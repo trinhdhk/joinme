@@ -28,21 +28,20 @@ Imports:
     splines2,
     survival,
     stats,
-    utils
-Suggests:
-    ggplot2,
-    cmdstanr,
     bridgesampling,
+    rstan,
+    ggplot2,
+    utils,
+    quarto
+Suggests:
     knitr,
     latex2exp,
     loo,
     patchwork,
     rmarkdown,
-    rstan,
     testthat,
     devtools,
     pkgdown,
-    quarto
 VignetteBuilder: quarto
 SystemRequirements: Quarto (>= 1.2)
 Roxygen: list(markdown = TRUE)
