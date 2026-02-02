@@ -45,7 +45,6 @@ reference:
   - plot.JoinMeDynPred
 - title: Model diagnosis
   contents:
-  - log_lik.J
   - loo
   - loo.JoinMeFit
   - waic
