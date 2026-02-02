@@ -135,6 +135,7 @@ waic.JoinMeFit <- function(object, what = c("total", "long", "surv"), draws = NU
 #' @param ... Additional arguments passed to `loo::elpd()`.
 #' 
 #' @importFrom loo elpd
+#' @rdname elpd.JoinMeFit
 #' @return A data frame with ELPD and standard error.
 #' @export
 elpd.JoinMeFit <- function(object, what = c("total", "long", "surv"), draws = NULL, seed = 1, ...) {
@@ -205,6 +206,7 @@ bayes_factor <- function(fit1, fit2, ...) {
 #' @param ... Additional arguments.
 #'
 #' @importFrom bayesplot pp_check
+#' @rdname pp_check.JoinMeFit
 #' @details 
 #' This crap is still under development.
 #' @return A list with observation-level summaries and overall diagnostics.
