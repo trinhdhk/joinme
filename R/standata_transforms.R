@@ -1,0 +1,441 @@
+##' Transform Specification Helper
+##'
+##' Provides utilities to build and manage transformation specifications
+##' for the joinme Stan model's association term.
+##'
+##' @description
+##' Transform can be specified in three modes:
+##'   - Mode 0: Identity (no transformation)
+##'   - Mode 1: Functional (arbitrary nested functions via parser)
+##'   - Mode 2: I-spline basis (monotonic, smooth)
+##'   - Mode 2 (penalized): I-spline coefficients estimated with smoothness penalty
+##'   - Mode 3: Piecewise-linear (user-defined interpolation)
+##'
+##' Each transformation term (CV_total, CS_total, CV_mean, CS_mean, CV_marker,
+##' CS_marker, vcov) can have its own independent specification, enabling
+##' flexibility in model building.
+##'
+##' @section Usage:
+##' Use `build_standata_transforms()` to construct the data list entries,
+##' and `validate_transforms()` to verify consistency before sampling.
+##'
+##' @export
+build_standata_transforms <- function(
+  transform_list = NULL,
+  default_mode = 0  # 0 = identity
+) {
+  ##' @param transform_list List with elements cv_total, cs_total, cv_mean, cs_mean,
+  ##'   cv_marker, cs_marker, vcov, each specifying a transformation. See details.
+  ##' @param default_mode Default transformation mode if not specified.
+  ##'
+  ##' @details
+  ##' Each element of transform_list should be a list with:
+  ##'   - type: "identity", "functional", "ispline", "ispline_penalized", or "pwlin"
+  ##'   - Additional fields depend on type:
+  ##'     - functional: expr (quosure, formula, quoted expression, or string)
+  ##'     - ispline: knots (vector), coeff (vector), degree (int)
+  ##'     - ispline_penalized: x, y, knots or n_knots, degree, lambda, weights
+  ##'     - pwlin: x (vector), y (vector)
+  ##'
+  ##' @return List of standata entries for transformation parameters:
+  ##'   - tf_mode_*
+  ##'   - functional_ops_* and const_data_* (if mode 1)
+  ##'   - knots_* and coeff_* and spline_degree_* (if mode 2 or 3)
+  
+  standata <- list()
+  
+  term_defaults <- list(
+    cv_tot = list(mode_suffix = "cv_tot", short_suffix = "cv"),
+    cs_tot = list(mode_suffix = "cs_tot", short_suffix = "cs"),
+    cv_mean = list(mode_suffix = "cv_mean", short_suffix = "cv_mean"),
+    cs_mean = list(mode_suffix = "cs_mean", short_suffix = "cs_mean"),
+    cv_marker = list(mode_suffix = "cv_marker", short_suffix = "cv_marker"),
+    cs_marker = list(mode_suffix = "cs_marker", short_suffix = "cs_marker"),
+    vcov = list(mode_suffix = "vcov", short_suffix = "vcov")
+  )
+  
+  # Default empty specs for all three terms
+  for (term in names(term_defaults)) {
+    mode_suffix <- term_defaults[[term]]$mode_suffix
+    short_suffix <- term_defaults[[term]]$short_suffix
+    standata[[paste0("tf_mode_", mode_suffix)]] <- default_mode
+    standata[[paste0("n_functional_ops_", short_suffix)]] <- 0
+    standata[[paste0("functional_ops_", short_suffix)]] <- integer()
+    standata[[paste0("n_const_", short_suffix)]] <- 0
+    standata[[paste0("const_data_", short_suffix)]] <- numeric()
+    standata[[paste0("n_knots_", short_suffix)]] <- 0
+    standata[[paste0("knots_", short_suffix)]] <- numeric()
+    standata[[paste0("n_coeff_", short_suffix)]] <- 0
+    standata[[paste0("coeff_", short_suffix)]] <- numeric()
+    standata[[paste0("spline_degree_", short_suffix)]] <- 1L
+  }
+  
+  # Override with user specifications
+  if (!is.null(transform_list)) {
+    for (term_name in names(transform_list)) {
+      spec <- transform_list[[term_name]]
+      term_info <- .resolve_transform_term(term_name)
+      mode_suffix <- term_info$mode_suffix
+      short_suffix <- term_info$short_suffix
+      
+      if (is.null(spec) || spec$type == "identity") {
+        standata[[paste0("tf_mode_", mode_suffix)]] <- 0
+      } else if (spec$type == "functional") {
+        bc <- parse_transform_expr(spec$expr)
+        standata[[paste0("tf_mode_", mode_suffix)]] <- 1
+        standata[[paste0("n_functional_ops_", short_suffix)]] <- bc$n_ops
+        standata[[paste0("functional_ops_", short_suffix)]] <- bc$opcodes
+        standata[[paste0("n_const_", short_suffix)]] <- bc$n_const
+        standata[[paste0("const_data_", short_suffix)]] <- bc$const_data
+      } else if (spec$type %in% c("ispline", "ispline_penalized", "pmonospline", "pmono")) {
+        if (spec$type %in% c("ispline_penalized", "pmonospline", "pmono")) {
+          spec <- .fit_penalized_ispline_spec(spec)
+        }
+        standata[[paste0("tf_mode_", mode_suffix)]] <- 2
+        standata[[paste0("n_knots_", short_suffix)]] <- length(spec$knots)
+        standata[[paste0("knots_", short_suffix)]] <- spec$knots
+        standata[[paste0("n_coeff_", short_suffix)]] <- length(spec$coeff)
+        standata[[paste0("coeff_", short_suffix)]] <- spec$coeff
+        standata[[paste0("spline_degree_", short_suffix)]] <- spec$degree %||% 3L
+      } else if (spec$type == "pwlin") {
+        standata[[paste0("tf_mode_", mode_suffix)]] <- 3
+        standata[[paste0("n_knots_", short_suffix)]] <- length(spec$x)
+        standata[[paste0("knots_", short_suffix)]] <- spec$x
+        standata[[paste0("n_coeff_", short_suffix)]] <- length(spec$y)
+        standata[[paste0("coeff_", short_suffix)]] <- spec$y
+      } else {
+        cli::cli_abort(c(
+          x = "Unknown transformation type: {spec$type}.",
+          i = "Use one of: identity, functional, ispline, ispline_penalized, pwlin."
+        ))
+      }
+    }
+  }
+  
+  return(standata)
+}
+
+##' @keywords internal
+.resolve_transform_term <- function(term_name) {
+  switch(term_name,
+    cv_total = list(mode_suffix = "cv_tot", short_suffix = "cv"),
+    cv_tot = list(mode_suffix = "cv_tot", short_suffix = "cv"),
+    cs_total = list(mode_suffix = "cs_tot", short_suffix = "cs"),
+    cs_tot = list(mode_suffix = "cs_tot", short_suffix = "cs"),
+    cv_mean = list(mode_suffix = "cv_mean", short_suffix = "cv_mean"),
+    cs_mean = list(mode_suffix = "cs_mean", short_suffix = "cs_mean"),
+    cv_marker = list(mode_suffix = "cv_marker", short_suffix = "cv_marker"),
+    cs_marker = list(mode_suffix = "cs_marker", short_suffix = "cs_marker"),
+    vcov = list(mode_suffix = "vcov", short_suffix = "vcov"),
+    cli::cli_abort(c(
+      x = "Unknown transform term: {term_name}.",
+      i = "Use cv_total, cs_total, cv_mean, cs_mean, cv_marker, cs_marker, or vcov."
+    ))
+  )
+}
+
+##' Validate Transformation Specifications
+##'
+##' Check functional opcode integrity and spline coefficient shapes before sampling.
+##'
+##' @param standata Prepared standata list with transformation entries
+##' @return TRUE if valid; stops with error message if invalid
+##'
+##' @keywords internal
+validate_transforms <- function(standata) {
+  term_map <- list(
+    cv = list(mode_suffix = "cv_tot", short_suffix = "cv"),
+    cs = list(mode_suffix = "cs_tot", short_suffix = "cs"),
+    cv_mean = list(mode_suffix = "cv_mean", short_suffix = "cv_mean"),
+    cs_mean = list(mode_suffix = "cs_mean", short_suffix = "cs_mean"),
+    cv_marker = list(mode_suffix = "cv_marker", short_suffix = "cv_marker"),
+    cs_marker = list(mode_suffix = "cs_marker", short_suffix = "cs_marker"),
+    vcov = list(mode_suffix = "vcov", short_suffix = "vcov")
+  )
+  for (term_name in names(term_map)) {
+    mode_suffix <- term_map[[term_name]]$mode_suffix
+    short_suffix <- term_map[[term_name]]$short_suffix
+    mode <- standata[[paste0("tf_mode_", mode_suffix)]]
+    
+    if (mode == 1) {
+      # Functional opcode validation
+      functional_ops <- standata[[paste0("functional_ops_", short_suffix)]]
+      const_data <- standata[[paste0("const_data_", short_suffix)]]
+      verify_opcodes(functional_ops, const_data)
+    } else if (mode %in% c(2, 3)) {
+      # Spline validation
+      knots <- standata[[paste0("knots_", short_suffix)]]
+      coeff <- standata[[paste0("coeff_", short_suffix)]]
+      
+      if (length(knots) == 0) {
+        cli::cli_abort(c(x = "Spline knots empty for {short_suffix}.", i = "Provide at least two knots."))
+      }
+      if (length(coeff) == 0) {
+        cli::cli_abort(c(x = "Spline coefficients empty for {short_suffix}.", i = "Provide coefficients matching the knots."))
+      }
+      
+      if (any(diff(knots) <= 0)) {
+        cli::cli_abort(c(x = "Knots not strictly increasing for {short_suffix}.", i = "Ensure knots are sorted and unique."))
+      }
+      
+      if (mode == 2) {
+        # I-spline: coeff length should match knot/degree conventions.
+        degree <- standata[[paste0("spline_degree_", short_suffix)]]
+        expected_len_a <- length(knots) + degree
+        expected_len_b <- length(knots) + degree - 1
+        if (!(length(coeff) %in% c(expected_len_a, expected_len_b))) {
+          cli::cli_abort(c(
+            x = "I-spline coeff length mismatch for {short_suffix}.",
+            i = "Expected {expected_len_a} or {expected_len_b} coefficients, got {length(coeff)}."
+          ))
+        }
+      }
+    }
+  }
+  
+  return(TRUE)
+}
+
+##' Example: Build Transform Specification from Formula String
+##'
+##' Helper function to construct user-friendly transform specifications
+##' for the association term.
+##'
+##' @export
+##'
+##' @examples
+##' # Example 1: Functional transformation (opcode-backed)
+##' spec_cv <- list(
+##'   type = "functional",
+##'   expr = ~ (log(sqrt(x + 1/inv_logit(3*x - 3))))^2
+##' )
+##'
+##' # Example 2: Piecewise-linear
+##' spec_cs <- list(
+##'   type = "pwlin",
+##'   x = c(-2, -1, 0, 1, 2),
+##'   y = c(0.1, 0.3, 1.0, 0.3, 0.1)  # smooth bump
+##' )
+##'
+##' # Example 3: I-spline (monotonic)
+##' spec_vcov <- list(
+##'   type = "ispline",
+##'   knots = c(-1, 0, 1),
+##'   coeff = c(0, 0.5, 1, 1.2, 1.5),
+##'   degree = 3
+##' )
+##'
+##' # Example 4: Penalized monotone I-spline (fit in R)
+##' spec_vcov_pen <- list(
+##'   type = "ispline_penalized",
+##'   x = seq(-2, 2, length.out = 50),
+##'   y = exp(seq(-2, 2, length.out = 50)),
+##'   n_knots = 6,
+##'   degree = 3,
+##'   lambda = 1.0
+##' )
+##'
+##' # Combine and build standata
+##' transforms <- list(
+##'   cv_total = spec_cv,
+##'   cs_total = spec_cs,
+##'   vcov = spec_vcov
+##' )
+##' standata_tf <- build_standata_transforms(transforms)
+example_transform_spec <- function() {
+  cat("See docstring for examples\n")
+}
+
+##' Penalized Monotone I-spline Transform Spec
+##'
+##' @description
+##' Fits a monotone I-spline transformation with a smoothness penalty and
+##' returns a transform specification compatible with `build_standata_transforms()`.
+##'
+##' @param x Numeric vector of input values.
+##' @param y Numeric vector of target values (same length as x).
+##' @param knots Optional numeric vector of knots (including boundary knots).
+##' @param n_knots Integer. If knots are not provided, number of knots to use
+##'   (including boundary knots). Default 6.
+##' @param degree Integer spline degree (default 3).
+##' @param lambda Non-negative penalty weight (default 1.0).
+##' @param weights Optional non-negative weights (same length as x).
+##' @param diff_order Integer difference order for penalty (default 2).
+##'
+##' @return A list suitable for `build_standata_transforms()`.
+##'
+##' @export
+penalized_ispline_transform <- function(
+  x,
+  y,
+  knots = NULL,
+  n_knots = 6,
+  degree = 3,
+  lambda = 1.0,
+  weights = NULL,
+  diff_order = 2
+) {
+  spec <- list(
+    type = "ispline_penalized",
+    x = x,
+    y = y,
+    knots = knots,
+    n_knots = n_knots,
+    degree = degree,
+    lambda = lambda,
+    weights = weights,
+    diff_order = diff_order
+  )
+  .fit_penalized_ispline_spec(spec)
+}
+
+##' @keywords internal
+.fit_penalized_ispline_spec <- function(spec) {
+  if (is.null(spec$x) || is.null(spec$y)) {
+    cli::cli_abort(c(
+      x = "Penalized I-spline requires {.arg x} and {.arg y}.",
+      i = "Provide input-output pairs for the monotone transform."
+    ))
+  }
+  x <- as.numeric(spec$x)
+  y <- as.numeric(spec$y)
+  if (length(x) != length(y) || length(x) < 2) {
+    cli::cli_abort(c(
+      x = "{.arg x} and {.arg y} must have the same length >= 2.",
+      i = "Check the transform training data."
+    ))
+  }
+  if (!is.numeric(spec$lambda) || length(spec$lambda) != 1 || spec$lambda < 0) {
+    cli::cli_abort(c(
+      x = "{.arg lambda} must be a non-negative numeric scalar.",
+      i = "Example: lambda = 1.0."
+    ))
+  }
+  lambda <- as.numeric(spec$lambda)
+  degree <- as.integer(spec$degree %||% 3L)
+  if (degree < 1) {
+    cli::cli_abort(c(
+      x = "{.arg degree} must be >= 1.",
+      i = "Typical choice: degree = 3 (cubic)."
+    ))
+  }
+
+  if (is.null(spec$knots)) {
+    n_knots <- as.integer(spec$n_knots %||% 6L)
+    if (n_knots < 2) {
+      cli::cli_abort(c(
+        x = "{.arg n_knots} must be >= 2.",
+        i = "Include boundary knots at the ends."
+      ))
+    }
+    probs <- seq(0, 1, length.out = n_knots)
+    knots <- as.numeric(stats::quantile(x, probs = probs, names = FALSE))
+  } else {
+    knots <- as.numeric(spec$knots)
+  }
+  if (length(knots) < 2 || any(diff(knots) <= 0)) {
+    cli::cli_abort(c(
+      x = "{.arg knots} must be a strictly increasing vector with at least 2 values.",
+      i = "Include boundary knots at the ends."
+    ))
+  }
+
+  internal_knots <- if (length(knots) > 2) knots[2:(length(knots) - 1)] else numeric(0)
+  boundary_knots <- c(knots[1], knots[length(knots)])
+
+  if (!requireNamespace("splines2", quietly = TRUE)) {
+    cli::cli_abort(c(
+      x = "Package {.pkg splines2} is required for penalized I-splines.",
+      i = "Install splines2 or provide explicit coeff/knots for type = 'ispline'."
+    ))
+  }
+
+  basis <- splines2::iSpline(x,
+    knots = internal_knots,
+    degree = degree,
+    intercept = TRUE,
+    Boundary.knots = boundary_knots
+  )
+  basis <- as.matrix(basis)
+
+  weights <- spec$weights
+  if (!is.null(weights)) {
+    weights <- as.numeric(weights)
+    if (length(weights) != length(x) || any(weights < 0)) {
+      cli::cli_abort(c(
+        x = "{.arg weights} must be non-negative and the same length as {.arg x}.",
+        i = "Remove weights or provide a valid vector."
+      ))
+    }
+  } else {
+    weights <- rep(1, length(x))
+  }
+
+  diff_order <- as.integer(spec$diff_order %||% 2L)
+  if (diff_order < 1) {
+    cli::cli_abort(c(
+      x = "{.arg diff_order} must be >= 1.",
+      i = "Typical choice: diff_order = 2."
+    ))
+  }
+
+  n_coef <- ncol(basis)
+  Dmat <- diff(diag(n_coef), differences = diff_order)
+
+  w_sqrt <- sqrt(weights)
+  B_w <- basis * w_sqrt
+  y_w <- y * w_sqrt
+
+  init <- tryCatch(
+    as.numeric(qr.solve(crossprod(B_w), crossprod(B_w, y_w))),
+    error = function(e) rep(0, n_coef)
+  )
+  init <- pmax(0, init)
+
+  fn <- function(b) {
+    r <- y_w - B_w %*% b
+    pen <- if (lambda > 0 && nrow(Dmat) > 0) Dmat %*% b else 0
+    0.5 * sum(r ^ 2) + 0.5 * lambda * sum(pen ^ 2)
+  }
+  gr <- function(b) {
+    r <- y_w - B_w %*% b
+    grad <- -crossprod(B_w, r)
+    if (lambda > 0 && nrow(Dmat) > 0) {
+      grad <- grad + lambda * crossprod(Dmat, Dmat %*% b)
+    }
+    as.numeric(grad)
+  }
+
+  opt <- optim(init, fn, gr,
+    method = "L-BFGS-B",
+    lower = rep(0, n_coef)
+  )
+
+  if (opt$convergence != 0) {
+    cli::cli_warn(c(
+      x = "Penalized I-spline optimization did not fully converge.",
+      i = "Consider increasing lambda or adjusting knots."
+    ))
+  }
+
+  list(
+    type = "ispline",
+    knots = knots,
+    coeff = as.numeric(opt$par),
+    degree = degree
+  )
+}
+
+##' Default Backward-Compatible Transforms
+##'
+##' If no transforms specified, create identity specs so existing models
+##' continue to work unchanged.
+##'
+##' @keywords internal
+default_identity_transforms <- function() {
+  list(
+    cv_tot = list(type = "identity"),
+    cs_tot = list(type = "identity"),
+    vcov = list(type = "identity")
+  )
+}

@@ -1,0 +1,13 @@
+/**
+ * @brief Vectorized version of apply_tf.
+ * @param x Vector of values to transform.
+ * @param tf Transformation code (see apply_tf).
+ * @return Vector of transformed values.
+ */
+vector apply_tf_vec(vector x, int tf) {
+  int K = num_elements(x);
+  vector[K] out;
+  for (k in 1 : K) 
+    out[k] = apply_tf(x[k], tf);
+  return out;
+}

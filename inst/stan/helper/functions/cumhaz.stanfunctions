@@ -1,0 +1,23 @@
+/**
+ * @brief Compute cumulative hazard using Gauss-Kronrod 15-point quadrature.
+ * @param S Integration endpoint (scaled time).
+ * @param log_h0_nodes Log baseline hazard evaluated at the 15 GK nodes.
+ * @param eta_nodes Model linear predictor (including associations) evaluated at the 15 GK nodes.
+ * @return Cumulative hazard value.
+ */
+real cumhaz(real S, vector log_h0_nodes, vector eta_nodes) {
+  array[15] real w = {0.02293532201052922, 0.06309209262997855,
+                      0.1047900103222502, 0.1406532597155259,
+                      0.1690047266392679, 0.1903505780647854,
+                      0.2044329400752989, 0.2094821410847278,
+                      0.2044329400752989, 0.1903505780647854,
+                      0.1690047266392679, 0.1406532597155259,
+                      0.1047900103222502, 0.06309209262997855,
+                      0.02293532201052922};
+  vector[15] z = log_h0_nodes + eta_nodes;
+  real zmax = max(z);
+  real acc = 0;
+  for (j in 1 : 15) 
+    acc += w[j] * exp(z[j] - zmax);
+  return 0.5 * S * exp(zmax) * acc;
+}

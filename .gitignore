@@ -1,0 +1,58 @@
+# .gitignore for an R package that uses Stan
+# Keeps user/editor/OS files, build artifacts and common tool caches out of git.
+
+# R / RStudio
+.Rhistory
+.Rapp.history
+.RData
+.Ruserdata
+.Rproj.user/
+*.Rproj
+
+# R package build artifacts
+/*.tar.gz
+/*.Rcheck/
+/build/
+
+# Compiled objects and shared libs
+*.o
+*.so
+*.dll
+*.exe
+*.d
+*.rds
+*.html
+*.pdf
+
+# R package intermediate and cache
+_pkgdown.yml
+
+# Editor/IDE
+.vscode/
+/.Rproj.user/
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# renv / packrat
+/renv/library/
+/renv/staging/
+/packrat/
+renv.lock
+
+# Logs and temporary
+*.log
+*.aux
+*.out
+
+# Quarto / knitr / vignette caches and outputs
+_quarto_out/
+*_cache/
+*_files/
+docs/
+sites/
+*~
+.#*
+docs

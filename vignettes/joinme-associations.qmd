@@ -1,0 +1,168 @@
+---
+title: "joinme: Association Construction"
+output-dir: ../docs/articles
+format:
+  html:
+    toc: true
+    number-sections: true
+    code-fold: true
+    embed-resources: true
+execute:
+  eval: false
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r setup}
+#| include: false
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 6,
+  fig.height = 4
+)
+options(width = 80)
+```
+
+# Purpose
+
+This vignette focuses on **association term construction**, including transformation selection, interpretability, and practical trade-offs.
+
+Association transforms apply to all supported longitudinal families (including
+double_exponential, skew_double_exponential, beta, and cumulative_logit) and to
+competing-risk survival models.
+
+# Functional Transform
+
+```{r functional-transform, eval=FALSE}
+transforms <- list(
+  cv_total = list(
+    type = "functional",
+    expr = ~ sinh(x) + tanh(x)
+  ),
+  cs_total = list(
+    type = "identity"
+  ),
+  vcov = list(
+    type = "identity"
+  )
+)
+```
+
+**When to use**
+
+- You want a fixed functional form with no spline fitting.
+- You need fast reconfiguration without recompiling Stan.
+
+# Monotone I-Spline
+
+```{r monotone-ispline, eval=FALSE}
+transforms <- list(
+  cv_total = list(
+    type = "ispline",
+    knots = c(-1, 0, 1),
+    coeff = c(0, 0.5, 1, 1.2, 1.5, 1.6),
+    degree = 3
+  ),
+  cs_total = list(
+    type = "identity"
+  ),
+  vcov = list(
+    type = "identity"
+  )
+)
+```
+
+**When to use**
+
+- You want monotone, smooth effects with constrained shape.
+
+# Penalized Monotone I-Spline
+
+```{r penalized-ispline, eval=FALSE}
+transforms <- list(
+  cv_total = list(
+    type = "identity"
+  ),
+  cs_total = list(
+    type = "identity"
+  ),
+  vcov = list(
+    type = "ispline_penalized",
+    x = seq(-2, 2, length.out = 40),
+    y = exp(seq(-2, 2, length.out = 40)),
+    n_knots = 6,
+    degree = 3,
+    lambda = 1.0
+  )
+)
+```
+
+**When to use**
+
+- You want a monotone transform learned from (x, y) pairs with smoothing.
+- Penalization avoids overfitting when knot counts are moderate.
+
+# Piecewise-Linear
+
+```{r piecewise-linear, eval=FALSE}
+transforms <- list(
+  cv_total = list(
+    type = "identity"
+  ),
+  cs_total = list(
+    type = "identity"
+  ),
+  vcov = list(
+    type = "pwlin",
+    x = c(-2, -1, 0, 1, 2),
+    y = c(0.2, 0.5, 1, 0.5, 0.2)
+  )
+)
+```
+
+**When to use**
+
+- You need simple, interpretable transformations.
+
+# Association Diagram
+
+```{mermaid}
+%%| fig-cap: "Association components mapped into the survival predictor."
+graph TD
+  CV[CV total] --> FCV[f_cv]
+  CS[CS total] --> FCS[f_cs]
+  V[Vcov] --> FVCOV[f_vcov]
+  FCV --> ETA[eta assoc]
+  FCS --> ETA
+  FVCOV --> ETA
+```
+
+# Hierarchical Covariance Regression
+
+```{mermaid}
+%%| fig-cap: "Covariance regression structure for marker-by-id effects."
+graph TD
+  X[Covariates] --> LP[Linear predictor]
+  UL[Latent effect] --> LP
+  LP --> L[Cholesky factor]
+  L --> W[Marker-by-id effects]
+  Z[Latent z] --> W
+```
+
+# Fit with Custom Association
+
+```{r fit-custom-association, eval=FALSE}
+fit <- joinme(
+  formulaLong = y ~ 1 + time + x1 +
+    (1 + time | id) +
+    (0 + x1 + (1 + time | id) | marker),
+  dataLong = sim$dataLong,
+  formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
+  dataEvent = sim$dataEvent,
+  transforms = transforms,
+  assoc = c("cv_total", "vcov")
+)
+```

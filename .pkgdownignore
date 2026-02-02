@@ -1,0 +1,8 @@
+^vignettes/.*_files$
+^vignettes/.*_files/.*$
+^vignettes/.*_cache$
+^vignettes/.*_cache/.*$
+^vignettes/_quarto_out$
+^vignettes/_quarto_out/.*$
+^vignettes/\.quarto$
+^vignettes/\.quarto/.*$

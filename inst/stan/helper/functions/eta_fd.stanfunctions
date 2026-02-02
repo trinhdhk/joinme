@@ -1,0 +1,10 @@
+/**
+ * @brief Compute forward finite difference approximation of the slope.
+ * @param now Values at current time t.
+ * @param fwd Values at time t + eps.
+ * @param eps Finite difference step size.
+ * @return Vector of approximated slopes.
+ */
+vector eta_fd(vector now, vector fwd, real eps) {
+  return (fwd - now) / eps;
+}

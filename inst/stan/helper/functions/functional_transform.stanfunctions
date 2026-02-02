@@ -1,0 +1,169 @@
+/**
+ * @file functional_transform.stanfunctions
+ * @brief Runtime-evaluable functional opcode interpreter for arbitrary nested transformations.
+ *
+ * Functional opcode format (Reverse Polish Notation style):
+ *   - Each operation is encoded as an integer opcode paired with optional arguments.
+ *   - A stack-based evaluator processes the opcodes to compute f(x).
+ *   - Opcodes:
+ *     0: PUSH_X        (push input x onto stack)
+ *     1: PUSH_CONST    (push next data element as constant)
+ *     2: ADD           (pop b,a; push a+b)
+ *     3: SUB           (pop b,a; push a-b)
+ *     4: MUL           (pop b,a; push a*b)
+ *     5: DIV           (pop b,a; push a/b)
+ *     6: LOG           (pop a; push log(a))
+ *     7: EXP           (pop a; push exp(a))
+ *     8: SQRT          (pop a; push sqrt(a))
+ *     9: INV_LOGIT     (pop a; push inv_logit(a))
+ *    10: LOGIT         (pop a; push logit(a))
+ *    11: RECIPROCAL    (pop a; push 1/a)
+ *    12: POW           (pop b,a; push a^b)
+ *    13: SIN           (pop a; push sin(a))
+ *    14: COS           (pop a; push cos(a))
+ *    15: TAN           (pop a; push tan(a))
+ *    16: ABS           (pop a; push abs(a))
+ *    17: SQUARE        (pop a; push a^2)
+ *    18: SINH          (pop a; push sinh(a))
+ *    19: COSH          (pop a; push cosh(a))
+ *    20: TANH          (pop a; push tanh(a))
+ *    21: ASINH         (pop a; push asinh(a))
+ *    22: ACOSH         (pop a; push acosh(a))
+ *    23: ATANH         (pop a; push atanh(a))
+ *
+ * Usage:
+ *   vector opcodes     <- integer vector of operation codes
+ *   vector const_data  <- vector of constants referenced by PUSH_CONST
+ *   result = eval_functional_scalar(x, opcodes, const_data)
+ *
+ * Example: f(x) = (x + 2) * 3
+ *   opcodes:  [0, 1, 2, 1, 4]  (PUSH_X, PUSH_CONST, ADD, PUSH_CONST, MUL)
+ *   const_data: [2, 3]
+ *   x = 5 -> (5 + 2) * 3 = 21
+ */
+
+  /**
+   * @brief Functional opcode evaluator for scalar inputs.
+   *
+   * @param x Input value
+   * @param opcodes Array of operation codes (0-23)
+   * @param const_data Vector of constant values for PUSH_CONST operations
+   * @return Scalar result of opcode evaluation
+   */
+  real eval_functional_scalar(real x, array[] int opcodes, vector const_data) {
+    vector[100] stack;  // Stack for computation (sized generously)
+    int stack_ptr = 0;  // Stack pointer
+    int const_idx = 1;  // Index into const_data
+
+    for (op_idx in 1:size(opcodes)) {
+      int op = opcodes[op_idx];
+
+      if (op == 0) {
+        // PUSH_X
+        stack_ptr += 1;
+        stack[stack_ptr] = x;
+      } else if (op == 1) {
+        // PUSH_CONST
+        stack_ptr += 1;
+        stack[stack_ptr] = const_data[const_idx];
+        const_idx += 1;
+      } else if (op == 2) {
+        // ADD
+        real b = stack[stack_ptr];
+        stack_ptr -= 1;
+        stack[stack_ptr] = stack[stack_ptr] + b;
+      } else if (op == 3) {
+        // SUB
+        real b = stack[stack_ptr];
+        stack_ptr -= 1;
+        stack[stack_ptr] = stack[stack_ptr] - b;
+      } else if (op == 4) {
+        // MUL
+        real b = stack[stack_ptr];
+        stack_ptr -= 1;
+        stack[stack_ptr] = stack[stack_ptr] * b;
+      } else if (op == 5) {
+        // DIV
+        real b = stack[stack_ptr];
+        stack_ptr -= 1;
+        stack[stack_ptr] = stack[stack_ptr] / b;
+      } else if (op == 6) {
+        // LOG
+        stack[stack_ptr] = log(stack[stack_ptr]);
+      } else if (op == 7) {
+        // EXP
+        stack[stack_ptr] = exp(stack[stack_ptr]);
+      } else if (op == 8) {
+        // SQRT
+        stack[stack_ptr] = sqrt(stack[stack_ptr]);
+      } else if (op == 9) {
+        // INV_LOGIT
+        stack[stack_ptr] = inv_logit(stack[stack_ptr]);
+      } else if (op == 10) {
+        // LOGIT
+        stack[stack_ptr] = logit(stack[stack_ptr]);
+      } else if (op == 11) {
+        // RECIPROCAL
+        stack[stack_ptr] = 1.0 / stack[stack_ptr];
+      } else if (op == 12) {
+        // POW
+        real b = stack[stack_ptr];
+        stack_ptr -= 1;
+        stack[stack_ptr] = stack[stack_ptr] ^ b;
+      } else if (op == 13) {
+        // SIN
+        stack[stack_ptr] = sin(stack[stack_ptr]);
+      } else if (op == 14) {
+        // COS
+        stack[stack_ptr] = cos(stack[stack_ptr]);
+      } else if (op == 15) {
+        // TAN
+        stack[stack_ptr] = tan(stack[stack_ptr]);
+      } else if (op == 16) {
+        // ABS
+        stack[stack_ptr] = abs(stack[stack_ptr]);
+      } else if (op == 17) {
+        // SQUARE
+        stack[stack_ptr] = square(stack[stack_ptr]);
+      } else if (op == 18) {
+        // SINH
+        stack[stack_ptr] = sinh(stack[stack_ptr]);
+      } else if (op == 19) {
+        // COSH
+        stack[stack_ptr] = cosh(stack[stack_ptr]);
+      } else if (op == 20) {
+        // TANH
+        stack[stack_ptr] = tanh(stack[stack_ptr]);
+      } else if (op == 21) {
+        // ASINH
+        stack[stack_ptr] = asinh(stack[stack_ptr]);
+      } else if (op == 22) {
+        // ACOSH
+        stack[stack_ptr] = acosh(stack[stack_ptr]);
+      } else if (op == 23) {
+        // ATANH
+        stack[stack_ptr] = atanh(stack[stack_ptr]);
+      }
+    }
+
+    return stack[stack_ptr];
+  }
+
+  /**
+   * @brief Functional opcode evaluator for vector inputs (element-wise).
+   *
+   * @param x Vector of input values
+   * @param opcodes Array of operation codes (0-23)
+   * @param const_data Vector of constant values for PUSH_CONST operations
+   * @return Vector result of opcode evaluation applied element-wise
+   */
+  vector eval_functional_vector(vector x, array[] int opcodes, vector const_data) {
+    int n = num_elements(x);
+    vector[n] result;
+
+    for (i in 1:n) {
+      result[i] = eval_functional_scalar(x[i], opcodes, const_data);
+    }
+
+    return result;
+  }

@@ -1,0 +1,280 @@
+---
+title: "A Scientifically Rigorous Workflow for Joint Modeling"
+output-dir: ../docs/articles
+format:
+  html:
+    toc: true
+    number-sections: true
+    code-fold: true
+    embed-resources: true
+    theme: cosmo
+execute:
+  eval: true
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r setup}
+#| include: false
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 7,
+  fig.height = 5,
+  collapse = TRUE,
+  comment = "#>"
+)
+options(width = 100)
+# Ensure the package is available for the vignette to run if possible
+repo_root <- normalizePath(if (dir.exists("R")) "." else "..")
+if (requireNamespace("devtools", quietly = TRUE) && file.exists(file.path(repo_root, "DESCRIPTION"))) {
+  devtools::load_all(repo_root, quiet = TRUE)
+} else if (requireNamespace("joinme", quietly = TRUE)) {
+  library(joinme)
+}
+library(dplyr)
+library(ggplot2)
+library(survival)
+library(bayesplot)
+library(posterior)
+```
+
+# 1. Introduction
+
+Applying a joint model in a scientific publication requires more than just fitting the model. It requires a rigorous validation process to ensure the results are robust, converged, and meaningful. This vignette outlines a "best practice" workflow for using `joinme` in a research context, suitable for inclusion in high-impact statistical or clinical journals.
+
+We will walk through a complete end-to-end simulation study:
+1.  Generating synthetic data with known ground truth.
+2.  Fitting the joint model.
+3.  Assessing convergence and model fit.
+4.  Performing dynamic predictions for individual subjects.
+
+# 2. Simulation and Data Exploration
+
+Before analyzing real data, it is highly recommended to perform a **parameter recovery simulation**. This confirms that the model is identifiable given your sample size and sampling frequency.
+
+We use the built-in simulator `simulate_joinme_joint_student_t_cvtotal` to generate a dataset where the hazard depends on the "Total Current Value" of the biomarkers (sum of random intercepts and time effects).
+
+```{r simulate}
+set.seed(2025)
+
+# Simulate a dataset: 
+# - 100 subjects
+# - 3 biomarkers
+# - ~10 observations per marker per subject
+sim <- simulate_joinme_joint_student_t_cvtotal(
+  n_id = 40, 
+  D = 3, 
+  n_t = 6,
+  beta = c("(Intercept)" = 1.0, "time" = 0.5, "x1" = 0.4),
+  alpha_cv_total = 0.5 # Association strength
+)
+
+dataLong <- sim$dataLong
+dataEvent <- sim$dataEvent
+
+# Preview the data
+head(dataLong)
+head(dataEvent)
+```
+
+**Scientific Check**: Always visualize your longitudinal trajectories and survival distribution before modeling.
+
+```{r explore-plot}
+# Visualize trajectories for a subset of IDs
+subset_ids <- base::sample(unique(dataLong$id), 6)
+
+ggplot(dataLong %>% filter(id %in% subset_ids), aes(x = time, y = y, color = marker, group = marker)) +
+  geom_line(alpha = 0.6) +
+  geom_point(size = 1) +
+  facet_wrap(~id) + 
+  theme_bw() +
+  labs(title = "Longitudinal Trajectories (Subset)", x = "Time", y = "Biomarker Value")
+
+# Check event rate
+table(dataEvent$event)
+prop.table(table(dataEvent$event))
+```
+
+Ensure the event rate is sufficient (typically >10-20 events per parameter in the survival submodel) to support the complexity of the proposed association structure.
+
+# 3. Model Specification
+
+We specify a joint model where:
+1.  **Longitudinal Submodel**: Linear growth over time with random intercepts and slopes for each subject-marker combination.
+2.  **Survival Submodel**: The hazard depends on baseline covariates (`x1`, `x2`) and the current value (`cv_total`) of the biomarkers.
+
+## 3.1 Marker-only random effects (no inner id term)
+
+In some studies, you may want **marker-level random effects only**, without subject-specific marker deviations. This is now supported by omitting the inner `( ... | id )` term inside the marker block. In this configuration, marker-by-id random effects are disabled (`Q_idm = 0`), and associations that require those effects (notably `vcov`) are not permitted.
+
+```{r marker-only-example, eval=FALSE}
+# Marker-only random effects: no inner ( ... | id )
+formulaLong_marker_only <- y ~ time + x1 +
+  (1 + time | id) +
+  (0 + x1 | marker)
+
+# Note: assoc = c("vcov") is not allowed when Q_idm = 0
+```
+
+```{r priors}
+# Define explicit priors for transparency (optional but recommended)
+priors <- list(
+  beta = list(scale = 2.5),       # Fixed effects
+  gamma = list(scale = 2.5),      # Survival coeffs
+  alpha = list(scale = 1.0),      # Association coeffs
+  aux = list(scale = 1.0),        # Aux parameters (sigma, etc)
+  lkj = 2.0                       # Correlation matrices (regularizing)
+)
+```
+
+# 4. Model Fitting
+
+We fit the model using Hamiltonian Monte Carlo (HMC) via the `cmdstanr` backend (recommended for speed and reliability).
+
+```{r fit}
+engine <- if (requireNamespace("rstan", quietly = TRUE)) "rstan" else "cmdstanr"
+
+control <- list(
+  engine = engine,
+  chains = 1,           # Use 4 chains for publication
+  iter_warmup = 200,    # Typically 1000+
+  iter_sampling = 200,  # Typically 1000+
+  parallel_chains = 1,
+  adapt_delta = 0.90,   # Increase if divergences occur
+  max_treedepth = 12,
+  force_recompile = (engine == "cmdstanr")
+)
+if (engine == "cmdstanr") control$init <- 0
+
+fit <- joinme(
+  dataLong = dataLong,
+  dataEvent = dataEvent,
+  # Longitudinal formula: Fixed effects + Random effects
+  formulaLong = y ~ time + x1 + (1 + time | id) + (0 + x1 + (1 + time | id) | marker),
+  # Survival formula: Baseline covariates
+  formulaEvent = survival::Surv(time, event) ~ x1 + x2,
+  # Association structure: Link hazard to the total current value of markers
+  assoc = list(cv_total = list(type = "identity")), 
+  priors = priors,
+  control = control
+)
+```
+
+# 5. Convergence Diagnostics
+
+**Do not interpret results without checking convergence.** We use the `posterior` and `bayesplot` packages to inspect the MCMC chains.
+
+## 5.1 R-hat and Effective Sample Size
+
+Values of $\hat{R} < 1.01$ and ESS > 400 indicate reasonable convergence for inference.
+
+```{r diagnostics}
+# robust summary of regression coefficients
+draws_obj <- if (inherits(fit$fit, "CmdStanMCMC")) {
+  fit$fit$draws()
+} else {
+  posterior::as_draws_array(fit$fit)
+}
+
+draws_sub <- posterior::subset_draws(
+  draws_obj,
+  variable = c("^beta\\[", "^gamma_w\\[", "^alpha"),
+  regex = TRUE
+)
+
+posterior::summarise_draws(
+  draws_sub,
+  default_summary_measures(),
+  default_convergence_measures()
+)
+```
+
+## 5.2 Traceplots
+
+Visual inspection of traceplots helps identify mixing issues or stuck chains.
+
+```{r trace}
+# Plot traces for the association parameter
+bayesplot::mcmc_trace(draws_obj, regex_pars = "alpha")
+```
+
+# 6. Posterior Predictive Checks (PPC)
+
+A key step in validation is checking if the model can reproduce the observed data patterns.
+
+```{r ppc, eval=FALSE}
+# Note: Requires generating y_rep in generated quantities or via posterior_predict helper
+# y_rep <- posterior_predict(fit, ndraws = 100)
+# bayesplot::ppc_dens_overlay(dataLong$y, y_rep)
+```
+
+(Note: PPC functionality depends on the exact `generated quantities` block configuration in your installed version.)
+
+# 7. Dynamic Prediction
+
+One of the most powerful features of joint models is **dynamic prediction**: updating survival probabilities as new biomarker data becomes available.
+
+We select a subject who had an event at a later time and predict their survival probability conditionally on data observed up to an earlier time point.
+
+```{r predict-setup}
+# Select a subject with an event > 5
+target_id <- dataEvent$id[which(dataEvent$time > 5 & dataEvent$event == 1)[1]]
+if (is.na(target_id)) target_id <- dataEvent$id[1]
+
+# Define the conditioning time (Tstart)
+t_cond <- 4
+
+# Filter history up to t_cond
+ndLong <- dataLong %>% filter(id == target_id, time <= t_cond)
+ndEvent <- dataEvent %>% filter(id == target_id)
+
+print(paste("Predicting for ID:", target_id, "conditioned on history up to t =", t_cond))
+```
+
+Run the prediction:
+
+```{r predict-run}
+# Predict conditional survival from t_cond onwards
+preds <- tryCatch(
+  predict(
+    fit,
+    newdataLong = ndLong,
+    newdataEvent = ndEvent,
+    Tstart = t_cond,
+    times = seq(t_cond, 8, length.out = 30),
+    process = "event" # Focus on survival probability
+  ),
+  error = function(e) {
+    message("Prediction skipped: ", conditionMessage(e))
+    NULL
+  }
+)
+
+# The result is a list with 'event' dataframe
+if (!is.null(preds)) head(preds$event)
+```
+
+Finally, we visualize the predicted survival curve. The shaded area represents the 95% credible interval, accounting for uncertainty in both the parameters and the random effects.
+
+```{r predict-plot}
+if (!is.null(preds)) {
+  plot(preds) +
+    ggtitle(paste("Dynamic Survival Prediction for Subject", target_id)) +
+    geom_vline(xintercept = dataEvent$time[dataEvent$id == target_id], linetype = "dashed", color = "red") +
+    annotate("text", x = dataEvent$time[dataEvent$id == target_id], y = 0.1, label = "True Event", color = "red", hjust = 1.1)
+}
+```
+
+# 8. Conclusion
+
+By following this workflow:
+1.  **Simulate** (or explore) to understand data properties.
+2.  **Fit** with explicit priors and robust settings.
+3.  **Diagnose** convergence thoroughly using $\hat{R}$ and traceplots.
+4.  **Validate** using posterior predictive checks.
+5.  **Predict** to demonstrate clinical utility.
+
+You ensure that your joint modeling analysis is scientifically sound and robust against common pitfalls in Bayesian inference.

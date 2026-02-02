@@ -1,0 +1,166 @@
+---
+title: "Technical Specification and Implementation Details"
+output-dir: ../docs/articles
+format:
+  html:
+    toc: true
+    number-sections: true
+    code-fold: true
+    embed-resources: true
+    theme: cosmo
+execute:
+  eval: false
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r setup}
+#| include: false
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 6,
+  fig.height = 4
+)
+options(width = 80)
+if (requireNamespace("joinme", quietly = TRUE)) {
+  library(joinme)
+}
+library(dplyr)
+```
+
+# 1. Overview
+
+This document provides the formal technical specification for the `joinme` package model structure. It details the precise matrix formulations, transformation logic, and the exact algorithms used by the underlying Stan engine. Ideally, this document serves as a reference for advanced methodologists or developers seeking to understand or extend the package internals.
+
+# 2. Mathematical Framework
+
+The joint model consists of two linked submodels: a multivariate longitudinal mixed-effects model and a survival model with time-varying covariates defined by the longitudinal process.
+
+## 2.1. Notation
+
+-   $N$: Number of subjects ($i = 1, \dots, N$).
+-   $D$: Number of longitudinal markers ($d = 1, \dots, D$).
+-   $n_{id}$: Number of observations for subject $i$ marker $d$.
+-   $T_i$: Observed event or censoring time for subject $i$.
+-   $\delta_i$: Event indicator (1 if event, 0 if censored).
+-   $y_{ijk}$: The $k$-th observation of marker $d$ for subject $i$ at time $t_{ijk}$.
+
+## 2.2. Longitudinal Submodel
+
+We assume the observed outcomes $y_{ijk}$ follow a distribution from the exponential family (e.g., Gaussian, Student-t) centered at a linear predictor $\eta_{ijk}(t)$.
+
+$$
+y_{ijk} \sim \mathcal{D}(\eta_{id}(t_{ijk}), \sigma_y, \nu)
+$$
+
+The linear predictor $\eta_{id}(t)$ is decomposed into fixed effects and random effects components. A key feature of `joinme` is the flexible random effects structure:
+
+$$
+\eta_{id}(t) = \mathbf{x}_{id}(t)^\top \boldsymbol{\beta} + \mathbf{z}_{id, id}(t)^\top \mathbf{b}_i + \mathbf{z}_{id, mk}(t)^\top \mathbf{u}_d + \mathbf{z}_{id, idm}(t)^\top \mathbf{w}_{id}
+$$
+
+where:
+-   $\mathbf{x}_{id}(t)$: Fixed effects design vector (time-varying).
+-   $\mathbf{b}_i \sim N(\mathbf{0}, \Sigma_b)$: Subject-specific random effects (shared across markers or independent).
+-   $\mathbf{u}_d \sim N(\mathbf{0}, \Sigma_u)$: Marker-specific random effects (e.g., marker-specific average intercept).
+-   $\mathbf{w}_{id} \sim N(\mathbf{0}, \Sigma_w)$: Subject-marker-specific random effects (the interaction level).
+
+**Optional marker-by-id block.** If the marker block omits the inner `( ... | id )` term, then $\mathbf{w}_{id}$ is removed and the marker-by-id block has dimension $Q_{idm} = 0$. In this case, the covariance-regression association (`vcov`) is not available, because there is no subject-specific marker covariance to model.
+
+This decomposition allows capturing correlations within subjects across markers, within markers across subjects, and the specific deviation of a subject's trajectory for a specific marker.
+
+## 2.3. Survival Submodel
+
+The hazard function $h_i(t)$ for subject $i$ at time $t$ is modeled as:
+
+$$
+h_i(t) = h_0(t) \exp\left( \mathbf{w}_i^\top \boldsymbol{\gamma} + \sum_{k=1}^K g_k(\mathcal{M}_i(t), \boldsymbol{\alpha}_k) \right)
+$$
+
+where:
+-   $h_0(t)$: Baseline hazard function (typically modeled via B-splines or Weibull).
+-   $\mathbf{w}_i$: Baseline covariates (baseline age, sex, treatment).
+-   $\mathcal{M}_i(t) = \{ \eta_{i1}(t), \dots, \eta_{iD}(t), \eta'_{i1}(t), \dots \}$: The collection of longitudinal trajectories and their derivatives (slopes) at time $t$.
+-   $g_k(\cdot)$: A functional transformation linking the longitudinal history to the hazard (the "association structure").
+
+Common forms for $g_k(\cdot)$ include:
+-   **Current Value**: $\alpha \cdot \eta_{id}(t)$
+-   **Current Slope**: $\alpha \cdot \frac{d}{dt}\eta_{id}(t)$
+-   **Area under curve**: $\alpha \cdot \int_0^t \eta_{id}(s) ds$
+
+# 3. Computational Implementation (Stan)
+
+The model is implemented in Stan, utilizing Hamiltonian Monte Carlo (HMC) for efficient posterior sampling.
+
+## 3.1. Time Scaling
+
+To check numerical stability and ensure spline bases are well-defined, all internal time calculations are performed on a scaled domain $t' \in [0, 1]$:
+
+$$
+t' = \frac{t}{t_{max}}, \quad t_{max} = \max_i(T_i)
+$$
+
+Coefficients reported to the user are automatically rescaled to the original time scale.
+
+## 3.2. Integration Strategy (Gauss-Kronrod)
+
+The survival likelihood requires evaluating the cumulative hazard $H_i(T_i) = \int_0^{T_i} h_i(s) ds$. Since the hazard contains time-varying random effects $\eta_{id}(s)$, this integral has no closed form.
+
+`joinme` employs **15-point Gauss-Kronrod quadrature** to approximate this integral numerically within the Stan `log_prob` block.
+
+$$
+\int_0^{T_i} h_i(s) ds \approx \frac{T_i}{2} \sum_{j=1}^{15} w_j h_i \left( \frac{T_i}{2}(x_j + 1) \right)
+$$
+
+This method provides high accuracy with relatively few function evaluations compared to Simpson's rule or trapezoidal integration.
+
+## 3.3. Arbitrary Transformation Engine (Bytecode VM)
+
+A unique feature of `joinme` is its ability to handle arbitrary non-linear user-specified association functions (e.g., `~ log(current_value) + current_slope^2`). Instead of hardcoding these forms, `joinme` compiles the R formula into a custom **bytecode** integer array.
+
+Inside Stan, a "virtual machine" interprets this bytecode:
+1.  **Input**: The instantaneous values of the longitudinal predictor and its derivative at time $t$.
+2.  **Execution**: A loop processes opcodes (mapped to Stan functions like `log`, `pow`, `sum`).
+3.  **Differentiation**: All operations utilize Stan's `var` type, ensuring the autodiff stack propagates gradients correctly through the user-defined formula to the underlying random effects.
+
+Supported Opcodes (subset):
+-   `1 (ADD)`, `2 (SUB)`, `3 (MUL)`, `4 (DIV)`
+-   `10 (EXP)`, `11 (LOG)`, `12 (SQRT)`
+-   `20 (SIN)`, `21 (COS)`
+-   `30 (LOGIT)`, `31 (INV_LOGIT)`
+
+## 3.4. Parallelization
+
+The model supports `reduce_sum` for within-chain parallelization. The likelihood evaluation is sharded by subject $i$.
+-   **Longitudinal Likelihood**: Calculated independently for each block of subjects.
+-   **Survival Likelihood**: Calculated independently for each block of subjects.
+
+The user controls the `grainsize` to balance overhead vs. parallelism.
+
+# 4. Stan Data Block Specification
+
+The generated Stan data block organizes the inputs efficiently:
+
+| Variable | Description |
+|:---|:---|
+| `N_id` | N subjects |
+| `N_obs` | Total longitudinal observations |
+| `y` | Vector of outcomes |
+| `X_long` | Fixed effects design matrix (sparse) |
+| `Z_id`, `Z_mk`, `Z_idm` | Random effects design matrices (sparse) |
+| `time_idx` | Indices mapping observations to time points |
+| `nodes`, `weights` | Gauss-Kronrod quadrature nodes and weights |
+| `assoc_ops` | Flattened integer array of bytecode instructions |
+
+# 5. Prediction
+
+Dynamic predictions $\pi_i(u|t)$ are efficiently computed using the same Stan code structure (via `generated quantities` or a separate `standalone generated quantities` run) to ensure consistency.
+
+$$
+S_i(u|t) = \frac{\exp(-\Lambda_i(u))}{\exp(-\Lambda_i(t))}
+$$
+
+where $\Lambda_i(t)$ uses the same Gauss-Kronrod integrator and association bytecode as the likelihood.
