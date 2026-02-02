@@ -1,0 +1,74 @@
+url: https://trinhdhk.github.io/joinme/
+template:
+  bootstrap: 5
+  bootswatch: flatly
+  toc: true
+  
+ignore:
+- vignettes/*_files
+- vignettes/*_cache
+- vignettes/_quarto_out
+- vignettes/.quarto
+home:
+  title: JoinMe
+  description: Bayesian Joint Mixed-Effects (JoinME) models for multivariate longitudinal
+    and survival data.
+articles:
+- title: Get started
+  contents:
+  - joinme-intro
+  - joinme-demo
+- title: Modeling
+  contents:
+  - joinme-workflow
+  - joinme-associations
+  - joinme-model
+  - joinme-theory
+reference:
+- title: Core modeling
+  contents:
+  - joinme
+  - joinme_standata
+  - build_standata_transforms
+  - simulate_joinme
+  - simulate_joinme_joint_student_t_cvtotal
+  - update.JoinMeFit
+  - print.JoinMeFit
+  - summary.JoinMeFit
+  - print.summary_JoinMeFit
+- title: Prediction
+  contents:
+  - predict.JoinMeFit
+  - posterior_epred
+  - posterior_linpred
+  - posterior_predict
+  - plot.JoinMeDynPred
+- title: Model diagnosis
+  contents:
+  - log_lik.J
+  - loo
+  - loo.JoinMeFit
+  - waic
+  - waic.JoinMeFit
+  - elpd
+  - pp_check
+  - concordance
+  - concordance.JoinMeFit
+  - logLik.JoinMeFit
+- title: Utilities
+  contents:
+  - fixef.JoinMeFit
+  - ranef.JoinMeFit
+  - vcov.JoinMeFit
+- title: Transforms
+  contents:
+  - parse_transform_expr
+  - example_transform_spec
+  - penalized_ispline_transform
+- title: Misc
+  contents:
+  - bayes_factor
+  - family_utils
+  - weibull_h0
+  - precompile_cmdstanr_models
+  - run_joinme_example

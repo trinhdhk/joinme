@@ -24,9 +24,6 @@
 *.html
 *.pdf
 
-# R package intermediate and cache
-_pkgdown.yml
-
 # Editor/IDE
 .vscode/
 /.Rproj.user/
