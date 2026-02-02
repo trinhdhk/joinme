@@ -18,8 +18,8 @@ Depends:
 Imports:
     R6,
     assertthat,
+    matrixStats,
     cli,
-    cmdstanr,
     dplyr,
     posterior,
     reformulas,
@@ -31,6 +31,7 @@ Imports:
     utils
 Suggests:
     ggplot2,
+    cmdstanr,
     bridgesampling,
     knitr,
     latex2exp,
