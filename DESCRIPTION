@@ -32,7 +32,8 @@ Imports:
     rstan,
     ggplot2,
     utils,
-    quarto
+    quarto,
+    bayesplot
 Suggests:
     knitr,
     latex2exp,
