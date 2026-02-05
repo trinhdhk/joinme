@@ -35,35 +35,35 @@
   }
   
   // -------------------- Priors
-  beta ~ normal(0, beta_scale);
-  beta_sigma ~ normal(0, 1);
-  beta_nu ~ normal(0, 1);
-  beta_phi ~ normal(0, 1);
-  beta_alpha ~ normal(0, 1);
-  beta_phi_beta ~ normal(0, 1);
-  beta_tau_sde ~ normal(0, 1);
+  beta ~ student_t(6, 0, beta_scale);
+  beta_sigma ~ student_t(6, 0, 1);
+  beta_nu ~ student_t(6, 0, 1);
+  beta_phi ~ student_t(6, 0, 1);
+  beta_alpha ~ student_t(6, 0, 1);
+  beta_phi_beta ~ student_t(6, 0, 1);
+  beta_tau_sde ~ student_t(6, 0, 1);
   for (j in 1 : n_re_sigma) {
-    tau_sigma[j][1:K_sigma[j]] ~ normal(0, 1);
+    tau_sigma[j][1:K_sigma[j]] ~ std_normal();
     to_vector(z_sigma[j][1:G_sigma[j], 1:K_sigma[j]]) ~ std_normal();
   }
   for (j in 1 : n_re_nu) {
-    tau_nu[j][1:K_nu[j]] ~ normal(0, 1);
+    tau_nu[j][1:K_nu[j]] ~ std_normal();
     to_vector(z_nu[j][1:G_nu[j], 1:K_nu[j]]) ~ std_normal();
   }
   for (j in 1 : n_re_phi) {
-    tau_phi[j][1:K_phi[j]] ~ normal(0, 1);
+    tau_phi[j][1:K_phi[j]] ~ std_normal();
     to_vector(z_phi[j][1:G_phi[j], 1:K_phi[j]]) ~ std_normal();
   }
   for (j in 1 : n_re_alpha) {
-    tau_alpha[j][1:K_alpha[j]] ~ normal(0, 1);
+    tau_alpha[j][1:K_alpha[j]] ~ std_normal();
     to_vector(z_alpha[j][1:G_alpha[j], 1:K_alpha[j]]) ~ std_normal();
   }
   for (j in 1 : n_re_phi_beta) {
-    tau_phi_beta[j][1:K_phi_beta[j]] ~ normal(0, 1);
+    tau_phi_beta[j][1:K_phi_beta[j]] ~ std_normal();
     to_vector(z_phi_beta[j][1:G_phi_beta[j], 1:K_phi_beta[j]]) ~ std_normal();
   }
   for (j in 1 : n_re_tau_sde) {
-    tau_tau_sde[j][1:K_tau_sde[j]] ~ normal(0, 1);
+    tau_tau_sde[j][1:K_tau_sde[j]] ~ std_normal();
     to_vector(z_tau_sde[j][1:G_tau_sde[j], 1:K_tau_sde[j]]) ~ std_normal();
   }
   
@@ -112,8 +112,8 @@
   }
   
   // distributional parameters
-  sigma_y ~ std_normal();
-  sigma_marker ~ std_normal();
+  sigma_y ~ exponential(1);
+  sigma_marker ~ exponential(1);
   nu_marker ~ gamma(2, 1);
   phi_nb_marker ~ exponential(1);
   alpha_skew_marker ~ normal(0, 2);
@@ -122,21 +122,28 @@
   cutpoints_ord ~ normal(0, 2);
   
   // association priors
-  alpha_cv_total ~ normal(0, 0.5);
-  alpha_cs_total ~ normal(0, 0.5);
-  alpha_cv_mean ~ normal(0, 0.5);
-  alpha_cs_mean ~ normal(0, 0.5);
-  alpha_cv_marker ~ normal(0, 0.5);
-  alpha_cs_marker ~ normal(0, 0.5);
+  alpha_cv_total ~ std_normal();
+  alpha_cs_total ~ std_normal();
+  alpha_cv_mean ~ std_normal();
+  alpha_cs_mean ~ std_normal();
   
   // marker-side shrinkage scales
+
+  // marker-weight shrinkage priors
+  tau_marker_weights ~ exponential(marker_weight_scale);
   s_cv_marker ~ normal(0, 0.2);
   s_cs_marker ~ normal(0, 0.2);
   s_vcov ~ normal(0, 0.2);
   
-  // shrinkage family switch for vcov weights (and marker-side alphas if you wish to keep them shrinky)
+  // shrinkage family switch for marker weights, marker-side alphas, and vcov weights
   if (shrinkage == 1) {
+    z_marker_weights ~ double_exponential(0, 1);
+    alpha_cv_marker ~ double_exponential(0, s_cv_marker);
+    alpha_cs_marker ~ double_exponential(0, s_cs_marker);
     alpha_vcov_var ~ double_exponential(0, s_vcov);
   } else {
+    z_marker_weights ~ std_normal();
+    alpha_cv_marker ~ normal(0, s_cv_marker);
+    alpha_cs_marker ~ normal(0, s_cs_marker);
     alpha_vcov_var ~ normal(0, s_vcov);
   }

@@ -17,6 +17,11 @@ Depends:
     lme4
 Imports:
     R6,
+    methods,
+    Rcpp (>= 0.12.0),
+    RcppParallel (>= 5.0.1),
+    rstan (>= 2.18.1),
+    rstantools (>= 2.6.0),
     assertthat,
     matrixStats,
     cli,
@@ -29,7 +34,6 @@ Imports:
     survival,
     stats,
     bridgesampling,
-    rstan,
     ggplot2,
     utils,
     quarto,
@@ -42,8 +46,17 @@ Suggests:
     rmarkdown,
     testthat,
     devtools,
-    pkgdown,
+    pkgdown
+LinkingTo: 
+    BH (>= 1.66.0),
+    Rcpp (>= 0.12.0),
+    RcppEigen (>= 0.3.3.3.0),
+    RcppParallel (>= 5.0.1),
+    rstan (>= 2.18.1),
+    StanHeaders (>= 2.18.0)
 VignetteBuilder: quarto
-SystemRequirements: Quarto (>= 1.2)
+SystemRequirements: 
+    Quarto (>= 1.2),
+    GNU make
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3

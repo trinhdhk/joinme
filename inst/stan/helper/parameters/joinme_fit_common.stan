@@ -72,6 +72,10 @@
   real alpha_cs_marker;
   vector[Q_idm] alpha_vcov_var;
 
+  // marker-weight shrinkage (global across ids)
+  vector[D] z_marker_weights;
+  real<lower=0> tau_marker_weights;
+
   // marker-side shrinkage scales
   real<lower=0> s_cv_marker;
   real<lower=0> s_cs_marker;

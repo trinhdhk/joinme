@@ -9,19 +9,18 @@ NULL
 
 # ---- log-likelihood extraction -------------------------------------------
 
-#' Extract pointwise log-likelihood draws
+#' Log-likelihood summary
 #'
-#' @rdname logLik.JoinMeFit
+#' @rdname log_lik.JoinMeFit
 #' @param object A fitted object of class `JoinMeFit`.
-#' @param ... Additional arguments.
+#' @param what Character; which component to return: `"long"`, `"surv"`, or `"total"`.
+#' @param draws Optional number of posterior draws to subset.
+#' @param seed Random seed for draw subsetting.
+#' @param ... Unused.
 #'
-#' @return A matrix of log-likelihood draws with rows = draws and columns = observations.
-#' @export
-log_lik <- function(object, ...) {
-	UseMethod("log_lik")
-}
-
-
+#' @importFrom rstantools log_lik
+#' @return A matrix
+#' @seealso [rstantools::log_lik()]
 #' @export
 log_lik.JoinMeFit <- function(object, what = c("long", "surv", "total"), draws = NULL, seed = 1, ...) {
 	assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
@@ -41,18 +40,10 @@ log_lik.JoinMeFit <- function(object, what = c("long", "surv", "total"), draws =
 	mat
 }
 
-#' Log-likelihood summary
-#'
-#' @rdname logLik.JoinMeFit
-#' @param object A fitted object of class `JoinMeFit`.
-#' @param what Character; which component to return: `"long"`, `"surv"`, or `"total"`.
-#' @param draws Optional number of posterior draws to subset.
-#' @param seed Random seed for draw subsetting.
-#' @param ... Unused.
-#'
-#' @return A `logLik` object (sum of pointwise log-likelihoods).
-#' @export
-logLik.JoinMeFit <- function(object, what = c("total", "long", "surv"), draws = NULL, seed = 1, ...) {
+#' Backup, unused
+#' @noRd
+#' @keywords internal
+unused_loo.JoinMeFit <- function(object, what = c("total", "long", "surv"), draws = NULL, seed = 1, ...) {
 	what <- match.arg(what)
 	ll_mat <- log_lik.JoinMeFit(object, what = what, draws = draws, seed = seed)
 
@@ -96,9 +87,6 @@ logLik.JoinMeFit <- function(object, what = c("total", "long", "surv"), draws = 
 #' @importFrom loo loo
 #' @export
 loo.JoinMeFit <- function(object, what = c("total", "long", "surv"), draws = NULL, seed = 1, ...) {
-	if (!requireNamespace("loo", quietly = TRUE)) {
-		cli::cli_abort("Package {.pkg loo} is required for loo(). Install it with install.packages('loo').")
-	}
 	what <- match.arg(what)
 	ll_mat <- log_lik.JoinMeFit(object, what = what, draws = draws, seed = seed)
 	loo::loo(ll_mat, ...)
@@ -220,11 +208,11 @@ pp_check.JoinMeFit <- function(object, newdataLong, newdataEvent, ci_level = 0.9
 	probs <- .quantile_probs_from_ci(ci_level)
 
 	pred <- posterior_epred(object,
-													newdataLong = newdataLong,
-													newdataEvent = newdataEvent,
-													n_samples = n_samples,
-													seed = seed,
-													...)
+				newdataLong = newdataLong,
+				newdataEvent = newdataEvent,
+				n_samples = n_samples,
+				seed = seed,
+				...)
 
 	draws_fit <- pred$draws$longitudinal_fitted
 	if (is.null(draws_fit) || length(draws_fit) == 0) {
@@ -288,8 +276,6 @@ pp_check.JoinMeFit <- function(object, newdataLong, newdataEvent, ci_level = 0.9
 #' @return A `concordance` object.
 #' @export
 concordance.JoinMeFit <- function(object, cause = 1, draws = NULL, seed = 1, ...) {
-	assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
-
 	sd <- object$stan_data
 	if (is.null(sd$W) || sd$p_w < 1) {
 		cli::cli_abort("No baseline survival covariates found for concordance calculation.")

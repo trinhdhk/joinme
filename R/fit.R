@@ -22,6 +22,15 @@
 #' The time axis is internally scaled for numerical stability; reported coefficients
 #' are rescaled within Stan so fixed effects remain interpretable on the original scale.
 #'
+#' Marker weights (see `joinme_standata()`) are used to form marker-average summaries
+#' for both current value (CV) and current slope (CS) association components. When
+#' `estimate_marker_weights = TRUE`, the weights are shrunk via Normal or Laplace
+#' perturbations depending on the `shrinkage` setting.
+#'
+#' Association coefficients are denoted with the `alpha_` prefix to match joint-model
+#' conventions and to avoid confusion with the linear predictor $\eta$ used throughout
+#' the longitudinal and survival submodels.
+#'
 #' The typical workflow is:
 #' 1. Prepare `dataLong` and `dataEvent` with aligned ids and time scales.
 #' 2. Specify `formulaLong` and `formulaEvent` to define the longitudinal and survival submodels.
@@ -209,8 +218,7 @@ joinme <- function(
     )
   } else {
     mod <- .get_rstan_model(
-      stan_file,
-      force_recompile = control$force_recompile %||% FALSE
+      stan_file
     )
   }
 
@@ -256,15 +264,19 @@ joinme <- function(
     sd_stan$grainsize <- grainsize
   }
 
+  # Ensure time index arrays are preserved for cmdstanr JSON (avoid auto-unbox)
+  sd_stan <- .coerce_rstan_time_indices(sd_stan)
+
+  # Coerce arrays/vectors consistently for both cmdstanr and rstan
+  sd_stan <- .coerce_rstan_dist_arrays(sd_stan)
+  sd_stan <- .coerce_rstan_vectors(sd_stan, c(
+    "beta_scale",
+    "const_data_cv",
+    "const_data_cs",
+    "const_data_vcov"
+  ))
+
   if (engine == "rstan") {
-    sd_stan <- .coerce_rstan_dist_arrays(sd_stan)
-    sd_stan <- .coerce_rstan_time_indices(sd_stan)
-    sd_stan <- .coerce_rstan_vectors(sd_stan, c(
-      "beta_scale",
-      "const_data_cv",
-      "const_data_cs",
-      "const_data_vcov"
-    ))
     allowed_data <- .stan_data_names(stan_file)
     if (length(allowed_data) > 0) {
       missing <- setdiff(allowed_data, names(sd_stan))
@@ -369,6 +381,8 @@ joinme <- function(
       idx_time_vmk = sd$idx_time_vmk,
       idx_time_widm = sd$idx_time_widm
     ),
+    marker_weights = sd$marker_weights,
+    estimate_marker_weights = sd$estimate_marker_weights,
     basehaz = sd$basehaz,
     n_knots = sd$n_knots,
     basehaz_degree = sd$basehaz_degree,

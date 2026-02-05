@@ -73,21 +73,24 @@ for (k in 1 : n_draws) {
   // -------------------------------------------------------------
   // 2. Prepare for Association (Averages)
   // -------------------------------------------------------------
+  vector[n_marker_types] marker_weights_k = to_vector(marker_weights_draws[k, ]);
+  real sum_w = sum(marker_weights_k);
+  if (sum_w <= 0) sum_w = 1;
   vector[n_random_marker] vbar;
   if (n_random_marker > 0) {
     for (r in 1 : n_random_marker) {
       real acc = 0;
       for (d in 1 : n_marker_types)
-        acc += v_marker[d][r];
-      vbar[r] = acc / n_marker_types;
+        acc += marker_weights_k[d] * v_marker[d][r];
+      vbar[r] = acc / sum_w;
     }
   }
   vector[n_random_marker_id] zbar;
   for (q in 1 : n_random_marker_id) {
     real acc = 0;
     for (d in 1 : n_marker_types)
-      acc += z_w[d][q];
-    zbar[q] = acc / n_marker_types;
+      acc += marker_weights_k[d] * z_w[d][q];
+    zbar[q] = acc / sum_w;
   }
   vector[n_random_marker_id] wbar_i = Li * zbar;
 

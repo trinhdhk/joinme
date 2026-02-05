@@ -1,4 +1,4 @@
-# Bayesian joint mixed-effects (JoinME)
+# Bayesian joint mixed-effects (JoinME) model using Stan
 
 JoinMe fit Bayesian joint mixed-effects modelling of multivariate longitudinal markers and time-to-event outcomes.
 It supports multiple outcome families (Gaussian, Student-t, binary, count),
@@ -13,51 +13,23 @@ for worked examples and API details.
 
 ## Installation
 
-```r# Run this once to publish your site regularly
-usethis::use_pkgdown_github_pages()
+```r
 # install.packages("remotes")
 # remotes::install_github("trinhdhk/joinme")
 ```
 
-For Stan backends:
+We can use Rstan or cmdstanr.
 
 ```r
-# CmdStanR backend (recommended)
-# install.packages("cmdstanr", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
+# CmdStanR backend
+# install.packages("cmdstanr", repos = repos = c('https://stan-dev.r-universe.dev', getOption("repos")))
 # cmdstanr::install_cmdstan()
 
-# RStan backend (optional)
-# install.packages("rstan", repos = c("https://mc-stan.org/r-packages/"))
+# RStan backend
+# install.packages("rstan")
 ```
 
-## Quick start: simulate → fit → predict → plot
-
-``` r
-
-library(joinme)
-# Bayesian joint mixed effects (JoinME) models
-
-## Installation
-
-``` r
-
-# install.packages("remotes")
-# remotes::install_github("trinhdhk/joinme")
-```
-
-For Stan backends:
-
-``` r
-
-# CmdStanR backend (recommended)
-# install.packages("cmdstanr", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
-# cmdstanr::install_cmdstan()
-
-# RStan backend (optional)
-# install.packages("rstan", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
-```
-
-## Quick start: simulate → fit → predict → plot
+## Quick example
 
 ``` r
 
@@ -100,7 +72,6 @@ fit <- joinme(
 
 # Summaries
 summary(fit)
-fixef(fit)
 
 # Dynamic prediction for one subject
 ndL <- sim$dataLong[sim$dataLong$id == 1, ]
@@ -114,16 +85,11 @@ pred <- posterior_epred(
   Tstart = Tstart,
   times = seq(Tstart, Tstart + 1, length.out = 20),
   n_samples = 50,
-  seed = 2026
+  seed = 69
 )
 
 # Plot longitudinal and survival predictions
 plot(pred)
 ```
 
-## Next steps
-
-- See the modeling workflow in `joinme-workflow`.
-- Explore association structures in `joinme-associations`.
-- Review the statistical details in `joinme-model` and `joinme-theory`.
-dynamic prediction for individualised risk and trajectory forecasts.
+Trinh Dong, 2026

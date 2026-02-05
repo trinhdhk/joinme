@@ -105,14 +105,30 @@
     for (d in 1 : D)
       w_idscaled[i, d] = L_i[i] * z_w[i, d];
   
-  // -------------------- marker averages for survival association (mean across markers)
+  // -------------------- marker weights (optional shrinkage around base weights)
+  // If estimate_marker_weights = 1, use a logistic-normal perturbation of the
+  // base weights with scale tau_marker_weights. Otherwise use marker_weights as-is.
+  vector[D] marker_weights_eff;
+  {
+    vector[D] base_log = log(marker_weights + 1e-12);
+    if (estimate_marker_weights == 1) {
+      marker_weights_eff = softmax(base_log + tau_marker_weights * z_marker_weights);
+    } else {
+      marker_weights_eff = marker_weights;
+    }
+  }
+
+  // -------------------- marker averages for survival association (weighted mean across markers)
+  // These averages are used for both current value (CV) and current slope (CS) terms.
+  real sum_w = sum(marker_weights_eff);
+  if (sum_w <= 0) sum_w = 1;
   vector[R_mk] vbar;
   if (R_mk > 0) {
     for (r in 1 : R_mk) {
       real acc = 0;
       for (d in 1 : D) 
-        acc += v_marker[d][r];
-      vbar[r] = acc / D;
+        acc += marker_weights_eff[d] * v_marker[d][r];
+      vbar[r] = acc / sum_w;
     }
   }
   
@@ -121,8 +137,8 @@
     for (q in 1 : Q_idm) {
       real acc = 0;
       for (d in 1 : D)
-        acc += z_w[i, d][q];
-      zbar[i][q] = acc / D;
+        acc += marker_weights_eff[d] * z_w[i, d][q];
+      zbar[i][q] = acc / sum_w;
     }
   }
   

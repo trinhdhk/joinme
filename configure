@@ -1,0 +1,14 @@
+#!/bin/sh
+
+# Best-effort Stan precompilation during installation.
+# Never fail installation if compilers or packages are unavailable.
+
+if [ -n "${R_HOME}" ]; then
+  "${R_HOME}/bin/Rscript" tools/precompile-stan.R || true
+else
+  Rscript tools/precompile-stan.R || true
+fi
+
+# Add configuration needed for big object files
+echo "PKG_CXXFLAGS += -Wa,-mbig-obj" >> ./src/Makevars
+exit 0

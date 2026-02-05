@@ -115,10 +115,33 @@ The term $\mathcal{H}_{i}(t) = \{ \eta_{id}(s) : s \le t, d=1\dots D \}$ represe
 -   **Current Slope**: $\alpha \cdot \frac{d}{dt}\eta_{id}(t)$
 -   **Cumulative Area**: $\alpha \cdot \int_0^t \eta_{id}(s) ds$
 
+### Marker-weighted contributions (CV and CS)
+
+When multiple markers are present, `joinme` forms marker-average association components using weights $\omega_d$ (one per marker). These weights apply **both** to the current value (CV) and current slope (CS) summaries. Let $\eta_{id}^{(mk)}(t)$ denote the marker-specific deviation component of the linear predictor for marker $d$. Then the marker-weighted summaries are:
+
+$$
+\eta_{i}^{(mk)}(t) = \sum_{d=1}^{D} \omega_d \eta_{id}^{(mk)}(t), \quad
+\frac{d}{dt}\eta_{i}^{(mk)}(t) = \sum_{d=1}^{D} \omega_d \frac{d}{dt}\eta_{id}^{(mk)}(t).
+$$
+
+These enter the hazard through the marker-specific association terms (e.g., `cv_marker`, `cs_marker`) after any configured transformation.
+
+### Shrinkage on marker contributions
+
+Marker weights and marker-side association coefficients are regularized to avoid overfitting when $D$ is large. `joinme` uses a shrinkage family controlled by `shrinkage`:
+
+- **Normal shrinkage (default)**: latent weight perturbations and marker-side association coefficients follow Normal priors.
+- **Laplace shrinkage**: the same quantities follow Laplace (double-exponential) priors.
+
+This applies to the marker-weight perturbations and to the marker-specific association coefficients for CV and CS, encouraging weak markers to shrink toward zero contribution while allowing strong markers to remain influential.
+
 Crucially, `joinme` supports **arbitrary non-linear transformations** of these terms (via the `transforms` argument). For example, the risk might depend on the log of the current slope, or a thresholded value of the marker:
 $$
 f(\eta_{id}(t)) = \alpha \cdot \text{softplus}(\eta_{id}(t) - c)
 $$
+
+We use the $\alpha$ notation for association coefficients to align with joint-model
+literature and to distinguish these coefficients from the linear predictor $\eta$.
 
 # 5. Bayesian Inference and Estimation
 

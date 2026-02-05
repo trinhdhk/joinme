@@ -63,6 +63,7 @@ $$
 $$
 
 where:
+
 -   $\mathbf{x}_{id}(t)$: Fixed effects design vector (time-varying).
 -   $\mathbf{b}_i \sim N(\mathbf{0}, \Sigma_b)$: Subject-specific random effects (shared across markers or independent).
 -   $\mathbf{u}_d \sim N(\mathbf{0}, \Sigma_u)$: Marker-specific random effects (e.g., marker-specific average intercept).
@@ -81,6 +82,7 @@ h_i(t) = h_0(t) \exp\left( \mathbf{w}_i^\top \boldsymbol{\gamma} + \sum_{k=1}^K 
 $$
 
 where:
+
 -   $h_0(t)$: Baseline hazard function (typically modeled via B-splines or Weibull).
 -   $\mathbf{w}_i$: Baseline covariates (baseline age, sex, treatment).
 -   $\mathcal{M}_i(t) = \{ \eta_{i1}(t), \dots, \eta_{iD}(t), \eta'_{i1}(t), \dots \}$: The collection of longitudinal trajectories and their derivatives (slopes) at time $t$.
@@ -90,6 +92,12 @@ Common forms for $g_k(\cdot)$ include:
 -   **Current Value**: $\alpha \cdot \eta_{id}(t)$
 -   **Current Slope**: $\alpha \cdot \frac{d}{dt}\eta_{id}(t)$
 -   **Area under curve**: $\alpha \cdot \int_0^t \eta_{id}(s) ds$
+
+When multiple markers are present, `joinme` forms marker-average CV and CS components
+using weights $\omega_d$ (one per marker). These weights apply to both current value
+and current slope marker summaries before any transformation and association scaling.
+Marker weights and marker-side association coefficients are regularized with Normal
+or Laplace priors depending on the `shrinkage` setting.
 
 # 3. Computational Implementation (Stan)
 
@@ -117,16 +125,12 @@ $$
 
 This method provides high accuracy with relatively few function evaluations compared to Simpson's rule or trapezoidal integration.
 
-## 3.3. Arbitrary Transformation Engine (Bytecode VM)
+## 3.3. Arbitrary Transformation
 
-A unique feature of `joinme` is its ability to handle arbitrary non-linear user-specified association functions (e.g., `~ log(current_value) + current_slope^2`). Instead of hardcoding these forms, `joinme` compiles the R formula into a custom **bytecode** integer array.
+`joinme` supports arbitrary non-linear user-specified association functions (e.g., `~ log(current_value) + current_slope^2`). 
 
-Inside Stan, a "virtual machine" interprets this bytecode:
-1.  **Input**: The instantaneous values of the longitudinal predictor and its derivative at time $t$.
-2.  **Execution**: A loop processes opcodes (mapped to Stan functions like `log`, `pow`, `sum`).
-3.  **Differentiation**: All operations utilize Stan's `var` type, ensuring the autodiff stack propagates gradients correctly through the user-defined formula to the underlying random effects.
+Supported functions includes (subset):
 
-Supported Opcodes (subset):
 -   `1 (ADD)`, `2 (SUB)`, `3 (MUL)`, `4 (DIV)`
 -   `10 (EXP)`, `11 (LOG)`, `12 (SQRT)`
 -   `20 (SIN)`, `21 (COS)`
@@ -135,6 +139,7 @@ Supported Opcodes (subset):
 ## 3.4. Parallelization
 
 The model supports `reduce_sum` for within-chain parallelization. The likelihood evaluation is sharded by subject $i$.
+
 -   **Longitudinal Likelihood**: Calculated independently for each block of subjects.
 -   **Survival Likelihood**: Calculated independently for each block of subjects.
 

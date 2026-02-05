@@ -1,9 +1,3 @@
-.onLoad <- function(libname, pkgname) {
-  if (isTRUE(getOption("joinme.compile_on_load", TRUE))) {
-    .warm_rstan_cache()
-  }
-}
-
 # Global variable bindings for dplyr NSE and other functions
 # These are used in dplyr pipelines and prevent R CMD check warnings
 

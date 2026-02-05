@@ -69,6 +69,14 @@
 #' @param indep_idmarker_cov Integer flag; 1 uses diagonal covariance for marker-by-id effects.
 #' @param allow_marker_crosscorr Integer flag; 1 allows cross-marker correlation in marker RE.
 #' @param shrinkage Integer flag controlling shrinkage behavior for marker-by-id effects.
+#' @param marker_weights Optional numeric vector of length D giving base weights
+#'   for marker-specific association components. These weights are applied to both
+#'   current value (CV) and current slope (CS) marker summaries. When NULL, equal
+#'   weights are used.
+#' @param estimate_marker_weights Logical; if TRUE, estimate marker weights via a
+#'   shrinkage scale (logistic-normal) rather than using fixed weights. The latent
+#'   perturbations follow Normal or Laplace priors depending on `shrinkage`.
+#' @param marker_weight_scale Non-negative prior scale for marker-weight shrinkage.
 #' @param flag_resid_dim Integer flag to include residual dimension checks.
 #' @param basehaz Baseline hazard basis type: "bs", "ns", or "formula".
 #' @param n_knots Number of internal knots for spline baseline hazards.
@@ -105,6 +113,9 @@ joinme_standata <- function(
   indep_idmarker_cov = 1L,
   allow_marker_crosscorr = 1L,
   shrinkage = 2L,
+  marker_weights = NULL,
+  estimate_marker_weights = FALSE,
+  marker_weight_scale = 1,
   flag_resid_dim = 0L,
   basehaz = c("bs", "ns", "formula"),
   n_knots = 5,
@@ -177,6 +188,50 @@ joinme_standata <- function(
   marker_levels <- levels(dataLong[[marker_var]])
   D <- length(marker_levels)
   dataLong$marker_int <- as.integer(dataLong[[marker_var]])
+
+  # Marker weights (for weighted means in CV/CS association components)
+  if (is.null(marker_weights)) {
+    marker_weights <- rep(1 / D, D)
+  } else {
+    if (!is.numeric(marker_weights)) {
+      cli::cli_abort(c(
+        x = "{.arg marker_weights} must be numeric.",
+        i = "Provide a numeric vector with length D or named by marker levels."
+      ))
+    }
+    if (!is.null(names(marker_weights))) {
+      marker_weights <- marker_weights[marker_levels]
+    }
+    if (length(marker_weights) != D) {
+      cli::cli_abort(c(
+        x = "{.arg marker_weights} must have length D={D}.",
+        i = "Use one weight per marker level."
+      ))
+    }
+    if (any(!is.finite(marker_weights)) || any(marker_weights < 0)) {
+      cli::cli_abort(c(
+        x = "{.arg marker_weights} must be finite and non-negative.",
+        i = "Provide weights >= 0."
+      ))
+    }
+    sw <- sum(marker_weights)
+    if (!is.finite(sw) || sw <= 0) {
+      cli::cli_abort(c(
+        x = "{.arg marker_weights} must sum to a positive value.",
+        i = "Provide at least one positive weight."
+      ))
+    }
+    marker_weights <- marker_weights / sw
+  }
+
+  # Marker-weight estimation controls
+  estimate_marker_weights <- isTRUE(estimate_marker_weights)
+  if (!is.numeric(marker_weight_scale) || length(marker_weight_scale) != 1 || !is.finite(marker_weight_scale) || marker_weight_scale < 0) {
+    cli::cli_abort(c(
+      x = "{.arg marker_weight_scale} must be a single non-negative numeric value.",
+      i = "Example: marker_weight_scale = 1."
+    ))
+  }
   
   # Process mixed families (optional)
   if (!is.null(families)) {
@@ -468,9 +523,19 @@ joinme_standata <- function(
       arbitrary_tf_data$tf_mode_cv_mean == 0 && arbitrary_tf_data$tf_mode_cv_marker == 0) {
     warning("cv_mean and cv_marker are both identity; consider using cv_total instead.", call. = FALSE)
   }
+  if (af$assoc_cv_total == 1 && af$assoc_cv_mean == 1 && af$assoc_cv_marker == 1 &&
+      arbitrary_tf_data$tf_mode_cv_tot == 0 &&
+      arbitrary_tf_data$tf_mode_cv_mean == 0 && arbitrary_tf_data$tf_mode_cv_marker == 0) {
+    warning("cv_total, cv_mean, and cv_marker are all identity; consider using only cv_total to avoid redundant association terms.", call. = FALSE)
+  }
   if (af$assoc_cs_total == 0 && af$assoc_cs_mean == 1 && af$assoc_cs_marker == 1 &&
       arbitrary_tf_data$tf_mode_cs_mean == 0 && arbitrary_tf_data$tf_mode_cs_marker == 0) {
     warning("cs_mean and cs_marker are both identity; consider using cs_total instead.", call. = FALSE)
+  }
+  if (af$assoc_cs_total == 1 && af$assoc_cs_mean == 1 && af$assoc_cs_marker == 1 &&
+      arbitrary_tf_data$tf_mode_cs_tot == 0 &&
+      arbitrary_tf_data$tf_mode_cs_mean == 0 && arbitrary_tf_data$tf_mode_cs_marker == 0) {
+    warning("cs_total, cs_mean, and cs_marker are all identity; consider using only cs_total to avoid redundant association terms.", call. = FALSE)
   }
 
   # Return Stan data
@@ -630,6 +695,9 @@ joinme_standata <- function(
     zidm_cols = zidm_cols,
     time_var = time_var,
     marker_levels = marker_levels,
+    marker_weights = as.numeric(marker_weights),
+    estimate_marker_weights = as.integer(estimate_marker_weights),
+    marker_weight_scale = as.numeric(marker_weight_scale),
     family_codes = family_codes,
     family_names = family_names,
     tf_compositions = NULL,

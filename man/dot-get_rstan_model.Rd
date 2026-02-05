@@ -4,12 +4,10 @@
 \alias{.get_rstan_model}
 \title{Resolve cached rstan model}
 \usage{
-.get_rstan_model(stan_file, force_recompile = FALSE)
+.get_rstan_model(stan_file)
 }
 \arguments{
 \item{stan_file}{Path to the Stan file.}
-
-\item{force_recompile}{Logical; force recompilation even if cached.}
 }
 \value{
 A stanfit model object.

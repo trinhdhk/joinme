@@ -4,6 +4,9 @@
   array[N] int<lower=1, upper=n_id> id;
   array[N] int<lower=1> marker;  // marker index 1..D
   int<lower=1> D;                // number of markers
+  vector[D] marker_weights;      // normalized weights for marker-level averaging (CV + CS)
+  int<lower=0, upper=1> estimate_marker_weights; // 1 to estimate weights
+  real<lower=0> marker_weight_scale; // prior scale for weight shrinkage
 
   // Outcomes by family type
   vector[N] y_real;              // gaussian/student_t

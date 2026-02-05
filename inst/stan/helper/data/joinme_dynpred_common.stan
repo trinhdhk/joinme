@@ -4,6 +4,8 @@
   int<lower=1> n_obs_long;
   array[n_obs_long] int<lower=1> idx_marker_obs;
   int<lower=1> n_marker_types;
+  vector[n_marker_types] marker_weights; // base weights (for reference)
+  matrix[n_draws, n_marker_types] marker_weights_draws; // per-draw effective weights
   vector[n_obs_long] y_real;
   array[n_obs_long] int y_int;
   array[n_obs_long] int<lower=0> trials_obs;

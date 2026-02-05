@@ -34,6 +34,27 @@ Association transforms apply to all supported longitudinal families (including
 double_exponential, skew_double_exponential, beta, and cumulative_logit) and to
 competing-risk survival models.
 
+# Marker-weighted CV and CS
+
+When multiple biomarkers are modeled, `joinme` constructs marker-average association
+components using weights $\omega_d$ (one per marker). These weights affect **both**
+current value (CV) and current slope (CS) marker summaries and then flow into the
+`cv_marker` and `cs_marker` association terms after any transformations.
+
+In practice, provide fixed weights via `marker_weights`, or set
+`estimate_marker_weights = TRUE` to estimate them with shrinkage (Normal or Laplace
+depending on `shrinkage`).
+
+# Association coefficients and naming
+
+Association coefficients are denoted with the $\alpha$ prefix (e.g., `alpha_cv_total`).
+This follows joint-model conventions and avoids confusion with the linear predictor
+$\eta$ used throughout the longitudinal and survival submodels.
+
+When an association component is not selected in `assoc`, its coefficient is
+prior-only and does not enter the likelihood. Summaries only report active
+components to keep interpretation focused on the fitted association structure.
+
 # Functional Transform
 
 ```{r functional-transform, eval=FALSE}

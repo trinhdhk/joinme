@@ -539,7 +539,7 @@ suppressPackageStartupMessages({
   if (.is_cmdstanr_fit(fit)) {
     d <- fit$draws(variables = variables)
   } else if (.is_rstan_fit(fit)) {
-    d <- posterior::as_draws_array(rstan::extract(fit, permuted = FALSE))
+    d <- posterior::as_draws_array(fit)
     if (!is.null(variables)) {
       vars_avail <- intersect(variables, posterior::variables(d))
       d <- posterior::subset_draws(d, variable = vars_avail)

@@ -42,10 +42,17 @@ NULL
 #' @return A CmdStanR model object.
 #'
 #' @keywords internal
-.get_cmdstan_model <- function(stan_file, cpp_options = NULL, force_recompile = FALSE) {
+.get_cmdstan_model <- function(
+  stan_file,
+  cpp_options = NULL,
+  force_recompile = FALSE
+) {
   # Validate inputs aggressively.
   assertthat::assert_that(is.character(stan_file), length(stan_file) == 1)
-  assertthat::assert_that(is.logical(force_recompile), length(force_recompile) == 1)
+  assertthat::assert_that(
+    is.logical(force_recompile),
+    length(force_recompile) == 1
+  )
 
   if (!file.exists(stan_file)) {
     cli::cli_abort(c(
@@ -61,7 +68,10 @@ NULL
   }
 
   # Ensure CmdStan is installed and discoverable.
-  ver <- tryCatch(cmdstanr::cmdstan_version(error_on_NA = FALSE), error = function(e) NA)
+  ver <- tryCatch(
+    cmdstanr::cmdstan_version(error_on_NA = FALSE),
+    error = function(e) NA
+  )
   if (is.na(ver)) {
     cli::cli_abort(c(
       x = "CmdStan is not installed or not detected by cmdstanr.",
@@ -70,19 +80,55 @@ NULL
   }
 
   # Use a stable cache directory so the compiled model can be reused.
-  cache_dir <- file.path(.stan_cache_dir(), "cmdstanr")
-  if (!dir.exists(cache_dir)) {
-    dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
-  }
+  cache_dir <- .stan_cache_dir()
 
   # Compile or load the model using CmdStanR's model cache.
+  # Rip-off from cmdstanr
+  is_windows <- isTRUE(.Platform$OS.type == "windows")
+  is_wsl <- is_windows &&
+    (grepl('//wsl$/', tolower(cmdstanr::cmdstan_path()), fixed = TRUE) ||
+      Sys.getenv("CMDSTANR_USE_WSL") == 1)
+  if (!is_wsl) {
+    ext <- if (is_windows) ".exe" else ""
+    exe_path <- file.path(
+      cache_dir,
+      paste0(tools::file_path_sans_ext(basename(stan_file)), ext)
+    )
+  } else {
+    # Create a WSL tmp path and copy the exe there
+    tmpdir <- processx::run(command = 'wsl', args = c('mktemp', '-d'))$stdout |>
+      gsub("\n$", "", x = _)
+    tmpdir_win <- processx::run(
+      command = 'wsl',
+      args = c("wslpath", "-w", tmpdir)
+    )$stdout |>
+      gsub("\n$", "", x = _)
+    file.copy(
+      from = file.path(
+        cache_dir,
+        tools::file_path_sans_ext(basename(stan_file))
+      ),
+      to = tmpdir_win,
+      overwrite = TRUE
+    )
+    exe_path <-
+      file.path(
+        tmpdir_win,
+        tools::file_path_sans_ext(basename(stan_file))
+      ) |>
+      normalizePath(winslash = "/") |>
+      gsub("^\\\\\\\\wsl.localhost", "//wsl$", x = _)
+  }
   cmdstanr::cmdstan_model(
-    stan_file,
+    # stan_file,
+    exe_file = exe_path,
+    compile = FALSE,
     cpp_options = cpp_options,
     include_paths = dirname(stan_file),
     dir = cache_dir,
     force_recompile = force_recompile
   )
+
 }
 
 #' Resolve cached rstan model
@@ -92,86 +138,13 @@ NULL
 #' The compiled model is stored as an RDS file in the package cache.
 #'
 #' @param stan_file Path to the Stan file.
-#' @param force_recompile Logical; force recompilation even if cached.
 #'
 #' @return A stanfit model object.
 #'
 #' @keywords internal
-.get_rstan_model <- function(stan_file, force_recompile = FALSE) {
-  # Validate inputs aggressively.
-  assertthat::assert_that(is.character(stan_file), length(stan_file) == 1)
-  assertthat::assert_that(is.logical(force_recompile), length(force_recompile) == 1)
-
-  if (!file.exists(stan_file)) {
-    cli::cli_abort(c(
-      x = "Stan file not found: {stan_file}.",
-      i = "Check installation or restore inst/stan files."
-    ))
-  }
-  if (!requireNamespace("rstan", quietly = TRUE)) {
-    cli::cli_abort(c(
-      x = "Package {.pkg rstan} is required for engine = 'rstan'.",
-      i = "Install with install.packages('rstan') or use engine = 'cmdstanr'."
-    ))
-  }
-
-  # Use a stable cache directory for compiled rstan models.
-  cache_dir <- file.path(.stan_cache_dir(), "rstan")
-  if (!dir.exists(cache_dir)) {
-    dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
-  }
-  rds_path <- file.path(cache_dir, paste0(basename(stan_file), ".rds"))
-
-  # Return cached model unless recompilation is explicitly requested.
-  if (file.exists(rds_path) && !isTRUE(force_recompile)) {
-    return(readRDS(rds_path))
-  }
-
-  # Compile and cache the model.
-  rstan::rstan_options(auto_write = TRUE)
-  old_wd <- getwd()
-  setwd(dirname(stan_file))
-  on.exit(setwd(old_wd), add = TRUE)
-  mod <- rstan::stan_model(
-    file = basename(stan_file),
-    save_dso = TRUE,
-    verbose = FALSE
-  )
-  saveRDS(mod, rds_path)
-  mod
-}
-
-#' Precompile rstan models on load
-#'
-#' @description
-#' Precompiles all packaged Stan models for rstan into the cache, allowing
-#' faster model usage later. This runs on package load when enabled.
-#'
-#' @return Invisibly returns TRUE if any models were attempted.
-#'
-#' @keywords internal
-.warm_rstan_cache <- function() {
-  if (!requireNamespace("rstan", quietly = TRUE)) {
-    return(invisible(FALSE))
-  }
-
-  # Enumerate all packaged Stan model files we want to cache.
-  stan_files <- c(
-    system.file("stan/joinme_fit.stan", package = "joinme"),
-    system.file("stan/joinme_fit_threading.stan", package = "joinme"),
-    system.file("stan/joinme_dynpred.stan", package = "joinme"),
-    system.file("stan/joinme_dynpred_threading.stan", package = "joinme")
-  )
-  stan_files <- stan_files[nzchar(stan_files) & file.exists(stan_files)]
-  if (length(stan_files) == 0) {
-    return(invisible(FALSE))
-  }
-
-  # Attempt compilation one-by-one to keep errors isolated.
-  for (sf in stan_files) {
-    try(.get_rstan_model(sf, force_recompile = FALSE), silent = TRUE)
-  }
-  invisible(TRUE)
+.get_rstan_model <- function(stan_file) {
+  mod <- gsub('.stan$', '', basename(stan_file))
+  stanmodels[[mod]]
 }
 
 #' Precompile CmdStanR models
@@ -182,15 +155,20 @@ NULL
 #' waiting for the first call with engine = "cmdstanr".
 #'
 #' @param force_recompile Logical; recompile even if cached.
-#' @param threads_per_chain Integer; number of threads for Stan (>= 1).
 #'
 #' @return Invisibly returns a named list of compiled CmdStanR models.
 #'
 #' @export
-precompile_cmdstanr_models <- function(force_recompile = FALSE, threads_per_chain = 1L) {
+precompile_cmdstanr_models <- function(force_recompile = TRUE) {
   # Validate inputs with assertthat, then provide structured cli errors.
-  assertthat::assert_that(is.logical(force_recompile), length(force_recompile) == 1)
-  assertthat::assert_that(is.numeric(threads_per_chain), length(threads_per_chain) == 1)
+  assertthat::assert_that(
+    is.logical(force_recompile),
+    length(force_recompile) == 1
+  )
+  assertthat::assert_that(
+    is.numeric(threads_per_chain),
+    length(threads_per_chain) == 1
+  )
 
   threads_per_chain <- as.integer(threads_per_chain)
   if (threads_per_chain < 1L) {
@@ -203,9 +181,18 @@ precompile_cmdstanr_models <- function(force_recompile = FALSE, threads_per_chai
   # Prepare the Stan file list in a deterministic order.
   stan_files <- c(
     joinme_fit = system.file("stan/joinme_fit.stan", package = "joinme"),
-    joinme_fit_threading = system.file("stan/joinme_fit_threading.stan", package = "joinme"),
-    joinme_dynpred = system.file("stan/joinme_dynpred.stan", package = "joinme"),
-    joinme_dynpred_threading = system.file("stan/joinme_dynpred_threading.stan", package = "joinme")
+    joinme_fit_threading = system.file(
+      "stan/joinme_fit_threading.stan",
+      package = "joinme"
+    ),
+    joinme_dynpred = system.file(
+      "stan/joinme_dynpred.stan",
+      package = "joinme"
+    ),
+    joinme_dynpred_threading = system.file(
+      "stan/joinme_dynpred_threading.stan",
+      package = "joinme"
+    )
   )
   stan_files <- stan_files[nzchar(stan_files) & file.exists(stan_files)]
   if (length(stan_files) == 0) {
@@ -220,7 +207,11 @@ precompile_cmdstanr_models <- function(force_recompile = FALSE, threads_per_chai
   models <- lapply(stan_files, function(sf) {
     .get_cmdstan_model(
       stan_file = sf,
-      cpp_options = cpp_opts,
+      cpp_options = if (grepl('threading', sf, fixed = TRUE)) {
+        list(stan_threads = TRUE)
+      } else {
+        NULL
+      },
       force_recompile = force_recompile
     )
   })

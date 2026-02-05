@@ -8,10 +8,10 @@
    * 4. Accumulate event term if subject had event (d_event[i] == 1)
    * 5. Subtract cumulative hazard to complete log-likelihood
    *
-   * Association features are computed using:
-   * - Current value total (mean + marker effects)
-   * - Current slope total (mean slope + marker slopes)
-   * - Variance covariance feature (id-specific variance structure)
+  * Association features are computed using:
+  * - Current value total (mean + marker effects; marker averages are weighted)
+  * - Current slope total (mean slope + marker slopes; same weights apply)
+  * - Variance covariance feature (id-specific variance structure)
    * Each can have its own transformation (functional, spline, etc.)
    */
 
@@ -31,7 +31,9 @@
       cvm_fwd[j] = dot_product(X_gk_fwd[i][j], beta_scaled)
                    + dot_product(Z_id_gk_fwd[i][j], u_id[i]);
       
-      // marker-average component: optional marker-only + mandatory marker-by-id
+      // marker-average component: optional marker-only + marker-by-id
+      // Note: vbar and wbar_i are weighted means across markers using marker_weights.
+      // These weighted averages feed both current value (CV) and current slope (CS).
       real mk_part_now = 0;
       real mk_part_fwd = 0;
       if (R_mk > 0) {
@@ -43,7 +45,7 @@
       cvk_fwd[j] = mk_part_fwd + dot_product(Z_idm_gk_fwd[i][j], wbar_i[i]);
     }
     
-    // FD slopes:
+    // FD slopes (marker weights are already folded into cvk via vbar/wbar_i):
     // eta_fd returns slope with respect to the scaled-time domain used in the GK designs.
     // Convert to original-time slope by dividing by tmax.
     vector[15] csm_raw = eta_fd(cvm_now, cvm_fwd, eps_fd) / tmax;

@@ -203,8 +203,7 @@ predict.JoinMeFit <- function(object,
         )
     } else {
         mod <- .get_rstan_model(
-            stan_file,
-            force_recompile = force_recompile
+            stan_file
         )
     }
 
@@ -328,16 +327,15 @@ predict.JoinMeFit <- function(object,
             t_cond, t_grid, t_surv_grid,
             forms, draws_list, grainsize_data
         )
-        if (engine == "rstan") {
-            sd_pred <- .coerce_rstan_dist_arrays(sd_pred)
-            sd_pred <- .coerce_rstan_time_indices(sd_pred)
-            sd_pred <- .coerce_rstan_vectors(sd_pred, c(
-                "vec_cov_vcov",
-                "const_data_cv",
-                "const_data_cs",
-                "const_data_vcov"
-            ))
-        }
+        # Ensure time index arrays are preserved for cmdstanr JSON (avoid auto-unbox)
+        sd_pred <- .coerce_rstan_time_indices(sd_pred)
+        sd_pred <- .coerce_rstan_dist_arrays(sd_pred)
+        sd_pred <- .coerce_rstan_vectors(sd_pred, c(
+            "vec_cov_vcov",
+            "const_data_cv",
+            "const_data_cs",
+            "const_data_vcov"
+        ))
         if (!is.null(allowed_data) && length(allowed_data) > 0) {
             missing <- setdiff(allowed_data, names(sd_pred))
             if (length(missing) > 0) {
@@ -614,20 +612,17 @@ predict.JoinMeFit <- function(object,
 
 #' Posterior Linear Predictor
 #'
+#' @rdname predict.JoinMeFit
 #' @description
 #' Convenience wrapper around the [predict] method returning the posterior
 #' linear predictor (linpred scale).
 #'
 #' @param object A fitted object of class `JoinMeFit`.
 #' @param ... Additional arguments passed to [predict].
-#'
+#' 
+#' @importFrom rstantools posterior_linpred
 #' @return A `JoinMeDynPred` object with `metadata$scale = "linpred"`.
 #'
-#' @export
-posterior_linpred <- function(object, ...) {
-    UseMethod("posterior_linpred")
-}
-
 #' @export
 posterior_linpred.JoinMeFit <- function(object, ...) {
     predict(object, scale = "linpred", ...)
@@ -635,6 +630,7 @@ posterior_linpred.JoinMeFit <- function(object, ...) {
 
 #' Posterior Expected Predictor
 #'
+#' @rdname predict.JoinMeFit
 #' @description
 #' Convenience wrapper around the [predict] method returning the posterior
 #' expected predictor (epred scale).
@@ -642,20 +638,16 @@ posterior_linpred.JoinMeFit <- function(object, ...) {
 #' @param object A fitted object of class `JoinMeFit`.
 #' @param ... Additional arguments passed to [predict].
 #'
-#' @return A `JoinMeDynPred` object with `metadata$scale = "epred"`.
-#'
-#' @export
-posterior_epred <- function(object, ...) {
-    UseMethod("posterior_epred")
-}
-
+#' @importFrom rstantools posterior_linpred
+#' @return A `JoinMeDynPred` object with `metadata$scale = "epred"`
 #' @export
 posterior_epred.JoinMeFit <- function(object, ...) {
     predict(object, scale = "epred", ...)
 }
 
 #' Posterior Predictive Draws
-#'
+#' 
+#' @rdname predict.JoinMeFit
 #' @description
 #' Convenience wrapper around the [predict] method returning posterior
 #' predictive draws (includes observation noise).
@@ -663,13 +655,8 @@ posterior_epred.JoinMeFit <- function(object, ...) {
 #' @param object A fitted object of class `JoinMeFit`.
 #' @param ... Additional arguments passed to [predict].
 #'
+#' @importFrom rstantools posterior_predict
 #' @return A `JoinMeDynPred` object with `metadata$scale = "predict"`.
-#'
-#' @export
-posterior_predict <- function(object, ...) {
-    UseMethod("posterior_predict")
-}
-
 #' @export
 posterior_predict.JoinMeFit <- function(object, ...) {
     predict(object, scale = "predict", ...)
@@ -896,6 +883,15 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         }
     }
 
+    marker_weights_draws <- NULL
+    if (all(paste0("marker_weights_eff[", 1:sd$D, "]") %in% colnames(dmat))) {
+        marker_weights_draws <- get_mat(paste0("marker_weights_eff[", 1:sd$D, "]"))
+    } else if (all(paste0("marker_weights[", 1:sd$D, "]") %in% colnames(dmat))) {
+        marker_weights_draws <- get_mat(paste0("marker_weights[", 1:sd$D, "]"))
+    } else if (!is.null(sd$marker_weights)) {
+        marker_weights_draws <- matrix(rep(as.numeric(sd$marker_weights), each = n), nrow = n, byrow = TRUE)
+    }
+
     list(
         n_samples = n,
         beta_fixed = beta_fixed,
@@ -940,6 +936,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         log_h0_intercept = log_h0_intercept,
         bs_gamma_c = bs_gamma_c,
         gamma_hazard = gamma_hazard,
+        marker_weights_draws = marker_weights_draws,
         sigma_y_shared = get_col("sigma_y", default = 0),
         sigma_marker_specific = if (sd$D > 0 && "sigma_marker[1]" %in% colnames(dmat)) {
             get_mat(paste0("sigma_marker[", 1:sd$D, "]"))
@@ -1206,6 +1203,32 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         marker_levels <- levels(dL[[marker_var]]) %||% sort(unique(dL[[marker_var]]))
     }
 
+    # Marker weights (use fitted weights when available)
+    marker_weights <- object$stan_data$marker_weights
+    if (is.null(marker_weights)) {
+        marker_weights <- rep(1 / length(marker_levels), length(marker_levels))
+    } else {
+        if (!is.null(names(marker_weights))) {
+            marker_weights <- marker_weights[marker_levels]
+        }
+        if (length(marker_weights) != length(marker_levels) || any(!is.finite(marker_weights)) || any(marker_weights < 0)) {
+            marker_weights <- rep(1 / length(marker_levels), length(marker_levels))
+        } else {
+            sw <- sum(marker_weights)
+            if (!is.finite(sw) || sw <= 0) {
+                marker_weights <- rep(1 / length(marker_levels), length(marker_levels))
+            } else {
+                marker_weights <- marker_weights / sw
+            }
+        }
+    }
+
+    marker_weights_draws <- draws_list$marker_weights_draws
+    if (is.null(marker_weights_draws) || nrow(marker_weights_draws) != length(draws_list$sigma_y_shared)) {
+        marker_weights_draws <- matrix(rep(marker_weights, each = length(draws_list$sigma_y_shared)),
+                                        nrow = length(draws_list$sigma_y_shared), byrow = TRUE)
+    }
+
     dL[[marker_var]] <- factor(dL[[marker_var]], levels = marker_levels)
     marker_int <- as.integer(dL[[marker_var]])
     if (any(is.na(marker_int))) stop("Markers in newdataLong don't match fitted model levels.")
@@ -1228,6 +1251,8 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     out <- list(
         n_draws = length(draws_list$sigma_y_shared),
         n_obs_long = nrow(dL), idx_marker_obs = marker_int, n_marker_types = sd$D,
+        marker_weights = as.numeric(marker_weights),
+        marker_weights_draws = marker_weights_draws,
         y_real = as.numeric(dL[[y_var]]),
         y_int = as.integer(dL[[y_var]]),
         trials_obs = as.integer(trials_obs),
@@ -1288,6 +1313,8 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         coeff_assoc_cv_mean = draws_list$coeff_assoc_cv_mean, coeff_assoc_cs_mean = draws_list$coeff_assoc_cs_mean,
         coeff_assoc_cv_marker = draws_list$coeff_assoc_cv_marker, coeff_assoc_cs_marker = draws_list$coeff_assoc_cs_marker,
         coeff_assoc_vcov_var = draws_list$coeff_assoc_vcov_var,
+        marker_weights_draws = draws_list$marker_weights_draws,
+        marker_weights_draws = draws_list$marker_weights_draws,
         K_ord = sd$K_ord %||% 2L,
         cutpoints_ord = draws_list$cutpoints_ord,
         flag_assoc_cv_total = sd$assoc_cv_total, flag_assoc_cv_mean = sd$assoc_cv_mean, flag_assoc_cv_marker = sd$assoc_cv_marker,

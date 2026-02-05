@@ -1,7 +1,8 @@
 url: https://trinhdhk.github.io/joinme/
 template:
   bootstrap: 5
-  bootswatch: flatly
+  bootswatch: sandstone
+  light-switch: true
   toc: true
   
 ignore:
@@ -18,7 +19,7 @@ articles:
   contents:
   - joinme-intro
   - joinme-demo
-- title: Modeling
+- title: Modelling
   contents:
   - joinme-workflow
   - joinme-associations
@@ -27,6 +28,7 @@ articles:
 reference:
 - title: Core modeling
   contents:
+  - joinme-package
   - joinme
   - joinme_standata
   - build_standata_transforms
@@ -39,18 +41,18 @@ reference:
 - title: Prediction
   contents:
   - predict.JoinMeFit
-  - posterior_epred
-  - posterior_linpred
-  - posterior_predict
+  - posterior_epred.JoinMeFit
+  - posterior_linpred.JoinMeFit
+  - posterior_predict.JoinMeFit
   - plot.JoinMeDynPred
-- title: Model diagnosis
+- title: Model diagnosis and performance
   contents:
   - loo.JoinMeFit
   - waic.JoinMeFit
   - elpd.JoinMeFit
   - pp_check.JoinMeFit
   - concordance.JoinMeFit
-  - logLik.JoinMeFit
+  - log_lik.JoinMeFit
 - title: Utilities
   contents:
   - fixef.JoinMeFit

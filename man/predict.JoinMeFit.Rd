@@ -2,6 +2,9 @@
 % Please edit documentation in R/predict.R
 \name{predict.JoinMeFit}
 \alias{predict.JoinMeFit}
+\alias{posterior_linpred.JoinMeFit}
+\alias{posterior_epred.JoinMeFit}
+\alias{posterior_predict.JoinMeFit}
 \title{Dynamic Prediction for Joint Models}
 \usage{
 \method{predict}{JoinMeFit}(
@@ -22,6 +25,12 @@
   seed = 123,
   ...
 )
+
+\method{posterior_linpred}{JoinMeFit}(object, ...)
+
+posterior_epred.JoinMeFit(object, ...)
+
+\method{posterior_predict}{JoinMeFit}(object, ...)
 }
 \arguments{
 \item{object}{A fitted object of class \code{JoinMeFit}.}
@@ -83,7 +92,7 @@ For engine = "rstan", threading uses options(stan.thread = threads_per_chain).
 
 \item{seed}{Integer. Random seed for reproducibility of random effect sampling.}
 
-\item{...}{Additional arguments (unused).}
+\item{...}{Additional arguments passed to \link{predict}.}
 }
 \value{
 A list with two components:
@@ -92,11 +101,26 @@ A list with two components:
 \item{survival}{A data.frame containing survival probabilities (S(t|Tstart)) for each time point in \code{times}. Columns: id, time, Survival, Median, Est.Error, L95, U95.}
 \item{cumhaz}{A data.frame containing conditional cumulative hazards H(t|Tstart). Columns: id, time, Cumhaz, Median, Est.Error, L95, U95.}
 \item{draws}{A list containing raw posterior draws (\code{longitudinal}, \code{survival}, \code{cumhaz}).}
+
+A \code{JoinMeDynPred} object with \code{metadata$scale = "linpred"}.
+
+A \code{JoinMeDynPred} object with \code{metadata$scale = "epred"}
+
+A \code{JoinMeDynPred} object with \code{metadata$scale = "predict"}.
 }
 \description{
 Performs dynamic prediction for a new subject using a fitted \code{JoinMeFit} joint model.
 It calculates the posterior predictive distribution of longitudinal trajectories
 and survival probabilities conditional on the subject's observed history up to a specific time point.
+
+Convenience wrapper around the \link{predict} method returning the posterior
+linear predictor (linpred scale).
+
+Convenience wrapper around the \link{predict} method returning the posterior
+expected predictor (epred scale).
+
+Convenience wrapper around the \link{predict} method returning posterior
+predictive draws (includes observation noise).
 }
 \details{
 The function uses a Bayesian approach. For each of the \code{n_samples} posterior draws from the fitted model:
