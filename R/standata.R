@@ -115,11 +115,11 @@ joinme_standata <- function(
   shrinkage = 2L,
   marker_weights = NULL,
   estimate_marker_weights = FALSE,
-  marker_weight_scale = 1,
+  marker_weight_scale = 0.5,
   flag_resid_dim = 0L,
   basehaz = c("bs", "ns", "formula"),
-  n_knots = 5,
-  basehaz_degree = 3,
+  n_knots = 5L,
+  basehaz_degree = 3L,
   basehaz_formula = ~ 1 + time,
   tau_spline = 0.4,
   seed = NULL
@@ -138,7 +138,7 @@ joinme_standata <- function(
   if (length(bars) == 0) {
      cli::cli_abort(c(
       i = "formulaLong must include (...| {.arg id_var }) and a marker term ( ... | {.arg marker_var}.",
-      x = "Missing necessary random-effects terms."
+      x = "Missing individual random-effects terms."
     ))
   }
 
@@ -356,8 +356,20 @@ joinme_standata <- function(
   p_w <- ncol(W)
 
   # Covariance covariates Xcov (intercept-only -> Xcov=0)
+  if (length(reformulas::findbars(formulaVcov)) > 0) {
+    cli::cli_abort(c(
+      x = "{.arg formulaVcov} does not support random-effects terms.",
+      i = "Remove all ( ... | ... ) terms from {.arg formulaVcov}."
+    ))
+  }
   fv_rhs <- stats::update(formulaVcov, . ~ .)
   fv_rhs[[2]] <- NULL
+  if (.expr_has_time(fv_rhs[[3]], time_var)) {
+    cli::cli_abort(c(
+      x = "{.arg formulaVcov} cannot include the time variable {.arg {time_var}}.",
+      i = "Remove time from {.arg formulaVcov} or move it to longitudinal formulas."
+    ))
+  }
   Xtmp <- .mm(fv_rhs, dataEvent)
   if (ncol(Xtmp) == 1 && colnames(Xtmp)[1] == "(Intercept)") {
     K_cov <- 1L

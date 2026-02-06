@@ -9,6 +9,5 @@ else
   Rscript tools/precompile-stan.R || true
 fi
 
-# Add configuration needed for big object files
-echo "PKG_CXXFLAGS += -Wa,-mbig-obj" >> ./src/Makevars
+
 exit 0
