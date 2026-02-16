@@ -2,6 +2,11 @@
 #'
 #' @description Joint Mixed-Effects (JoinME) Model for Multivariate Longitudinal and Survival Data
 #'
+#' @details
+#' Key entry points are `joinme()` for model fitting, `predict()` for dynamic
+#' prediction, and `plot()` for visualization of predicted trajectories and
+#' survival curves.
+#'
 #' @name joinme-package
 #' @aliases joinme
 #' @useDynLib joinme, .registration = TRUE
@@ -14,4 +19,4 @@
 #' @references
 #' Stan Development Team (NA). RStan: the R interface to Stan. R package version 2.36.0.9000. https://mc-stan.org
 #'
-"_PACKAGE"
+"_PACKAGE"  # roxygen entry point for package-level docs

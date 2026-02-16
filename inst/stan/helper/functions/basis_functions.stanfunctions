@@ -1,19 +1,22 @@
 /**
  * @file basis_functions.stanfunctions
- * @brief I-spline, B-spline, and related basis functions for nonparametric transformation.
+ * @brief I-spline and piecewise-linear basis helpers.
  *
- * These functions allow mapping arbitrary scalars through smooth, flexible bases
- * specified by knots and coefficients computed offline in R.
+ * @details These helpers evaluate monotone I-spline transformations and
+ * piecewise-linear transformations. The knot locations and coefficients are
+ * computed in R and passed to Stan as data. The evaluation here is designed
+ * for speed and robustness in the joint model association pipeline.
  *
- * @note All splines are defined on [x_min, x_max] and extrapolate linearly beyond.
+ * @note All splines are defined on [x_min, x_max] and extrapolate linearly
+ * beyond the boundary knots.
  */
 
   /**
    * @brief Evaluate I-spline (Integral of B-spline) basis at a single point.
    *
-   * I-splines are monotonically increasing by construction, suitable for
-   * transformations where monotonicity is desired.
-   *
+  * I-splines are monotonically increasing by construction, suitable for
+  * transformations where monotonicity is desired.
+  *
   * Pre-computed I-spline basis coefficients are expected from R; this function
   * evaluates a linear combination of basis functions (including penalized fits).
    *
@@ -35,7 +38,7 @@
     // Assuming knots[1] = x_min, knots[n_knots] = x_max
     // Boundary knots repeated `degree` times at each end
     
-    vector[n_basis + 2 * degree] knot_ext;
+    vector[n_basis + 2 * degree] knot_ext; // extended knot vector with repeats
     
     // Left boundary knots
     for (d in 1:degree) {
@@ -50,13 +53,13 @@
       knot_ext[degree + n_knots + d] = knots[n_knots];
     }
     
-    // Evaluate B-spline basis functions (recursive de Boor–Cox algorithm)
-    // For simplicity, approximate via piecewise-linear evaluation on precomputed knots
-    // (In production, use memoization or precomputed basis matrix from R)
+    // Evaluate B-spline basis functions (recursive de Boor-Cox algorithm)
+    // For simplicity, approximate via piecewise-linear evaluation on precomputed knots.
+    // In production, a full recursion or precomputed basis matrix can be used.
     
-    // Fallback: return linear interpolation for now
-    // (Full B-spline / I-spline evaluation requires more complex recursion)
-    int idx = 1;
+    // Fallback: linear interpolation for now.
+    // Full I-spline evaluation requires more complex recursion.
+    int idx = 1; // knot interval index
     int max_idx = (n_knots < n_basis) ? n_knots : n_basis;
     while (idx < n_knots && x >= knots[idx + 1]) {
       idx += 1;
@@ -79,7 +82,7 @@
       int idx_next = idx + 1;
       if (idx_next > n_knots) idx_next = n_knots;
       if (idx_next > n_basis) idx_next = n_basis;
-      real w = (x - knots[idx]) / (knots[idx_next] - knots[idx]);
+      real w = (x - knots[idx]) / (knots[idx_next] - knots[idx]); // linear weight
       return (1 - w) * coeff[idx] + w * coeff[idx_next];
     }
   }
@@ -105,7 +108,7 @@
   }
 
   /**
-   * @brief Piecewise-linear basis: simple linear interpolation between knots.
+  * @brief Piecewise-linear basis: simple linear interpolation between knots.
    *
    * Useful for user-specified arbitrary transformations defined by points.
    * Extrapolates linearly beyond knot range.
@@ -168,7 +171,7 @@
   }
 
   /**
-   * @brief Monotonic I-spline transformation wrapper.
+  * @brief Monotonic I-spline transformation wrapper.
    *
    * Applies an I-spline-based transformation with optional scaling.
    * The spline coefficients are pre-computed in R to ensure monotonicity

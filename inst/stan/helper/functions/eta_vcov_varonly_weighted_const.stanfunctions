@@ -1,19 +1,35 @@
 /**
- * @brief Compute variance-only weighted covariance association term from id-specific Cholesky factor.
- * @details Computes sum(weight_q * log(Sigma_qq)) where Sigma = L_i * L_i'.
- * @param K Number of nodes (e.g., Gauss-Kronrod nodes).
- * @param L_i Cholesky factor of the ID-specific covariance matrix (Q_idm x Q_idm).
- * @param a_vcov_var Weight vector for biomarker-specific variances (already includes flags and coefficients).
+ * @file eta_vcov_varonly_weighted_const.stanfunctions
+ * @brief Variance-only association feature from covariance matrix.
+ *
+ * @details Computes a weighted sum of log-variances from the subject-specific
+ * covariance matrix Sigma_i = L_i * L_i' where L_i is a lower-triangular
+ * Cholesky factor. The result is constant across time for a given subject.
+ *
+ * The computation is:
+ *   s = sum_q a_vcov_var[q] * log(Sigma_qq)
+ *   Sigma_qq = sum_{k=1}^q L_i[q, k]^2
+ *
+ * The output is a vector of length K with all entries equal to s, so it can be
+ * combined directly with other association features evaluated at K nodes.
+ *
+ * @param K Number of nodes (for example, 15 GK nodes).
+ * @param L_i Cholesky factor of the subject-specific covariance matrix (Q_idm x Q_idm).
+ * @param a_vcov_var Weight vector for variance association (already includes flags and coefficients).
  * @return Vector of length K containing the same constant value.
  */
 vector eta_vcov_varonly_weighted_const(int K, matrix L_i, vector a_vcov_var) {
   int Q = rows(L_i);
-  real s = 0;
+  real s = 0; // weighted log-variance sum
+
+  // Compute weighted sum of log-variances
   for (q in 1 : Q) {
     real var_q = 0;
-    for (k in 1 : q) 
+    for (k in 1 : q)
       var_q += square(L_i[q, k]);
     s += a_vcov_var[q] * log(var_q);
   }
+
+  // Replicate across nodes (constant in time)
   return rep_vector(s, K);
 }

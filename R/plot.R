@@ -10,7 +10,7 @@
 #'
 #' @param x An object of class `JoinMeDynPred` returned by the [predict] method.
 #' @param which Character vector indicating what to plot: "cumhaz" (default),
-#'   "longitudinal", "survival", or "both".
+#'   "longitudinal", or "survival". Multiple values are allowed.
 #' @param subject Integer/Character vector. Which subject(s) to plot. If NULL,
 #'   plots all subjects in separate panels or returns a list.
 #' @param trajectory_type Character. Which trajectory to show:
@@ -29,8 +29,12 @@
 #'   (shaded background) from prediction region (default TRUE).
 #' @param facet_by Character. "marker" to facet by marker type, "none" for single plot.
 #' @param facet_scales Character. "fixed" or "free_y" for longitudinal faceting.
-#' @param combined Logical. If TRUE and both outcomes requested, create a combined plot.
-#'   Otherwise return separate plots.
+#' @param combined Logical. If TRUE and multiple plot types are requested, combine
+#'   them into a single layout (patchwork/cowplot).
+#'   - For a single subject, returns one combined plot.
+#'   - For multiple subjects, returns a named list of combined plots (one per subject).
+#'   - If a combiner package is unavailable, falls back to the uncombined
+#'     subject/outcome structure for that subject.
 #' @param show_data Logical. Whether to overlay observed data points (default TRUE).
 #' @param show_observed_line Logical. Whether to connect observed points with lines
 #'   (default TRUE).
@@ -47,9 +51,9 @@
 #' **Longitudinal Plots:**
 #' - The longitudinal scale is inferred from the prediction object.
 #' - On \"predict\" scale: observed values are shown for times in interval
-#'   `[0, T_start]` and predictions are drawn for `[T_start, T_horiz]`.
-#' - On \"linpred\" or \"epred\" scale: predictions are shown for `[0, T_horiz]`,
-#'   with fitted values providing the pre-T_start segment when available.
+#'   `[0, time_start]` and predictions are drawn for `[time_start, time_horizon]`.
+#' - On \"linpred\" or \"epred\" scale: predictions are shown for `[0, time_horizon]`,
+#'   with fitted values providing the pre-time_start segment when available.
 #' - Optional shaded region distinguishing observed from prediction periods.
 #' - Predicted trajectories with credible bands.
 #' - Multiple CI levels with decreasing alpha for visual hierarchy.
@@ -63,14 +67,21 @@
 #'
 #' @return
 #' If a single subject and outcome requested: a `ggplot` object.
-#' If multiple subjects: a list of plots or a combined faceted plot.
-#' If both outcomes: list with "longitudinal", "survival", and "cumhaz" elements,
+#' If multiple subjects and `combined = TRUE`: a named list where each element is
+#'   a per-subject combined plot (patchwork/cowplot) when backend support exists,
+#'   otherwise the corresponding uncombined per-subject list.
+#' If multiple subjects and `combined = FALSE`: a named list grouped by subject,
+#'   each containing requested outcome plots.
+#' If multiple outcomes: list with "longitudinal", "survival", and/or "cumhaz" elements,
 #'   or a single combined plot if `combined = TRUE`.
 #'
 #' @export
+# File overview:
+# - Build longitudinal and survival/cumhaz plots from prediction summaries.
+# - Support per-subject panels and combined outputs.
 plot.JoinMeDynPred <- function(
     x,
-    which = c("cumhaz", "longitudinal", "survival", "both"),
+    which = c("cumhaz", "longitudinal", "survival"),
     subject = NULL,
     trajectory_type = c("id_marker", "marker_pop", "overall_pop", "all_types"),
     smooth_trajectory = TRUE,
@@ -105,28 +116,19 @@ plot.JoinMeDynPred <- function(
         ev_cols <- names(x$data$event)
         is_competing <- any(c("event_type", "stage_from", "stage_to") %in% ev_cols)
     }
-    if (missing(which) && isTRUE(is_competing)) {
-        which <- "cumhaz"
+    if (missing(which)) {
+        which <- if (isTRUE(is_competing)) "cumhaz" else c("longitudinal", "survival")
     }
-    which <- match.arg(which)
+    which <- .validate_plot_which(which)
     trajectory_type <- match.arg(trajectory_type)
     smooth_method <- match.arg(smooth_method)
     facet_by <- match.arg(facet_by)
     ci_type <- match.arg(ci_type)
 
-    if (!requireNamespace("ggplot2", quietly = TRUE)) {
-        stop("Package 'ggplot2' is required for plotting.")
-    }
-
     ci_levels <- .validate_ci_levels_plot(ci_levels, x$metadata$ci_levels %||% NULL)
 
-    # Check for required data
-    if (is.null(x$quantiles)) {
-        stop("This version of plot() requires enhanced prediction output with quantiles.\n",
-             "Please update your predict() output or re-run prediction.")
-    }
-
     # Identify subjects
+    # - allow explicit subject list or infer from prediction summaries
     ids <- if (!is.null(subject)) subject else {
         unique(c(
             x$quantiles$longitudinal$id %||% x$predictions$longitudinal$id,
@@ -146,6 +148,7 @@ plot.JoinMeDynPred <- function(
     plots_list <- list()
     
     # Determine trajectory sources based on type
+    # - multiple trajectories when trajectory_type == "all_types"
     trajectory_sources <- if (trajectory_type == "all_types") {
         c("id_marker", "marker_pop", "overall_pop")
     } else {
@@ -158,7 +161,7 @@ plot.JoinMeDynPred <- function(
         # =====================================================================
         # LONGITUDINAL PLOT
         # =====================================================================
-        if (which %in% c("both", "longitudinal")) {
+        if ("longitudinal" %in% which) {
             for (traj_src in trajectory_sources) {
                 p_long <- .plot_longitudinal_single(
                     x, id, traj_src,
@@ -180,7 +183,7 @@ plot.JoinMeDynPred <- function(
         # =====================================================================
         # SURVIVAL PLOT
         # =====================================================================
-        if (which %in% c("both", "survival")) {
+        if ("survival" %in% which) {
             p_surv <- .plot_survival_single(
                 x, id,
                 ci_levels, ci_type,
@@ -192,7 +195,7 @@ plot.JoinMeDynPred <- function(
         # =====================================================================
         # CUMHAZ PLOT
         # =====================================================================
-        if (which %in% c("both", "cumhaz")) {
+        if ("cumhaz" %in% which) {
             p_cumhaz <- .plot_cumhaz_single(
                 x, id,
                 ci_levels, ci_type,
@@ -207,42 +210,52 @@ plot.JoinMeDynPred <- function(
     # =========================================================================
     # RETURN
     # =========================================================================
-    if (length(plots_list) == 1) {
-        # Single subject
-        res <- plots_list[[1]]
-        if (length(res) == 1) {
-            return(res[[1]])
-        } else if (isTRUE(combined) && !is.null(res$longitudinal) && !is.null(res$survival)) {
-            # Combine longitudinal and survival (cumhaz returned separately if present)
-            combined_plot <- .combine_long_surv_plots(res$longitudinal, res$survival)
-            if (!is.null(res$cumhaz)) {
-                return(list(combined = combined_plot, cumhaz = res$cumhaz))
+        if (length(plots_list) == 1) {
+            # Single subject
+            res <- plots_list[[1]]
+            if (length(res) == 1) {
+                return(res[[1]])
             }
-            return(combined_plot)
-        } else {
+            if (isTRUE(combined)) {
+                combined_plot <- .combine_plot_grid(res, ncol = length(which))
+                if (inherits(combined_plot, "gg")) return(combined_plot)
+            }
             return(res)
         }
-    } else {
+
         # Multiple subjects
-        if (isTRUE(combined) && which == "both") {
-            # Create a grid with all subjects
-            all_p_long <- lapply(plots_list, function(x) x$longitudinal)
-            all_p_surv <- lapply(plots_list, function(x) x$survival)
-            all_p_cumhaz <- lapply(plots_list, function(x) x$cumhaz)
-            return(list(
-                longitudinal = all_p_long,
-                survival = all_p_surv,
-                cumhaz = all_p_cumhaz
-            ))
-        } else if (which == "longitudinal") {
+        if (isTRUE(combined)) {
+            # Combine requested outcomes within each subject.
+            # Output contract for multiple subjects:
+            # - preferred: list(id -> combined plot object)
+            # - fallback: list(id -> uncombined per-subject plot list)
+            out <- lapply(plots_list, function(sub_plots) {
+                design <- switch(
+                    length(which),
+                    "1" = 'A',
+                    "2" = "AB",
+                    "3" = "AB\nAC"
+                )
+                .combine_plot_grid(
+                    sub_plots,
+                    ncol = min(2, length(which)),
+                    nrow = min(1, length(which) - 1),
+                    design = design,
+                    fallback = "input"
+                )
+            })
+            return(out)
+        }
+        if (length(which) == 1 && which == "longitudinal") {
             return(lapply(plots_list, function(x) x$longitudinal))
-        } else if (which == "survival") {
+        }
+        if (length(which) == 1 && which == "survival") {
             return(lapply(plots_list, function(x) x$survival))
-        } else if (which == "cumhaz") {
+        }
+        if (length(which) == 1 && which == "cumhaz") {
             return(lapply(plots_list, function(x) x$cumhaz))
         }
-        return(plots_list)
-    }
+        plots_list
 }
 
 # ============================================================================
@@ -259,6 +272,7 @@ plot.JoinMeDynPred <- function(
 ) {
 
     # Extract quantile data based on trajectory type
+    # - population vs subject-specific paths
     if (trajectory_type == "marker_pop") {
         quant_df <- x$quantiles$longitudinal_marker_pop
         if (is.null(quant_df) || nrow(quant_df) == 0) {
@@ -356,22 +370,26 @@ plot.JoinMeDynPred <- function(
             # Otherwise take the first non-key column
             resp_var <- resp_candidates[1]
         } else {
-            stop("Cannot determine response variable name from prediction object. ",
-                 "Please ensure the prediction object was created with an updated version of predict().")
+            cli::cli_abort(c(
+                x = "Cannot determine response variable name for longitudinal data.",
+                i = "Ensure the prediction object includes metadata$response_var or a valid formulaLong with a response, or that the data contains a recognizable response column."
+            ))
         }
     }
 
     # Conditioning time
-    t_cond <- x$metadata$conditioning_time
+    # - separates observed history from prediction horizon
+    t_cond <- .conditioning_time_for_id(x, id)
 
     # Initialize plot data
     df_pred <- quant_df |>
         dplyr::mutate(
             type = "prediction",
+            segment = "predict",
             marker = as.character(.data$marker)
         )
 
-    # Prepare observed or fitted data for the left-of-Tstart region
+    # Prepare observed or fitted data for the left-of-time_start region
     df_obs <- NULL
     use_fitted <- scale_long %in% c("linpred", "epred")
 
@@ -426,13 +444,16 @@ plot.JoinMeDynPred <- function(
         df_pred <- df_pred[df_pred$time >= t_cond & df_pred$time <= t_horiz, , drop = FALSE]
         if (!is.null(df_obs)) df_obs <- df_obs[df_obs$time <= t_cond, , drop = FALSE]
     } else {
-        df_pred_future <- df_pred[df_pred$time <= t_horiz, , drop = FALSE]
+        df_pred_future <- df_pred[df_pred$time >= t_cond & df_pred$time <= t_horiz, , drop = FALSE]
+        df_pred_future$segment <- "predict"
         df_pred_hist <- NULL
         fit_quant <- x$quantiles$longitudinal_fitted
         if (!is.null(fit_quant)) {
             fit_quant <- fit_quant[fit_quant$id == id & fit_quant$scale == scale_long, , drop = FALSE]
             if (nrow(fit_quant) > 0) {
                 df_pred_hist <- fit_quant
+                df_pred_hist$segment <- "fitted"
+                df_pred_hist <- df_pred_hist[df_pred_hist$time <= t_cond, , drop = FALSE]
             }
         }
         df_pred <- if (!is.null(df_pred_hist)) {
@@ -617,6 +638,7 @@ plot.JoinMeDynPred <- function(
     }
 
     quant_df <- quant_df[quant_df$id == id, , drop = FALSE]
+    quant_df <- .ensure_plot_quantiles(quant_df, x$draws$survival[[as.character(id)]], id, ci_levels)
     if (nrow(quant_df) == 0) {
         cli::cli_warn(c(
             x = "No survival data found for subject {id}.",
@@ -640,12 +662,11 @@ plot.JoinMeDynPred <- function(
             p_names <- .quantile_names_from_ci(level)
 
             if (all(p_names %in% names(quant_df))) {
-                # Use aes_string for safe dynamic column references in loops
                 p <- p + ggplot2::geom_ribbon(
-                    ggplot2::aes_string(
-                        x = "time",
-                        ymin = p_names[1],
-                        ymax = p_names[2]
+                    ggplot2::aes(
+                        x = .data$time,
+                        ymin = .data[[p_names[1]]],
+                        ymax = .data[[p_names[2]]]
                     ),
                     fill = prediction_style$fill %||% "steelblue",
                     alpha = alpha_level,
@@ -668,7 +689,7 @@ plot.JoinMeDynPred <- function(
             for (qcol in q_cols) {
                 if (qcol %in% names(quant_df)) {
                     p <- p + ggplot2::geom_line(
-                        ggplot2::aes_string(x = "time", y = qcol),
+                        ggplot2::aes(x = .data$time, y = .data[[qcol]]),
                         color = prediction_style$color %||% "steelblue",
                         linetype = "dashed",
                         alpha = 0.5,
@@ -711,6 +732,7 @@ plot.JoinMeDynPred <- function(
     }
 
     quant_df <- quant_df[quant_df$id == id, , drop = FALSE]
+    quant_df <- .ensure_plot_quantiles(quant_df, x$draws$cumhaz[[as.character(id)]], id, ci_levels)
     if (nrow(quant_df) == 0) {
         cli::cli_warn(c(
             x = "No cumulative hazard data found for subject {id}.",
@@ -732,10 +754,10 @@ plot.JoinMeDynPred <- function(
             p_names <- .quantile_names_from_ci(level)
             if (all(p_names %in% names(quant_df))) {
                 p <- p + ggplot2::geom_ribbon(
-                    ggplot2::aes_string(
-                        x = "time",
-                        ymin = p_names[1],
-                        ymax = p_names[2]
+                    ggplot2::aes(
+                        x = .data$time,
+                        ymin = .data[[p_names[1]]],
+                        ymax = .data[[p_names[2]]]
                     ),
                     fill = prediction_style$fill %||% "steelblue",
                     alpha = alpha_level,
@@ -756,7 +778,7 @@ plot.JoinMeDynPred <- function(
             for (qcol in q_cols) {
                 if (qcol %in% names(quant_df)) {
                     p <- p + ggplot2::geom_line(
-                        ggplot2::aes_string(x = "time", y = qcol),
+                        ggplot2::aes(x = .data$time, y = .data[[qcol]]),
                         color = prediction_style$color %||% "steelblue",
                         linetype = "dashed",
                         alpha = 0.5,
@@ -774,6 +796,120 @@ plot.JoinMeDynPred <- function(
     ) + theme_fn()
 
     p
+}
+
+# ============================================================================
+# Helper: resolve conditioning time per subject
+# ============================================================================
+.conditioning_time_for_id <- function(x, id) {
+    tmap <- x$metadata$conditioning_time_by_id
+    if (!is.null(tmap) && as.character(id) %in% names(tmap)) {
+        return(as.numeric(tmap[[as.character(id)]]))
+    }
+    x$metadata$conditioning_time
+}
+
+# ============================================================================
+# Helper: validate plot selection
+# ============================================================================
+.validate_plot_which <- function(which) {
+    allowed <- c("cumhaz", "longitudinal", "survival")
+    which <- unique(which)
+    bad <- setdiff(which, allowed)
+    if (length(bad) > 0) {
+        cli::cli_abort(c(
+            x = "Unknown plot type(s): {paste(bad, collapse = ', ')}.",
+            i = "Use one or more of: {paste(allowed, collapse = ', ')}."
+        ))
+    }
+    which
+}
+
+# ============================================================================
+# Helper: ensure quantiles include requested CI levels
+# ============================================================================
+.ensure_plot_quantiles <- function(quant_df, draw_entry, id, ci_levels) {
+    probs <- .quantile_probs_from_ci_plot(ci_levels)
+    q_names <- .quantile_colnames(probs)
+    missing_cols <- setdiff(q_names, names(quant_df))
+    if (length(missing_cols) == 0) return(quant_df)
+
+    if (is.null(draw_entry) || is.null(draw_entry$matrix)) {
+        return(quant_df)
+    }
+    qdf <- .compute_quantiles_surv(draw_entry$matrix, draw_entry$time, id, probs = probs)
+    if (is.null(quant_df) || nrow(quant_df) == 0) return(qdf)
+
+    qdf <- qdf[, c("time", q_names), drop = FALSE]
+    merged <- merge(quant_df, qdf, by = "time", all.x = TRUE, sort = FALSE)
+    merged
+}
+
+.quantile_probs_from_ci_plot <- function(ci_levels) {
+    bounds <- unlist(lapply(ci_levels, function(level) c((1 - level) / 2, (1 + level) / 2)))
+    sort(unique(c(0.5, bounds)))
+}
+
+# ============================================================================
+# Helper: combine plots using patchwork/cowplot
+# ============================================================================
+.combine_plot_grid <- function(plots, ncol = NULL, nrow = NULL, ..., fallback = c("flat", "input")) {
+    fallback <- match.arg(fallback)
+    plot_list <- .flatten_plot_list(plots)
+    if (length(plot_list) == 0) return(NULL)
+
+    if (requireNamespace("patchwork", quietly = TRUE)) {
+        return(patchwork::wrap_plots(plot_list, ncol = ncol, nrow = nrow, ...))
+    }
+    # if (requireNamespace("cowplot", quietly = TRUE)) {
+    #     return(cowplot::plot_grid(plotlist = plot_list, ncol = ncol %||% length(plot_list)))
+    # }
+    # cli::cli_warn(c(
+    #     x = "Neither {.pkg patchwork} nor {.pkg cowplot} is available for combined plots.",
+    #     i = "Returning uncombined plots instead."
+    # ))
+    cli::cli_warn(c(
+        x = "{.pkg patchwork} is not installed for combined plots.",
+        i = "Returning uncombined plots instead."
+    ))
+    if (identical(fallback, "input")) plots else plot_list
+}
+
+.collect_plots_by_subject <- function(plots_list, which) {
+    out <- list()
+    for (id in names(plots_list)) {
+        sub_plots <- plots_list[[id]]
+        for (typ in which) {
+            if (typ == "longitudinal") {
+                long_keys <- names(sub_plots)[grepl("^longitudinal", names(sub_plots))]
+                if (length(long_keys) == 0 && !is.null(sub_plots$longitudinal)) {
+                    long_keys <- "longitudinal"
+                }
+                for (k in long_keys) {
+                    out[[paste(id, k, sep = "_")]] <- sub_plots[[k]]
+                }
+            } else if (!is.null(sub_plots[[typ]])) {
+                out[[paste(id, typ, sep = "_")]] <- sub_plots[[typ]]
+            }
+        }
+    }
+    out
+}
+
+.flatten_plot_list <- function(plots) {
+    if (length(plots) == 0) return(list())
+    if (all(vapply(plots, function(p) inherits(p, "gg"), logical(1)))) return(plots)
+    out <- list()
+    for (nm in names(plots)) {
+        p <- plots[[nm]]
+        if (inherits(p, "gg")) {
+            out[[nm]] <- p
+        } else if (is.list(p)) {
+            inner <- .flatten_plot_list(p)
+            for (k in names(inner)) out[[paste(nm, k, sep = "_")]] <- inner[[k]]
+        }
+    }
+    out
 }
 
 # ============================================================================
@@ -817,6 +953,7 @@ plot.JoinMeDynPred <- function(
 .quantile_name_from_prob <- function(prob) {
     pct <- 100 * prob
     lbl <- formatC(pct, format = "fg", digits = 6)
+    lbl <- gsub("\\s+", "", lbl)
     lbl <- sub("\\.?0+$", "", lbl)
     paste0("q", lbl)
 }
@@ -828,7 +965,7 @@ plot.JoinMeDynPred <- function(
 .latex_label_long <- function(resp_var, scale_label) {
     base_label <- paste0(resp_var, " (", scale_label, ")")
     if (!is.na(resp_var) && requireNamespace("latex2exp", quietly = TRUE)) {
-        latex2exp::TeX(paste0("$", resp_var, "$\\,(\\mathrm{", scale_label, "})"))
+        latex2exp::TeX(paste0("$", resp_var, "$\\,(", scale_label, ")"))
     } else {
         base_label
     }
@@ -840,6 +977,146 @@ plot.JoinMeDynPred <- function(
     } else {
         "S(t | T_cond)"
     }
+}
+
+# ============================================================================
+# Diagnostic plots for JoinMeFit
+# ============================================================================
+
+#' Diagnostic plots for JoinMe model fits
+#'
+#' @param x A fitted object of class `JoinMeFit`.
+#' @param type Diagnostic plot type.
+#' @param pars Optional character vector of parameter names to include.
+#' @param regex_pars Optional regular expression for parameter selection.
+#' @param draws Optional number of posterior draws to subset.
+#' @param seed Random seed for draw subsetting.
+#' @param max_vars Maximum number of parameters for running diagnostics.
+#' @param quantile_probs Numeric vector of quantile probabilities for running quantile plots.
+#' @param ... Unused.
+#'
+#' @return A `ggplot` object.
+#' @export
+plot.JoinMeFit <- function(x, type = c("rhat", "ess_bulk", "ess_tail", "mcse_mean", "mcse_sd", "running_mean", "running_quantile"),
+                           pars = NULL, regex_pars = NULL, draws = NULL, seed = 1, max_vars = 4,
+                           quantile_probs = c(0.1, 0.5, 0.9), ...) {
+    if (!inherits(x, "JoinMeFit")) {
+        cli::cli_abort("{.arg x} must be a JoinMeFit object.")
+    }
+    if (!requireNamespace("ggplot2", quietly = TRUE)) {
+        cli::cli_abort("Package {.pkg ggplot2} is required for plotting.")
+    }
+    type <- match.arg(type)
+
+    if (type %in% c("rhat", "ess_bulk", "ess_tail", "mcse_mean", "mcse_sd")) {
+        df <- switch(type,
+            rhat = stan_rhat(x, pars = pars, regex_pars = regex_pars, draws = draws, seed = seed),
+            ess_bulk = stan_ess(x, pars = pars, regex_pars = regex_pars, draws = draws, seed = seed, type = "bulk"),
+            ess_tail = stan_ess(x, pars = pars, regex_pars = regex_pars, draws = draws, seed = seed, type = "tail"),
+            mcse_mean = stan_mcse(x, pars = pars, regex_pars = regex_pars, draws = draws, seed = seed, type = "mean"),
+            mcse_sd = stan_mcse(x, pars = pars, regex_pars = regex_pars, draws = draws, seed = seed, type = "sd")
+        )
+        if (nrow(df) == 0) {
+            cli::cli_abort("No parameters found for diagnostic plotting.")
+        }
+        metric_name <- setdiff(names(df), "variable")
+        names(df)[names(df) == metric_name] <- "metric"
+        p <- ggplot2::ggplot(df, ggplot2::aes(x = stats::reorder(variable, metric), y = metric)) +
+            ggplot2::geom_point(size = 1.6, alpha = 0.7, color = "steelblue") +
+            ggplot2::coord_flip() +
+            ggplot2::labs(x = NULL, y = type, title = paste("JoinMe diagnostics:", type)) +
+            ggplot2::theme_minimal()
+        if (type == "rhat") {
+            p <- p + ggplot2::geom_hline(yintercept = 1.01, linetype = "dashed", color = "firebrick")
+        }
+        return(p)
+    }
+
+    vars <- posterior::variables(.get_draws_obj(x$fit))
+    vars <- .filter_diag_vars(vars, pars, regex_pars)
+    if (length(vars) == 0) {
+        cli::cli_abort("No parameters found for running diagnostics.")
+    }
+    if (length(vars) > max_vars) {
+        vars <- vars[seq_len(max_vars)]
+        cli::cli_warn("Limiting running diagnostics to the first {max_vars} parameters.")
+    }
+
+    draws_obj <- .get_draws_obj(x$fit, variables = vars, draws = draws, seed = seed)
+    arr <- posterior::as_draws_array(draws_obj)
+    if (type == "running_mean") {
+        df <- .running_mean_df(arr)
+        p <- ggplot2::ggplot(df, ggplot2::aes(x = iteration, y = value, color = factor(chain))) +
+            ggplot2::geom_line(alpha = 0.7) +
+            ggplot2::facet_wrap(~ variable, scales = "free_y") +
+            ggplot2::labs(x = "Iteration", y = "Running mean", color = "Chain", title = "Running mean by chain") +
+            ggplot2::theme_minimal()
+        return(p)
+    }
+
+    df <- .running_quantile_df(arr, probs = quantile_probs)
+    p <- ggplot2::ggplot(df, ggplot2::aes(x = iteration, y = value, color = factor(chain))) +
+        ggplot2::geom_line(alpha = 0.7) +
+        ggplot2::facet_grid(variable ~ stat, scales = "free_y") +
+        ggplot2::labs(x = "Iteration", y = "Running quantile", color = "Chain", title = "Running quantiles by chain") +
+        ggplot2::theme_minimal()
+    p
+}
+
+.running_mean_df <- function(arr) {
+    dims <- dim(arr)
+    n_iter <- dims[1]
+    n_chain <- dims[2]
+    n_var <- dims[3]
+    var_names <- dimnames(arr)[[3]]
+    out <- vector("list", n_var * n_chain)
+    idx <- 1
+    for (v in seq_len(n_var)) {
+        for (ch in seq_len(n_chain)) {
+            vec <- arr[, ch, v]
+            run_mean <- cumsum(vec) / seq_along(vec)
+            out[[idx]] <- data.frame(
+                iteration = seq_len(n_iter),
+                chain = ch,
+                variable = var_names[[v]],
+                value = run_mean,
+                stringsAsFactors = FALSE
+            )
+            idx <- idx + 1
+        }
+    }
+    do.call(rbind, out)
+}
+
+.running_quantile_df <- function(arr, probs = c(0.1, 0.5, 0.9)) {
+    dims <- dim(arr)
+    n_iter <- dims[1]
+    n_chain <- dims[2]
+    n_var <- dims[3]
+    var_names <- dimnames(arr)[[3]]
+    stat_names <- vapply(probs, .quantile_name_from_prob, character(1))
+
+    out <- vector("list", n_var * n_chain)
+    idx <- 1
+    for (v in seq_len(n_var)) {
+        for (ch in seq_len(n_chain)) {
+            vec <- arr[, ch, v]
+            qmat <- vapply(seq_len(n_iter), function(i) {
+                stats::quantile(vec[seq_len(i)], probs = probs, names = FALSE)
+            }, numeric(length(probs)))
+            df <- data.frame(
+                iteration = rep(seq_len(n_iter), each = length(probs)),
+                chain = ch,
+                variable = var_names[[v]],
+                stat = rep(stat_names, times = n_iter),
+                value = as.vector(qmat),
+                stringsAsFactors = FALSE
+            )
+            out[[idx]] <- df
+            idx <- idx + 1
+        }
+    }
+    do.call(rbind, out)
 }
 
 # ============================================================================

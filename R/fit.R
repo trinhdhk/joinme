@@ -24,11 +24,12 @@
 #'
 #' Marker weights (see `joinme_standata()`) are used to form marker-average summaries
 #' for both current value (CV) and current slope (CS) association components. When
-#' `estimate_marker_weights = TRUE`, the weights are shrunk via Normal or Laplace
-#' perturbations depending on the `shrinkage` setting.
+#' `estimate_marker_weights = TRUE`, signed perturbations are estimated around base
+#' weights with Normal or Laplace shrinkage (depending on `shrinkage`) and then
+#' RMS-stabilized to keep global scale identifiable.
 #'
 #' Association coefficients are denoted with the `alpha_` prefix to match joint-model
-#' conventions and to avoid confusion with the linear predictor $\eta$ used throughout
+#' conventions and to avoid confusion with the linear predictor eta used throughout
 #' the longitudinal and survival submodels.
 #'
 #' The typical workflow is:
@@ -44,7 +45,8 @@
 #'      vcov = list(type = "pwlin", x = c(-2, 0, 2), y = c(0.2, 1, 0.2)))`
 #'
 #' Additional arguments are forwarded to `joinme_standata()` (e.g., `assoc`,
-#' `basehaz`, `basehaz_degree`, `n_knots`, `time_var`, `shrinkage`, and `indep_*`).
+#' `basehaz`, `basehaz_degree`, `n_knots`, `time_var`, and `shrinkage`). Use
+#' lme4-style `||` in `formulaLong` to request diagonal random-effect covariance.
 #'
 #' @param formulaLong Longitudinal formula defining fixed effects, id-level effects,
 #'   and the marker block. The marker block may optionally include an inner
@@ -72,6 +74,8 @@
 #'     For engine = "rstan", threading uses options(stan.thread = threads_per_chain).
 #'   - grainsize: integer; reduce_sum grainsize for threading (default max(1, min(n_cores, ceiling(n_id/(4*threads_per_chain*chains))))).
 #'   - force_recompile: logical; recompile the Stan model if needed.
+#'   - vcov_diag_link: "softplus" or "exp" for covariance regression diagonals.
+#'   - tau_sde_fixed: optional fixed tau in (0,1) for skew-double-exponential.
 #' @param draws Optional number of posterior draws used for summaries (not sampling).
 #' @param families Marker-specific family specification (optional). Can be a vector
 #'   of family names aligned to marker order.
@@ -82,6 +86,10 @@
 #' @param ... Additional args passed to joinme_standata().
 #'
 #' @export
+# File overview:
+# - Validate inputs and build Stan data.
+# - Resolve threading/engine settings and select the Stan program.
+# - Fit with cmdstanr/rstan and wrap results in a JoinMeFit object.
 joinme <- function(
   formulaLong,
   dataLong,
@@ -116,6 +124,10 @@ joinme <- function(
     ))
   }
 
+  # Workflow: build standata -> resolve threading -> choose engine -> fit -> wrap
+  # - sd: prepared Stan data list with all dimensions and transforms
+  vcov_diag_link <- control$vcov_diag_link %||% "softplus"
+  tau_sde_fixed <- control$tau_sde_fixed %||% NULL
   sd <- joinme_standata(
     formulaLong = formulaLong,
     dataLong = dataLong,
@@ -128,9 +140,12 @@ joinme <- function(
     beta_prior = priors$beta,
     alpha_prior = priors$alpha,
     lkj_prior = priors$lkj,
+    vcov_diag_link = vcov_diag_link,
+    tau_sde_fixed = tau_sde_fixed,
     ...
   )
 
+  # Threading: honor explicit control overrides, fall back to mc.cores or 1
   threads_per_chain <- control$threads_per_chain %||% control$threads %||% control$mc.cores %||% 1L
   if (!is.numeric(threads_per_chain) || length(threads_per_chain) != 1) {
     cli::cli_abort(c(
@@ -145,6 +160,7 @@ joinme <- function(
       i = "Use 1 to disable threading."
     ))
   }
+  # Core cap: never exceed available physical cores or subject count
   n_cores <- parallel::detectCores(logical = FALSE) %||% 1L
   max_threads <- min(sd$n_id %||% 1L, n_cores)
   if (threads_per_chain > max_threads) {
@@ -155,6 +171,7 @@ joinme <- function(
     threads_per_chain <- max_threads
   }
 
+  # reduce_sum grainsize: default depends on id count, chains, and threads
   grainsize <- control$grainsize
   if (is.null(grainsize)) {
     n_id <- sd$n_id %||% 1L
@@ -178,28 +195,10 @@ joinme <- function(
     ))
   }
 
-  stan_candidates <- if (threads_per_chain > 1) {
-    c(
-      system.file("stan/joinme_fit_threading.stan", package = "joinme"),
-      file.path("inst", "stan", "joinme_fit_threading.stan"),
-      file.path("..", "inst", "stan", "joinme_fit_threading.stan"),
-      file.path("..", "..", "inst", "stan", "joinme_fit_threading.stan")
-    )
-  } else {
-    c(
-      system.file("stan/joinme_fit.stan", package = "joinme"),
-      file.path("inst", "stan", "joinme_fit.stan"),
-      file.path("..", "inst", "stan", "joinme_fit.stan"),
-      file.path("..", "..", "inst", "stan", "joinme_fit.stan")
-    )
-  }
-  stan_file <- stan_candidates[file.exists(stan_candidates)][1]
-  if (is.na(stan_file) || !nzchar(stan_file)) {
-    cli::cli_abort(c(
-      x = "Stan model file not found.",
-      i = "Reinstall the package or restore inst/stan files."
-    ))
-  }
+  stan_file <- .get_stan_file(
+    program = "joinme_fit",
+    threaded = threads_per_chain > 1
+  )
   use_threading <- threads_per_chain > 1
 
   engine <- .resolve_stan_engine(control$engine)
@@ -291,6 +290,7 @@ joinme <- function(
   }
 
   defaults <- list(
+    chains = 4,
     parallel_chains = 4,
     iter_warmup = 1000,
     iter_sampling = 1000,
@@ -328,7 +328,7 @@ joinme <- function(
     rstan_args <- list(
       object = mod,
       data = sd_stan,
-      chains = args$chains %||% 1,
+      chains = args$chains %||% 4,
       iter = iter_total,
       warmup = iter_warmup,
       seed = args$seed %||% defaults$seed,
@@ -359,6 +359,7 @@ joinme <- function(
       tf_mode_cs_marker = sd$tf_mode_cs_marker,
       tf_mode_vcov = sd$tf_mode_vcov
     ),
+    transforms_spec = transforms,
     dist = list(
       dist_cols = sd$dist_cols,
       dist_re_terms = sd$dist_re_terms,
@@ -386,7 +387,10 @@ joinme <- function(
     basehaz = sd$basehaz,
     n_knots = sd$n_knots,
     basehaz_degree = sd$basehaz_degree,
-    K_event = sd$K_event
+    K_event = sd$K_event,
+    vcov_diag_link = sd$vcov_diag_link,
+    use_tau_sde_fixed = sd$use_tau_sde_fixed,
+    tau_sde_fixed = sd$tau_sde_fixed
   )
   cfg$engine <- engine
 
@@ -398,6 +402,8 @@ joinme <- function(
     formulaVcov = formulaVcov,
     config = cfg,
     call = match.call(),
-    tmax = sd$tmax
+    tmax = sd$tmax,
+    dataLong = dataLong,
+    dataEvent = dataEvent
   )
 }

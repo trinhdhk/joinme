@@ -19,7 +19,9 @@
 ##' Use `build_standata_transforms()` to construct the data list entries,
 ##' and `validate_transforms()` to verify consistency before sampling.
 ##'
-##' @export
+# File overview:
+# - Map user transform specs into Stan-friendly bytecode/spline data.
+# - Validate functional bytecode and spline shapes before sampling.
 build_standata_transforms <- function(
   transform_list = NULL,
   default_mode = 0  # 0 = identity
@@ -42,6 +44,7 @@ build_standata_transforms <- function(
   ##'   - functional_ops_* and const_data_* (if mode 1)
   ##'   - knots_* and coeff_* and spline_degree_* (if mode 2 or 3)
   
+  # Output list to be merged into the main standata object
   standata <- list()
   
   term_defaults <- list(
@@ -54,7 +57,7 @@ build_standata_transforms <- function(
     vcov = list(mode_suffix = "vcov", short_suffix = "vcov")
   )
   
-  # Default empty specs for all three terms
+  # Default empty specs for all terms (identity transformation)
   for (term in names(term_defaults)) {
     mode_suffix <- term_defaults[[term]]$mode_suffix
     short_suffix <- term_defaults[[term]]$short_suffix
@@ -71,6 +74,7 @@ build_standata_transforms <- function(
   }
   
   # Override with user specifications
+  # - each term may supply a different mode and parameter payload
   if (!is.null(transform_list)) {
     for (term_name in names(transform_list)) {
       spec <- transform_list[[term_name]]
@@ -82,9 +86,10 @@ build_standata_transforms <- function(
         standata[[paste0("tf_mode_", mode_suffix)]] <- 0
       } else if (spec$type == "functional") {
         bc <- parse_transform_expr(spec$expr)
+        ops <- bc$bytecode %||% bc$opcodes
         standata[[paste0("tf_mode_", mode_suffix)]] <- 1
-        standata[[paste0("n_functional_ops_", short_suffix)]] <- bc$n_ops
-        standata[[paste0("functional_ops_", short_suffix)]] <- bc$opcodes
+        standata[[paste0("n_functional_ops_", short_suffix)]] <- length(ops)
+        standata[[paste0("functional_ops_", short_suffix)]] <- ops
         standata[[paste0("n_const_", short_suffix)]] <- bc$n_const
         standata[[paste0("const_data_", short_suffix)]] <- bc$const_data
       } else if (spec$type %in% c("ispline", "ispline_penalized", "pmonospline", "pmono")) {
@@ -136,7 +141,7 @@ build_standata_transforms <- function(
 
 ##' Validate Transformation Specifications
 ##'
-##' Check functional opcode integrity and spline coefficient shapes before sampling.
+##' Check functional bytecode integrity and spline coefficient shapes before sampling.
 ##'
 ##' @param standata Prepared standata list with transformation entries
 ##' @return TRUE if valid; stops with error message if invalid
@@ -158,7 +163,7 @@ validate_transforms <- function(standata) {
     mode <- standata[[paste0("tf_mode_", mode_suffix)]]
     
     if (mode == 1) {
-      # Functional opcode validation
+      # Functional bytecode validation
       functional_ops <- standata[[paste0("functional_ops_", short_suffix)]]
       const_data <- standata[[paste0("const_data_", short_suffix)]]
       verify_opcodes(functional_ops, const_data)
@@ -204,7 +209,7 @@ validate_transforms <- function(standata) {
 ##' @export
 ##'
 ##' @examples
-##' # Example 1: Functional transformation (opcode-backed)
+##' # Example 1: Functional transformation (bytecode-backed)
 ##' spec_cv <- list(
 ##'   type = "functional",
 ##'   expr = ~ (log(sqrt(x + 1/inv_logit(3*x - 3))))^2
@@ -291,6 +296,7 @@ penalized_ispline_transform <- function(
 
 ##' @keywords internal
 .fit_penalized_ispline_spec <- function(spec) {
+  # Validate and coerce input pairs for monotone spline fitting
   if (is.null(spec$x) || is.null(spec$y)) {
     cli::cli_abort(c(
       x = "Penalized I-spline requires {.arg x} and {.arg y}.",
@@ -320,6 +326,7 @@ penalized_ispline_transform <- function(
     ))
   }
 
+  # Resolve knot locations (explicit or quantile-based)
   if (is.null(spec$knots)) {
     n_knots <- as.integer(spec$n_knots %||% 6L)
     if (n_knots < 2) {
@@ -343,6 +350,7 @@ penalized_ispline_transform <- function(
   internal_knots <- if (length(knots) > 2) knots[2:(length(knots) - 1)] else numeric(0)
   boundary_knots <- c(knots[1], knots[length(knots)])
 
+  # splines2 provides the iSpline basis used for penalized fitting
   if (!requireNamespace("splines2", quietly = TRUE)) {
     cli::cli_abort(c(
       x = "Package {.pkg splines2} is required for penalized I-splines.",

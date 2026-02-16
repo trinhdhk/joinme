@@ -1,0 +1,651 @@
+/**
+ * @file joinme_dynpred_partial.stanfunctions
+ * @brief Per-draw log-likelihood slice for dynamic prediction (reduce_sum target).
+ *
+ * @details This function computes the log-likelihood contribution of a subset of
+ * posterior draws for a single new subject, conditioned on that subject's observed
+ * longitudinal history up to time `time_condition`. It is used inside
+ * `reduce_sum()` to parallelize across posterior draws.
+ *
+ * The goal is to evaluate, for each posterior draw k, the conditional likelihood:
+ *
+ *   log p(y_obs, T_cond | theta_k)
+ *
+ * where the subject-specific random effects are integrated through a
+ * draw-specific random effects reconstruction. The function performs:
+ *
+ * STEP 1: Sample subject-specific random effects from standard normal seeds
+ *   - z_u[k]     : ID-level latent effects
+ *   - z_v[k, d]  : marker-level latent effects
+ *   - z_w_lat[k, d] : marker-by-id latent effects
+ *   - z_L[k]     : latent effect for covariance regression
+ *
+ * STEP 2: Transform latent effects into correlated random effects
+ *   - u_id = L_u * z_u
+ *   - v_marker[d] = L_v * z_v[d]
+ *   - z_w[d] = (optional cross-correlation) + L_w * z_w_lat[d]
+ *   - w_idscaled[d] = L_i * z_w[d], where L_i is subject-specific covariance
+ *
+ * STEP 3: Build subject-specific Cholesky factor L_i via covariance regression
+ *   - For each unique lower-triangular entry (r,c), compute:
+ *       lp_i = alpha_vcov_reg + beta_vcov_reg' * vec_cov_vcov + lambda * u_Lk
+ *     If r == c (diagonal), apply softplus or exp to ensure positivity.
+ *     Otherwise, use lp_i directly for off-diagonal entries.
+ *
+ * STEP 4: Evaluate longitudinal likelihood given random effects
+ *   - For each observed longitudinal row n:
+ *       eta = X * beta_fixed + Z_id * u_id + Z_mk * v_marker[d] + Z_idm * w_idscaled[d]
+ *     Then evaluate log p(y_n | eta, family) with distributional parameters
+ *     (sigma, nu, phi, alpha, tau) taken from draw-specific regressions.
+ *
+ * STEP 5: Compute survival conditioning at time T_cond
+ *   - Build current value (CV) and current slope (CS) at 15 GK nodes in [0, T_cond]
+ *   - Apply nonlinear transforms to CV/CS/VCOV features
+ *   - Compute hazard at nodes and integrate via Gauss-Kronrod:
+ *       Lambda(T_cond) = integral_0^T_cond sum_k h_k(t) dt
+ *   - Add survival contribution: log S(T_cond) = -Lambda(T_cond)
+ *
+ * The returned value is the total log-likelihood for the draw slice.
+ *
+ * @param draw_ids_slice Indices of the posterior draws to process in this call.
+ * @param start Start index for the slice (1-based).
+ * @param end End index for the slice (1-based).
+ * @param n_obs_long Number of longitudinal observations for the new subject.
+ * @param idx_marker_obs Array of marker indices for each observation (1-based).
+ * @param n_marker_types Total number of marker types (D).
+ * @param marker_weights_draws Matrix of marker weights for each draw.
+ * @param y_real Vector of continuous response values.
+ * @param y_int Array of integer response values (for ordinal/count outcomes).
+ * @param trials_obs Array of trial counts for binomial outcomes.
+ * @param n_fixed_effects Number of fixed effect coefficients.
+ * @param n_random_id Number of subject-level random effects.
+ * @param n_random_marker Number of marker-level random effects.
+ * @param n_random_marker_id Number of subject-marker interaction random effects.
+ * @param mat_fixed_obs Fixed effects design matrix for observations.
+ * @param mat_id_obs Random effects design matrix (subject-level).
+ * @param mat_marker_obs Random effects design matrix (marker-level).
+ * @param mat_marker_id_obs Random effects design matrix (subject-marker interact).
+ * @param P_sigma Number of coefficients for sigma regression.
+ * @param X_sigma_obs Design matrix for sigma regression.
+ * @param P_nu Number of coefficients for nu regression.
+ * @param X_nu_obs Design matrix for nu regression.
+ * @param P_phi Number of coefficients for phi regression.
+ * @param X_phi_obs Design matrix for phi regression.
+ * @param P_alpha Number of coefficients for alpha regression.
+ * @param X_alpha_obs Design matrix for alpha regression.
+ * @param P_phi_beta Number of coefficients for phi_beta regression.
+ * @param X_phi_beta_obs Design matrix for phi_beta regression.
+ * @param P_tau_sde Number of coefficients for tau_sde regression.
+ * @param X_tau_sde_obs Design matrix for tau_sde regression.
+ * @param n_cov_vcov Number of covariates for variance-covariance regression.
+ * @param vec_cov_vcov Vector of covariates for variance-covariance regression.
+ * @param n_cov_hazard Number of covariates for hazard baseline.
+ * @param vec_cov_hazard Vector of covariates for hazard baseline.
+ * @param n_basehaz_basis Number of basis functions for baseline hazard.
+ * @param time_condition The conditioning time T_cond (last observation time).
+ * @param mat_basis_gk_cond Basis functions evaluated at Gauss-Kronrod nodes (0 to T_cond).
+ * @param mat_fixed_gk_cond Fixed effects design matrix at GK nodes.
+ * @param mat_id_gk_cond ID random effects design matrix at GK nodes.
+ * @param mat_marker_gk_cond Marker random effects design matrix at GK nodes.
+ * @param mat_marker_id_gk_cond ID-Marker random effects design matrix at GK nodes.
+ * @param mat_fixed_gk_cond_fwd Forward fixed effects design matrix at GK nodes.
+ * @param mat_id_gk_cond_fwd Forward ID random effects design matrix at GK nodes.
+ * @param mat_marker_gk_cond_fwd Forward Marker random effects design matrix at GK nodes.
+ * @param mat_marker_id_gk_cond_fwd Forward ID-Marker random effects design matrix at GK nodes.
+ * @param eps_finite_diff Epsilon for finite difference derivative approximation.
+ * @param family_long Array of family codes for each observation.
+ * @param flag_resid_dim Flag for residual dimension handling.
+ * @param vcov_diag_link Link flag for vcov diagonal (0 softplus, 1 exp).
+ * @param use_tau_sde_fixed Flag to use fixed tau for SDE.
+ * @param tau_sde_fixed Fixed tau value for SDE (0 < tau < 1).
+ * @param num_unique_cov_entries Number of unique entries in covariance regression.
+ * @param idx_row_cov Row indices for covariance regression.
+ * @param idx_col_cov Column indices for covariance regression.
+ * @param beta_fixed Array of fixed effect vectors (per draw).
+ * @param beta_sigma Array of sigma regression coefficients (per draw).
+ * @param beta_nu Array of nu regression coefficients (per draw).
+ * @param beta_phi Array of phi regression coefficients (per draw).
+ * @param beta_alpha Array of alpha regression coefficients (per draw).
+ * @param beta_phi_beta Array of phi_beta regression coefficients (per draw).
+ * @param beta_tau_sde Array of tau_sde regression coefficients (per draw).
+ * @param tau_id Array of ID random effect scales (per draw).
+ * @param Lcorr_id Array of ID random effect Cholesky correlations (per draw).
+ * @param tau_marker Array of marker random effect scales (per draw).
+ * @param Lcorr_marker Array of marker random effect Cholesky correlations (per draw).
+ * @param tau_marker_id Array of ID-marker random effect scales (per draw).
+ * @param Lcorr_marker_id Array of ID-marker random effect Cholesky correlations (per draw).
+ * @param B_cross Array of cross-correlation matrices between levels (per draw).
+ * @param alpha_vcov_reg Array of intercept vectors for covariance regression (per draw).
+ * @param beta_vcov_reg_flat Array of flattened coefficient vectors for covariance regression (per draw).
+ * @param tau_vcov_reg Array of scales for latent covariance effects (per draw).
+ * @param lambda_vcov_reg Array of loading vectors for latent covariance effects (per draw).
+ * @param K_event Number of competing risks.
+ * @param log_h0_intercept Array of baseline hazard intercepts (per draw).
+ * @param bs_gamma_c Array of baseline hazard spline coefficients (per draw).
+ * @param gamma_hazard Array of hazard covariate coefficients (per draw).
+ * @param sigma_y_shared Array of shared residual standard deviations (per draw).
+ * @param sigma_marker_specific Array of marker-specific residual standard deviations (per draw).
+ * @param nu_marker Array of marker-specific degrees of freedom (per draw).
+ * @param phi_nb_marker Array of marker-specific dispersion parameters (per draw).
+ * @param alpha_skew_marker Array of marker-specific skewness parameters (per draw).
+ * @param phi_beta_marker Array of marker-specific beta precision parameters (per draw).
+ * @param tau_sde_marker Array of marker-specific diffusion parameters (per draw).
+ * @param coeff_assoc_cv_total Array of association coefficients for Total Current Value (per draw).
+ * @param coeff_assoc_cs_total Array of association coefficients for Total Current Slope (per draw).
+ * @param coeff_assoc_cv_mean Array of association coefficients for Mean Current Value (per draw).
+ * @param coeff_assoc_cs_mean Array of association coefficients for Mean Current Slope (per draw).
+ * @param coeff_assoc_cv_marker Array of association coefficients for Marker Current Value (per draw).
+ * @param coeff_assoc_cs_marker Array of association coefficients for Marker Current Slope (per draw).
+ * @param coeff_assoc_vcov_var Array of association coefficients for Variance (per draw).
+ * @param K_ord Number of ordinal categories.
+ * @param cutpoints_ord Array of ordinal cutpoints (per draw).
+ * @param flag_assoc_cv_total Flag for Total Current Value association.
+ * @param flag_assoc_cs_total Flag for Total Current Slope association.
+ * @param flag_assoc_cv_mean Flag for Mean Current Value association.
+ * @param flag_assoc_cv_marker Flag for Marker Current Value association.
+ * @param flag_assoc_cs_mean Flag for Mean Current Slope association.
+ * @param flag_assoc_cs_marker Flag for Marker Current Slope association.
+ * @param flag_assoc_vcov Flag for Variance association.
+ * @param tf_mode_cv_tot Transform mode for Total Current Value.
+ * @param tf_mode_cs_tot Transform mode for Total Current Slope.
+ * @param tf_mode_vcov Transform mode for Variance.
+ * @param tf_mode_cv_mean Transform mode for Mean Current Value.
+ * @param tf_mode_cv_marker Transform mode for Marker Current Value.
+ * @param tf_mode_cs_mean Transform mode for Mean Current Slope.
+ * @param tf_mode_cs_marker Transform mode for Marker Current Slope.
+ * @param functional_ops_cv Function opcodes for Value transforms.
+ * @param const_data_cv Constants for Value transforms.
+ * @param knots_cv Knots for Value transforms.
+ * @param coeff_cv Coefficients for Value transforms.
+ * @param spline_degree_cv Spline degree for Value transforms.
+ * @param functional_ops_cs Function opcodes for Slope transforms.
+ * @param const_data_cs Constants for Slope transforms.
+ * @param knots_cs Knots for Slope transforms.
+ * @param coeff_cs Coefficients for Slope transforms.
+ * @param spline_degree_cs Spline degree for Slope transforms.
+ * @param functional_ops_vcov Function opcodes for Variance transforms.
+ * @param const_data_vcov Constants for Variance transforms.
+ * @param knots_vcov Knots for Variance transforms.
+ * @param coeff_vcov Coefficients for Variance transforms.
+ * @param spline_degree_vcov Spline degree for Variance transforms.
+ * @param functional_ops_cv_mean Function opcodes for Mean Value transforms.
+ * @param const_data_cv_mean Constants for Mean Value transforms.
+ * @param knots_cv_mean Knots for Mean Value transforms.
+ * @param coeff_cv_mean Coefficients for Mean Value transforms.
+ * @param spline_degree_cv_mean Spline degree for Mean Value transforms.
+ * @param functional_ops_cv_marker Function opcodes for Marker Value transforms.
+ * @param const_data_cv_marker Constants for Marker Value transforms.
+ * @param knots_cv_marker Knots for Marker Value transforms.
+ * @param coeff_cv_marker Coefficients for Marker Value transforms.
+ * @param spline_degree_cv_marker Spline degree for Marker Value transforms.
+ * @param functional_ops_cs_mean Function opcodes for Mean Slope transforms.
+ * @param const_data_cs_mean Constants for Mean Slope transforms.
+ * @param knots_cs_mean Knots for Mean Slope transforms.
+ * @param coeff_cs_mean Coefficients for Mean Slope transforms.
+ * @param spline_degree_cs_mean Spline degree for Mean Slope transforms.
+ * @param functional_ops_cs_marker Function opcodes for Marker Slope transforms.
+ * @param const_data_cs_marker Constants for Marker Slope transforms.
+ * @param knots_cs_marker Knots for Marker Slope transforms.
+ * @param coeff_cs_marker Coefficients for Marker Slope transforms.
+ * @param spline_degree_cs_marker Spline degree for Marker Slope transforms.
+ * @param flag_indep_id_re Flag for independent ID random effects.
+ * @param flag_indep_marker_re Flag for independent Marker random effects.
+ * @param flag_indep_marker_byid_latent_re Flag for independent latent Maker-ID random effects.
+ * @param flag_allow_marker_crosscorr Flag allowing cross-correlation between levels.
+ * @param z_u Array of standard normal draws for ID random effects.
+ * @param z_v Array of standard normal draws for Marker random effects.
+ * @param z_w_lat Array of standard normal draws for latent Marker-ID random effects.
+ * @param z_L Vector of standard normal draws for latent correlation effects.
+ * @return Accumulated log-likelihood for the slice.
+ */
+real partial_draw(
+    array[] int draw_ids_slice,
+    int start,
+    int end,
+    int n_obs_long,
+    array[] int idx_marker_obs,
+    int n_marker_types,
+    matrix marker_weights_draws,
+    vector y_real,
+    array[] int y_int,
+    array[] int trials_obs,
+    int n_fixed_effects,
+    int n_random_id,
+    int n_random_marker,
+    int n_random_marker_id,
+    matrix mat_fixed_obs,
+    matrix mat_id_obs,
+    matrix mat_marker_obs,
+    matrix mat_marker_id_obs,
+    int P_sigma,
+    matrix X_sigma_obs,
+    int P_nu,
+    matrix X_nu_obs,
+    int P_phi,
+    matrix X_phi_obs,
+    int P_alpha,
+    matrix X_alpha_obs,
+    int P_phi_beta,
+    matrix X_phi_beta_obs,
+    int P_tau_sde,
+    matrix X_tau_sde_obs,
+    int n_cov_vcov,
+    vector vec_cov_vcov,
+    int n_cov_hazard,
+    vector vec_cov_hazard,
+    int n_basehaz_basis,
+    real time_condition,
+    matrix mat_basis_gk_cond,
+    matrix mat_fixed_gk_cond,
+    matrix mat_id_gk_cond,
+    matrix mat_marker_gk_cond,
+    matrix mat_marker_id_gk_cond,
+    matrix mat_fixed_gk_cond_fwd,
+    matrix mat_id_gk_cond_fwd,
+    matrix mat_marker_gk_cond_fwd,
+    matrix mat_marker_id_gk_cond_fwd,
+    real eps_finite_diff,
+    array[] int family_long,
+    int flag_resid_dim,
+    int vcov_diag_link,
+    int use_tau_sde_fixed,
+    real tau_sde_fixed,
+    int num_unique_cov_entries,
+    array[] int idx_row_cov,
+    array[] int idx_col_cov,
+    array[] vector beta_fixed,
+    array[] vector beta_sigma,
+    array[] vector beta_nu,
+    array[] vector beta_phi,
+    array[] vector beta_alpha,
+    array[] vector beta_phi_beta,
+    array[] vector beta_tau_sde,
+    array[] vector tau_id,
+    array[] matrix Lcorr_id,
+    array[] vector tau_marker,
+    array[] matrix Lcorr_marker,
+    array[] vector tau_marker_id,
+    array[] matrix Lcorr_marker_id,
+    array[] matrix B_cross,
+    array[] vector alpha_vcov_reg,
+    array[] vector beta_vcov_reg_flat,
+    array[] real tau_vcov_reg,
+    array[] vector lambda_vcov_reg,
+    int K_event,
+    array[,] real log_h0_intercept,
+    array[,] vector bs_gamma_c,
+    array[,] vector gamma_hazard,
+    array[] real sigma_y_shared,
+    array[] vector sigma_marker_specific,
+    array[] vector nu_marker,
+    array[] vector phi_nb_marker,
+    array[] vector alpha_skew_marker,
+    array[] vector phi_beta_marker,
+    array[] vector tau_sde_marker,
+    array[] real coeff_assoc_cv_total,
+    array[] real coeff_assoc_cs_total,
+    array[] real coeff_assoc_cv_mean,
+    array[] real coeff_assoc_cs_mean,
+    array[] real coeff_assoc_cv_marker,
+    array[] real coeff_assoc_cs_marker,
+    array[] vector coeff_assoc_vcov_var,
+    int K_ord,
+    array[] vector cutpoints_ord,
+    int flag_assoc_cv_total,
+    int flag_assoc_cs_total,
+    int flag_assoc_cv_mean,
+    int flag_assoc_cv_marker,
+    int flag_assoc_cs_mean,
+    int flag_assoc_cs_marker,
+    int flag_assoc_vcov,
+    int tf_mode_cv_tot,
+    int tf_mode_cs_tot,
+    int tf_mode_vcov,
+    int tf_mode_cv_mean,
+    int tf_mode_cv_marker,
+    int tf_mode_cs_mean,
+    int tf_mode_cs_marker,
+    array[] int functional_ops_cv,
+    vector const_data_cv,
+    vector knots_cv,
+    vector coeff_cv,
+    int spline_degree_cv,
+    array[] int functional_ops_cs,
+    vector const_data_cs,
+    vector knots_cs,
+    vector coeff_cs,
+    int spline_degree_cs,
+    array[] int functional_ops_vcov,
+    vector const_data_vcov,
+    vector knots_vcov,
+    vector coeff_vcov,
+    int spline_degree_vcov,
+    array[] int functional_ops_cv_mean,
+    vector const_data_cv_mean,
+    vector knots_cv_mean,
+    vector coeff_cv_mean,
+    int spline_degree_cv_mean,
+    array[] int functional_ops_cv_marker,
+    vector const_data_cv_marker,
+    vector knots_cv_marker,
+    vector coeff_cv_marker,
+    int spline_degree_cv_marker,
+    array[] int functional_ops_cs_mean,
+    vector const_data_cs_mean,
+    vector knots_cs_mean,
+    vector coeff_cs_mean,
+    int spline_degree_cs_mean,
+    array[] int functional_ops_cs_marker,
+    vector const_data_cs_marker,
+    vector knots_cs_marker,
+    vector coeff_cs_marker,
+    int spline_degree_cs_marker,
+    int flag_indep_id_re,
+    int flag_indep_marker_re,
+    int flag_indep_marker_byid_latent_re,
+    int flag_allow_marker_crosscorr,
+    array[] vector z_u,
+    array[,] vector z_v,
+    array[,] vector z_w_lat,
+    vector z_L
+) {
+  real lp = 0;  // Accumulated log-likelihood for this draw slice
+
+  // =====================================================================
+  // LOOP OVER POSTERIOR DRAWS IN THIS SLICE
+  // =====================================================================
+  for (i in start:end) {
+    // IMPORTANT: reduce_sum passes a local slice of draw_ids.
+    // `start:end` are absolute indices in the full input, so we must convert
+    // to local slice indexing before reading draw_ids_slice.
+    //
+    // Using draw_ids_slice[i] here is out-of-range whenever start > 1.
+    int idx_local = i - start + 1;
+    int k = draw_ids_slice[idx_local];  // Global draw index
+
+    // ---------------------------------------------------------------
+    // STEP 1: Log-density of latent standard normal seeds
+    // ---------------------------------------------------------------
+    // These are the latent variables used to construct random effects.
+    // The densities contribute to the conditional likelihood for draw k.
+
+    lp += std_normal_lpdf(z_u[k]); // id-level latent density
+    if (n_random_marker > 0) {
+      for (d in 1 : n_marker_types)
+        lp += std_normal_lpdf(z_v[k, d]); // marker-level latent density
+    }
+    for (d in 1 : n_marker_types)
+      lp += std_normal_lpdf(z_w_lat[k, d]); // marker-id latent density
+    lp += std_normal_lpdf(z_L[k]); // covariance latent density
+
+    // ---------------------------------------------------------------
+    // STEP 2: Construct random effects from latent normals
+    // ---------------------------------------------------------------
+    // ID-level random effects: u_id = L_u * z_u
+    matrix[n_random_id, n_random_id] L_u;
+    if (flag_indep_id_re == 1)
+      L_u = diag_matrix(tau_id[k]);
+    else
+      L_u = diag_pre_multiply(tau_id[k], Lcorr_id[k]);
+    vector[n_random_id] u_id = L_u * z_u[k]; // realized id REs
+
+    // Marker-level random effects: v_marker[d] = L_v * z_v[d]
+    matrix[n_random_marker, n_random_marker] L_v;
+    if (n_random_marker > 0) {
+      if (flag_indep_marker_re == 1)
+        L_v = diag_matrix(tau_marker[k]);
+      else
+        L_v = diag_pre_multiply(tau_marker[k], Lcorr_marker[k]);
+    }
+    array[n_marker_types] vector[n_random_marker] v_marker; // realized marker REs
+    if (n_random_marker > 0) {
+      for (d in 1 : n_marker_types)
+        v_marker[d] = L_v * z_v[k, d];
+    }
+
+    // Marker-by-ID random effects (latent): z_w
+    // Optional cross-correlation with marker-level REs via B_cross
+    matrix[n_random_marker_id, n_random_marker_id] L_w;
+    if (flag_indep_marker_byid_latent_re == 1)
+      L_w = diag_matrix(tau_marker_id[k]);
+    else
+      L_w = diag_pre_multiply(tau_marker_id[k], Lcorr_marker_id[k]);
+    array[n_marker_types] vector[n_random_marker_id] z_w; // marker-id latent effects
+    for (d in 1 : n_marker_types) {
+      vector[n_random_marker_id] cross = rep_vector(0.0, n_random_marker_id);
+      if (flag_allow_marker_crosscorr == 1 && n_random_marker > 0)
+        cross = B_cross[k] * v_marker[d];
+      z_w[d] = cross + L_w * z_w_lat[k, d];
+    }
+
+    // ---------------------------------------------------------------
+    // STEP 3: Build subject-specific covariance Cholesky factor L_i
+    // ---------------------------------------------------------------
+    // L_i is built via covariance regression with covariates vec_cov_vcov
+    // and a latent random effect u_Lk for additional subject variability.
+    real u_Lk = tau_vcov_reg[k] * z_L[k]; // latent vcov effect for this draw
+    matrix[n_random_marker_id, n_random_marker_id] Li = rep_matrix(0.0, n_random_marker_id, n_random_marker_id);
+    for (m in 1 : num_unique_cov_entries) {
+      int r_ = idx_row_cov[m];
+      int c_ = idx_col_cov[m];
+      vector[n_cov_vcov] bL_m = beta_vcov_reg_flat[k][((m - 1) * n_cov_vcov + 1) : (m * n_cov_vcov)];
+      real lp_i = alpha_vcov_reg[k][m] + dot_product(bL_m, vec_cov_vcov) + lambda_vcov_reg[k][m] * u_Lk;
+      // lp_i: linear predictor for L_i element (r_, c_)
+      if (r_ == c_) {
+        Li[r_, c_] = (vcov_diag_link == 1) ? exp(lp_i) : log1p_exp(lp_i);
+      } else {
+        Li[r_, c_] = lp_i;
+      }
+    }
+
+    // Transform marker-by-ID latent effects into actual random effects
+    array[n_marker_types] vector[n_random_marker_id] w_idscaled; // scaled marker-id REs
+    for (d in 1 : n_marker_types)
+      w_idscaled[d] = Li * z_w[d];
+
+    // ---------------------------------------------------------------
+    // STEP 4: Longitudinal log-likelihood for observed history
+    // ---------------------------------------------------------------
+    for (n in 1 : n_obs_long) {
+      int d = idx_marker_obs[n];
+      real eta = dot_product(mat_fixed_obs[n], beta_fixed[k])
+                 + dot_product(mat_id_obs[n], u_id)
+                 + ((n_random_marker > 0) ? dot_product(mat_marker_obs[n], v_marker[d]) : 0.0)
+                 + dot_product(mat_marker_id_obs[n], w_idscaled[d]);
+      // eta: linear predictor for observed row n
+
+      // Evaluate log-likelihood based on family type and distributional
+      // parameters. Each distributional parameter can be draw-specific
+      // via its own regression (beta_sigma, beta_nu, etc.).
+      //
+      // Family codes:
+      //   1: Gaussian (eta, sigma)
+      //   2: Student-t (eta, sigma, nu)
+      //   3: Bernoulli (logit link)
+      //   4: Binomial (logit link)
+      //   5: Poisson (log link)
+      //   6: Neg-Binomial (log link, dispersion phi)
+      //   7: Skew-normal (eta, sigma, alpha)
+      //   8: Double-exponential (eta, sigma)
+      //   9: Skew-double-exponential (eta, sigma, tau)
+      //  10: Beta regression (logit link, precision phi)
+      //  11: Ordered logistic (eta, cutpoints)
+
+      // FAMILY 1: Gaussian
+      // sigma from regression if P_sigma > 0, else marker-specific or shared
+      if (family_long[d] == 1) {
+        real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_obs[n], beta_sigma[k])) : ((flag_resid_dim == 1) ? sigma_marker_specific[k][d] : sigma_y_shared[k]);
+        // sig: residual scale
+        lp += normal_lpdf(y_real[n] | eta, sig);
+      // FAMILY 2: Student-t
+      // sigma from regression; nu = 2 + exp(eta_nu) if P_nu > 0
+      } else if (family_long[d] == 2) {
+        real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_obs[n], beta_sigma[k])) : ((flag_resid_dim == 1) ? sigma_marker_specific[k][d] : sigma_y_shared[k]);
+        real nu = (P_nu > 0) ? (2 + exp(dot_product(X_nu_obs[n], beta_nu[k]))) : nu_marker[k][d];
+        // sig: residual scale, nu: degrees of freedom
+        lp += student_t_lpdf(y_real[n] | nu, eta, sig);
+      // FAMILY 3: Bernoulli (logit)
+      } else if (family_long[d] == 3) {
+        lp += bernoulli_logit_lpmf(y_int[n] | eta);
+      // FAMILY 4: Binomial (logit)
+      } else if (family_long[d] == 4) {
+        lp += binomial_logit_lpmf(y_int[n] | trials_obs[n], eta);
+      // FAMILY 5: Poisson (log)
+      } else if (family_long[d] == 5) {
+        lp += poisson_log_lpmf(y_int[n] | eta);
+      // FAMILY 6: Negative binomial (log, dispersion phi)
+      } else if (family_long[d] == 6) {
+        real phi = (P_phi > 0) ? exp(dot_product(X_phi_obs[n], beta_phi[k])) : phi_nb_marker[k][d];
+        // phi: negbin dispersion
+        lp += neg_binomial_2_log_lpmf(y_int[n] | eta, phi);
+      // FAMILY 7: Skew-normal (eta, sigma, alpha)
+      } else if (family_long[d] == 7) {
+        real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_obs[n], beta_sigma[k])) : ((flag_resid_dim == 1) ? sigma_marker_specific[k][d] : sigma_y_shared[k]);
+        real alpha = (P_alpha > 0) ? dot_product(X_alpha_obs[n], beta_alpha[k]) : alpha_skew_marker[k][d];
+        // sig: residual scale, alpha: skewness
+        lp += skew_normal_lpdf(y_real[n] | eta, sig, alpha);
+      // FAMILY 8: Double-exponential (Laplace)
+      } else if (family_long[d] == 8) {
+        real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_obs[n], beta_sigma[k])) : ((flag_resid_dim == 1) ? sigma_marker_specific[k][d] : sigma_y_shared[k]);
+        // sig: residual scale
+        lp += double_exponential_lpdf(y_real[n] | eta, sig);
+      // FAMILY 9: Skew double-exponential (eta, sigma, tau)
+      // tau constrained to (0,1) via logit link if regression used
+      } else if (family_long[d] == 9) {
+        real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_obs[n], beta_sigma[k])) : ((flag_resid_dim == 1) ? sigma_marker_specific[k][d] : sigma_y_shared[k]);
+        real tau_sde = use_tau_sde_fixed == 1
+          ? tau_sde_fixed
+          : ((P_tau_sde > 0) ? inv_logit(dot_product(X_tau_sde_obs[n], beta_tau_sde[k])) : tau_sde_marker[k][d]);
+        // sig: residual scale, tau_sde: skewness in (0,1)
+        lp += skew_double_exponential_lpdf(y_real[n] | eta, sig, tau_sde);
+      // FAMILY 10: Beta regression
+      // mu = inv_logit(eta), phi = precision
+      } else if (family_long[d] == 10) {
+        real phi_beta = (P_phi_beta > 0) ? exp(dot_product(X_phi_beta_obs[n], beta_phi_beta[k])) : phi_beta_marker[k][d];
+        real mu = inv_logit(eta);
+        // mu: beta mean, phi_beta: precision
+        real shape1 = fmax(mu * phi_beta, 1e-6);
+        real shape2 = fmax((1 - mu) * phi_beta, 1e-6);
+        // shape1/shape2: beta shapes
+        lp += beta_lpdf(y_real[n] | shape1, shape2);
+      } else {
+        // FAMILY 11: Ordered logistic (ordinal)
+        lp += ordered_logistic_lpmf(y_int[n] | eta, cutpoints_ord[k]);
+      }
+    }
+
+    // ---------------------------------------------------------------
+    // STEP 5: Survival conditioning at time_condition
+    // ---------------------------------------------------------------
+    // Compute association features at 15 Gauss-Kronrod nodes in [0, T_cond].
+    // These features depend on current value, current slope, and covariance.
+
+    vector[15] cvm;   // mean CV at GK nodes
+    vector[15] cvk;   // marker CV at GK nodes
+    vector[15] cvm_f; // mean CV forward
+    vector[15] cvk_f; // marker CV forward
+
+    // Weighted averages across markers for "total" association features
+    // Marker weights for draw k (used to aggregate marker-specific REs)
+    // These weights allow association features to focus on more influential markers.
+    vector[n_marker_types] marker_weights_k = to_vector(marker_weights_draws[k, ]); // draw-specific signed weights
+    // Weighted average of marker-level random effects
+    // vbar[r] = (1 / D) * sum_d w_d * v_marker[d][r]
+    vector[n_random_marker] vbar; // weighted mean of marker REs
+    if (n_random_marker > 0) {
+      for (r in 1 : n_random_marker) {
+        real acc = 0;
+        for (d in 1 : n_marker_types)
+          acc += marker_weights_k[d] * v_marker[d][r];
+        vbar[r] = acc / n_marker_types;
+      }
+    }
+    // Weighted average of marker-by-id latent effects (on z-scale)
+    vector[n_random_marker_id] zbar; // weighted mean of marker-id latents
+    for (q in 1 : n_random_marker_id) {
+      real acc = 0;
+      for (d in 1 : n_marker_types)
+        acc += marker_weights_k[d] * z_w[d][q];
+      zbar[q] = acc / n_marker_types;
+    }
+    // Convert weighted latent effects into actual ID-by-marker REs
+    vector[n_random_marker_id] wbar_i = Li * zbar; // scaled weighted mean
+
+    for (j in 1 : 15) {
+      cvm[j] = dot_product(mat_fixed_gk_cond[j], beta_fixed[k]) + dot_product(mat_id_gk_cond[j], u_id);
+      cvm_f[j] = dot_product(mat_fixed_gk_cond_fwd[j], beta_fixed[k]) + dot_product(mat_id_gk_cond_fwd[j], u_id);
+
+      real mk_part = 0; // marker-only CV
+      real mk_part_f = 0; // marker-only CV forward
+      if (n_random_marker > 0) {
+        mk_part = dot_product(mat_marker_gk_cond[j], vbar);
+        mk_part_f = dot_product(mat_marker_gk_cond_fwd[j], vbar);
+      }
+      cvk[j] = mk_part + dot_product(mat_marker_id_gk_cond[j], wbar_i);
+      cvk_f[j] = mk_part_f + dot_product(mat_marker_id_gk_cond_fwd[j], wbar_i);
+    }
+
+    // Current slopes via finite difference (time already scaled)
+    vector[15] csm_raw = eta_fd(cvm, cvm_f, eps_finite_diff); // mean slope
+    vector[15] csk_raw = eta_fd(cvk, cvk_f, eps_finite_diff); // marker slope
+    // Variance association feature (constant across nodes)
+    vector[15] vcov_raw = eta_vcov_varonly_weighted_const(15, Li, flag_assoc_vcov * coeff_assoc_vcov_var[k]);
+    // vcov_raw: variance feature
+
+    // Total current value and slope (mean + marker components)
+    vector[15] cv_tot = cvm + cvk; // total CV
+    vector[15] cs_tot = csm_raw + csk_raw; // total CS
+
+    // Apply association flags (0 disables the term)
+    real a_cv_total = flag_assoc_cv_total * coeff_assoc_cv_total[k];
+    real a_cs_total = flag_assoc_cs_total * coeff_assoc_cs_total[k];
+    real a_cv_mean = flag_assoc_cv_mean * coeff_assoc_cv_mean[k];
+    real a_cv_marker = flag_assoc_cv_marker * coeff_assoc_cv_marker[k];
+    real a_cs_mean = flag_assoc_cs_mean * coeff_assoc_cs_mean[k];
+    real a_cs_marker = flag_assoc_cs_marker * coeff_assoc_cs_marker[k];
+
+    // Apply nonlinear transforms to association features
+    vector[15] cv_tot_tf = apply_transform_vector(cv_tot, tf_mode_cv_tot, functional_ops_cv, const_data_cv, knots_cv, coeff_cv, spline_degree_cv);
+    vector[15] cv_mean_tf = apply_transform_vector(cvm, tf_mode_cv_mean, functional_ops_cv_mean, const_data_cv_mean, knots_cv_mean, coeff_cv_mean, spline_degree_cv_mean);
+    vector[15] cv_marker_tf = apply_transform_vector(cvk, tf_mode_cv_marker, functional_ops_cv_marker, const_data_cv_marker, knots_cv_marker, coeff_cv_marker, spline_degree_cv_marker);
+
+    vector[15] cs_tot_tf = apply_transform_vector(cs_tot, tf_mode_cs_tot, functional_ops_cs, const_data_cs, knots_cs, coeff_cs, spline_degree_cs);
+    vector[15] cs_mean_tf = apply_transform_vector(csm_raw, tf_mode_cs_mean, functional_ops_cs_mean, const_data_cs_mean, knots_cs_mean, coeff_cs_mean, spline_degree_cs_mean);
+    vector[15] cs_marker_tf = apply_transform_vector(csk_raw, tf_mode_cs_marker, functional_ops_cs_marker, const_data_cs_marker, knots_cs_marker, coeff_cs_marker, spline_degree_cs_marker);
+    vector[15] vcov_tf = apply_transform_vector(vcov_raw, tf_mode_vcov, functional_ops_vcov, const_data_vcov, knots_vcov, coeff_vcov, spline_degree_vcov);
+
+    // Combine transformed association features into hazard predictor
+    vector[15] eta_assoc_nodes = a_cv_total * cv_tot_tf
+                                 + a_cv_mean * cv_mean_tf
+                                 + a_cv_marker * cv_marker_tf
+                                 + a_cs_total * cs_tot_tf
+                                 + a_cs_mean * cs_mean_tf
+                                 + a_cs_marker * cs_marker_tf
+                                 + vcov_tf;
+    // eta_assoc_nodes: association predictor at GK nodes
+
+    // ---------------------------------------------------------------
+    // STEP 6: Cumulative hazard via Gauss-Kronrod integration
+    // ---------------------------------------------------------------
+    vector[15] log_h_total; // total log-hazard at GK nodes
+    for (j in 1 : 15) {
+      vector[K_event] log_h_cause; // cause-specific log hazards
+      for (k_ev in 1 : K_event) {
+        real eta_w = 0; // hazard covariate effect
+        if (n_cov_hazard > 0)
+          eta_w = dot_product(vec_cov_hazard, gamma_hazard[k, k_ev]);
+        // Cause-specific log hazard at GK node j
+        log_h_cause[k_ev] = log_h0_intercept[k, k_ev]
+                            + dot_product(mat_basis_gk_cond[j], bs_gamma_c[k, k_ev])
+                            + eta_w
+                            + eta_assoc_nodes[j];
+      }
+      log_h_total[j] = log_sum_exp(log_h_cause);
+    }
+
+    // Survival contribution at T_cond: log S(T_cond) = -Lambda(T_cond)
+    lp += -cumhaz(time_condition, log_h_total, rep_vector(0.0, 15));
+  }
+
+  return lp;
+}

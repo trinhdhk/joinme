@@ -30,7 +30,8 @@
 #' @param formulaLong Longitudinal formula defining fixed effects, id-level effects,
 #'   and the marker block. The marker block may optionally include an inner
 #'   `( ... | id )` term for marker-by-id random effects. When the inner term is
-#'   omitted, marker-by-id random effects are disabled (Q_idm = 0).
+#'   omitted, marker-by-id random effects are disabled (Q_idm = 0). Use `||` to
+#'   enforce diagonal random-effect covariance (e.g., `(1 + time || id)`).
 #' @param dataLong Long-format longitudinal data with columns for id, marker, time,
 #'   outcome, and covariates referenced in `formulaLong`.
 #' @param formulaEvent Survival formula for baseline covariates and event model.
@@ -64,18 +65,18 @@
 #' @param beta_prior Prior specification for longitudinal fixed effects.
 #' @param alpha_prior Prior specification for association parameters.
 #' @param lkj_prior Prior specification for correlation structures.
-#' @param indep_id_re Integer flag; 1 enforces independent id random effects.
-#' @param indep_marker_re Integer flag; 1 enforces independent marker random effects.
-#' @param indep_idmarker_cov Integer flag; 1 uses diagonal covariance for marker-by-id effects.
 #' @param allow_marker_crosscorr Integer flag; 1 allows cross-marker correlation in marker RE.
 #' @param shrinkage Integer flag controlling shrinkage behavior for marker-by-id effects.
 #' @param marker_weights Optional numeric vector of length D giving base weights
 #'   for marker-specific association components. These weights are applied to both
-#'   current value (CV) and current slope (CS) marker summaries. When NULL, equal
-#'   weights are used.
+#'   current value (CV) and current slope (CS) marker summaries. Weights may be
+#'   positive or negative. Internally, base weights are rescaled to unit RMS
+#'   (`sqrt(mean(w^2)) = 1`) for numerical stability and better identifiability.
+#'   When NULL, equal base weights are used.
 #' @param estimate_marker_weights Logical; if TRUE, estimate marker weights via a
-#'   shrinkage scale (logistic-normal) rather than using fixed weights. The latent
-#'   perturbations follow Normal or Laplace priors depending on `shrinkage`.
+#'   signed additive perturbation around base weights. The effective weights are
+#'   RMS-stabilized so composition can change while overall scale remains stable.
+#'   Latent perturbations follow Normal or Laplace priors depending on `shrinkage`.
 #' @param marker_weight_scale Non-negative prior scale for marker-weight shrinkage.
 #' @param flag_resid_dim Integer flag to include residual dimension checks.
 #' @param basehaz Baseline hazard basis type: "bs", "ns", or "formula".
@@ -83,8 +84,13 @@
 #' @param basehaz_degree Degree of spline basis for baseline hazard.
 #' @param basehaz_formula Formula for baseline hazard when `basehaz = "formula"`.
 #' @param tau_spline Prior scale for spline coefficients (penalized spline).
+#' @param vcov_diag_link Link for covariance regression diagonals: "softplus" or "exp".
+#' @param tau_sde_fixed Optional fixed tau for skew-double-exponential (0 < tau < 1).
 #' @param seed Optional random seed for deterministic components of standata.
 #' @export
+# File overview:
+# - Parse formulas, build design matrices, and scale time.
+# - Assemble longitudinal, survival, and association data blocks for Stan.
 joinme_standata <- function(
   formulaLong,
   dataLong,
@@ -108,26 +114,27 @@ joinme_standata <- function(
   beta_prior = NULL,
   alpha_prior = NULL,
   lkj_prior = NULL,
-  indep_id_re = 1L,
-  indep_marker_re = 1L,
-  indep_idmarker_cov = 1L,
   allow_marker_crosscorr = 1L,
   shrinkage = 2L,
   marker_weights = NULL,
-  estimate_marker_weights = FALSE,
-  marker_weight_scale = 0.5,
+  estimate_marker_weights = TRUE,
+  marker_weight_scale = 1,
   flag_resid_dim = 0L,
   basehaz = c("bs", "ns", "formula"),
   n_knots = 5L,
   basehaz_degree = 3L,
   basehaz_formula = ~ 1 + time,
   tau_spline = 0.4,
+  vcov_diag_link = c("softplus", "exp"),
+  tau_sde_fixed = NULL,
   seed = NULL
 ) {
   assertthat::assert_that(is.data.frame(dataLong), msg = "dataLong must be a data.frame")
   assertthat::assert_that(is.data.frame(dataEvent), msg = "dataEvent must be a data.frame")
   basehaz <- match.arg(basehaz)
+  vcov_diag_link <- match.arg(vcov_diag_link)
 
+  # Workflow: parse formulas -> build matrices -> assemble survival basis -> pack list
   # Handle mixed families
   priors <- .build_priors(beta_prior = beta_prior, alpha_prior = alpha_prior, lkj_prior = lkj_prior)
   
@@ -180,8 +187,12 @@ joinme_standata <- function(
   dataLong$id_int <- as.integer(id_map[as.character(dataLong[[id_var]])])
 
   dataLong <- dataLong |>
-    dplyr::filter(!is.na(.data$id_int)) |>
-    dplyr::filter(is.finite(.data[[time_var]]), is.finite(.data[[y_var]]), !is.na(.data[[marker_var]])) |>
+    dplyr::filter(
+      !is.na(.data$id_int),
+      is.finite(.data[[time_var]]),
+      is.finite(.data[[y_var]]),
+      !is.na(.data[[marker_var]])
+    ) |>
     dplyr::arrange(.data$id_int, .data[[marker_var]], .data[[time_var]])
 
   dataLong[[marker_var]] <- factor(dataLong[[marker_var]])
@@ -191,7 +202,7 @@ joinme_standata <- function(
 
   # Marker weights (for weighted means in CV/CS association components)
   if (is.null(marker_weights)) {
-    marker_weights <- rep(1 / D, D)
+    marker_weights <- rep(1, D)
   } else {
     if (!is.numeric(marker_weights)) {
       cli::cli_abort(c(
@@ -208,24 +219,39 @@ joinme_standata <- function(
         i = "Use one weight per marker level."
       ))
     }
-    if (any(!is.finite(marker_weights)) || any(marker_weights < 0)) {
+    if (any(!is.finite(marker_weights))) {
       cli::cli_abort(c(
-        x = "{.arg marker_weights} must be finite and non-negative.",
-        i = "Provide weights >= 0."
+        x = "{.arg marker_weights} must be finite.",
+        i = "Weights may be positive or negative, but cannot be NA/Inf."
       ))
     }
-    sw <- sum(marker_weights)
-    if (!is.finite(sw) || sw <= 0) {
+    if (all(abs(marker_weights) < 1e-12)) {
       cli::cli_abort(c(
-        x = "{.arg marker_weights} must sum to a positive value.",
-        i = "Provide at least one positive weight."
+        x = "{.arg marker_weights} cannot be all zeros.",
+        i = "Provide at least one non-zero weight."
       ))
     }
-    marker_weights <- marker_weights / sw
   }
 
+  # Normalize base weights to unit RMS so marker-side scale is identifiable.
+  # This preserves signs and relative patterns while keeping the global magnitude stable.
+  mw_rms <- sqrt(mean(marker_weights^2))
+  if (!is.finite(mw_rms) || mw_rms <= 0) {
+    cli::cli_abort(c(
+      x = "Failed to scale {.arg marker_weights}.",
+      i = "Provide finite weights with at least one non-zero value."
+    ))
+  }
+  marker_weights <- marker_weights / mw_rms
+
   # Marker-weight estimation controls
+  # - estimate_marker_weights toggles whether shrinkage is applied in Stan
   estimate_marker_weights <- isTRUE(estimate_marker_weights)
+    # Independence flags from lme4-style double-bar syntax
+    # - (... || id) enforces diagonal id RE covariance
+    # - (... || marker) enforces diagonal marker RE covariance
+    # - Nested (... || id) inside marker block enforces diagonal marker-by-id covariance
+    indep_flags <- .resolve_re_independence(formulaLong, marker_var = marker_var, id_var = id_var)
   if (!is.numeric(marker_weight_scale) || length(marker_weight_scale) != 1 || !is.finite(marker_weight_scale) || marker_weight_scale < 0) {
     cli::cli_abort(c(
       x = "{.arg marker_weight_scale} must be a single non-negative numeric value.",
@@ -234,6 +260,7 @@ joinme_standata <- function(
   }
   
   # Process mixed families (optional)
+  # - family_codes drive distributional parameter availability
   if (!is.null(families)) {
     # If only length 1, duplicate to all markers
     if (length(families) == 1) {
@@ -244,6 +271,34 @@ joinme_standata <- function(
     family_codes <- rep(1L, D)  # Default: all gaussian
   }
   family_names <- .family_code_to_name(family_codes)
+
+  vcov_diag_link_code <- if (vcov_diag_link == "exp") 1L else 0L
+
+  use_tau_sde_fixed <- 0L
+  tau_sde_fixed_value <- 0.5
+  if (!is.null(tau_sde_fixed)) {
+    if (!is.numeric(tau_sde_fixed) || length(tau_sde_fixed) != 1 || !is.finite(tau_sde_fixed)) {
+      cli::cli_abort(c(
+        x = "{.arg tau_sde_fixed} must be a single finite numeric value.",
+        i = "Provide a number strictly between 0 and 1."
+      ))
+    }
+    tau_sde_fixed_value <- as.numeric(tau_sde_fixed)
+    if (tau_sde_fixed_value <= 0 || tau_sde_fixed_value >= 1) {
+      cli::cli_abort(c(
+        x = "{.arg tau_sde_fixed} must be between 0 and 1.",
+        i = "Provide a number strictly between 0 and 1."
+      ))
+    }
+    if (any(family_codes == 9L)) {
+      use_tau_sde_fixed <- 1L
+    } else {
+      cli::cli_warn(c(
+        x = "{.arg tau_sde_fixed} is ignored because no skew_double_exponential family is present.",
+        i = "Remove {.arg tau_sde_fixed} or include the skew_double_exponential family."
+      ))
+    }
+  }
   
   dist_formulas <- .normalize_formula_dist(formulaDist)
   allowed_dist <- unique(unlist(lapply(family_codes, .family_distrib_params)))
@@ -264,12 +319,14 @@ joinme_standata <- function(
   )
 
   # Scale time to [0,1] by max event time
+  # - tmax is also returned for coefficient rescaling in Stan
   tmax <- max(dataEvent[[event_time_var]])
   if (!is.finite(tmax) || tmax <= 0) stop("Invalid max event time.")
   dataLong$t_scaled <- dataLong[[time_var]] / tmax
   dataEvent$S_scaled <- dataEvent[[event_time_var]] / tmax
 
   # Build obs matrices on scaled time
+  # - distributional regression matrices follow the same scaled timeline
   dl <- dataLong
   dl[[time_var]] <- dl$t_scaled
 
@@ -291,11 +348,13 @@ joinme_standata <- function(
   P <- ncol(X_obs)
 
   # id block
+  # - always required (subject random effects)
   id_rhs_list <- .bar_terms_to_rhs_list(bars[id_idx])
   Z_id_obs <- do.call(cbind, lapply(id_rhs_list, function(rhs) .mm(rhs, dl)))
   R_id <- ncol(Z_id_obs)
 
   # marker-only optional
+  # - empty marker block yields zero columns
   if (length(mk_rhs_list) == 0) {
     mk0 <- .zero_marker_block(N = nrow(dl), n_id = nrow(dataEvent))
     R_mk <- mk0$R_mk
@@ -305,7 +364,8 @@ joinme_standata <- function(
     R_mk <- ncol(Z_mk_obs)
   }
 
-  # marker-by-id basis (optional)
+  # marker-by-id basis
+  # - enables vcov association features
   if (!has_idm) {
     Z_idm_obs <- matrix(0.0, nrow(dl), 0)
     Q_idm <- 0L
@@ -314,7 +374,8 @@ joinme_standata <- function(
     Q_idm <- ncol(Z_idm_obs)
   }
 
-  # Time presence checks + CS gating (as in Page)
+  # Time presence checks + CS warning
+  # - disable slope associations if no time terms exist
   id_has_time <- any(vapply(bars[id_idx], function(bt) .expr_has_time(bt[[2]], time_var), logical(1)))
   mk_has_time <- any(vapply(mk_rhs_list, function(rhs) .expr_has_time(rhs, time_var), logical(1)))
   idm_has_time <- any(vapply(idm_rhs_list, function(rhs) .expr_has_time(rhs, time_var), logical(1)))
@@ -342,6 +403,7 @@ joinme_standata <- function(
   }
 
   # Prepare outcomes (mixed families)
+  # - y_real/y_int mirror Stan data requirements
   y_real <- as.numeric(dl[[y_var]])
   y_int <- as.integer(dl[[y_var]])
   trials <- rep.int(1L, nrow(dl))
@@ -350,12 +412,14 @@ joinme_standata <- function(
   }
 
   # Hazard covariates W
+  # - baseline covariates only, handled in survival submodel
   fe_rhs <- stats::update(formulaEvent, . ~ .)
   fe_rhs[[2]] <- NULL
   W <- .mm(fe_rhs, dataEvent)
   p_w <- ncol(W)
 
   # Covariance covariates Xcov (intercept-only -> Xcov=0)
+  # - used to build subject-specific L_i in Stan
   if (length(reformulas::findbars(formulaVcov)) > 0) {
     cli::cli_abort(c(
       x = "{.arg formulaVcov} does not support random-effects terms.",
@@ -364,7 +428,7 @@ joinme_standata <- function(
   }
   fv_rhs <- stats::update(formulaVcov, . ~ .)
   fv_rhs[[2]] <- NULL
-  if (.expr_has_time(fv_rhs[[3]], time_var)) {
+  if (length(fv_rhs) >= 3 && .expr_has_time(fv_rhs[[3]], time_var)) {
     cli::cli_abort(c(
       x = "{.arg formulaVcov} cannot include the time variable {.arg {time_var}}.",
       i = "Remove time from {.arg formulaVcov} or move it to longitudinal formulas."
@@ -386,11 +450,13 @@ joinme_standata <- function(
   }
 
   # Survival outcomes (scaled)
+  # - S_event is on [0,1] after scaling by tmax
   n_id <- nrow(dataEvent)
   S_event <- as.numeric(dataEvent$S_scaled)
   d_event <- as.integer(dataEvent[[event_var]])
 
   # Competing risks / multi-stage event type
+  # - event_type collapses stages into a single factor
   if (all(c(stage_from_var, stage_to_var) %in% colnames(dataEvent))) {
     event_type_raw <- interaction(
       dataEvent[[stage_from_var]],
@@ -407,6 +473,7 @@ joinme_standata <- function(
   K_event <- nlevels(event_type_fac)
 
   # GK times now/fwd on scaled domain
+  # - u_now/u_fwd feed CV/CS feature computations
   gk <- .gk15_nodes()
   u_now <- matrix(NA_real_, n_id, 15)
   u_fwd <- matrix(NA_real_, n_id, 15)
@@ -490,7 +557,7 @@ joinme_standata <- function(
   af <- .parse_assoc(assoc)
 
   # --------------------------
-  # NEW: time-index metadata
+  # Time-index metadata
   # --------------------------
   x_cols <- colnames(X_obs)
   zid_cols <- colnames(Z_id_obs)
@@ -570,11 +637,14 @@ joinme_standata <- function(
     Q_idm = as.integer(Q_idm),
     Z_idm_obs = Z_idm_obs,
     flag_resid_dim = as.integer(flag_resid_dim),
-    indep_id_re = as.integer(indep_id_re),
-    indep_marker_re = as.integer(indep_marker_re),
+    indep_id_re = as.integer(indep_flags$indep_id_re),
+    indep_marker_re = as.integer(indep_flags$indep_marker_re),
     indep_marker_byid_latent_re = as.integer(1L), # keep as in your Page; extend if needed
-    indep_idmarker_cov = as.integer(indep_idmarker_cov),
+    indep_idmarker_cov = as.integer(indep_flags$indep_idmarker_cov),
     allow_marker_crosscorr = as.integer(allow_marker_crosscorr),
+    vcov_diag_link = as.integer(vcov_diag_link_code),
+    use_tau_sde_fixed = as.integer(use_tau_sde_fixed),
+    tau_sde_fixed = as.numeric(tau_sde_fixed_value),
     p_w = as.integer(p_w),
     W = W,
     K_cov = as.integer(K_cov),
@@ -675,17 +745,17 @@ joinme_standata <- function(
     shrinkage = as.integer(shrinkage),
 
     # --------------------------
-    # TRANSFORMATIONS (optional)
+    # TRANSFORMATIONS
     # --------------------------
     # --------------------------
-    # PRIOR SCALES (optional)
+    # PRIOR SCALES 
     # --------------------------
     beta_scale = as.numeric(beta_scale),
     alpha_scale = as.numeric(priors$alpha_scale),
     lkj_eta = as.numeric(priors$lkj_eta),
 
     # --------------------------
-    # REQUIRED by new Stan:
+    # Time metadata
     # --------------------------
     tmax = as.numeric(tmax),
     n_time_beta = as.integer(time_meta$n_time_beta),
@@ -698,7 +768,7 @@ joinme_standata <- function(
     idx_time_widm = as.integer(time_meta$idx_time_widm),
 
     # --------------------------
-    # metadata
+    # Other metadata
     # --------------------------
     x_cols = x_cols,
     w_cols = colnames(W),

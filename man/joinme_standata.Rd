@@ -27,17 +27,19 @@ joinme_standata(
   beta_prior = NULL,
   alpha_prior = NULL,
   lkj_prior = NULL,
-  indep_id_re = 1L,
-  indep_marker_re = 1L,
-  indep_idmarker_cov = 1L,
   allow_marker_crosscorr = 1L,
   shrinkage = 2L,
+  marker_weights = NULL,
+  estimate_marker_weights = FALSE,
+  marker_weight_scale = 0.5,
   flag_resid_dim = 0L,
   basehaz = c("bs", "ns", "formula"),
-  n_knots = 5,
-  basehaz_degree = 3,
+  n_knots = 5L,
+  basehaz_degree = 3L,
   basehaz_formula = ~1 + time,
   tau_spline = 0.4,
+  vcov_diag_link = c("softplus", "exp"),
+  tau_sde_fixed = NULL,
   seed = NULL
 )
 }
@@ -45,7 +47,8 @@ joinme_standata(
 \item{formulaLong}{Longitudinal formula defining fixed effects, id-level effects,
 and the marker block. The marker block may optionally include an inner
 \code{( ... | id )} term for marker-by-id random effects. When the inner term is
-omitted, marker-by-id random effects are disabled (Q_idm = 0).}
+omitted, marker-by-id random effects are disabled (Q_idm = 0). Use \code{||} to
+enforce diagonal random-effect covariance (e.g., \code{(1 + time || id)}).}
 
 \item{dataLong}{Long-format longitudinal data with columns for id, marker, time,
 outcome, and covariates referenced in \code{formulaLong}.}
@@ -103,15 +106,24 @@ required by that type (see \code{build_standata_transforms()}).}
 
 \item{lkj_prior}{Prior specification for correlation structures.}
 
-\item{indep_id_re}{Integer flag; 1 enforces independent id random effects.}
-
-\item{indep_marker_re}{Integer flag; 1 enforces independent marker random effects.}
-
-\item{indep_idmarker_cov}{Integer flag; 1 uses diagonal covariance for marker-by-id effects.}
-
 \item{allow_marker_crosscorr}{Integer flag; 1 allows cross-marker correlation in marker RE.}
 
 \item{shrinkage}{Integer flag controlling shrinkage behavior for marker-by-id effects.}
+
+\item{marker_weights}{Optional numeric vector of length D giving base weights
+for marker-specific association components. These weights are applied to both
+current value (CV) and current slope (CS) marker summaries. Weights may be
+positive or negative. Internally, base weights are rescaled to unit RMS
+(\eqn{\sqrt{\mathrm{mean}(w^2)} = 1}) for numerical stability and better
+identifiability. When NULL, equal base weights are used.}
+
+\item{estimate_marker_weights}{Logical; if TRUE, estimate marker weights via a
+signed additive perturbation around base weights. The effective weights are
+RMS-stabilized so composition can change while overall scale remains stable.
+Latent perturbations follow Normal or Laplace priors depending on
+\code{shrinkage}.}
+
+\item{marker_weight_scale}{Non-negative prior scale for marker-weight shrinkage.}
 
 \item{flag_resid_dim}{Integer flag to include residual dimension checks.}
 
@@ -124,6 +136,10 @@ required by that type (see \code{build_standata_transforms()}).}
 \item{basehaz_formula}{Formula for baseline hazard when \code{basehaz = "formula"}.}
 
 \item{tau_spline}{Prior scale for spline coefficients (penalized spline).}
+
+\item{vcov_diag_link}{Link for covariance regression diagonals: "softplus" or "exp".}
+
+\item{tau_sde_fixed}{Optional fixed tau for skew-double-exponential (0 < tau < 1).}
 
 \item{seed}{Optional random seed for deterministic components of standata.}
 }

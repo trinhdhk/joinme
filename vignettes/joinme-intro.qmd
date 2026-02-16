@@ -31,26 +31,103 @@ For Stan backends:
 
 ## Quick start: simulate → fit → predict → plot
 
-```r
-library(joinme)
+## Conceptual overview
+
+The `joinme` model links two components:
+
+1. A multivariate longitudinal model for repeated biomarker measurements.
+2. A survival model whose hazard depends on summaries of the longitudinal
+   process at time $t$.
+
+For the longitudinal part, each marker can follow its own distribution
+(Gaussian, Student-$t$, Poisson, negative binomial, Bernoulli, beta,
+skew families, or ordinal). The linear predictor is decomposed into fixed
+effects, subject-level random effects, marker-level random effects, and
+optional marker-by-subject random effects. The survival part uses a
+proportional hazards model with a flexible spline baseline hazard and
+time-dependent association terms.
+
+The association terms implemented in `joinme` are:
+
+- Current value (CV) of the latent linear predictor.
+- Current slope (CS) of the latent linear predictor.
+- Variance association (VCOV) derived from the marker-by-subject
+  covariance structure.
+
+Each association term can be left on its original scale or transformed
+using a functional expression, a monotone I-spline, or a piecewise linear
+mapping. These transformations are configured in R and passed to Stan as
+data so that the likelihood remains fully deterministic.
+
+## Data requirements (minimal)
+
+You need two data frames:
+
+- `dataLong`: long-format longitudinal data with columns for subject id,
+  marker id, time, outcome, and covariates.
+- `dataEvent`: one row per subject with event/censoring time, event
+  indicator, and baseline covariates.
+
+Time is internally scaled to $[0, 1]$ for numerical stability. The model
+returns coefficients on the original time scale.
+
+### Step 1: Load packages and set a reproducible seed
+
+```{r intro-setup}
+if (requireNamespace("pkgload", quietly = TRUE)) {
+  repo_root <- normalizePath("..", mustWork = FALSE)
+  if (file.exists(file.path(repo_root, "DESCRIPTION"))) {
+    pkgload::load_all(repo_root, quiet = TRUE, compile = FALSE)
+  } else {
+    library(joinme)
+  }
+} else {
+  library(joinme)
+}
+library(survival)
 
 set.seed(2026)
+```
 
-# Simulate a small dataset
-sim <- simulate_joinme_joint_student_t_cvtotal(
+### Step 2: Simulate a small dataset
+
+We generate a modest dataset so the workflow runs quickly while still
+containing both longitudinal and survival information.
+
+```{r intro-simulate}
+sim <- simulate_joinme(
   n_id = 10,
-  D = 2,
-  n_t = 4,
+  families = rep("student_t", 2),
+  n_obs_per_marker_per_id = 4,
+  times_obs = seq(0, 5, length.out = 8),
   seed = 2026,
-  include_marker_only = TRUE
+  assoc = c("cv_total"),
+  assoc_coefs = c(cv_total = 0.6)
 )
 
+head(sim$dataLong)
+head(sim$dataEvent)
+```
+
+### Step 3: Specify longitudinal and survival models
+
+The longitudinal formula defines fixed effects and random effects. The survival
+formula defines baseline covariates in the hazard model.
+
+```{r intro-formulas}
 formulaLong <- y ~ 1 + time + x1 +
-  (1 + time | id) +
-  (0 + x1 + (1 + time | id) | marker)
+  (1 + time || id) +
+  (0 + x1 + (1 + time || id) || marker)
 
 formulaEvent <- survival::Surv(time, event) ~ 1 + x1 + x2
+```
 
+### Step 4: Fit the joint model
+
+We link the survival hazard to the current value (CV) of the longitudinal
+process using an identity transformation.
+
+```{r intro-fit}
 fit <- joinme(
   formulaLong = formulaLong,
   dataLong = sim$dataLong,
@@ -60,6 +137,8 @@ fit <- joinme(
   families = rep("student_t", 2),
   transforms = list(cv_total = list(type = "identity")),
   control = list(
+    engine = "rstan",
+    chains = 1,
     parallel_chains = 1,
     iter_warmup = 100,
     iter_sampling = 100,
@@ -68,29 +147,45 @@ fit <- joinme(
     adapt_delta = 0.9
   )
 )
+```
 
-# Summaries
+### Step 5: Summarize fixed effects and associations
+
+```{r intro-summaries}
 summary(fit)
 fixef(fit)
+```
 
-# Dynamic prediction for one subject
+### Step 6: Dynamic prediction for one subject
+
+We condition on the observed history up to the last measurement for subject 1
+and obtain predictive summaries beyond that time.
+
+```{r intro-predict}
 ndL <- sim$dataLong[sim$dataLong$id == 1, ]
 ndE <- sim$dataEvent[sim$dataEvent$id == 1, ]
-Tstart <- max(ndL$time)
+time_start <- max(ndL$time)
 
-pred <- posterior_epred(
+pred <- rstantools::posterior_epred(
   fit,
   newdataLong = ndL,
   newdataEvent = ndE,
-  Tstart = Tstart,
-  times = seq(Tstart, Tstart + 1, length.out = 20),
+  time_start = time_start,
+  times = seq(time_start, time_start + 1, length.out = 20),
   n_samples = 50,
   seed = 2026
 )
-
-# Plot longitudinal and survival predictions
-plot(pred)
 ```
+
+### Step 7: Plot longitudinal and survival predictions
+
+```{r intro-plot}
+plot(pred, which = c("longitudinal", "survival"), combined = TRUE)
+```
+
+If `patchwork`/`cowplot` is unavailable, `combined = TRUE` falls back to the
+standard per-subject structured return (grouped by subject and outcome) instead
+of any flattened helper list.
 
 ## Next steps
 

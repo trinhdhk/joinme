@@ -1,0 +1,1022 @@
+/**
+ * @file joinme_fit_partial.stanfunctions
+ * @brief Subject-specific joint log-likelihood for reduce_sum parallelization.
+ *
+ * @details This function computes the combined longitudinal and survival log-likelihood
+ * for a slice of subjects (from `start` to `end` indices in `id_seq`). It is designed
+ * for parallel execution via Stan's `reduce_sum()`, enabling efficient multi-threading
+ * over subjects.
+ *
+ * ## ALGORITHM OVERVIEW:
+ *
+ * For each subject i in the slice:
+ *
+ * ### STEP 1: LONGITUDINAL LIKELIHOOD
+ *   - Iterate over all observations for subject i (rows id_start[i]:id_end[i])
+ *   - For each observation n:
+ *     a. Compute linear predictor: eta = X*beta + Z_id*u_i + Z_mk*v_d + Z_idm*w_{i,d}
+ *        where d = marker type for observation n
+ *     b. Compute distributional parameters (sigma, nu, phi, alpha, tau) via auxiliary regressions if present
+ *     c. Accumulate log p(y_n | eta, distributional params, family)
+ *        Family types (11 options):
+ *          1: Gaussian(eta, sigma)
+ *          2: Student-t(eta, sigma, nu)
+ *          3: Bernoulli(logit^-1(eta))
+ *          4: Binomial(trials, logit^-1(eta))
+ *          5: Poisson(exp(eta))
+ *          6: Negative-Binomial(exp(eta), phi)
+ *          7: Skew-Normal(eta, sigma, alpha)
+ *          8: Skew-Double-Exponential(eta, sigma, tau)
+ *          10: Beta regression (logit^-1(eta), phi)
+ *          11: Ordered-Logistic(eta, cutpoints)
+ *
+ * ### STEP 2: ASSOCIATION FEATURE COMPUTATION (for survival sub-model)
+ *   Compute current values (CV) and current slopes (CS) at 15 Gauss-Kronrod nodes
+ *   covering [0, S_event[i]]:
+ *
+ *   a. **Current Value - Mean Component (cvm)**:
+ *      cvm(t) = X(t)*beta + Z_id(t)*u_i
+ *      This captures the subject-average trajectory
+ *
+ *   b. **Current Value - Marker Component (cvk)**:
+ *      cvk(t) = Z_mk(t)*vbar + Z_idm(t)*wbar_i
+ *      where vbar = weighted average of v_marker across markers
+ *            wbar_i = weighted average of w_idscaled[i, ] across markers
+ *      This captures marker-specific deviations
+ *
+ *   c. **Current Slope via Finite Difference**:
+ *      CS(t) approx [CV(t + eps) - CV(t)] / eps
+ *      where eps = eps_fd (small forward step)
+ *      Compute separately for mean (csm) and marker (csk) components
+ *      Time-rescale by dividing by tmax (since time scaled to [0,1] internally)
+ *
+ *   d. **Variance-Covariance Association (vcov)**:
+ *      vcov = sum_q a_vcov_var[q] * log(Var[w_i[q]])
+ *      where Var[w_i[q]] = sum_{k=1}^q L_i[q,k]^2  (from Cholesky: Sigma_i = L_i*L_i')
+ *      This is constant across time for a given subject
+ *
+ *   e. **Aggregate Total Features**:
+ *      cv_total = cvm + cvk  (full current value)
+ *      cs_total = csm + csk  (full current slope)
+ *
+ * ### STEP 3: NONLINEAR TRANSFORMATIONS OF ASSOCIATION FEATURES
+ *   Each association type (cv_total, cv_mean, cv_marker, cs_total, cs_mean, cs_marker, vcov)
+ *   can be transformed flexibly before entering the survival predictor:
+ *
+ *   Transformation modes (tf_mode):
+ *     0: Identity (no transformation)
+ *     1: Functional opcodes (stack-based evaluator for arbitrary compositions)
+ *     2: I-spline basis (monotonic smooth transformation)
+ *     3: Piecewise-linear interpolation
+ *
+ *   Each transform configured via:
+ *     - functional_ops_*: Opcodes for mode 1
+ *     - const_data_*: Constants for opcodes
+ *     - knots_*, coeff_*: Spline knots and coefficients for modes 2-3
+ *     - spline_degree_*: Spline degree for mode 2
+ *
+ * ### STEP 4: SURVIVAL LIKELIHOOD - HAZARD AT EVENT TIME
+ *   If subject i experienced an event (d_event[i] = 1):
+ *     a. Identify event cause: k_ev = event_type[i] in {1, ..., K_event}
+ *     b. Compute baseline log-hazard at event time:
+ *        log h0(S_i) = log_h0_intercept[k_ev] + Bs_event_c[i]'*bs_gamma_c[k_ev]
+ *        where Bs_event_c are B-spline basis values at S_event[i]
+ *     c. Compute hazard covariate effect:
+ *        eta_w = W[i]'*gamma_w[k_ev]
+ *     d. Compute association features at event time (same as STEP 2, but for S_event[i])
+ *     e. Transform and aggregate:
+ *        eta_assoc_S = sum(a_* * transformed_association_feature)
+ *     f. Add log-hazard contribution:
+ *        log h(S_i | k_ev) = log h0(S_i) + eta_w + eta_assoc_S
+ *
+ * ### STEP 5: SURVIVAL LIKELIHOOD - CUMULATIVE HAZARD
+ *   Compute cumulative hazard via Gauss-Kronrod 15-point quadrature:
+ *
+ *   Lambda(S_i) = integral_0^{S_i} sum_{k=1}^{K_event} h_k(t) dt
+ *
+ *   where h_k(t) = h0_k(t) * exp(eta_w[k] + eta_assoc(t))
+ *
+ *   Steps:
+ *     a. For each GK node j in {1, ..., 15}:
+ *        - Compute total log-hazard across all competing risks:
+ *          log h_total(t_j) = log sum_k exp(log h0_k(t_j) + eta_w[k] + eta_assoc[j])
+ *     b. Apply cumhaz() function with GK weights to numerically integrate
+ *     c. Add survival contribution: log S(S_i) = -Lambda(S_i)
+ *
+ * ## PARALLELIZATION STRATEGY:
+ *   - This function processes subjects [start:end] independently
+ *   - `reduce_sum()` splits subjects into chunks, each calling this function
+ *   - Results are summed across chunks to get total log-likelihood
+ *   - Threading efficiency depends on:
+ *     * grainsize (subjects per chunk)
+ *     * Subject-level computation balance (subjects with more obs take longer)
+ *
+ * @param id_seq Array of subject indices to process (indexed from 1 to n_id)
+ * @param start Start index in `id_seq`.
+ * @param end End index in `id_seq`.
+ * @param id Array mapping observation rows to subjects.
+ * @param marker Array mapping observation rows to marker types.
+ * @param y_real Vector of continuous response values.
+ * @param y_int Array of integer response values (for ordinal/count).
+ * @param trials Array of trial counts for binomial outcomes.
+ * @param family_long Array of family codes for each observation.
+ * @param flag_resid_dim Integer flag for residual dimension options.
+ * @param use_tau_sde_fixed Integer flag to use fixed tau for SDE.
+ * @param tau_sde_fixed Fixed tau value for SDE (0 < tau < 1).
+ * @param X_obs Fixed effects design matrix for longitudinal part.
+ * @param Z_id_obs Random effects design matrix (subject-level).
+ * @param Z_mk_obs Random effects design matrix (marker-level).
+ * @param Z_idm_obs Random effects design matrix (subject-marker interact).
+ * @param R_mk Number of marker-level random effects.
+ * @param Q_idm Number of subject-marker interaction random effects.
+ * @param beta_scaled Fixed effects coefficients (scaled).
+ * @param P_sigma Number of coefficients for sigma regression.
+ * @param X_sigma Design matrix for sigma regression.
+ * @param P_nu Number of coefficients for nu regression.
+ * @param X_nu Design matrix for nu regression.
+ * @param P_phi Number of coefficients for phi regression.
+ * @param X_phi Design matrix for phi regression.
+ * @param P_alpha Number of coefficients for alpha regression.
+ * @param X_alpha Design matrix for alpha regression.
+ * @param P_phi_beta Number of coefficients for phi_beta regression.
+ * @param X_phi_beta Design matrix for phi_beta regression.
+ * @param P_tau_sde Number of coefficients for tau_sde regression.
+ * @param X_tau_sde Design matrix for tau_sde regression.
+ * @param beta_sigma Coefficients for sigma regression.
+ * @param beta_nu Coefficients for nu regression.
+ * @param beta_phi Coefficients for phi regression.
+ * @param beta_alpha Coefficients for alpha regression.
+ * @param beta_phi_beta Coefficients for phi_beta regression.
+ * @param beta_tau_sde Coefficients for tau_sde regression.
+ * @param n_re_sigma Number of random effects for sigma.
+ * @param K_sigma Random effect dimensions for sigma.
+ * @param K_sigma_max Max random effect dimension for sigma.
+ * @param Z_sigma Random effect design matrices for sigma.
+ * @param J_sigma Random effect grouping indices for sigma.
+ * @param tau_sigma Random effect scales for sigma.
+ * @param z_sigma Standard normal draws for sigma random effects.
+ * @param n_re_nu Number of random effects for nu.
+ * @param K_nu Random effect dimensions for nu.
+ * @param K_nu_max Max random effect dimension for nu.
+ * @param Z_nu Random effect design matrices for nu.
+ * @param J_nu Random effect grouping indices for nu.
+ * @param tau_nu Random effect scales for nu.
+ * @param z_nu Standard normal draws for nu random effects.
+ * @param n_re_phi Number of random effects for phi.
+ * @param K_phi Random effect dimensions for phi.
+ * @param K_phi_max Max random effect dimension for phi.
+ * @param Z_phi Random effect design matrices for phi.
+ * @param J_phi Random effect grouping indices for phi.
+ * @param tau_phi Random effect scales for phi.
+ * @param z_phi Standard normal draws for phi random effects.
+ * @param n_re_alpha Number of random effects for alpha.
+ * @param K_alpha Random effect dimensions for alpha.
+ * @param K_alpha_max Max random effect dimension for alpha.
+ * @param Z_alpha Random effect design matrices for alpha.
+ * @param J_alpha Random effect grouping indices for alpha.
+ * @param tau_alpha Random effect scales for alpha.
+ * @param z_alpha Standard normal draws for alpha random effects.
+ * @param n_re_phi_beta Number of random effects for phi_beta.
+ * @param K_phi_beta Random effect dimensions for phi_beta.
+ * @param K_phi_beta_max Max random effect dimension for phi_beta.
+ * @param Z_phi_beta Random effect design matrices for phi_beta.
+ * @param J_phi_beta Random effect grouping indices for phi_beta.
+ * @param tau_phi_beta Random effect scales for phi_beta.
+ * @param z_phi_beta Standard normal draws for phi_beta random effects.
+ * @param n_re_tau_sde Number of random effects for tau_sde.
+ * @param K_tau_sde Random effect dimensions for tau_sde.
+ * @param K_tau_sde_max Max random effect dimension for tau_sde.
+ * @param Z_tau_sde Random effect design matrices for tau_sde.
+ * @param J_tau_sde Random effect grouping indices for tau_sde.
+ * @param tau_tau_sde Random effect scales for tau_sde.
+ * @param z_tau_sde Standard normal draws for tau_sde random effects.
+ * @param u_id Random effects (subject-level).
+ * @param v_marker Random effects (marker-level).
+ * @param w_idscaled Random effects (scaled subject-marker).
+ * @param wbar_i Mean of random effects per subject (for centering).
+ * @param sigma_y Base residual standard deviation.
+ * @param sigma_marker Marker-specific residual scales.
+ * @param nu_marker Marker-specific degrees of freedom (t-dist).
+ * @param phi_nb_marker Marker-specific dispersion (neg-binomial).
+ * @param alpha_skew_marker Marker-specific skewness (skew-normal).
+ * @param phi_beta_marker Marker-specific precision (beta).
+ * @param tau_sde_marker Marker-specific SDE diffusion scales.
+ * @param K_ord Number of ordinal categories.
+ * @param cutpoints_ord Cutpoints for ordinal models.
+ * @param p_w Number of survival covariates.
+ * @param W Survival design matrix.
+ * @param gamma_w Survival coefficients.
+ * @param log_h0_intercept Baseline hazard intercepts.
+ * @param bs_gamma_c B-spline coefficients for baseline hazard.
+ * @param Kbs Number of B-spline basis functions for baseline hazard.
+ * @param Bs_event_c B-spline basis at event times.
+ * @param Bs_gk_c B-spline basis at Gauss-Kronrod nodes.
+ * @param S_event Event times.
+ * @param d_event Event indicators.
+ * @param K_event Number of competing risks.
+ * @param event_type Type of event for each subject.
+ * @param eps_fd Finite difference epsilon step size.
+ * @param X_gk_now Design matrix at GK nodes (current).
+ * @param X_gk_fwd Design matrix at GK nodes (forward).
+ * @param Z_id_gk_now Random effect design matrix at GK nodes (id, current).
+ * @param Z_id_gk_fwd Random effect design matrix at GK nodes (id, forward).
+ * @param X_event_now Design matrix at event times (current).
+ * @param X_event_fwd Design matrix at event times (forward).
+ * @param Z_id_event_now Random effect design matrix at event times (id, current).
+ * @param Z_id_event_fwd Random effect design matrix at event times (id, forward).
+ * @param Z_mk_gk_now Random effect design matrix at GK nodes (mk, current).
+ * @param Z_mk_gk_fwd Random effect design matrix at GK nodes (mk, forward).
+ * @param Z_idm_gk_now Random effect design matrix at GK nodes (idm, current).
+ * @param Z_idm_gk_fwd Random effect design matrix at GK nodes (idm, forward).
+ * @param Z_mk_event_now Random effect design matrix at event times (mk, current).
+ * @param Z_mk_event_fwd Random effect design matrix at event times (mk, forward).
+ * @param Z_idm_event_now Random effect design matrix at event times (idm, current).
+ * @param Z_idm_event_fwd Random effect design matrix at event times (idm, forward).
+ * @param vbar Mean of random effects (global).
+ * @param L_i Cholesky factors for random effects.
+ * @param a_cv_total Association weight (Total Current Value).
+ * @param a_cs_total Association weight (Total Current Slope).
+ * @param a_cv_mean Association weight (Mean Current Value).
+ * @param a_cv_marker Association weight (Marker Current Value).
+ * @param a_cs_mean Association weight (Mean Current Slope).
+ * @param a_cs_marker Association weight (Marker Current Slope).
+ * @param a_vcov_var Association weights for variance components.
+ * @param tf_mode_cv_tot Transformation mode (CV Total).
+ * @param tf_mode_cs_tot Transformation mode (CS Total).
+ * @param tf_mode_vcov Transformation mode (VCOV).
+ * @param tf_mode_cv_mean Transformation mode (CV Mean).
+ * @param tf_mode_cv_marker Transformation mode (CV Marker).
+ * @param tf_mode_cs_mean Transformation mode (CS Mean).
+ * @param tf_mode_cs_marker Transformation mode (CS Marker).
+ * @param functional_ops_cv Functional operations (CV).
+ * @param const_data_cv Constant data (CV).
+ * @param knots_cv Spline knots (CV).
+ * @param coeff_cv Spline coefficients (CV).
+ * @param spline_degree_cv Spline degree (CV).
+ * @param functional_ops_cs Functional operations (CS).
+ * @param const_data_cs Constant data (CS).
+ * @param knots_cs Spline knots (CS).
+ * @param coeff_cs Spline coefficients (CS).
+ * @param spline_degree_cs Spline degree (CS).
+ * @param functional_ops_vcov Functional operations (VCOV).
+ * @param const_data_vcov Constant data (VCOV).
+ * @param knots_vcov Spline knots (VCOV).
+ * @param coeff_vcov Spline coefficients (VCOV).
+ * @param spline_degree_vcov Spline degree (VCOV).
+ * @param functional_ops_cv_mean Functional operations (CV Mean).
+ * @param const_data_cv_mean Constant data (CV Mean).
+ * @param knots_cv_mean Spline knots (CV Mean).
+ * @param coeff_cv_mean Spline coefficients (CV Mean).
+ * @param spline_degree_cv_mean Spline degree (CV Mean).
+ * @param functional_ops_cv_marker Functional operations (CV Marker).
+ * @param const_data_cv_marker Constant data (CV Marker).
+ * @param knots_cv_marker Spline knots (CV Marker).
+ * @param coeff_cv_marker Spline coefficients (CV Marker).
+ * @param spline_degree_cv_marker Spline degree (CV Marker).
+ * @param functional_ops_cs_mean Functional operations (CS Mean).
+ * @param const_data_cs_mean Constant data (CS Mean).
+ * @param knots_cs_mean Spline knots (CS Mean).
+ * @param coeff_cs_mean Spline coefficients (CS Mean).
+ * @param spline_degree_cs_mean Spline degree (CS Mean).
+ * @param functional_ops_cs_marker Functional operations (CS Marker).
+ * @param const_data_cs_marker Constant data (CS Marker).
+ * @param knots_cs_marker Spline knots (CS Marker).
+ * @param coeff_cs_marker Spline coefficients (CS Marker).
+ * @param spline_degree_cs_marker Spline degree (CS Marker).
+ * @param id_start Start index for each subject in longitudinal data.
+ * @param id_end End index for each subject in longitudinal data.
+ * @param tmax Time scaling factor.
+ * @return Accumulated log-likelihood for the slice.
+ */
+real partial_joinme(
+    array[] int id_seq,
+    int start,
+    int end,
+    array[] int id,
+    array[] int marker,
+    vector y_real,
+    array[] int y_int,
+    array[] int trials,
+    array[] int family_long,
+    int flag_resid_dim,
+    int use_tau_sde_fixed,
+    real tau_sde_fixed,
+    matrix X_obs,
+    matrix Z_id_obs,
+    matrix Z_mk_obs,
+    matrix Z_idm_obs,
+    int R_mk,
+    int Q_idm,
+    vector beta_scaled,
+    int P_sigma,
+    matrix X_sigma,
+    int P_nu,
+    matrix X_nu,
+    int P_phi,
+    matrix X_phi,
+    int P_alpha,
+    matrix X_alpha,
+    int P_phi_beta,
+    matrix X_phi_beta,
+    int P_tau_sde,
+    matrix X_tau_sde,
+    vector beta_sigma,
+    vector beta_nu,
+    vector beta_phi,
+    vector beta_alpha,
+    vector beta_phi_beta,
+    vector beta_tau_sde,
+    int n_re_sigma,
+    array[] int K_sigma,
+    int K_sigma_max,
+    array[] matrix Z_sigma,
+    array[,] int J_sigma,
+    array[] vector tau_sigma,
+    array[] matrix z_sigma,
+    int n_re_nu,
+    array[] int K_nu,
+    int K_nu_max,
+    array[] matrix Z_nu,
+    array[,] int J_nu,
+    array[] vector tau_nu,
+    array[] matrix z_nu,
+    int n_re_phi,
+    array[] int K_phi,
+    int K_phi_max,
+    array[] matrix Z_phi,
+    array[,] int J_phi,
+    array[] vector tau_phi,
+    array[] matrix z_phi,
+    int n_re_alpha,
+    array[] int K_alpha,
+    int K_alpha_max,
+    array[] matrix Z_alpha,
+    array[,] int J_alpha,
+    array[] vector tau_alpha,
+    array[] matrix z_alpha,
+    int n_re_phi_beta,
+    array[] int K_phi_beta,
+    int K_phi_beta_max,
+    array[] matrix Z_phi_beta,
+    array[,] int J_phi_beta,
+    array[] vector tau_phi_beta,
+    array[] matrix z_phi_beta,
+    int n_re_tau_sde,
+    array[] int K_tau_sde,
+    int K_tau_sde_max,
+    array[] matrix Z_tau_sde,
+    array[,] int J_tau_sde,
+    array[] vector tau_tau_sde,
+    array[] matrix z_tau_sde,
+    array[] vector u_id,
+    array[] vector v_marker,
+    array[,] vector w_idscaled,
+    array[] vector wbar_i,
+    real sigma_y,
+    vector sigma_marker,
+    vector nu_marker,
+    vector phi_nb_marker,
+    vector alpha_skew_marker,
+    vector phi_beta_marker,
+    vector tau_sde_marker,
+    int K_ord,
+    vector cutpoints_ord,
+    int p_w,
+    matrix W,
+    array[] vector gamma_w,
+    array[] real log_h0_intercept,
+    array[] vector bs_gamma_c,
+    int Kbs,
+    matrix Bs_event_c,
+    array[] matrix Bs_gk_c,
+    vector S_event,
+    array[] int d_event,
+    int K_event,
+    array[] int event_type,
+    real eps_fd,
+    array[] matrix X_gk_now,
+    array[] matrix X_gk_fwd,
+    array[] matrix Z_id_gk_now,
+    array[] matrix Z_id_gk_fwd,
+    matrix X_event_now,
+    matrix X_event_fwd,
+    matrix Z_id_event_now,
+    matrix Z_id_event_fwd,
+    array[] matrix Z_mk_gk_now,
+    array[] matrix Z_mk_gk_fwd,
+    array[] matrix Z_idm_gk_now,
+    array[] matrix Z_idm_gk_fwd,
+    matrix Z_mk_event_now,
+    matrix Z_mk_event_fwd,
+    matrix Z_idm_event_now,
+    matrix Z_idm_event_fwd,
+    vector vbar,
+    array[] matrix L_i,
+    real a_cv_total,
+    real a_cs_total,
+    real a_cv_mean,
+    real a_cv_marker,
+    real a_cs_mean,
+    real a_cs_marker,
+    vector a_vcov_var,
+    int tf_mode_cv_tot,
+    int tf_mode_cs_tot,
+    int tf_mode_vcov,
+    int tf_mode_cv_mean,
+    int tf_mode_cv_marker,
+    int tf_mode_cs_mean,
+    int tf_mode_cs_marker,
+    array[] int functional_ops_cv,
+    vector const_data_cv,
+    vector knots_cv,
+    vector coeff_cv,
+    int spline_degree_cv,
+    array[] int functional_ops_cs,
+    vector const_data_cs,
+    vector knots_cs,
+    vector coeff_cs,
+    int spline_degree_cs,
+    array[] int functional_ops_vcov,
+    vector const_data_vcov,
+    vector knots_vcov,
+    vector coeff_vcov,
+    int spline_degree_vcov,
+    array[] int functional_ops_cv_mean,
+    vector const_data_cv_mean,
+    vector knots_cv_mean,
+    vector coeff_cv_mean,
+    int spline_degree_cv_mean,
+    array[] int functional_ops_cv_marker,
+    vector const_data_cv_marker,
+    vector knots_cv_marker,
+    vector coeff_cv_marker,
+    int spline_degree_cv_marker,
+    array[] int functional_ops_cs_mean,
+    vector const_data_cs_mean,
+    vector knots_cs_mean,
+    vector coeff_cs_mean,
+    int spline_degree_cs_mean,
+    array[] int functional_ops_cs_marker,
+    vector const_data_cs_marker,
+    vector knots_cs_marker,
+    vector coeff_cs_marker,
+    int spline_degree_cs_marker,
+    array[] int id_start,
+    array[] int id_end,
+    real tmax
+) {
+  real lp = 0;  // Accumulated log-likelihood for this subject slice
+
+  // =====================================================================
+  // LOOP OVER SUBJECTS IN THIS SLICE
+  // =====================================================================
+  for (ii in start : end) {
+    int idx_local = ii - start + 1;  // Local index within slice
+    int i = id_seq[idx_local];       // Global subject index
+
+    // Cached weighted average of subject-by-marker REs (used in survival submodel)
+    vector[Q_idm] wbar_i_i = wbar_i[i];
+
+    // ---------------------------------------------------------------------
+    // PART 1: LONGITUDINAL LOG-LIKELIHOOD
+    // ---------------------------------------------------------------------
+    // Process all observations for subject i (from row id_start[i] to id_end[i])
+    // Each observation contributes log p(y_n | subject REs, parameters, family)
+    
+    for (n in id_start[i] : id_end[i]) {
+      int d = marker[n];  // Marker type for this observation (1, 2, ..., D_mkrs)
+      
+      // Subject-by-marker interaction random effects for this observation
+      vector[Q_idm] w_idscaled_i = w_idscaled[i, d]; // marker-id RE for obs n
+      
+      // -------------------------------------------------------------------
+      // LINEAR PREDICTOR (LOCATION PARAMETER) FOR LONGITUDINAL OBSERVATION
+      // -------------------------------------------------------------------
+      // eta = X*beta + Z_id*u_i + Z_mk*v_d + Z_idm*w_{i,d}
+      //
+      // Components:
+      //   - X*beta        : Fixed effects (population-level trajectory)
+      //   - Z_id*u_i      : Subject-specific deviation (R_id random effects)
+      //   - Z_mk*v_d      : Marker-specific effect (R_mk random effects)
+      //   - Z_idm*w_{i,d} : Subject-by-marker interaction (Q_idm random effects)
+      real eta_long = dot_product(X_obs[n], beta_scaled)
+                      + dot_product(Z_id_obs[n], u_id[i])
+                      + ((R_mk > 0) ? dot_product(Z_mk_obs[n], v_marker[d]) : 0.0)
+                      + dot_product(Z_idm_obs[n], w_idscaled_i);
+      // eta_long: linear predictor for observation n
+
+      // -------------------------------------------------------------------
+      // DISTRIBUTIONAL PARAMETERS AND LIKELIHOOD BY FAMILY TYPE
+      // -------------------------------------------------------------------
+      // Each family may have auxiliary parameters (sigma, nu, phi, alpha, tau) with their
+      // own regression structures. These parameters can vary by:
+      //   - Fixed effects (X_sigma, X_nu, etc.)
+      //   - Random effects (Z_sigma, Z_nu, etc. with grouping factors)
+      //   - Marker-specific constants (sigma_marker, nu_marker, etc.)
+      //   - Global constant (sigma_y)
+      
+      // FAMILY 1: GAUSSIAN
+      // p(y | eta, sigma) = Normal(y | eta, sigma)
+      // Location: eta (computed above)
+      // Scale: sigma (log scale: log(sigma) = X_sigma*beta_sigma + Z_sigma*b_sigma, or constant)
+      if (family_long[d] == 1) {
+        real eta_sigma = 0; // log-sigma linear predictor
+        
+        // Fixed effects regression for log(sigma)
+        if (P_sigma > 0) eta_sigma += dot_product(X_sigma[n], beta_sigma);
+        
+        // Random effects for log(sigma) (multi-level structure)
+        if (n_re_sigma > 0) {
+          for (j in 1 : n_re_sigma) {
+            // Construct random effects: b_j = z_j .* tau_j (element-wise product)
+            // z_j ~ N(0, I), tau_j = scales
+            vector[K_sigma[j]] b = (to_vector(z_sigma[j][J_sigma[j, n], 1:K_sigma[j]]) .* tau_sigma[j][1:K_sigma[j]]);
+            // b: sigma random-effect coefficients for term j
+            eta_sigma += dot_product(Z_sigma[j][n, 1:K_sigma[j]], b);
+          }
+        }
+        
+        // Compute sigma from regression or use marker/global constant
+        real sig = (P_sigma > 0 || n_re_sigma > 0)
+                   ? exp(eta_sigma)  // If regression present, exponentiate to ensure sigma > 0
+                   : ((flag_resid_dim == 1) ? sigma_marker[d] : sigma_y);  // Else use constant
+        // sig: residual scale
+        
+        lp += normal_lpdf(y_real[n] | eta_long, sig);
+        
+      // FAMILY 2: STUDENT-T
+      // p(y | eta, sigma, nu) = Student_t(y | nu, eta, sigma)
+      // Heavier tails than Gaussian, robust to outliers
+      // Location: eta, Scale: sigma, Degrees-of-freedom: nu
+      // Both sigma and nu can have auxiliary regressions
+      } else if (family_long[d] == 2) {
+        // --- Compute sigma (same logic as Gaussian) ---
+        real eta_sigma = 0; // log-sigma linear predictor
+        if (P_sigma > 0) eta_sigma += dot_product(X_sigma[n], beta_sigma);
+        if (n_re_sigma > 0) {
+          for (j in 1 : n_re_sigma) {
+            vector[K_sigma[j]] b = (to_vector(z_sigma[j][J_sigma[j, n], 1:K_sigma[j]]) .* tau_sigma[j][1:K_sigma[j]]);
+            // b: sigma random-effect coefficients for term j
+            eta_sigma += dot_product(Z_sigma[j][n, 1:K_sigma[j]], b);
+          }
+        }
+        real sig = (P_sigma > 0 || n_re_sigma > 0)
+                   ? exp(eta_sigma)
+                   : ((flag_resid_dim == 1) ? sigma_marker[d] : sigma_y);
+        // sig: residual scale
+        
+        // --- Compute nu (degrees of freedom) ---
+        // Parameterization: nu = 2 + exp(eta_nu) to ensure nu > 2 (finite variance)
+        real eta_nu = 0; // nu linear predictor
+        if (P_nu > 0) eta_nu += dot_product(X_nu[n], beta_nu);
+        if (n_re_nu > 0) {
+          for (j in 1 : n_re_nu) {
+            vector[K_nu[j]] b = (to_vector(z_nu[j][J_nu[j, n], 1:K_nu[j]]) .* tau_nu[j][1:K_nu[j]]);
+            // b: nu random-effect coefficients for term j
+            eta_nu += dot_product(Z_nu[j][n, 1:K_nu[j]], b);
+          }
+        }
+        real nu = (P_nu > 0 || n_re_nu > 0) ? (2 + exp(eta_nu)) : nu_marker[d];
+        // nu: degrees of freedom
+        
+        lp += student_t_lpdf(y_real[n] | nu, eta_long, sig);
+        
+      // FAMILY 3: BERNOULLI (BINARY LOGISTIC)
+      // p(y = 1 | eta) = logit^-1(eta) = 1 / (1 + exp(-eta))
+      // For binary outcomes (y in {0, 1})
+      } else if (family_long[d] == 3) {
+        lp += bernoulli_logit_lpmf(y_int[n] | eta_long);
+        
+      // FAMILY 4: BINOMIAL (BINOMIAL LOGISTIC)
+      // p(y | N, eta) = Binomial(y | N, p), where p = logit^-1(eta)
+      // For count outcomes with known number of trials N
+      } else if (family_long[d] == 4) {
+        lp += binomial_logit_lpmf(y_int[n] | trials[n], eta_long);
+        
+      // FAMILY 5: POISSON
+      // p(y | eta) = Poisson(y | mu), where mu = exp(eta)
+      // For count data (y in {0, 1, 2, ...})
+      } else if (family_long[d] == 5) {
+        lp += poisson_log_lpmf(y_int[n] | eta_long);
+        
+      // FAMILY 6: NEGATIVE BINOMIAL
+      // p(y | eta, phi) = NegBinom(y | mu, phi), where mu = exp(eta)
+      // Over-dispersed Poisson (variance = mu + mu^2 / phi)
+      // phi = dispersion parameter (larger phi -> closer to Poisson)
+      } else if (family_long[d] == 6) {
+        // Compute phi via regression or constant
+        real eta_phi = 0; // log-phi linear predictor
+        if (P_phi > 0) eta_phi += dot_product(X_phi[n], beta_phi);
+        if (n_re_phi > 0) {
+          for (j in 1 : n_re_phi) {
+            vector[K_phi[j]] b = (to_vector(z_phi[j][J_phi[j, n], 1:K_phi[j]]) .* tau_phi[j][1:K_phi[j]]);
+            // b: phi random-effect coefficients for term j
+            eta_phi += dot_product(Z_phi[j][n, 1:K_phi[j]], b);
+          }
+        }
+        real phi = (P_phi > 0 || n_re_phi > 0) ? exp(eta_phi) : phi_nb_marker[d];
+        // phi: negbin dispersion
+        
+        lp += neg_binomial_2_log_lpmf(y_int[n] | eta_long, phi);
+        
+      // FAMILY 7: SKEW-NORMAL
+      // p(y | eta, sigma, alpha) = SkewNormal(y | eta, sigma, alpha)
+      // Extension of Gaussian with skewness parameter alpha
+      // alpha = 0 -> standard Gaussian, alpha != 0 -> asymmetric distribution
+      } else if (family_long[d] == 7) {
+        // Compute sigma (same as Gaussian)
+        real eta_sigma = 0; // log-sigma linear predictor
+        if (P_sigma > 0) eta_sigma += dot_product(X_sigma[n], beta_sigma);
+        if (n_re_sigma > 0) {
+          for (j in 1 : n_re_sigma) {
+            vector[K_sigma[j]] b = (to_vector(z_sigma[j][J_sigma[j, n], 1:K_sigma[j]]) .* tau_sigma[j][1:K_sigma[j]]);
+            // b: sigma random-effect coefficients for term j
+            eta_sigma += dot_product(Z_sigma[j][n, 1:K_sigma[j]], b);
+          }
+        }
+        real sig = (P_sigma > 0 || n_re_sigma > 0)
+                   ? exp(eta_sigma)
+                   : ((flag_resid_dim == 1) ? sigma_marker[d] : sigma_y);
+        // sig: residual scale
+        
+        // Compute alpha (skewness parameter, unrestricted real)
+        real eta_alpha = 0; // alpha linear predictor
+        if (P_alpha > 0) eta_alpha += dot_product(X_alpha[n], beta_alpha);
+        if (n_re_alpha > 0) {
+          for (j in 1 : n_re_alpha) {
+            vector[K_alpha[j]] b = (to_vector(z_alpha[j][J_alpha[j, n], 1:K_alpha[j]]) .* tau_alpha[j][1:K_alpha[j]]);
+            // b: alpha random-effect coefficients for term j
+            eta_alpha += dot_product(Z_alpha[j][n, 1:K_alpha[j]], b);
+          }
+        }
+        real alpha = (P_alpha > 0 || n_re_alpha > 0) ? eta_alpha : alpha_skew_marker[d];
+        // alpha: skewness
+        
+        lp += skew_normal_lpdf(y_real[n] | eta_long, sig, alpha);
+        
+      // FAMILY 8: SKEW-DOUBLE-EXPONENTIAL (ASYMMETRIC LAPLACE)
+      // p(y | eta, sigma, tau) = SkewDE(y | eta, sigma, tau)
+      // Heavy-tailed distribution with separate left/right tail behavior
+      // tau in (0,1): asymmetry parameter (0.5 = symmetric Laplace)
+      } else if (family_long[d] == 8) {
+        // Compute sigma (scale parameter)
+        real eta_sigma = 0; // log-sigma linear predictor
+        if (P_sigma > 0) eta_sigma += dot_product(X_sigma[n], beta_sigma);
+        if (n_re_sigma > 0) {
+          for (j in 1 : n_re_sigma) {
+            vector[K_sigma[j]] b = (to_vector(z_sigma[j][J_sigma[j, n], 1:K_sigma[j]]) .* tau_sigma[j][1:K_sigma[j]]);
+            // b: sigma random-effect coefficients for term j
+            eta_sigma += dot_product(Z_sigma[j][n, 1:K_sigma[j]], b);
+          }
+        }
+        real sig = (P_sigma > 0 || n_re_sigma > 0)
+                   ? exp(eta_sigma)
+                   : ((flag_resid_dim == 1) ? sigma_marker[d] : sigma_y);
+        // sig: residual scale
+        lp += double_exponential_lpdf(y_real[n] | eta_long, sig);
+      } else if (family_long[d] == 9) {
+        real eta_sigma = 0; // log-sigma linear predictor
+        if (P_sigma > 0) eta_sigma += dot_product(X_sigma[n], beta_sigma);
+        if (n_re_sigma > 0) {
+          for (j in 1 : n_re_sigma) {
+            vector[K_sigma[j]] b = (to_vector(z_sigma[j][J_sigma[j, n], 1:K_sigma[j]]) .* tau_sigma[j][1:K_sigma[j]]);
+            // b: sigma random-effect coefficients for term j
+            eta_sigma += dot_product(Z_sigma[j][n, 1:K_sigma[j]], b);
+          }
+        }
+        real sig = (P_sigma > 0 || n_re_sigma > 0)
+                   ? exp(eta_sigma)
+                   : ((flag_resid_dim == 1) ? sigma_marker[d] : sigma_y);
+        // sig: residual scale
+        
+        // Compute tau (asymmetry parameter, constrained to (0,1) via logit link)
+        // tau = logit^-1(eta_tau) ensures 0 < tau < 1
+        real tau_sde;
+        if (use_tau_sde_fixed == 1) {
+          tau_sde = tau_sde_fixed;
+        } else {
+          real eta_tau = 0; // tau_sde linear predictor
+          if (P_tau_sde > 0) eta_tau += dot_product(X_tau_sde[n], beta_tau_sde);
+          if (n_re_tau_sde > 0) {
+            for (j in 1 : n_re_tau_sde) {
+              vector[K_tau_sde[j]] b = (to_vector(z_tau_sde[j][J_tau_sde[j, n], 1:K_tau_sde[j]]) .* tau_tau_sde[j][1:K_tau_sde[j]]);
+              // b: tau_sde random-effect coefficients for term j
+              eta_tau += dot_product(Z_tau_sde[j][n, 1:K_tau_sde[j]], b);
+            }
+          }
+          tau_sde = (P_tau_sde > 0 || n_re_tau_sde > 0) ? inv_logit(eta_tau) : tau_sde_marker[d];
+        }
+        // tau_sde: asymmetry parameter in (0,1)
+        
+        lp += skew_double_exponential_lpdf(y_real[n] | eta_long, sig, tau_sde);
+        
+      // FAMILY 10: BETA REGRESSION
+      // p(y | eta, phi) = Beta(y | a, b), where y in (0, 1)
+      // Mean: mu = logit^-1(eta) in (0,1)
+      // Precision: phi > 0 (larger phi -> lower variance)
+      // Parameterization: a = mu * phi, b = (1 - mu) * phi
+      // Variance: Var(y) = mu * (1 - mu) / (phi + 1)
+      } else if (family_long[d] == 10) {
+        // Compute phi (precision parameter)
+        real eta_phi_beta = 0; // log-phi_beta linear predictor
+        if (P_phi_beta > 0) eta_phi_beta += dot_product(X_phi_beta[n], beta_phi_beta);
+        if (n_re_phi_beta > 0) {
+          for (j in 1 : n_re_phi_beta) {
+            vector[K_phi_beta[j]] b = (to_vector(z_phi_beta[j][J_phi_beta[j, n], 1:K_phi_beta[j]]) .* tau_phi_beta[j][1:K_phi_beta[j]]);
+            // b: phi_beta random-effect coefficients for term j
+            eta_phi_beta += dot_product(Z_phi_beta[j][n, 1:K_phi_beta[j]], b);
+          }
+        }
+        real phi_beta = (P_phi_beta > 0 || n_re_phi_beta > 0) ? exp(eta_phi_beta) : phi_beta_marker[d];
+        // phi_beta: precision
+        
+        // Convert eta to mean mu in (0,1) via inverse logit
+        real mu = inv_logit(eta_long); // beta mean
+        
+        // Compute Beta shape parameters with floor to avoid numerical issues
+        real shape1 = fmax(mu * phi_beta, 1e-6); // beta shape1
+        real shape2 = fmax((1 - mu) * phi_beta, 1e-6); // beta shape2
+        
+        lp += beta_lpdf(y_real[n] | shape1, shape2);
+        
+      // FAMILY 11: ORDERED LOGISTIC (ORDINAL OUTCOMES)
+      // p(y = k | eta, c) for k in {1, 2, ..., K_ord}
+      // Ordered logistic model with cutpoints c = (c_1, ..., c_{K-1})
+      // P(y <= k) = logit^-1(c_k - eta),  P(y = k) = P(y <= k) - P(y <= k-1)
+      // Used for ordinal outcomes (e.g., severity: mild/moderate/severe)
+      } else {
+        lp += ordered_logistic_lpmf(y_int[n] | eta_long, cutpoints_ord);
+      }
+    } // End longitudinal observations loop for subject i
+
+
+    // ---------------------------------------------------------------------
+    // PART 2: SURVIVAL LOG-LIKELIHOOD (TIME-TO-EVENT SUBMODEL)
+    // ---------------------------------------------------------------------
+    // Integrates longitudinal trajectory information into survival hazard
+    // via association features (current value, current slope, variance components).
+    //
+    // STEP 2.1: Compute association features at Gauss-Kronrod nodes
+    // - Gauss-Kronrod 15-point quadrature approximates integral_0^S h(t) dt
+    // - Evaluate current values (CV) and forward values (for slopes) at each node
+    
+    // Storage for association features at 15 GK nodes
+    vector[15] cvm_now;  // Current Value - Mean component at node j
+    vector[15] cvm_fwd;  // Forward value (for finite difference slope)
+    vector[15] cvk_now;  // Current Value - Marker component at node j
+    vector[15] cvk_fwd;  // Forward value
+
+    for (j in 1 : 15) {
+      // CURRENT VALUE - MEAN COMPONENT
+      // cvm(t) = X(t)*beta + Z_id(t)*u_i
+      // Captures subject-average trajectory (population + subject deviation)
+      cvm_now[j] = dot_product(X_gk_now[i][j], beta_scaled) 
+                 + dot_product(Z_id_gk_now[i][j], u_id[i]);
+      
+      // Forward step: cvm(t + eps) for finite-difference slope approximation
+      cvm_fwd[j] = dot_product(X_gk_fwd[i][j], beta_scaled) 
+                 + dot_product(Z_id_gk_fwd[i][j], u_id[i]);
+
+      // CURRENT VALUE - MARKER COMPONENT
+      // cvk(t) = Z_mk(t)*vbar + Z_idm(t)*wbar_i
+      // where: vbar = weighted average of v_marker (marker-level REs)
+      //        wbar_i = weighted average of w_idscaled[i, ] (ID-by-marker REs)
+      // Captures marker-specific deviations and ID-by-marker interactions
+      real mk_part_now = 0; // marker-only CV contribution
+      real mk_part_fwd = 0; // marker-only CV forward contribution
+      if (R_mk > 0) {  // Only if marker-level REs present
+        mk_part_now = dot_product(Z_mk_gk_now[i][j], vbar);
+        mk_part_fwd = dot_product(Z_mk_gk_fwd[i][j], vbar);
+      }
+
+      cvk_now[j] = mk_part_now + dot_product(Z_idm_gk_now[i][j], wbar_i_i);
+      cvk_fwd[j] = mk_part_fwd + dot_product(Z_idm_gk_fwd[i][j], wbar_i_i);
+    }
+
+    // STEP 2.2: Compute current slopes via finite differences
+    // CS(t) approx [CV(t + eps) - CV(t)] / eps
+    // Captures rate of change of longitudinal trajectory at time t
+    // Time rescaling: divide by tmax (since time internally scaled to [0,1])
+    vector[15] csm_raw = eta_fd(cvm_now, cvm_fwd, eps_fd) / tmax; // mean slope
+    vector[15] csk_raw = eta_fd(cvk_now, cvk_fwd, eps_fd) / tmax; // marker slope
+
+    // STEP 2.3: Compute variance-covariance association feature
+    // VCOV feature: weighted sum of log-variances from ID-by-marker covariance
+    // vcov = sum_q a_vcov_var[q] * log(Var[w_i[q]])
+    // where Var[w_i[q]] = sum_{k=1}^q L_i[q,k]^2  (from Cholesky: Sigma_i = L_i*L_i')
+    // This captures uncertainty in subject-specific predictions
+    // Note: This is CONSTANT across time for subject i (RE variance doesn't vary)
+    vector[15] vcov_raw = eta_vcov_varonly_weighted_const(15, L_i[i], a_vcov_var);
+
+    // STEP 2.4: Aggregate total association features
+    // Combine mean and marker components for "total" associations
+    vector[15] cv_tot = cvm_now + cvk_now;  // Total current value
+    vector[15] cs_tot = csm_raw + csk_raw;  // Total current slope
+
+    // STEP 2.5: Apply nonlinear transformations
+    // Each association feature can be transformed flexibly before entering hazard
+    // Transformation modes: 0=identity, 1=functional opcodes, 2=I-spline, 3=piecewise
+    //
+    // Example: If CV exhibits nonlinear association with hazard risk,
+    //          we can transform via f(CV) = log(CV), spline(CV), etc.
+    
+    // Transform CV features
+    vector[15] cv_tot_tf = apply_transform_vector(cv_tot, tf_mode_cv_tot, 
+                                                    functional_ops_cv, const_data_cv, 
+                                                    knots_cv, coeff_cv, spline_degree_cv);
+    vector[15] cv_mean_tf = apply_transform_vector(cvm_now, tf_mode_cv_mean, 
+                                                     functional_ops_cv_mean, const_data_cv_mean, 
+                                                     knots_cv_mean, coeff_cv_mean, spline_degree_cv_mean);
+    vector[15] cv_marker_tf = apply_transform_vector(cvk_now, tf_mode_cv_marker, 
+                                                       functional_ops_cv_marker, const_data_cv_marker, 
+                                                       knots_cv_marker, coeff_cv_marker, spline_degree_cv_marker);
+
+    // Transform CS features
+    vector[15] cs_tot_tf = apply_transform_vector(cs_tot, tf_mode_cs_tot, 
+                                                    functional_ops_cs, const_data_cs, 
+                                                    knots_cs, coeff_cs, spline_degree_cs);
+    vector[15] cs_mean_tf = apply_transform_vector(csm_raw, tf_mode_cs_mean, 
+                                                     functional_ops_cs_mean, const_data_cs_mean, 
+                                                     knots_cs_mean, coeff_cs_mean, spline_degree_cs_mean);
+    vector[15] cs_marker_tf = apply_transform_vector(csk_raw, tf_mode_cs_marker, 
+                                                       functional_ops_cs_marker, const_data_cs_marker, 
+                                                       knots_cs_marker, coeff_cs_marker, spline_degree_cs_marker);
+
+    // Transform VCOV feature
+    vector[15] vcov_tf = apply_transform_vector(vcov_raw, tf_mode_vcov, 
+                                                  functional_ops_vcov, const_data_vcov, 
+                                                  knots_vcov, coeff_vcov, spline_degree_vcov);
+
+    // STEP 2.6: Combine into survival predictor at GK nodes
+    // eta_assoc(t) = sum(coefficient * transformed_association_feature)
+    //
+    // This predictor enters the hazard function:
+    //   h(t) = h0(t) * exp(W'gamma + eta_assoc(t))
+    //
+    // Coefficients (a_*) quantify strength and direction of association:
+    //   - Positive: Higher longitudinal value/slope -> Higher hazard
+    //   - Negative: Higher longitudinal value/slope -> Lower hazard (protective)
+    vector[15] eta_assoc_nodes = a_cv_total * cv_tot_tf
+                     + a_cv_mean * cv_mean_tf
+                     + a_cv_marker * cv_marker_tf
+                     + a_cs_total * cs_tot_tf
+                     + a_cs_mean * cs_mean_tf
+                     + a_cs_marker * cs_marker_tf
+                     + vcov_tf;
+    // eta_assoc_nodes: association predictor at GK nodes
+
+
+    // STEP 2.7: Log-hazard at event time (if event occurred)
+
+    // If subject i experienced an event (d_event[i] = 1), add log h(S_i) to likelihood
+    // For censored subjects (d_event[i] = 0), only survival function S(S_i) contributes
+    if (d_event[i] == 1) {
+      int k_ev = event_type[i];  // Which competing risk caused the event (1, ..., K_event)
+      
+      // Hazard covariates effect
+      // nu*_w = W[i]' * gamma_w[k_ev]
+      // W = baseline covariates (e.g., treatment, age, sex)
+      real eta_w_ev = 0; // hazard covariate contribution
+      if (p_w > 0)
+        eta_w_ev = dot_product(to_vector(W[i]'), gamma_w[k_ev]);
+
+      // Baseline log-hazard at event time
+      // log h0(S_i) = log_h0_intercept[k_ev] + Bs_event_c[i]' * bs_gamma_c[k_ev]
+      // where Bs_event_c = B-spline basis evaluated at S_event[i]
+      // This gives flexible nonparametric baseline hazard
+      real log_h0_S = log_h0_intercept[k_ev] + dot_product(Bs_event_c[i], bs_gamma_c[k_ev]);
+      // log_h0_S: baseline log-hazard at event time
+
+      // Association features at event time
+      // Same computation as GK nodes, but for exact event time S_event[i]
+      real cvm_S = dot_product(X_event_now[i], beta_scaled) 
+                 + dot_product(Z_id_event_now[i], u_id[i]);
+      real cvm_S_fwd = dot_product(X_event_fwd[i], beta_scaled) 
+                     + dot_product(Z_id_event_fwd[i], u_id[i]);
+      // cvm_S/cvm_S_fwd: mean CV at event time and forward shift
+
+      real mk_part_S = 0; // marker-only CV at event time
+      real mk_part_S_fwd = 0; // marker-only CV forward
+      if (R_mk > 0) {
+        mk_part_S = dot_product(Z_mk_event_now[i], vbar);
+        mk_part_S_fwd = dot_product(Z_mk_event_fwd[i], vbar);
+      }
+
+      real cvk_S = mk_part_S + dot_product(Z_idm_event_now[i], wbar_i_i);
+      real cvk_S_fwd = mk_part_S_fwd + dot_product(Z_idm_event_fwd[i], wbar_i_i);
+      // cvk_S/cvk_S_fwd: marker-id CV at event time and forward shift
+
+      // Current slopes at event time (finite difference)
+      real csm_S_raw = ((cvm_S_fwd - cvm_S) / eps_fd) / tmax; // mean slope at event
+      real csk_S_raw = ((cvk_S_fwd - cvk_S) / eps_fd) / tmax; // marker slope at event
+
+      // VCOV at event time (same as GK nodes, but compute directly for clarity)
+      real vcov_S_raw = 0; // variance feature at event time
+      for (q in 1 : Q_idm) {
+        real var_q = 0;
+        for (k in 1 : q)
+          var_q += square(L_i[i][q, k]);
+        vcov_S_raw += a_vcov_var[q] * log(var_q);
+      }
+
+      // Aggregate totals
+      real cv_S_tot = cvm_S + cvk_S; // total CV at event
+      real cs_S_tot = csm_S_raw + csk_S_raw; // total CS at event
+
+      // Association features at event time
+      real cv_S_tot_tf = apply_transform_scalar(cv_S_tot, tf_mode_cv_tot, 
+                                                  functional_ops_cv, const_data_cv, 
+                                                  knots_cv, coeff_cv, spline_degree_cv);
+      real cv_S_mean_tf = apply_transform_scalar(cvm_S, tf_mode_cv_mean, 
+                                                   functional_ops_cv_mean, const_data_cv_mean, 
+                                                   knots_cv_mean, coeff_cv_mean, spline_degree_cv_mean);
+      real cv_S_marker_tf = apply_transform_scalar(cvk_S, tf_mode_cv_marker, 
+                                                     functional_ops_cv_marker, const_data_cv_marker, 
+                                                     knots_cv_marker, coeff_cv_marker, spline_degree_cv_marker);
+
+      real cs_S_tot_tf = apply_transform_scalar(cs_S_tot, tf_mode_cs_tot, 
+                                                  functional_ops_cs, const_data_cs, 
+                                                  knots_cs, coeff_cs, spline_degree_cs);
+      real cs_S_mean_tf = apply_transform_scalar(csm_S_raw, tf_mode_cs_mean, 
+                                                   functional_ops_cs_mean, const_data_cs_mean, 
+                                                   knots_cs_mean, coeff_cs_mean, spline_degree_cs_mean);
+      real cs_S_marker_tf = apply_transform_scalar(csk_S_raw, tf_mode_cs_marker, 
+                                                     functional_ops_cs_marker, const_data_cs_marker, 
+                                                     knots_cs_marker, coeff_cs_marker, spline_degree_cs_marker);
+
+      real vcov_S_tf = apply_transform_scalar(vcov_S_raw, tf_mode_vcov, 
+                                                functional_ops_vcov, const_data_vcov, 
+                                                knots_vcov, coeff_vcov, spline_degree_vcov);
+
+      // Combine into association predictor
+      real eta_assoc_S = a_cv_total * cv_S_tot_tf
+                   + a_cv_mean * cv_S_mean_tf
+                   + a_cv_marker * cv_S_marker_tf
+                   + a_cs_total * cs_S_tot_tf
+                   + a_cs_mean * cs_S_mean_tf
+                   + a_cs_marker * cs_S_marker_tf
+                   + vcov_S_tf;
+      // eta_assoc_S: association predictor at event time
+      
+
+      // log h0(S_i) = log_h0_intercept[k_ev] + Bs_event_c[i]' * bs_gamma_c[k_ev]
+      lp += log_h0_S + eta_w_ev + eta_assoc_S;
+    }
+
+
+
+
+
+    //
+    // For COMPETING RISKS, total hazard at time t is SUM across all event types:
+
+    //
+    // Each cause-specific hazard:
+
+    //
+    // Numerical integration via 15-point Gauss-Kronrod:
+
+    //   where t_j are GK nodes in [0, S_i], w_j are GK weights
+    
+    vector[15] log_h_total;  // Total log-hazard at each GK node
+    
+    for (j in 1 : 15) {
+      // Storage for log-hazard from each competing risk
+      vector[K_event] log_h_cause; // cause-specific log hazards
+      
+      // Compute cause-specific hazard for each event type k
+      for (k_ev in 1 : K_event) {
+        // Hazard covariate effect for cause k
+        real eta_w = 0; // hazard covariate effect
+        if (p_w > 0)
+          eta_w = dot_product(to_vector(W[i]'), gamma_w[k_ev]);
+        
+        // Cause-specific log-hazard:
+
+        log_h_cause[k_ev] = log_h0_intercept[k_ev]
+                            + dot_product(Bs_gk_c[i][j], bs_gamma_c[k_ev])  // Baseline hazard
+                            + eta_w                                          // Covariate effect
+                            + eta_assoc_nodes[j];                            // Association effect
+      }
+      
+
+      // Computed via log-sum-exp for numerical stability
+      log_h_total[j] = log_sum_exp(log_h_cause);
+    }
+
+
+    // cumhaz(S, log_h0_nodes, eta_nodes) computes:
+
+    // 
+    // Here we pass:
+    //   - S_event[i]: integration upper limit
+    //   - log_h_total: already includes baseline + covariates + associations
+    //   - zeros: no additional eta (already included)
+    //
+
+    lp += -cumhaz(S_event[i], log_h_total, rep_vector(0.0, 15));
+    
+  } // End subject loop
+
+  return lp;  // Return total log-likelihood for this slice
+}

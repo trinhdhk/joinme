@@ -4,12 +4,10 @@
 \alias{precompile_cmdstanr_models}
 \title{Precompile CmdStanR models}
 \usage{
-precompile_cmdstanr_models(force_recompile = FALSE, threads_per_chain = 1L)
+precompile_cmdstanr_models(force_recompile = TRUE)
 }
 \arguments{
 \item{force_recompile}{Logical; recompile even if cached.}
-
-\item{threads_per_chain}{Integer; number of threads for Stan (>= 1).}
 }
 \value{
 Invisibly returns a named list of compiled CmdStanR models.

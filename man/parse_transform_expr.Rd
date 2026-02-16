@@ -13,46 +13,50 @@ parse_transform_expr(expr)
 }
 \description{
 The \code{parse_transform_expr} function takes a formula, quosure, quoted expression,
-or character string and converts it to a functional opcode representation compatible with the
-Stan-side opcode evaluator.
+or character string and converts it to a functional bytecode representation compatible with the
+Stan-side bytecode evaluator.
 
 Supported operations:
 \itemize{
 \item Arithmetic: +, -, *, /
 \item Power: ^
 \item Functions: log, exp, sqrt, sin, cos, tan, abs, sinh, cosh, tanh, asinh, acosh, atanh
-\item Sigmoid/Link: inv_logit, logit
+\item Sigmoid/Link: inv_logit, logit, sigmoid, expit
+\item Softplus: softplus, log1p_exp
+\item Other: cbrt, power
 \item Reciprocal: 1/x or rec(x)
 }
 
 The \code{parse_transform_expr} function takes a formula, quosure, quoted expression,
-or character string and converts it to a functional opcode representation compatible with the
-Stan-side opcode evaluator.
+or character string and converts it to a functional bytecode representation compatible with the
+Stan-side bytecode evaluator.
 
 Supported operations:
 \itemize{
 \item Arithmetic: +, -, *, /
 \item Power: ^
 \item Functions: log, exp, sqrt, sin, cos, tan, abs, sinh, cosh, tanh, asinh, acosh, atanh
-\item Sigmoid/Link: inv_logit, logit
+\item Sigmoid/Link: inv_logit, logit, sigmoid, expit
+\item Softplus: softplus, log1p_exp
+\item Other: cbrt, power
 \item Reciprocal: 1/x or rec(x)
 }
 }
 \details{
 Provides R utilities to parse user-friendly transformation expressions
-and generate functional opcodes for Stan's arbitrary transformation evaluator.
+and generate functional bytecode for Stan's arbitrary transformation evaluator.
 
 Provides R utilities to parse user-friendly transformation expressions
-and generate functional opcodes for Stan's arbitrary transformation evaluator.
+and generate functional bytecode for Stan's arbitrary transformation evaluator.
 }
 \note{
-Functional opcodes are a vector of operation codes (0-17) paired with a vector of
+Functional bytecode is a vector of operation codes (0-25) paired with a vector of
 constant values. Constants are embedded using PUSH_CONST operations.
 
-Functional opcodes are a vector of operation codes (0-17) paired with a vector of
+Functional bytecode is a vector of operation codes (0-25) paired with a vector of
 constant values. Constants are embedded using PUSH_CONST operations.
 }
-\section{Functional Opcode Reference}{
+\section{Functional Bytecode Reference}{
 
 \describe{
 \item{0}{PUSH_X: Push input x onto stack}
@@ -79,6 +83,8 @@ constant values. Constants are embedded using PUSH_CONST operations.
 \item{21}{ASINH: Pop a; push asinh(a)}
 \item{22}{ACOSH: Pop a; push acosh(a)}
 \item{23}{ATANH: Pop a; push atanh(a)}
+\item{24}{SOFTPLUS: Pop a; push log1p_exp(a)}
+\item{25}{CBRT: Pop a; push cbrt(a)}
 }
 
 
@@ -107,6 +113,8 @@ constant values. Constants are embedded using PUSH_CONST operations.
 \item{21}{ASINH: Pop a; push asinh(a)}
 \item{22}{ACOSH: Pop a; push acosh(a)}
 \item{23}{ATANH: Pop a; push atanh(a)}
+\item{24}{SOFTPLUS: Pop a; push log1p_exp(a)}
+\item{25}{CBRT: Pop a; push cbrt(a)}
 }
 }
 
@@ -116,7 +124,7 @@ bc <- parse_transform_expr(~ x + 2)
 
 # Use a plain formula (recommended)
 bc <- parse_transform_expr(~ log(x + 1))
-# Returns: opcodes = c(0, 1, 2), const_data = c(2)
+# Returns: bytecode = c(0, 1, 2), const_data = c(2)
 
 # Complex: f(x) = (log(sqrt(x + 1/inv_logit(3*x - 3))))^2
 bc <- parse_transform_expr(~ (log(sqrt(x + 1/inv_logit(3*x - 3))))^2)
@@ -126,7 +134,7 @@ bc <- parse_transform_expr(~ x + 2)
 
 # Use a plain formula (recommended)
 bc <- parse_transform_expr(~ log(x + 1))
-# Returns: opcodes = c(0, 1, 2), const_data = c(2)
+# Returns: bytecode = c(0, 1, 2), const_data = c(2)
 
 # Complex: f(x) = (log(sqrt(x + 1/inv_logit(3*x - 3))))^2
 bc <- parse_transform_expr(~ (log(sqrt(x + 1/inv_logit(3*x - 3))))^2)

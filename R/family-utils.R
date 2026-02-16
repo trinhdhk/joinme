@@ -6,11 +6,16 @@
 #' @name family_utils
 NULL
 
+# File overview:
+# - Map between family names and integer codes.
+# - Validate outcome ranges and parse transform compositions.
+
 #' Parse family string to numeric code
 #' @param family String family name (e.g., "gaussian", "student_t", "binomial") or vector of names
 #' @return Integer family code (1-11) or vector of codes
 #' @keywords internal
 .parse_family <- function(family) {
+  # Map human-readable family names to Stan integer codes
   family <- tolower(as.character(family))
   
   # Handle vector input
@@ -54,6 +59,7 @@ NULL
 #' @return Character family name(s)
 #' @keywords internal
 .family_code_to_name <- function(fam) {
+  # Map Stan integer codes to canonical family names
   fam <- as.integer(fam)
   
   # Handle vector input
@@ -82,6 +88,7 @@ NULL
 #' @param y_range Numeric range of observed values
 #' @keywords internal
 .validate_family_outcome <- function(family, y_range, name = "y") {
+  # Validate observed outcome ranges by family requirements
   fam_name <- .family_code_to_name(family)
   
   if (family %in% c(1, 2, 7, 8, 9)) {
@@ -136,6 +143,7 @@ NULL
 #' 
 #' @keywords internal
 .parse_tf_composition <- function(tf_string, max_length = 7) {
+  # Parse transform composition into numeric codes for Stan
   tf_string <- as.character(tf_string)
   tf_string <- tolower(trimws(tf_string))
   
@@ -205,6 +213,7 @@ NULL
 #' @return Integer vector of family codes (length D)
 #' @keywords internal
 .validate_family_list <- function(families, D, dataLong, marker_var, y_var) {
+  # Validate per-marker families against observed data
   # Convert to list if single value
   if (length(families) == 1 && !is.list(families)) {
     families <- rep(list(families), D)
@@ -250,6 +259,7 @@ NULL
 #' @return Character vector of parameter names
 #' @keywords internal
 .family_distrib_params <- function(family) {
+  # Enumerate distributional regression parameters per family
   switch(as.integer(family),
     "1" = c("sigma"),        # gaussian
     "2" = c("sigma", "nu"),  # student_t
@@ -294,6 +304,7 @@ NULL
   trials = 1,
   skew = 0
 ) {
+  # Prior predictive helper for a single family
   family <- as.integer(family)
   
   if (family == 1) {
@@ -363,6 +374,7 @@ NULL
 #' @return List with prior specifications compatible with Stan
 #' @keywords internal
 .build_priors <- function(beta_prior = NULL, alpha_prior = NULL, lkj_prior = NULL) {
+  # Create full prior spec list consumed by joinme_standata()
   priors <- list()
   
   # Beta priors (fixed effects)
@@ -409,6 +421,7 @@ NULL
 #' @return List with codes and n_codes for each composition
 #' @keywords internal
 .parse_tf_composition_list <- function(tf_composition) {
+  # Expand named composition list into per-term code arrays
   tf_names <- c("tf_cv_mean_comp", "tf_cv_marker_comp", "tf_cs_mean_comp", "tf_cs_marker_comp")
   result <- list()
   

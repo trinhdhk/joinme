@@ -9,6 +9,10 @@
 #' @keywords internal
 NULL
 
+# File overview:
+# - Common helpers for matrix construction, formula parsing, and validation.
+# - Shared utilities used by standata, simulation, and diagnostics.
+
 suppressPackageStartupMessages({
   library(lme4)
   library(reformulas)
@@ -17,7 +21,8 @@ suppressPackageStartupMessages({
 })
 
 #' @keywords internal
-.gk15_nodes <- function() {
+ .gk15_nodes <- function() {
+  # 15-point Gauss-Kronrod nodes on [-1, 1] (fixed reference grid)
   c(
     -0.9914553711208126, -0.9491079123427585, -0.8648644233597691,
     -0.7415311855993945, -0.5860872354676911, -0.4058451513773972,
@@ -30,6 +35,7 @@ suppressPackageStartupMessages({
 #' Safe model.matrix wrapper
 #' @keywords internal
 .mm <- function(formula, data) {
+  # Always return double matrices for Stan compatibility
   X <- stats::model.matrix(formula, data = data)
   storage.mode(X) <- "double"
   X
@@ -38,6 +44,7 @@ suppressPackageStartupMessages({
 #' Normalize distributional formula input
 #' @keywords internal
 .normalize_formula_dist <- function(formulaDist) {
+  # Normalize list input to named distributional formulas
   if (is.null(formulaDist)) return(list())
   if (inherits(formulaDist, "formula") || is.character(formulaDist)) {
     formulaDist <- list(formulaDist)
@@ -104,6 +111,7 @@ suppressPackageStartupMessages({
 #' Build distributional design matrix
 #' @keywords internal
 .build_dist_matrix <- function(formula, data) {
+  # Construct fixed-effect matrix for distributional regression
   if (is.null(formula)) {
     return(list(P = 0L, X = matrix(0.0, nrow(data), 0), cols = character(0)))
   }
@@ -118,6 +126,7 @@ suppressPackageStartupMessages({
 #' Parse mixed-effects terms for distributional regression
 #' @keywords internal
 .build_dist_re_terms <- function(formula, data) {
+  # Parse random-effect terms for distributional regression
   if (is.null(formula)) {
     return(list(n_re = 0L, K = integer(0), G = integer(0), Z = list(), J = list(), terms = character(0)))
   }
@@ -182,6 +191,7 @@ suppressPackageStartupMessages({
 #' Pad random-effects term matrices to max dimensions
 #' @keywords internal
 .pad_re_terms <- function(re_terms, n_rows) {
+  # Pad variable-size RE terms into aligned arrays for Stan
   if (re_terms$n_re == 0) {
     return(list(
       n_re = 0L,
@@ -385,6 +395,88 @@ suppressPackageStartupMessages({
   }
 }
 
+#' Resolve grouping factor names from random-effect terms
+#'
+#' @param grp_expr Grouping expression from a random-effects term.
+#' @return Character scalar with the base grouping name.
+#'
+#' @keywords internal
+.group_name_from_expr <- function(grp_expr) {
+  if (is.call(grp_expr) && as.character(grp_expr)[[1]] %in% c(":", "*")) {
+    # Handle marker:id or marker*id patterns - extract first part
+    return(deparse(grp_expr[[2]], width.cutoff = 500L)[1])
+  }
+  # Simple symbol or name
+  as.character(grp_expr)[[1]]
+}
+
+#' Resolve independence flags from double-bar syntax
+#'
+#' @description
+#' Uses lme4-style `||` parsing to determine which random-effects blocks should
+#' be modeled with diagonal covariance structures. The resolution rules are:
+#' - Top-level `(... || id)` sets `indep_id_re = 1`.
+#' - `(... || marker)` sets `indep_marker_re = 1`.
+#' - Nested `(... || id)` inside a marker block sets `indep_idmarker_cov = 1`.
+#'
+#' @param formulaLong Longitudinal formula with random-effects terms.
+#' @param marker_var Marker grouping variable name.
+#' @param id_var Subject grouping variable name.
+#' @return Named list with `indep_id_re`, `indep_marker_re`, and `indep_idmarker_cov`.
+#'
+#' @keywords internal
+.resolve_re_independence <- function(formulaLong, marker_var, id_var) {
+  # Collect random-effects terms with their operator and context so that
+  # nested marker-by-id specifications can be distinguished from top-level id blocks.
+  .collect_re_terms <- function(expr, context = NULL) {
+    terms <- list()
+    if (!is.call(expr)) {
+      return(terms)
+    }
+
+    op <- as.character(expr[[1]])
+    if (op %in% c("|", "||")) {
+      grp <- .group_name_from_expr(expr[[3]])
+      terms <- c(terms, list(list(op = op, group = grp, context = context)))
+      # Traverse the left-hand side within the current group context.
+      return(c(terms, .collect_re_terms(expr[[2]], context = grp)))
+    }
+
+    for (i in seq_along(expr)[-1]) {
+      terms <- c(terms, .collect_re_terms(expr[[i]], context = context))
+    }
+    terms
+  }
+
+  rhs <- formulaLong[[3]]
+  terms <- .collect_re_terms(rhs, context = NULL)
+  if (length(terms) == 0) {
+    return(list(indep_id_re = 0L, indep_marker_re = 0L, indep_idmarker_cov = 0L))
+  }
+
+  indep_id_re <- any(vapply(
+    terms,
+    function(t) t$op == "||" && t$group == id_var && (is.null(t$context) || t$context != marker_var),
+    logical(1)
+  ))
+  indep_marker_re <- any(vapply(
+    terms,
+    function(t) t$op == "||" && t$group == marker_var,
+    logical(1)
+  ))
+  indep_idmarker_cov <- any(vapply(
+    terms,
+    function(t) t$op == "||" && t$group == id_var && !is.null(t$context) && t$context == marker_var,
+    logical(1)
+  ))
+
+  list(
+    indep_id_re = as.integer(indep_id_re),
+    indep_marker_re = as.integer(indep_marker_re),
+    indep_idmarker_cov = as.integer(indep_idmarker_cov)
+  )
+}
+
 #' Extract nested marker syntax terms
 #'
 #' Outer: ( ... | marker )
@@ -399,23 +491,20 @@ suppressPackageStartupMessages({
   if (length(bars) == 0) {
     return(list(mk_rhs_list = list(), idm_rhs_list = list(), marker_terms = list()))
   }
+
+  expr_has_literal <- function(expr, value) {
+    if (is.null(expr)) return(FALSE)
+    if (is.numeric(expr) && length(expr) == 1) return(identical(as.numeric(expr), value))
+    if (!is.call(expr)) return(FALSE)
+    any(vapply(as.list(expr)[-1], expr_has_literal, logical(1), value = value))
+  }
+
+  expr_is_zero <- function(expr) {
+    is.numeric(expr) && length(expr) == 1 && identical(as.numeric(expr), 0)
+  }
   
   # Extract grouping variable name - handle both symbols and compound expressions
-  grp <- character(length(bars))
-  for (i in seq_along(bars)) {
-    b <- bars[[i]]
-    grp_expr <- b[[3]]
-    if (is.call(grp_expr) && as.character(grp_expr)[[1]] == ":") {
-      # Handle marker:id or marker*id patterns - extract first part
-      grp[i] <- deparse(grp_expr[[2]], width.cutoff = 500L)[1]
-    } else if (is.call(grp_expr) && as.character(grp_expr)[[1]] == "*") {
-      # Handle marker*id patterns - extract first part
-      grp[i] <- deparse(grp_expr[[2]], width.cutoff = 500L)[1]
-    } else {
-      # Simple symbol
-      grp[i] <- as.character(grp_expr)[[1]]
-    }
-  }
+  grp <- vapply(bars, function(b) .group_name_from_expr(b[[3]]), character(1))
   
   mk_idx <- which(grp == marker_var)
   if (length(mk_idx) == 0) {
@@ -448,14 +537,12 @@ suppressPackageStartupMessages({
     term_labels <- attr(rhs_terms, "term.labels")
     has_only_intercept <- (length(term_labels) == 0) && (attr(rhs_terms, "intercept") == 1)
 
-    outer_txt <- paste(deparse(outer_expr, width.cutoff = 500L), collapse = " ")
-    user_explicit_intercept <- grepl("(\\+\\s*1\\s*(\\+|$))", outer_txt)
+    user_explicit_intercept <- expr_has_literal(outer_expr, 1)
 
     if (has_only_intercept && !user_explicit_intercept) next
 
-    rhs_txt <- paste(deparse(f_mk[[2]], width.cutoff = 500L), collapse = " ")
-    rhs_txt <- trimws(rhs_txt)
-    if (rhs_txt == "0") next
+    rhs_expr <- f_mk[[2]]
+    if (expr_is_zero(rhs_expr)) next
 
     mk_rhs_list <- c(mk_rhs_list, list(f_mk))
   }
@@ -463,7 +550,7 @@ suppressPackageStartupMessages({
   list(mk_rhs_list = mk_rhs_list, idm_rhs_list = idm_rhs_list, marker_terms = marker_terms)
 }
 
-# ---- NEW: time-index metadata for internal scaling in Stan -----------------
+# ---- time-index metadata for internal scaling in Stan -----------------
 
 #' Detect indices of time-related columns in a design matrix
 #'

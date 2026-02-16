@@ -8,6 +8,11 @@
 \description{
 Joint Mixed-Effects (JoinME) Model for Multivariate Longitudinal and Survival Data
 }
+\details{
+Key entry points are \code{joinme()} for model fitting, \code{predict()} for dynamic
+prediction, and \code{plot()} for visualization of predicted trajectories and
+survival curves.
+}
 \references{
 Stan Development Team (NA). RStan: the R interface to Stan. R package version 2.36.0.9000. https://mc-stan.org
 }
@@ -15,11 +20,6 @@ Stan Development Team (NA). RStan: the R interface to Stan. R package version 2.
 Useful links:
 \itemize{
   \item \url{https://trinhdhk.github.io/joinme}
-  \item \url{https://trinhdhk.github.io/joinme/}
 }
-
-}
-\author{
-\strong{Maintainer}: Trinh Dong \email{trinh.dong@ncl.ac.uk}
 
 }

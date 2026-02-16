@@ -7,6 +7,10 @@
 #' @keywords internal
 NULL
 
+# File overview:
+# - Extract log-likelihood and compute LOO/WAIC/ELPD summaries.
+# - Provide posterior predictive checks and Bayes factor utilities.
+
 # ---- log-likelihood extraction -------------------------------------------
 
 #' Log-likelihood summary
@@ -199,10 +203,26 @@ bayes_factor <- function(fit1, fit2, ...) {
 #' This crap is still under development.
 #' @return A list with observation-level summaries and overall diagnostics.
 #' @export
-pp_check.JoinMeFit <- function(object, newdataLong, newdataEvent, ci_level = 0.95, n_samples = 200, seed = 123, plot = FALSE,...) {
+pp_check.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, ci_level = 0.95, n_samples = 200, seed = 123, plot = FALSE,...) {
+	# Workflow: run posterior_epred -> summarize coverage and RMSE
 	assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
-	assertthat::assert_that(!missing(newdataLong), msg = "newdataLong is required.")
-	assertthat::assert_that(!missing(newdataEvent), msg = "newdataEvent is required.")
+	if (is.null(newdataLong) && is.null(newdataEvent)) {
+		if (!is.null(object$dataLong) && !is.null(object$dataEvent)) {
+			newdataLong <- object$dataLong
+			newdataEvent <- object$dataEvent
+		} else {
+			cli::cli_abort(c(
+				x = "Training data not found on the fitted object.",
+				i = "Provide {.arg newdataLong} and {.arg newdataEvent} explicitly."
+			))
+		}
+	}
+	if (is.null(newdataLong) != is.null(newdataEvent)) {
+		cli::cli_abort(c(
+			x = "Both {.arg newdataLong} and {.arg newdataEvent} are required.",
+			i = "Provide both or neither to use the training data."
+		))
+	}
 
 	ci_level <- .validate_ci_levels(ci_level)
 	probs <- .quantile_probs_from_ci(ci_level)
@@ -226,6 +246,7 @@ pp_check.JoinMeFit <- function(object, newdataLong, newdataEvent, ci_level = 0.9
 
 	out_list <- list()
 	for (id in names(draws_fit)) {
+		# Per-subject summary of fitted draws vs observed outcomes
 		dL <- newdataLong[newdataLong[[id_var]] == id, , drop = FALSE]
 		if (nrow(dL) == 0) next
 
@@ -261,43 +282,357 @@ pp_check.JoinMeFit <- function(object, newdataLong, newdataEvent, ci_level = 0.9
 	list(summary = overall, data = out_df)
 }
 
+#' @keywords internal
+.resolve_train_data <- function(object, newdataLong, newdataEvent, purpose = "analysis") {
+	if (is.null(newdataLong) && is.null(newdataEvent)) {
+		if (!is.null(object$dataLong) && !is.null(object$dataEvent)) {
+			newdataLong <- object$dataLong
+			newdataEvent <- object$dataEvent
+		} else {
+			cli::cli_abort(c(
+				x = "Training data not found on the fitted object.",
+				i = "Provide {.arg newdataLong} and {.arg newdataEvent} for {purpose}."
+			))
+		}
+	}
+	if (is.null(newdataLong) != is.null(newdataEvent)) {
+		cli::cli_abort(c(
+			x = "Both {.arg newdataLong} and {.arg newdataEvent} are required.",
+			i = "Provide both or neither to use the training data."
+		))
+	}
+	list(newdataLong = newdataLong, newdataEvent = newdataEvent)
+}
+
 # ---- Concordance ----------------------------------------------------------
 
-#' Concordance index for survival component
+#' Time-varying concordance for the survival component
 #'
 #' @rdname concordance.JoinMeFit
 #' @param object A fitted object of class `JoinMeFit`.
+#' @param newdataLong Longitudinal data for evaluation (defaults to training data).
+#' @param newdataEvent Event data for evaluation (defaults to training data).
+#' @param time_start Numeric landmark time(s) or a column name in `newdataEvent`.
+#' @param time_horizon Numeric horizon time(s) or a column name in `newdataEvent`.
+#' @param Dt Numeric horizon width; used when `time_horizon` is not supplied.
 #' @param cause Integer; cause index for competing risks (default 1).
-#' @param draws Optional number of posterior draws to subset.
+#' @param n_samples Number of posterior draws for prediction (default 200).
 #' @param seed Random seed for draw subsetting.
-#' @param ... Additional arguments passed to `survival::concordance()`.
+#' @param type_weights Time-weighting for concordance; passed to `survival::concordance`.
+#' @param ... Additional arguments passed to `predict.JoinMeFit()`.
 #'
 #' @importFrom survival Surv concordance
-#' @return A `concordance` object.
+#' @return A data frame with time-varying concordance at each landmark time.
 #' @export
-concordance.JoinMeFit <- function(object, cause = 1, draws = NULL, seed = 1, ...) {
-	sd <- object$stan_data
-	if (is.null(sd$W) || sd$p_w < 1) {
-		cli::cli_abort("No baseline survival covariates found for concordance calculation.")
+concordance.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, time_start,
+                                  time_horizon = NULL, Dt = NULL, cause = 1, n_samples = 200,
+                                  seed = 123, type_weights = "none", ...) {
+	assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
+	if (missing(time_start)) {
+		cli::cli_abort("{.arg time_start} is required for time-varying concordance.")
+	}
+	data_in <- .resolve_train_data(object, newdataLong, newdataEvent, purpose = "time-varying concordance")
+	newdataLong <- data_in$newdataLong
+	newdataEvent <- data_in$newdataEvent
+
+	if (!is.numeric(cause) || length(cause) != 1) {
+		cli::cli_abort("{.arg cause} must be a single integer.")
 	}
 
-	if (!is.numeric(cause) || length(cause) != 1 || cause < 1 || cause > (sd$K_event %||% 1)) {
-		cli::cli_abort("cause must be a single integer between 1 and K_event.")
+	id_var <- eval(object$call$id_var) %||% "id"
+	time_var <- eval(object$call$time_var) %||% "time"
+	event_time_var <- eval(object$call$event_time_var) %||% "time"
+	event_var <- eval(object$call$event_var) %||% "event"
+
+	if (!(id_var %in% names(newdataEvent))) {
+		cli::cli_abort("{.arg newdataEvent} must include id column {id_var}.")
+	}
+	if (!(event_time_var %in% names(newdataEvent))) {
+		cli::cli_abort("{.arg newdataEvent} must include event time column {event_time_var}.")
+	}
+	if (!(event_var %in% names(newdataEvent))) {
+		cli::cli_abort("{.arg newdataEvent} must include event indicator column {event_var}.")
+	}
+	if (!(id_var %in% names(newdataLong)) || !(time_var %in% names(newdataLong))) {
+		cli::cli_abort("{.arg newdataLong} must include id and time columns used in the model.")
 	}
 
-	vars <- paste0("gamma_w[", cause, ",", seq_len(sd$p_w), "]")
-	ddf <- .get_draws_df(object$fit, variables = vars, draws = draws, seed = seed)
-	gamma_mean <- colMeans(as.matrix(ddf[, vars, drop = FALSE]))
+	ids <- unique(newdataEvent[[id_var]])
+	ids <- ids[!is.na(ids)]
+	if (length(ids) == 0) {
+		cli::cli_abort("No subjects found in {.arg newdataEvent}.")
+	}
 
-	concord_data <- data.frame(
-		time = sd$S_event,
-		status = if (!is.null(sd$event_type)) {
-			ifelse(sd$d_event == 1 & sd$event_type == cause, 1, 0)
-		} else {
-			sd$d_event
-		},
-		risk = as.numeric(sd$W %*% gamma_mean)
+	build_time_map <- function(val, label) {
+		if (is.character(val)) {
+			if (length(val) != 1) {
+				cli::cli_abort("{label} must be a single column name when character.")
+			}
+			if (!(val %in% names(newdataEvent))) {
+				cli::cli_abort("{label} column {val} not found in newdataEvent.")
+			}
+			return(stats::setNames(as.numeric(newdataEvent[[val]]), newdataEvent[[id_var]]))
+		}
+		if (!is.numeric(val)) {
+			cli::cli_abort("{label} must be numeric or a column name.")
+		}
+		if (length(val) == 1) {
+			return(stats::setNames(rep(as.numeric(val), length(ids)), ids))
+		}
+		if (!is.null(names(val))) {
+			return(stats::setNames(as.numeric(val), names(val)))
+		}
+		if (length(val) == length(ids)) {
+			return(stats::setNames(as.numeric(val), ids))
+		}
+		NULL
+	}
+
+	use_grid <- is.numeric(time_start) && length(time_start) > 1 && is.null(names(time_start))
+	if (use_grid) {
+		time_start_grid <- as.numeric(time_start)
+		if (!is.null(time_horizon) && length(time_horizon) > 1 && length(time_horizon) != length(time_start_grid)) {
+			cli::cli_abort("{.arg time_horizon} must be length 1 or the same length as {.arg time_start}.")
+		}
+		if (is.null(time_horizon) && is.null(Dt)) {
+			cli::cli_abort("Provide {.arg time_horizon} or {.arg Dt} when {.arg time_start} is a vector.")
+		}
+		results <- lapply(seq_along(time_start_grid), function(i) {
+			th <- if (!is.null(time_horizon)) {
+				if (length(time_horizon) == 1) time_horizon else time_horizon[i]
+			} else {
+				time_start_grid[i] + Dt
+			}
+			.time_varying_concordance_single(object, newdataLong, newdataEvent, time_start_grid[i], th, cause, n_samples, seed, type_weights, ...)
+		})
+		out <- do.call(rbind, results)
+		class(out) <- c("tvConcordance_JoinMeFit", "data.frame")
+		return(out)
+	}
+
+	time_start_map <- build_time_map(time_start, "time_start")
+	if (is.null(time_start_map)) {
+		cli::cli_abort("{.arg time_start} must be scalar, per-subject, or a column name.")
+	}
+
+	if (is.null(time_horizon) && is.null(Dt)) {
+		cli::cli_abort("Provide {.arg time_horizon} or {.arg Dt}.")
+	}
+	if (!is.null(time_horizon)) {
+		time_horizon_map <- build_time_map(time_horizon, "time_horizon")
+		if (is.null(time_horizon_map)) {
+			cli::cli_abort("{.arg time_horizon} must be scalar, per-subject, or a column name.")
+		}
+	} else {
+		if (!is.numeric(Dt) || length(Dt) != 1) {
+			cli::cli_abort("{.arg Dt} must be a single numeric value.")
+		}
+		time_horizon_map <- time_start_map + as.numeric(Dt)
+	}
+
+	out <- .time_varying_concordance_single(object, newdataLong, newdataEvent, time_start_map, time_horizon_map, cause, n_samples, seed, type_weights, ...)
+	class(out) <- c("tvConcordance_JoinMeFit", "data.frame")
+	out
+}
+
+#' @keywords internal
+.time_varying_concordance_single <- function(object, newdataLong, newdataEvent, time_start, time_horizon, cause, n_samples, seed, type_weights, ...) {
+	id_var <- eval(object$call$id_var) %||% "id"
+	time_var <- eval(object$call$time_var) %||% "time"
+	event_time_var <- eval(object$call$event_time_var) %||% "time"
+	event_var <- eval(object$call$event_var) %||% "event"
+
+	ids <- unique(newdataEvent[[id_var]])
+	ids <- ids[!is.na(ids)]
+
+	if (length(time_start) == 1 && !is.null(names(time_start))) time_start <- unname(time_start)
+	if (length(time_horizon) == 1 && !is.null(names(time_horizon))) time_horizon <- unname(time_horizon)
+
+	  if (length(time_start) == 1) {
+			time_start_map <- stats::setNames(rep(as.numeric(time_start), length(ids)), ids)
+	} else {
+			time_start_map <- time_start
+	}
+	if (length(time_horizon) == 1) {
+			time_horizon_map <- stats::setNames(rep(as.numeric(time_horizon), length(ids)), ids)
+	} else {
+			time_horizon_map <- time_horizon
+	}
+
+		if (any(time_horizon_map <= time_start_map, na.rm = TRUE)) {
+		cli::cli_abort("{.arg time_horizon} must be greater than {.arg time_start} for all subjects.")
+	}
+
+	# Restrict histories to each subject's landmark time
+	dL_split <- split(newdataLong, newdataLong[[id_var]])
+	dL_filtered <- lapply(names(dL_split), function(id) {
+		dd <- dL_split[[id]]
+		dd[dd[[time_var]] <= time_start_map[[id]], , drop = FALSE]
+	})
+	newdataLong <- do.call(rbind, dL_filtered)
+	if (is.null(newdataLong) || nrow(newdataLong) == 0) {
+		cli::cli_abort("No longitudinal history available at or before the landmark time(s).")
+	}
+
+	# Prepare per-subject time grids
+	times_map <- stats::setNames(as.list(as.numeric(time_horizon_map[ids])), ids)
+
+	pred <- predict(
+		object,
+		newdataLong = newdataLong,
+		newdataEvent = newdataEvent,
+		process = "event",
+		times = times_map,
+		time_start = time_start_map,
+		n_samples = n_samples,
+		seed = seed,
+		...
 	)
 
-	survival::concordance(survival::Surv(time, status) ~ risk, data = concord_data, ...)
+	surv_df <- pred$predictions$survival
+	if (is.null(surv_df) || nrow(surv_df) == 0) {
+		cli::cli_abort("No survival predictions returned for time-varying concordance.")
+	}
+
+	key_df <- data.frame(
+		id = ids,
+		time_horizon = as.numeric(time_horizon_map[ids]),
+		stringsAsFactors = FALSE
+	)
+	colnames(key_df)[1] <- id_var
+
+	merge_df <- merge(key_df, surv_df, by.x = id_var, by.y = "id", all.x = TRUE)
+	merge_df <- merge_df[abs(merge_df$time - merge_df$time_horizon) <= sqrt(.Machine$double.eps), , drop = FALSE]
+	if (nrow(merge_df) == 0) {
+		cli::cli_abort("Failed to align survival predictions at the requested horizon.")
+	}
+
+	merge_df$risk <- 1 - merge_df$Survival
+
+	event_df <- newdataEvent[, c(id_var, event_time_var, event_var), drop = FALSE]
+	colnames(event_df) <- c(id_var, "event_time", "event_status")
+	if ("event_type" %in% names(newdataEvent)) {
+		event_df$event_type <- newdataEvent$event_type
+	}
+	merge_df <- merge(merge_df, event_df, by = id_var, all.x = TRUE)
+	merge_df$time_start <- as.numeric(time_start_map[merge_df[[id_var]]])
+
+	merge_df <- merge_df[merge_df$event_time > merge_df$time_start, , drop = FALSE]
+	if (nrow(merge_df) == 0) {
+		return(data.frame(time_start = as.numeric(time_start)[1], time_horizon = as.numeric(time_horizon)[1],
+			concordance = NA_real_, n_cases = 0, n_controls = 0, n_pairs = 0))
+	}
+
+	status <- as.integer(merge_df$event_status)
+	if (!is.null(merge_df$event_type)) {
+		status <- ifelse(status == 1 & merge_df$event_type == cause, 1L, 0L)
+	}
+
+	merge_df$event_window <- as.integer(status == 1 & merge_df$event_time <= merge_df$time_horizon)
+	merge_df$time_window <- pmin(merge_df$event_time, merge_df$time_horizon) - merge_df$time_start
+
+	n_cases <- sum(merge_df$event_window == 1, na.rm = TRUE)
+	n_controls <- sum(merge_df$event_window == 0 & merge_df$event_time > merge_df$time_horizon, na.rm = TRUE)
+
+	if (n_cases == 0 || n_controls == 0) {
+		return(data.frame(time_start = as.numeric(time_start)[1], time_horizon = as.numeric(time_horizon)[1],
+			concordance = NA_real_, n_cases = n_cases, n_controls = n_controls, n_pairs = 0))
+	}
+
+	concord_data <- merge_df[merge_df$event_time > merge_df$time_start, , drop = FALSE]
+
+	weight_map <- list(none = "n")
+	timewt <- weight_map[[type_weights]] %||% type_weights
+
+	conc <- survival::concordance(
+		survival::Surv(concord_data$time_window, concord_data$event_window) ~ concord_data$risk,
+		timewt = timewt
+	)
+
+	data.frame(
+		time_start = as.numeric(time_start)[1],
+		time_horizon = as.numeric(time_horizon)[1],
+		concordance = conc$concordance,
+		n_cases = n_cases,
+		n_controls = n_controls,
+		n_pairs = n_cases * n_controls
+	)
+}
+
+# ---- Stan diagnostics ----------------------------------------------------
+
+#' Stan diagnostics for JoinMe models
+#'
+#' @name stan_diagnostics.JoinMeFit
+#' @rdname stan_diagnostics.JoinMeFit
+#' @param object A fitted object of class `JoinMeFit`.
+#' @param pars Optional character vector of parameter names to include.
+#' @param regex_pars Optional regular expression for parameter selection.
+#' @param draws Optional number of posterior draws to subset.
+#' @param seed Random seed for draw subsetting.
+#' @param type Diagnostic type (for ESS and MCSE).
+#' @param ... Unused.
+#'
+#' @return A data frame of diagnostics by parameter.
+#' @export
+stan_rhat.JoinMeFit <- function(object, pars = NULL, regex_pars = NULL, draws = NULL, seed = 1, ...) {
+	assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
+	draws_obj <- .get_draws_obj(object$fit)
+	vars <- posterior::variables(draws_obj)
+	vars <- .filter_diag_vars(vars, pars, regex_pars)
+	if (length(vars) == 0) {
+		return(data.frame(variable = character(0), rhat = numeric(0)))
+	}
+	draws_obj <- .get_draws_obj(object$fit, variables = vars, draws = draws, seed = seed)
+	rhat_vals <- posterior::rhat(draws_obj)
+	data.frame(variable = names(rhat_vals), rhat = as.numeric(rhat_vals), row.names = NULL)
+}
+
+#' @rdname stan_diagnostics.JoinMeFit
+#' @export
+stan_ess.JoinMeFit <- function(object, pars = NULL, regex_pars = NULL, draws = NULL, seed = 1,
+                               type = c("bulk", "tail"), ...) {
+	assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
+	type <- match.arg(type)
+	draws_obj <- .get_draws_obj(object$fit)
+	vars <- posterior::variables(draws_obj)
+	vars <- .filter_diag_vars(vars, pars, regex_pars)
+	if (length(vars) == 0) {
+		return(data.frame(variable = character(0), ess = numeric(0)))
+	}
+	draws_obj <- .get_draws_obj(object$fit, variables = vars, draws = draws, seed = seed)
+	ess_vals <- if (type == "bulk") posterior::ess_bulk(draws_obj) else posterior::ess_tail(draws_obj)
+	data.frame(variable = names(ess_vals), ess = as.numeric(ess_vals), row.names = NULL)
+}
+
+#' @rdname stan_diagnostics.JoinMeFit
+#' @export
+stan_mcse.JoinMeFit <- function(object, pars = NULL, regex_pars = NULL, draws = NULL, seed = 1,
+                                type = c("mean", "sd", "median"), ...) {
+	assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
+	type <- match.arg(type)
+	draws_obj <- .get_draws_obj(object$fit)
+	vars <- posterior::variables(draws_obj)
+	vars <- .filter_diag_vars(vars, pars, regex_pars)
+	if (length(vars) == 0) {
+		return(data.frame(variable = character(0), mcse = numeric(0)))
+	}
+	draws_obj <- .get_draws_obj(object$fit, variables = vars, draws = draws, seed = seed)
+	mcse_vals <- switch(type,
+		mean = posterior::mcse_mean(draws_obj),
+		sd = posterior::mcse_sd(draws_obj),
+		median = posterior::mcse_quantile(draws_obj, probs = 0.5)
+	)
+	data.frame(variable = names(mcse_vals), mcse = as.numeric(mcse_vals), row.names = NULL)
+}
+
+#' @keywords internal
+.filter_diag_vars <- function(vars, pars = NULL, regex_pars = NULL) {
+	if (!is.null(pars)) {
+		vars <- intersect(vars, pars)
+	}
+	if (!is.null(regex_pars)) {
+		vars <- vars[grepl(regex_pars, vars)]
+	}
+	vars
 }

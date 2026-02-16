@@ -55,6 +55,8 @@ iter_warmup, iter_sampling, seed, refresh, adapt_delta, max_treedepth).
 For engine = "rstan", threading uses options(stan.thread = threads_per_chain).
 \item grainsize: integer; reduce_sum grainsize for threading (default max(1, min(n_cores, ceiling(n_id/(4\emph{threads_per_chain}chains))))).
 \item force_recompile: logical; recompile the Stan model if needed.
+\item vcov_diag_link: "softplus" or "exp" for covariance regression diagonals.
+\item tau_sde_fixed: optional fixed tau in (0,1) for skew-double-exponential.
 }}
 
 \item{draws}{Optional number of posterior draws used for summaries (not sampling).}
@@ -91,6 +93,15 @@ Distributional regression can be specified in two equivalent forms:
 The time axis is internally scaled for numerical stability; reported coefficients
 are rescaled within Stan so fixed effects remain interpretable on the original scale.
 
+Marker weights (see \code{joinme_standata()}) are used to form marker-average summaries
+for both current value (CV) and current slope (CS) association components. When
+\code{estimate_marker_weights = TRUE}, the weights are shrunk via Normal or Laplace
+perturbations depending on the \code{shrinkage} setting.
+
+Association coefficients are denoted with the \code{alpha_} prefix to match joint-model
+conventions and to avoid confusion with the linear predictor eta used throughout
+the longitudinal and survival submodels.
+
 The typical workflow is:
 \enumerate{
 \item Prepare \code{dataLong} and \code{dataEvent} with aligned ids and time scales.
@@ -104,5 +115,6 @@ Example:
 \code{list(cv_total = list(type = "functional", expr = ~ log1p(x)), cs_total = list(type = "identity"), vcov = list(type = "pwlin", x = c(-2, 0, 2), y = c(0.2, 1, 0.2)))}
 
 Additional arguments are forwarded to \code{joinme_standata()} (e.g., \code{assoc},
-\code{basehaz}, \code{basehaz_degree}, \code{n_knots}, \code{time_var}, \code{shrinkage}, and \verb{indep_*}).
+\code{basehaz}, \code{basehaz_degree}, \code{n_knots}, \code{time_var}, and \code{shrinkage}). Use
+lme4-style \code{||} in \code{formulaLong} to request diagonal random-effect covariance.
 }

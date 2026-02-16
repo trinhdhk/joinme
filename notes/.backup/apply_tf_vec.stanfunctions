@@ -1,0 +1,19 @@
+/**
+ * @file apply_tf_vec.stanfunctions
+ * @brief Vectorized wrapper for apply_tf.
+ *
+ * @details Applies the scalar transform defined in apply_tf() to each
+ * element of the input vector. Used when a transformation must be
+ * applied at multiple nodes (for example, GK nodes).
+ *
+ * @param x Vector of values to transform.
+ * @param tf Transformation code (see apply_tf).
+ * @return Vector of transformed values.
+ */
+vector apply_tf_vec(vector x, int tf) {
+  int K = num_elements(x); // vector length
+  vector[K] out; // transformed output
+  for (k in 1 : K) 
+    out[k] = apply_tf(x[k], tf);
+  return out;
+}

@@ -11,7 +11,7 @@ Helper function to construct user-friendly transform specifications
 for the association term.
 }
 \examples{
-# Example 1: Functional transformation (opcode-backed)
+# Example 1: Functional transformation (bytecode-backed)
 spec_cv <- list(
   type = "functional",
   expr = ~ (log(sqrt(x + 1/inv_logit(3*x - 3))))^2

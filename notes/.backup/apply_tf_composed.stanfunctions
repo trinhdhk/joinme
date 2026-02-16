@@ -2,9 +2,13 @@
  * @file apply_tf_composed.stanfunctions
  * @brief Apply a composition of simple transforms to scalar or vector inputs.
  *
+ * @details Each transform is applied sequentially (left-to-right) to
+ * form a composition. This allows lightweight nonlinear mappings
+ * without using the more general opcode interpreter.
+ *
  * Transform IDs:
- *   0 = none
- *   1 = identity
+ *   0 = no-op
+ *   1 = identity (explicit no-op)
  *   2 = log
  *   3 = sqrt
  *   4 = logit
@@ -20,7 +24,7 @@
    * @return Transformed scalar value.
    */
   real apply_tf_composed(array[] int tf_ids, real x) {
-    real result = x;
+    real result = x;  // Running value through transform chain
     for (i in 1 : size(tf_ids)) {
       int tf = tf_ids[i];
       if (tf == 0) {
@@ -50,7 +54,7 @@
    * @return Transformed vector.
    */
   vector apply_tf_composed_vec(array[] int tf_ids, vector x) {
-    vector[num_elements(x)] result = x;
+    vector[num_elements(x)] result = x;  // Running values through transform chain
     for (i in 1 : size(tf_ids)) {
       int tf = tf_ids[i];
       if (tf == 0) {

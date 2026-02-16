@@ -1,11 +1,27 @@
 /**
- * @brief Compute cumulative hazard using Gauss-Kronrod 15-point quadrature.
- * @param S Integration endpoint (scaled time).
+ * @file cumhaz.stanfunctions
+ * @brief Cumulative hazard via Gauss-Kronrod 15-point quadrature.
+ *
+ * @details Numerically integrates the hazard function over [0, S] using the
+ * 15-point Gauss-Kronrod rule. The hazard is evaluated at 15 fixed nodes
+ * (pre-scaled to [0, 1]) and then scaled by S.
+ *
+ * The integrand is:
+ *   h(t) = exp(log_h0_nodes[j] + eta_nodes[j])
+ *
+ * To avoid overflow, the function uses a log-sum-exp style stabilization:
+ *   z = log_h0_nodes + eta_nodes
+ *   zmax = max(z)
+ *   sum = sum_j w[j] * exp(z[j] - zmax)
+ *   Lambda(S) = (S / 2) * exp(zmax) * sum
+ *
+ * @param S Integration endpoint (scaled time in [0, 1]).
  * @param log_h0_nodes Log baseline hazard evaluated at the 15 GK nodes.
- * @param eta_nodes Model linear predictor (including associations) evaluated at the 15 GK nodes.
- * @return Cumulative hazard value.
+ * @param eta_nodes Linear predictor at the 15 GK nodes (covariates + associations).
+ * @return Cumulative hazard value Lambda(S).
  */
 real cumhaz(real S, vector log_h0_nodes, vector eta_nodes) {
+  // Fixed Gauss-Kronrod 15-point weights on [0, 1]
   array[15] real w = {0.02293532201052922, 0.06309209262997855,
                       0.1047900103222502, 0.1406532597155259,
                       0.1690047266392679, 0.1903505780647854,
@@ -14,10 +30,16 @@ real cumhaz(real S, vector log_h0_nodes, vector eta_nodes) {
                       0.1690047266392679, 0.1406532597155259,
                       0.1047900103222502, 0.06309209262997855,
                       0.02293532201052922};
+
+  // Combined log hazard at nodes
   vector[15] z = log_h0_nodes + eta_nodes;
   real zmax = max(z);
+
+  // Stable weighted sum of exp(z)
   real acc = 0;
-  for (j in 1 : 15) 
+  for (j in 1 : 15)
     acc += w[j] * exp(z[j] - zmax);
+
+  // Scale by interval length (S/2) for GK rule on [0, S]
   return 0.5 * S * exp(zmax) * acc;
 }

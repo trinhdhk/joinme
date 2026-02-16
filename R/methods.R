@@ -7,10 +7,15 @@
 #' @author Trinh Dong
 NULL
 
+# File overview:
+# - S3 methods for JoinMeFit and summary output.
+# - Internal helpers for diagnostics and draw summaries.
+
 # ---- internal helpers -----------------------------------------------------
 
 #' @keywords internal
 .summarise_draws_diag <- function(fit, variables, draws = NULL, seed = 1) {
+  # Summarize draws with point estimates + diagnostics in one table
   if (length(variables) == 0) {
     return(data.frame(variable = character(0)))
   }
@@ -42,7 +47,136 @@ NULL
 }
 
 #' @keywords internal
+.format_transform_expr <- function(expr) {
+  if (is.null(expr)) return("identity")
+  if (rlang::is_quosure(expr)) expr <- rlang::get_expr(expr)
+  if (inherits(expr, "formula")) expr <- expr[[2]]
+  if (is.character(expr)) return(paste0("~ ", expr))
+  if (is.call(expr) || is.name(expr) || is.numeric(expr)) {
+    return(paste0("~ ", paste(deparse(expr), collapse = "")))
+  }
+  "functional"
+}
+
+#' @keywords internal
+.format_transform_spec <- function(spec) {
+  if (is.null(spec) || is.null(spec$type) || spec$type == "identity") {
+    return("identity")
+  }
+  if (spec$type == "functional") {
+    return(.format_transform_expr(spec$expr))
+  }
+  if (spec$type %in% c("ispline", "ispline_penalized", "pmonospline", "pmono")) {
+    knots <- spec$knots %||% spec$x
+    degree <- spec$degree %||% 3L
+    if (!is.null(knots)) {
+      knot_text <- paste(format(knots, digits = 3, trim = TRUE), collapse = ", ")
+      return(paste0("ispline(knots = c(", knot_text, "), degree = ", degree, ")"))
+    }
+    return(paste0("ispline(degree = ", degree, ")"))
+  }
+  if (spec$type == "pwlin") {
+    x_vals <- spec$x
+    y_vals <- spec$y
+    x_text <- if (!is.null(x_vals)) paste(format(x_vals, digits = 3, trim = TRUE), collapse = ", ") else ""
+    y_text <- if (!is.null(y_vals)) paste(format(y_vals, digits = 3, trim = TRUE), collapse = ", ") else ""
+    return(paste0("pwlin(x = c(", x_text, "), y = c(", y_text, "))"))
+  }
+  spec$type
+}
+
+#' @keywords internal
+.transform_formulas_from_specs <- function(transforms) {
+  if (is.null(transforms) || length(transforms) == 0) return(NULL)
+  terms <- names(transforms)
+  if (is.null(terms)) return(NULL)
+  data.frame(
+    term = terms,
+    formula = vapply(transforms, .format_transform_spec, character(1)),
+    stringsAsFactors = FALSE
+  )
+}
+
+#' @keywords internal
+.distributional_term_map <- function(sd, cfg, all_vars) {
+  # Build a family-aware map from Stan variable names to human-readable
+  # distributional summary terms.
+  #
+  # The key contract is:
+  # - report marker-specific distributional parameters only for markers whose
+  #   family actually uses that parameter,
+  # - label marker parameters with marker names, not numeric positions.
+  family_long <- sd$family_long %||% cfg$family_long %||% integer(0)
+  D <- sd$D %||% length(family_long)
+  if (D <= 0) {
+    return(character(0))
+  }
+
+  if (length(family_long) < D) {
+    family_long <- c(as.integer(family_long), rep(NA_integer_, D - length(family_long)))
+  } else {
+    family_long <- as.integer(family_long[seq_len(D)])
+  }
+
+  marker_levels <- sd$marker_levels %||% paste0("marker_", seq_len(D))
+  marker_levels <- as.character(marker_levels)
+  if (length(marker_levels) < D) {
+    marker_levels <- c(marker_levels, paste0("marker_", seq.int(length(marker_levels) + 1L, D)))
+  }
+  marker_levels <- marker_levels[seq_len(D)]
+
+  # Family -> parameter requirements via .family_distrib_params().
+  req_by_marker <- lapply(seq_len(D), function(d) {
+    fam <- family_long[d]
+    if (is.na(fam)) return(character(0))
+    tryCatch(.family_distrib_params(fam), error = function(e) character(0))
+  })
+
+  term_map <- character(0)
+
+  # Include shared sigma_y only if at least one marker family uses sigma.
+  if ("sigma_y" %in% all_vars && any(vapply(req_by_marker, function(x) "sigma" %in% x, logical(1)))) {
+    term_map["sigma_y"] <- "sigma_y"
+  }
+
+  # Marker-specific parameters are included only when required by family[d].
+  for (d in seq_len(D)) {
+    req <- req_by_marker[[d]]
+    mk <- marker_levels[d]
+
+    if ("sigma" %in% req) {
+      var_nm <- paste0("sigma_marker[", d, "]")
+      term_map[var_nm] <- paste0("sigma_marker[", mk, "]")
+    }
+    if ("nu" %in% req) {
+      var_nm <- paste0("nu_marker[", d, "]")
+      term_map[var_nm] <- paste0("nu_marker[", mk, "]")
+    }
+    if ("phi" %in% req) {
+      var_nm <- paste0("phi_nb_marker[", d, "]")
+      term_map[var_nm] <- paste0("phi_nb_marker[", mk, "]")
+    }
+    if ("alpha" %in% req) {
+      var_nm <- paste0("alpha_skew_marker[", d, "]")
+      term_map[var_nm] <- paste0("alpha_skew_marker[", mk, "]")
+    }
+    if ("phi_beta" %in% req) {
+      var_nm <- paste0("phi_beta_marker[", d, "]")
+      term_map[var_nm] <- paste0("phi_beta_marker[", mk, "]")
+    }
+    if ("tau_sde" %in% req) {
+      var_nm <- paste0("tau_sde_marker[", d, "]")
+      term_map[var_nm] <- paste0("tau_sde_marker[", mk, "]")
+    }
+  }
+
+  # Keep only variables that are present in posterior draws.
+  term_map[names(term_map) %in% all_vars]
+}
+
+#' @keywords internal
 .joinme_sampler_diagnostics <- function(fit) {
+  # Collect sampler diagnostics across cmdstanr or rstan backends
   out <- list(
     draws = NA_integer_,
     divergences = NA_integer_,
@@ -107,6 +241,7 @@ NULL
 #' @return Invisibly returns the object.
 #' @export
 print.JoinMeFit <- function(x, ...) {
+  # User-facing summary header for fits
   assertthat::assert_that(inherits(x, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
 
   cat("JoinMe model fit\n")
@@ -117,7 +252,11 @@ print.JoinMeFit <- function(x, ...) {
   }
   family <- x$stan_data$family_names %||% .family_code_to_name(x$config$family_long)
   if (!is.null(family)) {
-    cat("Family: ", paste(family, collapse = ", "), "\n", sep = "")
+    fml <-
+      if (length(unique(family)) == 1) family[1] else
+      if (length(family) > 5) paste(paste(head(family, 5), collapse = ", "), "...") else
+      paste(family, collapse = ", ")
+    cat("Family: ", fml, "\n", sep = "")
   }
   if (!is.null(x$tmax)) {
     cat("tmax: ", x$tmax, "\n", sep = "")
@@ -151,6 +290,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
   assertthat::assert_that(is.numeric(digits) && digits >= 0, msg = "digits must be non-negative.")
 
   cache_key <- paste0("summary_", draws, "_", digits, "_", include_vcov)
+  # Cache by draw count + digits to avoid repeat summaries
   cached <- object$cache_get(cache_key)
   if (!is.null(cached)) return(cached)
 
@@ -200,6 +340,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
   if (length(active_vars) > 0) {
     a_vars <- a_vars[a_vars %in% active_vars]
   }
+  # Association coefficient summaries (respect assoc flags)
   s_a <- NULL
   if (length(a_vars) > 0) {
     s_a <- as.data.frame(.summarise_draws_diag(fit, a_vars, draws = draws, seed = seed))
@@ -258,18 +399,17 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     }
   }
 
-  dist_candidates <- c(
-    "sigma_y",
-    grep("^sigma_marker\\[", all_vars, value = TRUE),
-    grep("^nu_marker\\[", all_vars, value = TRUE),
-    grep("^phi_nb_marker\\[", all_vars, value = TRUE),
-    grep("^alpha_skew_marker\\[", all_vars, value = TRUE)
-  )
-  dist_vars <- dist_candidates[dist_candidates %in% all_vars]
+  # Distributional parameter summaries (family-aware, marker-labeled)
+  #
+  # Reporting rules:
+  # - Include only parameters required by each marker family.
+  # - Replace numeric marker indices with marker names in term labels.
+  dist_term_map <- .distributional_term_map(sd, cfg, all_vars)
+  dist_vars <- names(dist_term_map)
   s_d <- NULL
   if (length(dist_vars) > 0) {
     s_d <- as.data.frame(.summarise_draws_diag(fit, dist_vars, draws = draws, seed = seed))
-    s_d$term <- s_d$variable
+    s_d$term <- unname(dist_term_map[s_d$variable])
     s_d <- s_d[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ESS"), drop = FALSE]
     s_d$Estimate <- round(s_d$Estimate, digits)
     s_d$Est.Error <- round(s_d$Est.Error, digits)
@@ -281,6 +421,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
 
   s_dr <- NULL
   dist_cols <- cfg$dist$dist_cols %||% list()
+  # Distributional regression summaries (fixed effects)
   dist_reg_specs <- list(
     sigma = list(prefix = "beta_sigma", cols = dist_cols$sigma %||% character(0)),
     nu = list(prefix = "beta_nu", cols = dist_cols$nu %||% character(0)),
@@ -313,6 +454,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     s_dr <- do.call(rbind, dist_reg_tables)
   }
 
+  # Optional variance/covariance summaries (costly)
   vcov_tables <- NULL
   if (isTRUE(include_vcov)) {
     vcov_tables <- list(
@@ -321,6 +463,9 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
       marker_by_id_latent = vcov(object, what = "marker_by_id_latent", draws = draws)
     )
   }
+
+  transform_specs <- cfg$transforms_spec %||% object$call$transforms
+  transform_formulas <- .transform_formulas_from_specs(transform_specs)
 
   summary_obj <- SummaryJoinMeFit$new(
     tables = list(
@@ -336,7 +481,8 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
       family = sd$family_names %||% .family_code_to_name(cfg$family_long),
       tmax = sd$tmax %||% cfg$tmax %||% 1.0,
       draws = draws,
-      transforms = cfg$transforms
+      transforms = cfg$transforms,
+      transform_formulas = transform_formulas
     )
   )
 
@@ -367,6 +513,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
 #' @param ... Additional arguments passed to `joinme()`.
 #'
 #' @return A refitted joinme object.
+#' @method update JoinMeFit
 #' @export
 update.JoinMeFit <- function(
   object,
@@ -392,12 +539,44 @@ update.JoinMeFit <- function(
   call_obj[[1]] <- quote(joinme)
 
   update_formula <- function(current, updated, name) {
+    # Support update formulas ("~ . + x") while preserving original
     if (is.null(updated)) return(current)
     if (!inherits(updated, "formula")) {
       cli::cli_abort("{.arg {name}} must be a formula.")
     }
-    if (any(all.vars(updated) == ".")) {
-      return(stats::update(current, updated))
+
+    # Robust dot detection without regex; the dot symbol is not reported by all.vars().
+    expr_has_dot <- function(expr) {
+      if (is.null(expr)) return(FALSE)
+      if (is.name(expr) && identical(as.character(expr), ".")) return(TRUE)
+      if (!is.call(expr)) return(FALSE)
+      any(vapply(as.list(expr)[-1], expr_has_dot, logical(1)))
+    }
+
+    replace_dot <- function(expr, replacement) {
+      if (is.null(expr)) return(expr)
+      if (is.name(expr) && identical(as.character(expr), ".")) return(replacement)
+      if (!is.call(expr)) return(expr)
+      as.call(c(expr[[1]], lapply(as.list(expr)[-1], replace_dot, replacement = replacement)))
+    }
+
+    has_lhs <- length(updated) == 3
+    rhs <- if (has_lhs) updated[[3]] else updated[[2]]
+    if (expr_has_dot(rhs) || !has_lhs) {
+      current_exp <- reformulas::expandDoubleVerts(current)
+      current_bars <- reformulas::findbars(current_exp)
+      current_fix <- reformulas::nobars(current_exp)
+      current_fix_rhs <- if (length(current_fix) == 3) current_fix[[3]] else current_fix[[2]]
+      new_rhs <- if (expr_has_dot(rhs)) replace_dot(rhs, current_fix_rhs) else rhs
+
+      tmp_form <- rlang::new_formula(NULL, new_rhs, env = rlang::`%||%`(environment(current), environment(updated)))
+      has_bars <- length(reformulas::findbars(reformulas::expandDoubleVerts(tmp_form))) > 0
+      if (!has_bars && length(current_bars) > 0) {
+        new_rhs <- Reduce(function(acc, bar) call("+", acc, bar), current_bars, init = new_rhs)
+      }
+
+      lhs <- if (has_lhs) updated[[2]] else if (length(current) == 3) current[[2]] else NULL
+      return(rlang::new_formula(lhs, new_rhs, env = rlang::`%||%`(environment(current), environment(updated))))
     }
     updated
   }
@@ -406,6 +585,21 @@ update.JoinMeFit <- function(
   call_obj$formulaEvent <- update_formula(object$formulaEvent, formulaEvent, "formulaEvent")
   call_obj$formulaVcov <- update_formula(object$formulaVcov, formulaVcov, "formulaVcov")
   if (!is.null(formulaDist)) call_obj$formulaDist <- formulaDist
+
+  if (!is.null(call_obj$formulaLong) && inherits(call_obj$formulaLong, "formula")) {
+    f_exp <- reformulas::expandDoubleVerts(call_obj$formulaLong)
+    if (length(reformulas::findbars(f_exp)) == 0 && !is.null(object$formulaLong)) {
+      current_exp <- reformulas::expandDoubleVerts(object$formulaLong)
+      current_bars <- reformulas::findbars(current_exp)
+      if (length(current_bars) > 0) {
+        fe_form <- reformulas::nobars(f_exp)
+        fe_rhs <- if (length(fe_form) == 3) fe_form[[3]] else fe_form[[2]]
+        rhs <- Reduce(function(acc, bar) call("+", acc, bar), current_bars, init = fe_rhs)
+        lhs <- if (length(call_obj$formulaLong) == 3) call_obj$formulaLong[[2]] else object$formulaLong[[2]]
+        call_obj$formulaLong <- rlang::new_formula(lhs, rhs, env = rlang::`%||%`(environment(call_obj$formulaLong), environment(object$formulaLong)))
+      }
+    }
+  }
 
   if (!is.null(dataLong)) call_obj$dataLong <- dataLong
   if (!is.null(dataEvent)) call_obj$dataEvent <- dataEvent
@@ -487,6 +681,11 @@ print.summary_JoinMeFit <- function(x, ...) {
     cat("\nAssociation parameters\n")
     cat("-----------------------\n")
     print(x$tables$assoc, row.names = FALSE)
+  }
+  if (!is.null(x$metadata$transform_formulas)) {
+    cat("\nTransformations\n")
+    cat("----------------\n")
+    print(x$metadata$transform_formulas, row.names = FALSE)
   }
   if (!is.null(x$tables$distributional)) {
     cat("\nDistributional parameters\n")

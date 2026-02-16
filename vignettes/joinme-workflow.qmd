@@ -51,11 +51,31 @@ We will walk through a complete end-to-end simulation study:
 3.  Assessing convergence and model fit.
 4.  Performing dynamic predictions for individual subjects.
 
+## 1.1 Program flow in practice
+
+The `joinme` workflow follows a fixed sequence that mirrors the Stan program:
+
+1. **Data assembly (R)**: build design matrices, scale time to $[0, 1]$,
+  and prepare Gauss-Kronrod nodes for survival integration.
+2. **Parameter declarations (Stan)**: define fixed effects, random effects,
+  distributional regression coefficients, baseline hazard parameters, and
+  association coefficients.
+3. **Transformed parameters (Stan)**: rescale time-related coefficients and
+  construct the random effects used in the likelihood.
+4. **Model block (Stan)**: apply priors and evaluate the likelihood using
+  `reduce_sum`, which splits subjects across threads when requested.
+5. **Generated quantities (Stan)**: compute per-observation log-likelihoods,
+  fitted values, and prediction summaries for posterior diagnostics.
+
+This sequence is important because it clarifies where each modeling choice
+enters the inference: formula parsing happens in R, while all probability
+calculations occur in Stan.
+
 # 2. Simulation and Data Exploration
 
 Before analyzing real data, it is highly recommended to perform a **parameter recovery simulation**. This confirms that the model is identifiable given your sample size and sampling frequency.
 
-We use the built-in simulator `simulate_joinme_joint_student_t_cvtotal` to generate a dataset where the hazard depends on the "Total Current Value" of the biomarkers (sum of random intercepts and time effects).
+We use the built-in generalized simulator `simulate_joinme` to generate a dataset where the hazard depends on the "Total Current Value" of the biomarkers.
 
 ```{r simulate}
 set.seed(2025)
@@ -64,12 +84,14 @@ set.seed(2025)
 # - 100 subjects
 # - 3 biomarkers
 # - ~10 observations per marker per subject
-sim <- simulate_joinme_joint_student_t_cvtotal(
-  n_id = 40, 
-  D = 3, 
-  n_t = 6,
-  beta = c("(Intercept)" = 1.0, "time" = 0.5, "x1" = 0.4),
-  alpha_cv_total = 0.5 # Association strength
+sim <- simulate_joinme(
+  n_id = 40,
+  families = rep("student_t", 3),
+  n_obs_per_marker_per_id = 6,
+  times_obs = seq(0, 8, length.out = 12),
+  beta_long = c("(Intercept)" = 1.0, "time" = 0.5, "x1" = 0.4),
+  assoc = c("cv_total"),
+  assoc_coefs = c(cv_total = 0.5)
 )
 
 dataLong <- sim$dataLong
@@ -106,6 +128,22 @@ We specify a joint model where:
 1.  **Longitudinal Submodel**: Linear growth over time with random intercepts and slopes for each subject-marker combination.
 2.  **Survival Submodel**: The hazard depends on baseline covariates (`x1`, `x2`) and the current value (`cv_total`) of the biomarkers.
 
+### Families and distributional regression
+
+Each marker can follow a distinct family (for example Gaussian, Student-$t$,
+Poisson, negative binomial, Bernoulli, beta, or ordinal). When a family includes
+additional parameters (for example $\sigma$, $\nu$, or $\phi$), those parameters
+can be modeled through `formulaDist`. This allows heteroscedasticity or
+covariate-dependent dispersion while keeping the mean structure aligned across
+markers.
+
+### Association transformations
+
+The association terms can be transformed using one of four modes: identity,
+functional bytecode expressions, monotone I-splines, or piecewise linear
+interpolation. These transformations are specified in R and passed to Stan as
+data so that the likelihood remains deterministic and reproducible.
+
 ## 3.1 Marker-only random effects (no inner id term)
 
 In some studies, you may want **marker-level random effects only**, without subject-specific marker deviations. This is now supported by omitting the inner `( ... | id )` term inside the marker block. In this configuration, marker-by-id random effects are disabled (`Q_idm = 0`), and associations that require those effects (notably `vcov`) are not permitted.
@@ -113,19 +151,18 @@ In some studies, you may want **marker-level random effects only**, without subj
 ```{r marker-only-example, eval=FALSE}
 # Marker-only random effects: no inner ( ... | id )
 formulaLong_marker_only <- y ~ time + x1 +
-  (1 + time | id) +
-  (0 + x1 | marker)
+  (1 + time || id) +
+  (0 + x1 || marker)
 
 # Note: assoc = c("vcov") is not allowed when Q_idm = 0
 ```
 
 ```{r priors}
 # Define explicit priors for transparency (optional but recommended)
+# Note: joinme exposes beta (fixed effects), alpha (associations), and lkj
 priors <- list(
-  beta = list(scale = 2.5),       # Fixed effects
-  gamma = list(scale = 2.5),      # Survival coeffs
-  alpha = list(scale = 1.0),      # Association coeffs
-  aux = list(scale = 1.0),        # Aux parameters (sigma, etc)
+  beta = list(scale = 2.5),       # Fixed effects (Student-t, df = 6)
+  alpha = list(scale = 1.0),      # Association coefficients
   lkj = 2.0                       # Correlation matrices (regularizing)
 )
 ```
@@ -153,11 +190,12 @@ fit <- joinme(
   dataLong = dataLong,
   dataEvent = dataEvent,
   # Longitudinal formula: Fixed effects + Random effects
-  formulaLong = y ~ time + x1 + (1 + time | id) + (0 + x1 + (1 + time | id) | marker),
+  formulaLong = y ~ time + x1 + (1 + time || id) + (0 + x1 + (1 + time || id) || marker),
   # Survival formula: Baseline covariates
   formulaEvent = survival::Surv(time, event) ~ x1 + x2,
   # Association structure: Link hazard to the total current value of markers
-  assoc = list(cv_total = list(type = "identity")), 
+  assoc = c("cv_total"),
+  transforms = list(cv_total = list(type = "identity")),
   priors = priors,
   control = control
 )
@@ -206,16 +244,19 @@ bayesplot::mcmc_trace(draws_obj, regex_pars = "alpha")
 A key step in validation is checking if the model can reproduce the observed data patterns.
 
 ```{r ppc, eval=FALSE}
-# Note: Requires generating y_rep in generated quantities or via posterior_predict helper
+# posterior_predict draws from the fitted model for PPC
 # y_rep <- posterior_predict(fit, ndraws = 100)
 # bayesplot::ppc_dens_overlay(dataLong$y, y_rep)
 ```
 
-(Note: PPC functionality depends on the exact `generated quantities` block configuration in your installed version.)
-
 # 7. Dynamic Prediction
 
 One of the most powerful features of joint models is **dynamic prediction**: updating survival probabilities as new biomarker data becomes available.
+
+If competing risks are present, the dynamic survival and cumulative hazard
+outputs correspond to the overall survival that integrates the sum of
+cause-specific hazards. Cause-specific survival curves are not returned by the
+default prediction outputs.
 
 We select a subject who had an event at a later time and predict their survival probability conditionally on data observed up to an earlier time point.
 
@@ -224,8 +265,10 @@ We select a subject who had an event at a later time and predict their survival 
 target_id <- dataEvent$id[which(dataEvent$time > 5 & dataEvent$event == 1)[1]]
 if (is.na(target_id)) target_id <- dataEvent$id[1]
 
-# Define the conditioning time (Tstart)
+# Define the conditioning time (time_start)
 t_cond <- 4
+
+# You can also pass a column name in newdataEvent, e.g. time_start = "time_start".
 
 # Filter history up to t_cond
 ndLong <- dataLong %>% filter(id == target_id, time <= t_cond)
@@ -243,9 +286,9 @@ preds <- tryCatch(
     fit,
     newdataLong = ndLong,
     newdataEvent = ndEvent,
-    Tstart = t_cond,
+    time_start = t_cond,
     times = seq(t_cond, 8, length.out = 30),
-    process = "event" # Focus on survival probability
+    process = "event" # Focus on survival and cumhaz
   ),
   error = function(e) {
     message("Prediction skipped: ", conditionMessage(e))
@@ -253,8 +296,8 @@ preds <- tryCatch(
   }
 )
 
-# The result is a list with 'event' dataframe
-if (!is.null(preds)) head(preds$event)
+# The result is a list with survival and cumhaz data frames
+if (!is.null(preds)) head(preds$survival)
 ```
 
 Finally, we visualize the predicted survival curve. The shaded area represents the 95% credible interval, accounting for uncertainty in both the parameters and the random effects.
@@ -264,7 +307,7 @@ if (!is.null(preds)) {
   plot(preds) +
     ggtitle(paste("Dynamic Survival Prediction for Subject", target_id)) +
     geom_vline(xintercept = dataEvent$time[dataEvent$id == target_id], linetype = "dashed", color = "red") +
-    annotate("text", x = dataEvent$time[dataEvent$id == target_id], y = 0.1, label = "True Event", color = "red", hjust = 1.1)
+    annotate("text", x = dataEvent$time[dataEvent$id == target_id], y = 0.1, label = "Observed event time", color = "red", hjust = 1.1)
 }
 ```
 

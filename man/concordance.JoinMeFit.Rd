@@ -2,24 +2,38 @@
 % Please edit documentation in R/diagnosis.R
 \name{concordance.JoinMeFit}
 \alias{concordance.JoinMeFit}
-\title{Concordance index for survival component}
+	itle{Time-varying concordance for the survival component}
 \usage{
-\method{concordance}{JoinMeFit}(object, cause = 1, draws = NULL, seed = 1, ...)
+\method{concordance}{JoinMeFit}(object, newdataLong = NULL, newdataEvent = NULL,
+	time_start, time_horizon = NULL, Dt = NULL, cause = 1, n_samples = 200,
+	seed = 123, type_weights = "none", ...)
 }
 \arguments{
 \item{object}{A fitted object of class \code{JoinMeFit}.}
 
+\item{newdataLong}{Longitudinal data for evaluation (defaults to training data).}
+
+\item{newdataEvent}{Event data for evaluation (defaults to training data).}
+
+\item{time_start}{Numeric landmark time(s) or a column name in \code{newdataEvent}.}
+
+\item{time_horizon}{Numeric horizon time(s) or a column name in \code{newdataEvent}.}
+
+\item{Dt}{Numeric horizon width; used when \code{time_horizon} is not supplied.}
+
 \item{cause}{Integer; cause index for competing risks (default 1).}
 
-\item{draws}{Optional number of posterior draws to subset.}
+\item{n_samples}{Number of posterior draws for prediction (default 200).}
 
 \item{seed}{Random seed for draw subsetting.}
 
-\item{...}{Additional arguments passed to \code{survival::concordance()}.}
+\item{type_weights}{Time-weighting for concordance; passed to \code{survival::concordance}.}
+
+\item{...}{Additional arguments passed to \code{predict.JoinMeFit()}.}
 }
 \value{
-A \code{concordance} object.
+A data frame with time-varying concordance at each landmark time.
 }
 \description{
-Concordance index for survival component
+Time-varying concordance for the survival component
 }

@@ -6,9 +6,11 @@
 \usage{
 run_joinme_example()
 }
-\arguments{
-\item{...}{Actually no. Currently everything is fixed. But will support input later :p}
+\value{
+A list with \code{fit} and \code{sim} entries.
 }
 \description{
-Runs an simulation + standata build + fit.
+Runs a small end-to-end workflow: simulate data, build standata, fit the model,
+and return both the fit and simulated data. This is intended as a quick smoke
+test or reproducible demo with fixed settings.
 }

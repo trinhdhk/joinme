@@ -31,18 +31,19 @@ jobs:
         with:
           use-public-rspm: true
 
+      - name: Install cmdstanr
+        run: |
+          cmdstanr::install_cmdstan()
+        shell: Rscript {0}
+      
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           extra-packages: any::pkgdown, local::., github::stan-dev/cmdstanr
           needs: website
 
-      - name: Install cmdstanr
-        run: |
-          cmdstanr::install_cmdstan()
-        shell: Rscript {0}
         
       - name: Build site
-        run: pkgdown::build_site_github_pages(new_process = FALSE, install = FALSE)
+        run: pkgdown::build_site_github_pages(new_process = FALSE, install = FALSE, quiet=FALSE)
         shell: Rscript {0}
 
       - name: Deploy to GitHub pages 🚀

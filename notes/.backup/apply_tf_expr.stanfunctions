@@ -2,8 +2,10 @@
  * @file apply_tf_expr.stanfunctions
  * @brief Arbitrary transformation composition via operation sequence.
  *
- * Operations are applied left-to-right (post-fix order).
- * Each operation is identified by an opcode; some take a parameter.
+ * @details Applies a left-to-right sequence of operations to a scalar or
+ * vector. Some operations consume parameters from the `params` vector.
+ * This is a lightweight, ordered transform pipeline distinct from the
+ * opcode stack in functional_transform.stanfunctions.
  *
  * Operation codes:
  *   0: identity (no-op)
@@ -33,14 +35,14 @@
  * @return transformed value
  */
 real apply_tf_expr(array[] int ops, vector params, real x) {
-  real result = x;
-  int param_idx = 1;
+  real result = x;     // Running value
+  int param_idx = 1;   // Index into params for parameterized ops
   
   for (k in 1:size(ops)) {
     int op = ops[k];
     
     if (op == 0) {
-      // identity
+      // identity (no-op)
     } else if (op == 1) {
       result = log(result);
     } else if (op == 2) {
@@ -90,10 +92,13 @@ real apply_tf_expr(array[] int ops, vector params, real x) {
 
 /**
  * @brief Apply operation sequence to a vector.
+ *
+ * @details Applies the same operation sequence to each element of x.
+ * Parameterized operations consume params in the same order as scalar case.
  */
 vector apply_tf_expr_vec(array[] int ops, vector params, vector x) {
   vector[num_elements(x)] result = x;
-  int param_idx = 1;
+  int param_idx = 1; // shared parameter cursor for vector ops
   
   for (k in 1:size(ops)) {
     int op = ops[k];

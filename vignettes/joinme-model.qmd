@@ -83,15 +83,23 @@ $$
 
 where:
 
--   $h_0(t)$: Baseline hazard function (typically modeled via B-splines or Weibull).
+-   $h_0(t)$: Baseline hazard function modeled via spline basis or a user-specified
+  baseline hazard formula.
 -   $\mathbf{w}_i$: Baseline covariates (baseline age, sex, treatment).
 -   $\mathcal{M}_i(t) = \{ \eta_{i1}(t), \dots, \eta_{iD}(t), \eta'_{i1}(t), \dots \}$: The collection of longitudinal trajectories and their derivatives (slopes) at time $t$.
 -   $g_k(\cdot)$: A functional transformation linking the longitudinal history to the hazard (the "association structure").
 
-Common forms for $g_k(\cdot)$ include:
--   **Current Value**: $\alpha \cdot \eta_{id}(t)$
--   **Current Slope**: $\alpha \cdot \frac{d}{dt}\eta_{id}(t)$
--   **Area under curve**: $\alpha \cdot \int_0^t \eta_{id}(s) ds$
+Common forms for $g_k(\cdot)$ in `joinme` are constructed from the following
+association summaries, each optionally transformed:
+
+- **Current value (CV)**: the value of the longitudinal linear predictor at time $t$.
+- **Current slope (CS)**: the derivative of the linear predictor at time $t$.
+- **Variance association (VCOV)**: a subject-specific, time-constant summary of
+  the marker-by-id covariance structure.
+
+In implementation, CV and CS are evaluated at a fixed set of 15 Gauss-Kronrod
+nodes on the scaled time interval, and CS is approximated by a forward
+finite difference with step size $\varepsilon$.
 
 When multiple markers are present, `joinme` forms marker-average CV and CS components
 using weights $\omega_d$ (one per marker). These weights apply to both current value
@@ -127,14 +135,41 @@ This method provides high accuracy with relatively few function evaluations comp
 
 ## 3.3. Arbitrary Transformation
 
-`joinme` supports arbitrary non-linear user-specified association functions (e.g., `~ log(current_value) + current_slope^2`). 
+`joinme` supports user-specified association transforms in four modes:
 
-Supported functions includes (subset):
+- **Identity**: no transformation.
+- **Functional bytecode**: a data-defined Reverse Polish Notation (RPN) program.
+- **Monotone I-spline**: smooth monotone mapping with user-supplied knots and coefficients.
+- **Piecewise linear**: linear interpolation between user-supplied knots.
 
--   `1 (ADD)`, `2 (SUB)`, `3 (MUL)`, `4 (DIV)`
--   `10 (EXP)`, `11 (LOG)`, `12 (SQRT)`
--   `20 (SIN)`, `21 (COS)`
--   `30 (LOGIT)`, `31 (INV_LOGIT)`
+The functional bytecode evaluator implements the following operations:
+
+- 0: PUSH_X
+- 1: PUSH_CONST
+- 2: ADD
+- 3: SUB
+- 4: MUL
+- 5: DIV
+- 6: LOG
+- 7: EXP
+- 8: SQRT
+- 9: INV_LOGIT
+- 10: LOGIT
+- 11: RECIPROCAL
+- 12: POW
+- 13: SIN
+- 14: COS
+- 15: TAN
+- 16: ABS
+- 17: SQUARE
+- 18: SINH
+- 19: COSH
+- 20: TANH
+- 21: ASINH
+- 22: ACOSH
+- 23: ATANH
+- 24: SOFTPLUS
+- 25: CBRT
 
 ## 3.4. Parallelization
 
@@ -151,14 +186,16 @@ The generated Stan data block organizes the inputs efficiently:
 
 | Variable | Description |
 |:---|:---|
-| `N_id` | N subjects |
-| `N_obs` | Total longitudinal observations |
-| `y` | Vector of outcomes |
-| `X_long` | Fixed effects design matrix (sparse) |
-| `Z_id`, `Z_mk`, `Z_idm` | Random effects design matrices (sparse) |
-| `time_idx` | Indices mapping observations to time points |
-| `nodes`, `weights` | Gauss-Kronrod quadrature nodes and weights |
-| `assoc_ops` | Flattened integer array of bytecode instructions |
+| `n_id` | number of subjects |
+| `N` | total longitudinal observations |
+| `id`, `marker` | subject and marker indices for each observation |
+| `y_real`, `y_int`, `trials` | continuous and discrete outcomes plus binomial trials |
+| `X_obs`, `Z_id_obs`, `Z_mk_obs`, `Z_idm_obs` | fixed and random-effect design matrices |
+| `S_event`, `d_event`, `event_type` | scaled event times, event indicator, cause type |
+| `Bs_event_c`, `Bs_gk_c` | spline bases at event times and GK nodes |
+| `X_gk_*`, `Z_*_gk_*` | design matrices at GK nodes (now/fwd for slopes) |
+| `tf_mode_*`, `functional_ops_*`, `const_data_*` | association transform configuration |
+| `knots_*`, `coeff_*`, `spline_degree_*` | spline-based transform configuration |
 
 # 5. Prediction
 

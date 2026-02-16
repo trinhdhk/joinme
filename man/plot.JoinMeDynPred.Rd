@@ -6,7 +6,7 @@
 \usage{
 \method{plot}{JoinMeDynPred}(
   x,
-  which = c("cumhaz", "longitudinal", "survival", "both"),
+  which = c("cumhaz", "longitudinal", "survival"),
   subject = NULL,
   trajectory_type = c("id_marker", "marker_pop", "overall_pop", "all_types"),
   smooth_trajectory = TRUE,
@@ -32,7 +32,7 @@
 \item{x}{An object of class \code{JoinMeDynPred} returned by the \link{predict} method.}
 
 \item{which}{Character vector indicating what to plot: "cumhaz" (default),
-"longitudinal", "survival", or "both".}
+"longitudinal", or "survival". Multiple values are allowed.}
 
 \item{subject}{Integer/Character vector. Which subject(s) to plot. If NULL,
 plots all subjects in separate panels or returns a list.}
@@ -62,8 +62,14 @@ plots all subjects in separate panels or returns a list.}
 
 \item{facet_scales}{Character. "fixed" or "free_y" for longitudinal faceting.}
 
-\item{combined}{Logical. If TRUE and both outcomes requested, create a combined plot.
-Otherwise return separate plots.}
+\item{combined}{Logical. If TRUE and multiple plot types are requested, combine
+them into a single layout (patchwork/cowplot).
+\itemize{
+\item For a single subject, returns one combined plot.
+\item For multiple subjects, returns a named list of combined plots (one per subject).
+\item If a combiner package is unavailable, falls back to the uncombined
+subject/outcome structure for that subject.
+}}
 
 \item{show_data}{Logical. Whether to overlay observed data points (default TRUE).}
 
@@ -85,8 +91,12 @@ function like \code{ggplot2::scale_color_brewer()}.}
 }
 \value{
 If a single subject and outcome requested: a \code{ggplot} object.
-If multiple subjects: a list of plots or a combined faceted plot.
-If both outcomes: list with "longitudinal", "survival", and "cumhaz" elements,
+If multiple subjects and \code{combined = TRUE}: a named list where each element is
+a per-subject combined plot (patchwork/cowplot) when backend support exists,
+otherwise the corresponding uncombined per-subject list.
+If multiple subjects and \code{combined = FALSE}: a named list grouped by subject,
+each containing requested outcome plots.
+If multiple outcomes: list with "longitudinal", "survival", and/or "cumhaz" elements,
 or a single combined plot if \code{combined = TRUE}.
 }
 \description{
@@ -99,9 +109,9 @@ conditional survival curves.
 \itemize{
 \item The longitudinal scale is inferred from the prediction object.
 \item On \"predict\" scale: observed values are shown for times in interval
-\verb{[0, T_start]} and predictions are drawn for \verb{[T_start, T_horiz]}.
-\item On \"linpred\" or \"epred\" scale: predictions are shown for \verb{[0, T_horiz]},
-with fitted values providing the pre-T_start segment when available.
+\verb{[0, time_start]} and predictions are drawn for \verb{[time_start, time_horizon]}.
+\item On \"linpred\" or \"epred\" scale: predictions are shown for \verb{[0, time_horizon]},
+with fitted values providing the pre-time_start segment when available.
 \item Optional shaded region distinguishing observed from prediction periods.
 \item Predicted trajectories with credible bands.
 \item Multiple CI levels with decreasing alpha for visual hierarchy.

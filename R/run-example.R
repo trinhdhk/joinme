@@ -1,19 +1,20 @@
 #' Example runner for joinme
 #'
 #' @description
-#' Runs an simulation + standata build + fit.
-#' @param ... Actually no. Currently everything is fixed. But will support input later :p
+#' Runs a small end-to-end workflow: simulate data, build standata, fit the model,
+#' and return both the fit and simulated data. This is intended as a quick smoke
+#' test or reproducible demo with fixed settings.
 #'
+#' @return A list with `fit` and `sim` entries.
 #' @export
 run_joinme_example <- function() {
-  sim <- simulate_joinme_joint_student_t_cvtotal(
+  # End-to-end smoke test: simulate -> fit -> summarize
+  sim <- simulate_joinme(
     n_id = 50,
-    D = 10,
-    n_t = 10,
-    seed = 42,
-    include_marker_only = TRUE,
-    formulaDist = list(sigma = sigma ~ 1 + time),
-    beta_sigma = c("(Intercept)" = log(0.4), "time" = 0.15)
+    families = rep("student_t", 10),
+    n_obs_per_marker_per_id = 10,
+    times_obs = seq(0, 8, length.out = 16),
+    seed = 42
   )
 
   formulaLong <- y ~ 1 + time + x1 +

@@ -1,5 +1,11 @@
 /**
- * @brief Apply nonlinear transformation to a scalar.
+ * @file apply_tf.stanfunctions
+ * @brief Simple scalar transformation dispatcher.
+ *
+ * @details Applies one of a small set of predefined scalar transforms
+ * used for light-weight association transformations. This is a simpler
+ * alternative to the opcode and spline-based transformations.
+ *
  * @param x Input scalar to transform.
  * @param tf Transformation code:
  *           0: identity
@@ -12,6 +18,7 @@
  * @return Transformed scalar value.
  */
 real apply_tf(real x, int tf) {
+  // Dispatch on a small fixed set of scalar transforms
   if (tf == 0) 
     return x;
   if (tf == 1) 

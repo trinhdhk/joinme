@@ -16,7 +16,7 @@
     "subject_marker"),
   scale = c("epred", "linpred", "predict"),
   times = NULL,
-  Tstart = NULL,
+  time_start = NULL,
   tmax = NULL,
   ci_levels = c(0.5, 0.95),
   n_samples = 200,
@@ -28,7 +28,7 @@
 
 \method{posterior_linpred}{JoinMeFit}(object, ...)
 
-posterior_epred.JoinMeFit(object, ...)
+\method{posterior_epred}{JoinMeFit}(object, ...)
 
 \method{posterior_predict}{JoinMeFit}(object, ...)
 }
@@ -62,11 +62,14 @@ Options: "longitudinal" (future trajectory), "event" (conditional survival proba
 
 \item{times}{Numeric vector of times at which to predict the longitudinal and survival trajectories.
 Can also be a named list of numeric vectors (one per subject id). If NULL, a grid
-from \code{Tstart} to \code{Tstart + 5} (scaled) is generated. If fewer than 50 points are
+from \code{time_start} to \code{time_start + 5} (scaled) is generated. If fewer than 50 points are
 supplied for a subject, a warning is emitted when \code{n_times = 50}.}
 
-\item{Tstart}{Numeric scalar. The conditioning time (last observation time).
-If NULL, defaults to the maximum observed time in \code{newdataLong} for the subject.}
+\item{time_start}{Numeric scalar or character. The conditioning time (last observation time).
+If numeric, a single value is reused for all subjects, or a named vector supplies
+subject-specific values. If character, it is interpreted as a column name in
+\code{newdataEvent} holding subject-specific conditioning times. If NULL, defaults to
+the maximum observed time in \code{newdataLong} for each subject.}
 
 \item{tmax}{Numeric scalar. The maximum time used for scaling during model fitting.
 \strong{CRITICAL}: If this is not provided and cannot be inferred from the object, predictions will be on the wrong time scale.}
@@ -98,8 +101,8 @@ For engine = "rstan", threading uses options(stan.thread = threads_per_chain).
 A list with two components:
 \item{longitudinal}{A data.frame containing longitudinal predictions (Mean, Median, SD, 95\% CrI) for each time point in \code{times}. Columns: id, time, marker, Estimate, Median, Est.Error, L95, U95.}
 \item{longitudinal_fitted}{A data.frame containing fitted values for observed history on the linpred and epred scales. Includes a \code{scale} column.}
-\item{survival}{A data.frame containing survival probabilities (S(t|Tstart)) for each time point in \code{times}. Columns: id, time, Survival, Median, Est.Error, L95, U95.}
-\item{cumhaz}{A data.frame containing conditional cumulative hazards H(t|Tstart). Columns: id, time, Cumhaz, Median, Est.Error, L95, U95.}
+\item{survival}{A data.frame containing survival probabilities (S(t|time_start)) for each time point in \code{times}. Columns: id, time, Survival, Median, Est.Error, L95, U95.}
+\item{cumhaz}{A data.frame containing conditional cumulative hazards H(t|time_start). Columns: id, time, Cumhaz, Median, Est.Error, L95, U95.}
 \item{draws}{A list containing raw posterior draws (\code{longitudinal}, \code{survival}, \code{cumhaz}).}
 
 A \code{JoinMeDynPred} object with \code{metadata$scale = "linpred"}.

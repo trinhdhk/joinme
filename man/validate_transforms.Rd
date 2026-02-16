@@ -13,6 +13,6 @@ validate_transforms(standata)
 TRUE if valid; stops with error message if invalid
 }
 \description{
-Check functional opcode integrity and spline coefficient shapes before sampling.
+Check functional bytecode integrity and spline coefficient shapes before sampling.
 }
 \keyword{internal}

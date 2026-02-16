@@ -1,0 +1,1065 @@
+---
+title: "JoinME Stan Model Architecture"
+subtitle: "Comprehensive Technical Documentation"
+format:
+  html:
+    toc: true
+    toc-depth: 4
+    code-fold: false
+    mermaid:
+      theme: default
+---
+---
+
+# Overview
+
+The **JoinME** package implements a sophisticated joint model for multivariate longitudinal and time-to-event data using Stan. This document provides an in-depth technical explanation of the Stan model architecture, data flow, and computational algorithms.
+
+## Core Capabilities
+
+1. **Multivariate Longitudinal Submodel**: Handles multiple markers measured repeatedly over time with flexible distribution families (Gaussian, Student-t, Bernoulli, Poisson, negative binomial, beta, ordinal, skew-normal, double exponential)
+2. **Survival Submodel**: Proportional hazards model with competing risks and flexible baseline hazard (B-spline)
+3. **Association Structure**: Links longitudinal and survival processes through:
+   - Current value (CV) and current slope (CS) of longitudinal trajectories
+   - Covariance structure of random effects
+   - Flexible transformations of association features
+4. **Dynamic Prediction**: Conditional prediction of future longitudinal trajectories and survival probabilities given observed history
+
+Additional implementation details that are central to the interpretation:
+
+- Marker-weighted contributions are formed as weighted means across markers,
+  using either fixed weights or shrinkage-estimated weights.
+- The VCOV association depends on an id-level latent effect that drives a
+  covariance regression, producing subject-specific Cholesky factors.
+- Non-linear transforms are applied to CV, CS, and VCOV before they enter the
+  hazard, using identity, functional opcodes, monotone I-splines, or piecewise
+  linear rules.
+- Random-effects independence follows lme4-style `||` syntax in `formulaLong`,
+  mapping to diagonal covariance structures for id, marker, and nested marker-by-id blocks.
+- Prediction plots distinguish fitted history from forecast intervals and display
+  user-selected credible bands for longitudinal, survival, and cumulative hazard trajectories.
+- Competing risks are supported through event-type indexing; the overall survival
+  in prediction integrates the sum of cause-specific hazards.
+
+# High-Level Architecture
+
+```{mermaid}
+%%| fig-width: 100%
+flowchart TD
+    subgraph Data["Data Layer"]
+        LongData[("Longitudinal Data<br/>N observations<br/>D markers<br/>n_id subjects")]
+        EventData[("Survival Data<br/>n_id subjects<br/>K_event risks")]
+        Covariates[("Covariates<br/>Fixed effects<br/>Hazard covariates<br/>Vcov covariates")]
+    end
+    
+    subgraph Model["Model Layer"]
+        direction TB
+        FitModel["joinme_fit.stan<br/><b>Model Fitting</b>"]
+        DynPred["joinme_dynpred.stan<br/><b>Dynamic Prediction</b>"]
+    end
+    
+    subgraph Parameters["Parameter Space"]
+        direction LR
+        FixedEffects["β: Fixed Effects"]
+        RandomEffects["u, v, w: Random Effects"]
+        Hazard["γ, h0: Hazard Parameters"]
+        Association["α: Association Weights"]
+    end
+    
+    subgraph Likelihood["Likelihood Functions"]
+        LongLik["Longitudinal Likelihood<br/>P(Y|RE, β)"]
+        SurvLik[" Survival Likelihood<br/>P(T, δ|RE, γ, h0, α)"]
+    end
+    
+   subgraph Helpers["Helper Functions"]
+        PartialFit["partial_joinme()<br/>Subject-specific log-likelihood"]
+        PartialDynPred["partial_draw()<br/>Draw-specific prediction"]
+        Transform["Association Transformations<br/>apply_transform_*()"]
+        CumHaz["Cumulative Hazard<br/>cumhaz()"]
+        EtaFD["Finite Difference Slopes<br/>eta_fd()"]
+    end
+    
+    LongData --> FitModel
+    EventData --> FitModel
+    Covariates --> FitModel
+    
+    FitModel --> Parameters
+    Parameters --> DynPred
+    LongData -.->|New Subject| DynPred
+    
+    FitModel --> PartialFit
+    DynPred --> PartialDynPred
+    
+    PartialFit --> LongLik
+    PartialFit --> SurvLik
+    
+    PartialDynPred --> LongLik
+    PartialDynPred --> SurvLik
+    
+    LongLik --> Transform
+    SurvLik --> Transform
+    SurvLik --> CumHaz
+    SurvLik --> EtaFD
+    
+    style FitModel fill:#e1f5ff
+    style DynPred fill:#fff4e1
+    style PartialFit fill:#ffe1f5
+    style PartialDynPred fill:#f5e1ff
+```
+
+# Model Fitting: `joinme_fit.stan`
+
+## Data Flow
+
+```{mermaid}
+%%| fig-width: 100%
+graph LR
+    subgraph Input["Data Block"]
+        LongObs["Longitudinal<br/>y_real, y_int<br/>X_obs, Z_*_obs"]
+        SurvObs["Survival<br/>S_event, d_event<br/>W, Bs_*"]
+        Design["Design Matrices<br/>X_gk_*, Z_*_gk_*<br/>Association info"]
+    end
+    
+    subgraph TransData["Transformed Data"]
+        IDRanges["id_start[i], id_end[i]<br/>Row ranges per subject"]
+        Indices["Covariance indices<br/>idx_row_cov, idx_col_cov"]
+    end
+    
+    subgraph Params["Parameters"]
+        Beta["β: Fixed effects<br/>(scaled)"]
+        RE["u_id: ID REs<br/>v_marker: Marker REs<br/>w_idscaled: Interaction REs"]
+        Scales["τ: RE scales<br/>Lcorr: Correlations"]
+        Gamma["γ: Hazard params<br/>h0: Baseline hazard"]
+        Alpha["α: Association<br/>coefficients"]
+    end
+    
+    subgraph Likelihood["Model Block"]
+        ReduceSum["reduce_sum()<br/>Parallelizes over subjects"]
+        PartialJoinME["partial_joinme(id_seq, start, end, ...)<br/>Likelihood slice"]
+    end
+    
+    subgraph SubjectLik["Subject i Likelihood"]
+        LongLoop["For each obs n ∈ [id_start[i], id_end[i]]:<br/>Compute η = Xβ + Zu + Zv + Zw<br/>Accumulate log p(y[n] | η, family)"]
+        SurvCalc["Compute association features:<br/>CV, CS at GK nodes & event time<br/>Transform via functional ops<br/>Compute log h(t) & cumulative hazard"]
+    end
+    
+    Input --> TransData
+    TransData --> Likelihood
+    Params --> Likelihood
+    
+    Likelihood --> ReduceSum
+    ReduceSum -.->|Slice| PartialJoinME
+    PartialJoinME --> SubjectLik
+    SubjectLik --> LongLoop
+    SubjectLik --> SurvCalc
+    
+    style ReduceSum fill:#ffe6e6
+    style PartialJoinME fill:#fff0e6
+```
+
+## Algorithm Pseudocode
+
+### Main Model Block
+
+```plaintext
+FOR each MCMC iteration:
+  1. Sample parameters from priors
+  2. Compute scaled fixed effects: β_scaled = β / tmax^{idx_time_*}
+  3. Call reduce_sum(partial_joinme, id_seq, grainsize, ...)
+     ├─ Splits subjects into chunks of size grainsize
+     ├─ Processes each chunk in parallel (if threading enabled)
+     └─ Returns total log-likelihood
+  4. Add log-likelihood to target
+END FOR
+```
+
+### `partial_joinme()` Function
+
+This is the core likelihood evaluation per subject slice.
+
+```plaintext
+FUNCTION partial_joinme(id_seq, start, end, ... [all data & parameters]):
+  lp = 0  // Accumulated log-likelihood for this slice
+  
+  FOR ii = start TO end:  // Process subjects in this slice
+    i = id_seq[ii]  // Current subject index
+    
+    // -------------------
+    // LONGITUDINAL LIKELIHOOD
+    // -------------------
+    FOR each observation n IN [id_start[i], id_end[i]]:
+      d = marker[n]  // Marker type for this observation
+      
+      // 1. Compute linear predictor (location parameter)
+      η_long = X_obs[n]'β_scaled             // Fixed effects
+             + Z_id_obs[n]'u_id[i]           // ID-specific RE
+             + Z_mk_obs[n]'v_marker[d]       // Marker-specific RE
+             + Z_idm_obs[n]'w_idscaled[i,d]  // ID×Marker interaction RE
+      
+      // 2. Compute distributional parameters if needed
+      //    (e.g., σ for Gaussian, ν for Student-t, φ for NegBinom, etc.)
+      //    These may have their own regression structures (X_sigma, etc.)
+      
+      // 3. Accumulate log-density based on family
+      SWITCH family_long[d]:
+        CASE Gaussian:
+          σ = exp(X_sigma[n]'β_sigma) OR sigma_marker[d] OR sigma_y
+          lp += log N(y_real[n] | η_long, σ)
+          
+        CASE Student_t:
+          σ = ... (as above)
+          ν = 2 + exp(X_nu[n]'β_nu) OR nu_marker[d]
+          lp += log t_ν(y_real[n] | η_long, σ)
+          
+        CASE Bernoulli:
+          lp += log Bernoulli(y_int[n] | logit^{-1}(η_long))
+          
+        CASE Poisson:
+          lp += log Poisson(y_int[n] | exp(η_long))
+          
+        CASE NegBinom:
+          φ = exp(X_phi[n]'β_phi) OR phi_nb_marker[d]
+          lp += log NegBinom(y_int[n] | exp(η_long), φ)
+          
+        ... [other families: beta, ordinal, skew_normal, etc.]
+      END SWITCH
+    END FOR
+    
+    // -------------------
+    // SURVIVAL LIKELIHOOD
+    // -------------------
+    
+    // 1. Compute association features at 15 Gauss-Kronrod (GK) quadrature nodes
+    //    These nodes tile [0, S_event[i]] for numerical integration
+    
+    FOR j = 1 TO 15:  // For each GK node
+      // a. Compute current value (CV) components
+      cvm_now[j] = X_gk_now[i][j]'β_scaled + Z_id_gk_now[i][j]'u_id[i]  // Mean component
+      cvk_now[j] = Z_mk_gk_now[i][j]'vbar + Z_idm_gk_now[i][j]'wbar_i[i]  // Marker component
+      
+      // b. Compute forward step for finite-difference slope
+      cvm_fwd[j] = X_gk_fwd[i][j]'β_scaled + Z_id_gk_fwd[i][j]'u_id[i]
+      cvk_fwd[j] = Z_mk_gk_fwd[i][j]'vbar + Z_idm_gk_fwd[i][j]'wbar_i[i]
+    END FOR
+    
+    // 2. Compute current slopes (CS) via finite differences
+    csm_raw = eta_fd(cvm_now, cvm_fwd, eps_fd) / tmax  // Time-rescaled slope
+    csk_raw = eta_fd(cvk_now, cvk_fwd, eps_fd) / tmax
+
+    // 2b. Marker-weighted means used for cvk and csk
+    //     vbar and wbar_i are weighted means across markers using weights ω_d
+    
+    // 3. Compute variance-covariance association feature
+    //    (logarithm of variances from Cholesky factor L_i)
+    //    L_i is built by covariance regression with id-level latent effect u_L[i]
+    //    lp_m = alpha_L[m] + beta_L[m]'Xcov[i] + lambda_L[m] * u_L[i]
+    //    L_i[r,c] = log1p_exp(lp_m) if r == c, else lp_m
+    vcov_raw = weighted_log_variances(L_i[i], a_vcov_var)
+    
+    // 4. Aggregate association features
+    cv_total[j] = cvm_now[j] + cvk_now[j]  // Total current value
+    cs_total[j] = csm_raw[j] + csk_raw[j]  // Total current slope
+    
+    // 5. Apply nonlinear transformations to association features
+    //    Transformations can be: identity, log, exp, splines, functional opcodes, etc.
+    cv_total_tf = apply_transform(cv_total, tf_mode_cv_tot, ops_cv, coeff_cv, ...)
+    cv_mean_tf  = apply_transform(cvm_now, tf_mode_cv_mean, ...)
+    cv_marker_tf = apply_transform(cvk_now, tf_mode_cv_marker, ...)
+    cs_total_tf = apply_transform(cs_total, tf_mode_cs_tot, ...)
+    cs_mean_tf  = apply_transform(csm_raw, tf_mode_cs_mean, ...)
+    cs_marker_tf = apply_transform(csk_raw, tf_mode_cs_marker, ...)
+    vcov_tf     = apply_transform(vcov_raw, tf_mode_vcov, ...)
+    
+    // 6. Combine transformed features into survival predictor at GK nodes
+    FOR j = 1 TO 15:
+      η_assoc_nodes[j] = α_cv_total * cv_total_tf[j]
+                       + α_cv_mean * cv_mean_tf[j]
+                       + α_cv_marker * cv_marker_tf[j]
+                       + α_cs_total * cs_total_tf[j]
+                       + α_cs_mean * cs_mean_tf[j]
+                       + α_cs_marker * cs_marker_tf[j]
+                       + vcov_tf[j]
+    END FOR
+
+    // 7. Competing risks handling
+    //    For K_event causes, compute cause-specific hazards and sum in the
+    //    cumulative hazard. The event-time contribution uses the observed cause.
+    
+    // 7. If subject had event (d_event[i] = 1), add log-hazard at event time
+    IF d_event[i] == 1:
+      k_ev = event_type[i]  // Which competing risk
+      
+      // Baseline hazard at event time
+      log_h0_S = log_h0_intercept[k_ev] + Bs_event_c[i]'bs_gamma_c[k_ev]
+      
+      // Hazard covariate effects
+      η_w_S = W[i]'γ_w[k_ev]
+      
+      // Association feature at event time (same steps as GK nodes)
+      [Compute cv_*, cs_*, vcov_* at S_event[i]]
+      [Transform and aggregate into η_assoc_S]
+      
+      // Add log-hazard contribution
+      lp += log_h0_S + η_w_S + η_assoc_S
+    END IF
+    
+    // 8. Compute cumulative hazard via Gauss-Kronrod quadrature
+    //    Λ(t) = ∫₀ᵗ Σₖ hₖ(s) ds ≈ weighted sum over GK nodes
+    
+    FOR j = 1 TO 15:
+      // Total hazard at node j across all K_event competing risks
+      log_h_total[j] = log Σₖ exp(log_h0[k] + Bs_gk_c[i][j]'bs_gamma_c[k] + η_w + η_assoc_nodes[j])
+    END FOR
+    
+    // Apply Gauss-Kronrod formula with weights w[j]
+    Λ_i = cumhaz(S_event[i], log_h_total, zeros(15))
+    
+    // 9. Add survival contribution: log S(t) = -Λ(t)
+    lp += -Λ_i
+    
+  END FOR  // End subject loop
+  
+  RETURN lp
+END FUNCTION
+```
+
+### Key Computational Steps Explained
+
+#### 1. **Random Effects Structure**
+
+Three-level random effects:
+$$ u_{id}[i] \sim \text{MVN}(0, \Sigma_{id}) $$
+$$ v_{marker}[d] \sim \text{MVN}(0, \Sigma_{marker}) $$
+$$ w_{id \times m}[i,d] \sim \text{MVN}(0, \Sigma_{idm}) $$
+
+Covariance matrices parameterized via Cholesky:
+$$ \Sigma_{id} = \text{diag}(\tau_{id}) \cdot L_{id}^{corr} (L_{id}^{corr})' \cdot \text{diag}(\tau_{id}) $$
+$$ \Sigma_{marker} = \text{diag}(\tau_{mk}) \cdot L_{mk}^{corr} (L_{mk}^{corr})' \cdot \text{diag}(\tau_{mk}) $$
+$$ \Sigma_{idm} = L_i L_i' $$
+where $L_i$ is a subject-specific Cholesky factor driven by covariance regression.
+  
+$\bar{w}[i]$ is the weighted average of $w$ across markers (for "total" associations), and $\bar{v}$ is the weighted average of $v$ across markers.
+
+#### 2. **Association Mechanisms**
+
+**Current Value (CV)**:
+- $CV_{total} = \text{Fixed} + u_{id} + v_{mk} + w_{id \times m}$
+- $CV_{mean}  = \text{Fixed} + u_{id}$ (subject-average trajectory)
+- $CV_{marker} = v_{mk} + w_{id \times m}$ (marker-specific deviations)
+
+**Current Slope (CS)**:
+- Computed via finite differences: 
+$$ CS(t) \approx \frac{CV(t + \varepsilon) - CV(t)}{\varepsilon} $$
+
+**Covariance (VCOV)**:
+- Weighted log-variances from Cholesky factor $L_i$.
+- Captures uncertainty in subject-specific predictions.
+
+#### 3. **Gauss-Kronrod Quadrature**
+
+To integrate hazard over $[0, T]$:
+$$ \Lambda(T) = \int_0^T \lambda(s) ds $$
+
+Use 15-point Gauss-Kronrod rule:
+$$ \Lambda(T) \approx \frac{T}{2} \sum_{j=1}^{15} \omega_j \lambda(T \cdot x_j) $$
+where $x_j \in [0,1]$ are GK nodes and $\omega_j$ are weights. Design matrices are pre-computed at these nodes.
+
+#### 4. **Flexible Transformations**
+
+Association features can be transformed before entering survival predictor. Transformation modes:
+- **0**: Identity ($f(x)=x$)
+- **1**: Functional opcodes (log, exp, sqrt, compositions)
+- **2**: I-spline basis (for monotonic smooth transforms)
+- **3**: Piecewise linear
+
+Example: If CV exhibits nonlinear association with hazard:
+$$ \eta_{assoc} += \alpha \cdot f(CV) $$
+where $f()$ is learned via splines.
+
+
+# Dynamic Prediction: `joinme_dynpred.stan`
+
+## Conceptual Overview
+
+Given:
+- Posterior samples {θ^(k)} from fitted model
+- New subject with observed history y_obs, times t_obs
+- Conditioning time T_cond (usually max(t_obs))
+
+Goal:
+- Predict future longitudinal values y_future | y_obs, θ
+- Predict survival probability S(t | T_cond, y_obs, θ)
+
+Competing risks note:
+When K_event > 1, the prediction returns the overall survival probability that
+integrates the sum of cause-specific hazards. Cause-specific survival curves are
+not returned directly by the default dynpred outputs.
+
+Strategy:
+1. For each posterior draw k:
+   a. Sample subject-specific random effects u, v, w | y_obs, θ^(k)
+   b. Compute longitudinal and survival predictions given u, v, w
+2. Average predictions across draws to get marginal estimates
+
+## Data Flow
+
+```{mermaid}
+%%| fig-width: 100%
+graph TB
+    subgraph Input["Inputs"]
+        PostDraws["Posterior Draws<br/>β^(k), τ^(k), γ^(k), α^(k)<br/>k = 1...n_draws"]
+        NewSub["New Subject Data<br/>y_obs, X_obs, Z_obs<br/>Observed history"]
+        PredGrid["Prediction Grids<br/>t_future (longitudinal)<br/>t_surv (survival)"]
+    end
+    
+    subgraph Model["Model Block"]
+        ReduceDraw["reduce_sum()<br/>Parallelizes over draws"]
+        PartialDraw["partial_draw(draw_ids, start, end, ...)<br/>Draw-specific likelihood"]
+    end
+    
+    subgraph DrawK["For Draw k"]
+        SampleRE["Sample Random Effects<br/>u ~ N(0,I), v ~ N(0,I), w_lat ~ N(0,I)<br/>Transform: u ← L_u·z_u, etc."]
+        BuildCov["Build Subject Cholesky L_i<br/>from covariance regression"]
+        LongCond["Longitudinal Conditioning<br/>log p(y_obs | u,v,w, θ^(k))"]
+        SurvCond["Survival Conditioning<br/>log S(T_cond | u,v,w, θ^(k))"]
+    end
+    
+    subgraph GenQuant["Generated Quantities"]
+        PredLong["Predict y_future<br/>at each t_future"]
+        PredSurv["Predict S(t | T_cond)<br/>at each t_surv"]
+        Summarize["Aggregate over draws<br/>Mean, Median, CrI"]
+    end
+    
+    PostDraws --> Model
+    NewSub --> Model
+    Model --> ReduceDraw
+    ReduceDraw -.->|Slice| PartialDraw
+    PartialDraw --> DrawK
+    DrawK --> SampleRE
+    SampleRE --> BuildCov
+    BuildCov --> LongCond
+    BuildCov --> SurvCond
+    LongCond -.-> GenQuant
+    SurvCond -.-> GenQuant
+    GenQuant --> PredLong
+    GenQuant --> PredSurv
+    GenQuant --> Summarize
+    
+    style PartialDraw fill:#fff0e6
+    style SampleRE fill:#e6f7ff
+```
+
+## Algorithm Pseudocode
+
+### `partial_draw()` Function
+
+This function operates on a slice of posterior draws.
+
+```plaintext
+FUNCTION partial_draw(draw_ids_slice, start, end, ... [data & posterior draws]):
+  lp = 0  // Accumulated log-density for this draw slice
+  
+  FOR i = start TO end:  // Process draws in slice
+    k = draw_ids_slice[i]  // Current draw index
+    
+    // -------------------
+    // 1. SAMPLE RANDOM EFFECTS FROM STANDARD NORMAL
+    // -------------------
+    z_u[k]      ~ N(0, I_{R_id})            // ID-level standard normal
+    z_v[k,d]    ~ N(0, I_{R_mk})  ∀d        // Marker-level standard normal
+    z_w_lat[k,d] ~ N(0, I_{Q_idm}) ∀d       // Latent ID×marker standard normal
+    z_L[k]      ~ N(0, 1)                   // Latent covariance regression
+    
+    lp += log p(z_u, z_v, z_w_lat, z_L)  // Standard normal densities
+    
+    // -------------------
+    // 2. TRANSFORM TO ACTUAL RANDOM EFFECTS
+    // -------------------
+    // Build Cholesky factors from draw k parameters
+    L_u = diag(τ_id^(k)) * Lcorr_id^(k)
+    L_v = diag(τ_marker^(k)) * Lcorr_marker^(k)
+    L_w = diag(τ_marker_id^(k)) * Lcorr_marker_id^(k)
+    
+    // Transform standard normals to correlated REs
+    u_id = L_u * z_u[k]
+    
+    FOR each marker d:
+      v_marker[d] = L_v * z_v[k, d]
+    END FOR
+    
+    // For subject×marker interaction, allow cross-marker correlation
+    FOR each marker d:
+      cross = B_cross^(k) * v_marker[d]  (if cross-correlation enabled)
+      z_w[d] = cross + L_w * z_w_lat[k, d]
+    END FOR
+    
+    // -------------------
+    // 3. BUILD SUBJECT-SPECIFIC COVARIANCE VIA REGRESSION
+    // -------------------
+    // Latent random intercept for covariance
+    u_Lk = τ_vcov_reg^(k) * z_L[k]
+    
+    // Build Cholesky factor L_i for this subject
+    L_i = matrix(Q_idm × Q_idm, 0)
+    FOR each unique entry (r,c) in lower triangle:
+      // Regression on covariance covariates
+      lin_pred = α_vcov_reg^(k)[r,c]
+               + vec_cov_vcov' * β_vcov_reg^(k)[r,c]
+               + λ_vcov_reg^(k)[r,c] * u_Lk
+      
+      IF r == c:  // Diagonal (log scale with softplus)
+        L_i[r,c] = log(1 + exp(lin_pred))
+      ELSE:       // Off-diagonal (unrestricted)
+        L_i[r,c] = lin_pred
+      END IF
+    END FOR
+    
+    // Transform latent REs to actual subject×marker REs
+    FOR each marker d:
+      w_idscaled[d] = L_i * z_w[d]
+    END FOR
+
+    // 3b. Marker-weighted means for association summaries
+    //     weights ω_d are draw-specific when marker weights are estimated
+    vbar = Σ_d ω_d v_marker[d]
+    wbar = Σ_d ω_d w_idscaled[d]
+    
+    // -------------------
+    // 4. LONGITUDINAL CONDITIONING: log p(y_obs | u, v, w, θ^(k))
+    // -------------------
+    FOR each observed longitudinal obs n:
+      d = idx_marker_obs[n]
+      
+      // Linear predictor
+      η = mat_fixed_obs[n]' * β_fixed^(k)
+        + mat_id_obs[n]' * u_id
+        + mat_marker_obs[n]' * v_marker[d]
+        + mat_marker_id_obs[n]' * w_idscaled[d]
+      
+      // Likelihood based on family (same logic as joinme_fit)
+      SWITCH family_long[d]:
+        CASE Gaussian:
+          σ = ... (from β_sigma^(k) or σ_marker^(k))
+          lp += log N(y_real[n] | η, σ)
+        ... [other families]
+      END SWITCH
+    END FOR
+    
+    // -------------------
+    // 5. COMPUTE ASSOCIATION FEATURES AT GK NODES (conditional on T_cond)
+    // -------------------
+    // Same logic as joinme_fit, but at conditioning time T_cond
+    
+    // Weighted averages of REs across markers
+    marker_weights_k = marker_weights_draws[k, :]
+    vbar = weighted_average(v_marker, marker_weights_k)
+    wbar_i = L_i * weighted_average(z_w, marker_weights_k)
+    
+    FOR j = 1 TO 15:  // GK nodes in [0, T_cond]
+      cvm[j] = mat_fixed_gk_cond[j]' * β_fixed^(k) + mat_id_gk_cond[j]' * u_id
+      cvm_f[j] = mat_fixed_gk_cond_fwd[j]' * β_fixed^(k) + mat_id_gk_cond_fwd[j]' * u_id
+      
+      cvk[j] = mat_marker_gk_cond[j]' * vbar + mat_marker_id_gk_cond[j]' * wbar_i
+      cvk_f[j] = mat_marker_gk_cond_fwd[j]' * vbar + mat_marker_id_gk_cond_fwd[j]' * wbar_i
+    END FOR
+    
+    // Compute slopes, aggregate, transform
+    csm_raw = eta_fd(cvm, cvm_f, eps_finite_diff)
+    csk_raw = eta_fd(cvk, cvk_f, eps_finite_diff)
+    vcov_raw = weighted_log_variances(L_i, coeff_assoc_vcov_var^(k))
+    
+    cv_total = cvm + cvk
+    cs_total = csm_raw + csk_raw
+    
+    // Apply transformations
+    cv_total_tf = apply_transform(cv_total, ...)
+    ... [other transforms]
+    
+    // Aggregate association
+    η_assoc_nodes = α_cv_total^(k) * cv_total_tf
+                  + α_cv_mean^(k) * cv_mean_tf
+                  + ... [other terms]
+    
+    // -------------------
+    // 6. SURVIVAL CONDITIONING: log S(T_cond | u, v, w, θ^(k))
+    // -------------------
+    FOR j = 1 TO 15:
+      // Total hazard at node j
+      log_h_total[j] = log Σₖ exp(log_h0^(k)[k] + mat_basis_gk_cond[j]' * bs_gamma_c^(k)[k]
+                                  + vec_cov_hazard' * γ_hazard^(k)[k]
+                                  + η_assoc_nodes[j])
+    END FOR
+    
+    // Cumulative hazard up to T_cond
+    Λ_cond = cumhaz(time_condition, log_h_total, zeros(15))
+    
+    // Add survival contribution
+    lp += -Λ_cond
+    
+  END FOR  // End draw loop
+  
+  RETURN lp
+END FUNCTION
+```
+
+### Generated Quantities
+
+Once random effects are sampled conditional on observed data, the `generated quantities` block:
+
+1. **Longitudinal Predictions**:
+   ```plaintext
+   FOR each future time t_fut:
+     FOR each marker d:
+       η_fut[d, t_fut] = X_fut[t_fut]'β + Z_id_fut[t_fut]'u + Z_mk_fut[t_fut]'v[d] + Z_idm_fut[t_fut]'w[d]
+       
+       // Expectation (epred scale)
+       y_pred_mean[d, t_fut] = inv_link(η_fut, family[d])
+       
+       // Predictive draw (with residual noise)
+       y_pred[d, t_fut] ~ distribution(η_fut, family[d])
+     END FOR
+   END FOR
+   ```
+
+2. **Survival Predictions**:
+   ```plaintext
+   FOR each future time t_surv > T_cond:
+     // Compute cumulative hazard from T_cond to t_surv
+     Λ_future = cumhaz_from_to(T_cond, t_surv, log_h_total, ...)
+     
+     // Conditional survival
+     S(t_surv | T_cond) = exp(-Λ_future)
+   END FOR
+   ```
+
+3. **Aggregation**:
+   ```plaintext
+   Across all draws k = 1...n_draws:
+     mean_y_pred[d, t_fut] = mean_k(y_pred_mean[k, d, t_fut])
+     quantiles_y_pred[d, t_fut] = quantile_k(y_pred_mean[k, d, t_fut], [0.025, 0.5, 0.975])
+     
+     mean_S(t | T_cond) = mean_k(S[k, t | T_cond])
+     quantiles_S(t | T_cond) = quantile_k(S[k, t | T_cond], [0.025, 0.5, 0.975])
+   ```
+
+# Helper Functions Documentation
+
+## `eta_fd(now, fwd, eps)`: Finite Difference Slope
+
+**Purpose**: Approximate the derivative (slope) of a trajectory using forward finite differences.
+
+**Algorithm Setup**:
+- `now`: vector of values at time $t$
+- `fwd`: vector of values at time $t + \varepsilon$
+- `eps`: step size $\varepsilon$
+
+**Computation**:
+$$ \text{slope}[j] = \frac{\text{fwd}[j] - \text{now}[j]}{\varepsilon} $$
+
+**Usage in Joint Model**:
+- Computes "current slope" (CS) association features.
+- Applied at Gauss-Kronrod nodes and event times.
+- Time rescaling by $1/T_{max}$ converts to original time scale.
+
+## `cumhaz(S, log_h0_nodes, eta_nodes)`: Cumulative Hazard via Gauss-Kronrod
+
+**Purpose**: Numerically integrate hazard function over $[0, S]$ using 15-point Gauss-Kronrod quadrature.
+
+**Algorithm Setup**:
+- $S$: upper limit of integration (scaled event/censoring time)
+- `log_h0_nodes`: log baseline hazard at 15 GK nodes
+- `eta_nodes`: hazard predictor at 15 GK nodes
+
+**Output**:
+$$ \Lambda(S) = \int_0^S h(t) dt $$
+
+**Computation**:
+Using weights $\omega = [0.0229, 0.0631, \dots]$:
+1. Compute log-hazard contributions: $z_j = \log h_0(x_j) + \eta(x_j)$
+2. Numerically stable log-sum-exp accumulation:
+   $$ \text{acc} = \sum_{j=1}^{15} \omega_j \cdot \exp(z_j - \max(z)) $$
+3. Scale result:
+   $$ \Lambda(S) = \frac{S}{2} \cdot \exp(\max(z)) \cdot \text{acc} $$
+
+## `eta_vcov_varonly_weighted_const(K, L_i, a_vcov_var)`: Variance Association
+
+**Purpose**: Compute weighted log-variances from a Cholesky decomposition, used as an association feature.
+
+**Algorithm Setup**:
+- $K$: number of evaluations
+- $L_i$: $Q \times Q$ Cholesky factor ($\Sigma_i = L_i L_i'$)
+- $a_{vcov}$: $Q$-vector of association weights
+
+**Computation**:
+$$ s = \sum_{q=1}^Q a_{vcov}[q] \cdot \log\left( \sum_{k=1}^q L_i[q,k]^2 \right) $$
+Returns a constant vector of length $K$.
+
+## `apply_transform_*()`: Flexible Nonlinear Transformations
+
+**Purpose**: Apply user-specified transformations to association features before entering survival predictor.
+
+**Supported Modes**:
+
+1. **Identity** (`mode = 0`): $f(x) = x$
+
+2. **Functional Opcodes** (`mode = 1`):
+   - Stack-based evaluator for compositions: $f(x) = \log(1 + \exp(x))$
+   - Operations: log, exp, sqrt, inv_logit, logit, square, reciprocal, add/mult const, power, min/max, abs, trig functions.
+
+3. **I-Spline Basis** (`mode = 2`):
+   - Monotonic smooth transformation via integrated B-splines.
+   - Enforces $f'(x) \ge 0$.
+
+4. **Piecewise Linear** (`mode = 3`):
+   - Linear interpolation between knot points.
+
+**Algorithm** (functional opcodes):
+Evaluates reverse polish notation Opcodes on a stack.
+For example `PUSH_X, PUSH_1, ADD, LOG` computes $\log(x+1)$.
+
+
+**Vectorized Version**:
+- For vectors, apply element-wise (same opcodes, broadcast constants)
+- Efficient for evaluating at multiple GK nodes simultaneously
+
+# Computational Considerations
+
+## Threading and Parallelization
+
+### `reduce_sum()` in `joinme_fit.stan`
+
+```plaintext
+target += reduce_sum(partial_joinme, id_seq, grainsize, ...)
+
+grainsize: Number of subjects per parallel chunk
+- grainsize = n_id → serial execution (single chunk)
+- grainsize = ceil(n_id / n_threads) → parallel execution
+
+Threading model:
+- Each chunk processed independently
+- No shared mutable state → thread-safe
+- Results summed after all chunks complete
+```
+
+**Trade-offs**:
+- **Small grainsize**: More parallelism, higher overhead
+- **Large grainsize**: Less parallelism, lower overhead
+- **Optimal**: Depends on n_id, model complexity, hardware
+
+### Threading in `joinme_dynpred.stan`
+
+```plaintext
+target += reduce_sum(partial_draw, draw_ids, grainsize, ...)
+
+Parallelizes over posterior draws instead of subjects
+- Each draw's likelihood computed independently
+- Particularly beneficial when n_draws is large (e.g., 200-1000)
+```
+
+## Memory and Efficiency
+
+### Design Matrix Pre-computation
+
+All association design matrices (X_gk_*, Z_*_gk_*, etc.) are pre-computed in R and passed as data. This avoids:
+- Recomputing spline bases at every MCMC iteration
+- Building design matrices inside Stan loops
+- Memory allocations during sampling
+
+**Trade-off**: Larger data object, but much faster sampling.
+
+### Sparse Representations
+
+Random effects designs (Z_*) are typically sparse. Stan's matrix operations leverage this implicitly, but explicit sparse matrices are not used due to compatibility constraints with `reduce_sum`.
+
+### Caching Cholesky Factors
+
+Correlation matrices parameterized via Cholesky factors (Lcorr_*) to:
+- Ensure positive-definiteness
+- Avoid costly eigendecompositions
+- Enable efficient sampling via standard normal draws
+
+## Numerical Stability
+
+### Log-Sum-Exp for Competing Risks
+
+$$ \log\left(\sum_{k=1}^K \exp(h_k)\right) = \max(h) + \log\left(\sum_{k=1}^K \exp(h_k - \max(h))\right) $$
+
+Prevents overflow/underflow when hazards have vastly different magnitudes.
+
+### Softplus for Positive Parameters
+
+$$ \sigma = \log(1 + \exp(\eta)) $$
+
+Alternative to $\exp(\eta)$ when avoiding extreme values (always $>0$, smooth, stable).
+
+### Time Rescaling
+
+All times scaled to $[0, 1]$ via division by $t_{max}$:
+- Numerical stability (avoids large numbers in exponentials)
+- Coefficients interpretable on standardized scale
+- Fixed effects rescaled post-hoc for original scale
+
+# Common Pitfalls and Debugging
+
+## Divergent Transitions
+
+**Symptom**: Stan warnings about divergent transitions after warmup.
+
+**Causes** in JoinME context:
+1. **Stiff survival likelihood**: Hazard changes rapidly, creating challenging geometry
+2. **Weakly identified random effects**: Some REs not well-constrained by data
+3. **Prior-data conflict**: Priors incompatible with likelihood
+
+**Remedies**:
+- Increase `adapt_delta` (e.g., 0.95 or 0.99) → smaller step sizes
+- Reparameterize: Use non-centered parameterization for REs if not already
+- Tighten priors on poorly identified parameters
+- Simplify model: Remove weak associations or unnecessary REs
+
+## Non-Finite Log-Likelihood
+
+**Symptom**: `log_prob = -inf` or `nan`.
+
+**Causes**:
+1. **Distributional parameter out of bounds**: e.g., σ ≤ 0, ν ≤ 0 for Student-t
+2. **Incorrect data encoding**: Integer outcomes for continuous family, or vice versa
+3. **Transformation domain violation**: log of negative, sqrt of negative
+
+**Debugging**:
+- Check `family_long` indices match data types
+- Verify all distributional regressions produce valid ranges (use link functions)
+- Add `print()` statements in Stan to trace parameter values
+
+## Slow Sampling
+
+**Symptom**: < 10 iterations/second, or hours for 1000 iterations.
+
+**Causes**:
+1. **Large n_id or N**: More subjects/observations = more computation
+2. **Complex associations**: Many transformations, high-dimensional REs
+3. **Inefficient grainsize**: Too small → overhead dominates
+
+**Remedies**:
+- Reduce `n_draws` for testing
+- Simplify model: Disable unused associations
+- Tune `grainsize`: Try ceil(n_id / (4 * threads))
+- Use threading: `threads_per_chain = 2` or `4`
+
+## Prediction Failures
+
+**Symptom**: `no chains finished successfully` in `predict()`.
+
+**Causes**:
+1. **Threaded model not compiled with threading**: Exe missing `stan_threads`
+2. **Insufficient warmup for fixed_param sampler**: `iter_warmup` too small
+3. **Incompatible data dimensions**: Prediction grid misaligned
+
+**Remedies**:
+- Clear Stan cache, recompile dynpred models
+- Increase `iter_warmup` to 100+
+- Validate `times` vector is within valid range
+
+# Advanced Topics
+
+## Covariance Regression
+
+Subject-specific Cholesky factor $L_i$ is modeled via regression. For each unique entry $(r,c)$ of $L_i$:
+
+$$ \eta_{r,c} = \alpha[r,c] + X_{cov}[i] \beta[r,c] + \lambda[r,c] u_L[i] $$
+
+If $r=c$ (Diagonal):
+$$ L_i[r,c] = \text{softplus}(\eta_{r,c}) $$
+Else (Off-diagonal):
+$$ L_i[r,c] = \eta_{r,c} $$
+
+**Enables**:
+- Covariance structure varying with subject covariates.
+- Individual-specific uncertainty in longitudinal predictions ($u_L$).
+- Richer association with survival (via vcov feature).
+
+**Shrinkage**:
+- Normal priors on $\beta[r,c]$ with scale 0.3 
+- Random intercept $u_L$ $\to$ subject-level variation.
+
+## Marker Weighting
+
+Association features use **weighted averages** of marker-specific REs:
+
+$$ \bar{v} = \frac{1}{D}\sum_d \omega_d v_{marker}[d] $$
+$$ \bar{w}_i = L_i \cdot \frac{1}{D}\sum_d \omega_d z_w[d] $$
+
+**Weights** $\omega_d$:
+- Fixed: User-specified (e.g., equal weights $1/D$).
+- Estimated: Signed additive perturbation of base weights with RMS stabilization,
+  i.e., $\omega \propto \omega^{(0)} + \tau_w z$ with unit RMS after scaling.
+-- Reflects relative importance of each marker for survival after shrinkage (Park & Casella 2008).
+
+**Interpretation**:
+- High $\omega_d$ $\to$ marker $d$ strongly associated with event.
+
+
+## Competing Risks
+
+Hazard for subject $i$ is sum over $K_{event}$ risk types:
+
+$$ \lambda(t | i) = \sum_{k=1}^{K_{event}} \lambda_k(t | i) $$
+$$ \lambda_k(t | i) = h_{0k}(t) \exp(W[i]'\gamma_k + \eta_{assoc}(t, i)) $$
+
+**Event Type**:
+- If $d_{event}[i] = 1$, observed $event\_type[i] \in \{1,\dots,K_{event}\}$.
+- Log-likelihood includes $h_{event\_type[i]}(S_{event}[i])$.
+- Cumulative hazard includes all $K_{event}$ hazards.
+
+**Use Cases**:
+- Death vs. dropout
+- Multiple disease endpoints
+- Recurrent events (with time-varying baseline)
+
+## Distributional Regression
+
+Parameters like $\sigma, \nu, \phi$ can have their own regression structures:
+
+$$ \log(\sigma[n]) = X_{\sigma}[n] \beta_{\sigma} + Z_{\sigma}[n] b_{\sigma} $$
+
+**Allows**:
+- Heteroscedasticity (residual variance varies with covariates).
+- Marker-specific variance.
+- Random effects in variance (group-level variation).
+
+
+**Families Supporting Distributional Regression**:
+- Gaussian: σ (scale)
+- Student-t: σ, ν (scale, df)
+- Negative binomial: φ (dispersion)
+- Beta: φ (precision)
+- Skew-normal: σ, α (scale, skewness)
+- Skew-double-exponential: σ, τ (scale, skewness)
+
+# Practical Workflow
+
+## 1. Model Fitting
+
+```r
+fit <- joinme(
+  formulaLong = y ~ time + x1 + (1 + time || id) + (1 || marker),
+  dataLong = long_data,
+  formulaEvent = Surv(time, event) ~ x2,
+  dataEvent = event_data,
+  assoc = c("cv_total", "cs_total"),  # Association features
+  family = "gaussian",  # Or auto-detect
+  basehaz = "bs",  # B-spline baseline hazard
+  n_knots = 5,
+  control = list(
+    chains = 4,
+    iter_warmup = 1000,
+    iter_sampling = 1000,
+    adapt_delta = 0.95,
+    threads_per_chain = 2  # Enable threading
+  )
+)
+```
+
+## 2. Inspect Convergence
+
+```r
+summary(fit)       # Parameter estimates with R-hat, ESS
+plot(fit)          # Traceplots
+pp_check(fit)      # Posterior predictive checks
+```
+
+## 3. Dynamic Prediction
+
+```r
+pred <- predict(
+  fit,
+  newdataLong = new_long,
+  newdataEvent = new_event,
+  time_start = 5,  # Condition on data up to t=5
+  times = seq(5, 10, length.out = 50),  # Predict t ∈ [5, 10]
+  n_samples = 200
+)
+
+plot(pred, type = "survival")
+plot(pred, type = "longitudinal", marker = "CD4")
+```
+
+
+# Priors and Regularization Strategy
+
+This section provides the definitive technical specification and rationale for the prior ecosystem within `joinme`. The prior choices strike a balance between **weakly informative defaults** (allowing data to drive inference) and **principled regularization** (preventing pathological behavior in complex joint likelihood surfaces).
+
+## 1. Longitudinal Submodel
+
+### Fixed Effects ($\beta$)
+- **Prior**: Student-$t(\nu=6, \mu=0, \sigma=2.5)$ (scaled).
+- **Rationale**: The Student-$t$ distribution with moderate degrees of freedom ($\nu=6$) provides fatter tails than a Normal distribution. This robustness allows for occasional large coefficients without overly penalizing them, while the scale prevents the sampler from exploring implausibly large regions of parameter space during warm-up.
+- **Support**: User-configurable scales allow adaptation to the magnitude of covariates.
+
+### Random Effect Scales ($\tau_{id}, \tau_{mk}$)
+- **Prior**: Half-Normal($0, \sigma$).
+- **Rationale**: The half-normal prior provides regularization toward zero (parsimony) while strictly enforcing positivity. Unlike the Half-Cauchy (often recommended in older literature), the Half-Normal has lighter tails, which reduces the risk of the "funnel" pathology where the sampler gets stuck in regions of extremely high variance where the data provide little information. This is crucial for convergence in high-dimensional random effects structures.
+
+### Random Effect Correlations ($\Omega$)
+- **Prior**: LKJ-Correlation($\eta$).
+- **Rationale**: The LKJ distribution over correlation matrices allows explicit control over the prior volume near the identity matrix.
+  - $\eta = 1$: Uniform over valid correlation matrices.
+  - $\eta > 1$ (Default $\eta=2$): Peaked at the identity matrix. This mildly regularizes correlations toward zero (independence), stabilizing estimation when clusters (subjects) are few or observation counts are low.
+  - This avoids the degeneracy often seen with Inverse-Wishart priors on covariance matrices.
+
+### Distributional Parameters
+Family-specific auxiliary parameters require constraints matching their support:
+- **Scales ($\sigma_y$)**: Exponential($\lambda$). The maximum entropy prior for positive continuous variables with a known mean.
+- **Degrees of Freedom ($\nu$)**: Gamma($\alpha, \beta$). Prior constraints $\nu > 2$, soft-bounded to avoid infinite variance regimes while allowing normality ($\nu \to \infty$).
+- **Skew/Quantile Parameters**: Beta($\alpha, \beta$). Natural conjugate for bounded $(0,1)$ parameters, defaulting to Uniform(0,1) or centered symmetric Beta(2,2).
+
+## 2. Survival Submodel
+
+### Baseline Hazard ($h_0(t)$)
+- **Coefficients ($\gamma_{bs}$)**: Normal($0, \sigma_{bs}$).
+- **Smoothness Penalty**: When B-splines are used, `joinme` imposes a **random-walk prior** (second-order difference penalty) on the spline coefficients.
+  $$ \gamma_k - 2\gamma_{k-1} + \gamma_{k-2} \sim \mathcal{N}(0, \tau_{smooth}) $$
+- **Rationale**: This effectively smooths the baseline hazard, preventing overfitting to small clusters of events (spikes) while allowing flexibility in the hazard shape over time. This is critical for robust extrapolation in dynamic prediction.
+
+### Hazard Covariates ($\gamma_w$)
+- **Prior**: Student-$t(\nu=6, \mu=0, \sigma=2.5)$.
+- **Rationale**: Consistent with fixed effects; robust regularization.
+
+## 3. Association and Link Functions
+
+The association module is the most complex component and requires hierarchical shrinkage to handle high-dimensional marker systems ($D \gg 1$).
+
+### Association Coefficients ($\alpha$)
+The total association is often a sum of a mean term, a marker-specific deviation, and interactions.
+- **Base Effect ($\alpha_{mean}$)**: Normal($0, 1$). Weakly informative.
+- **Marker-Specific Deviations ($\alpha_{marker}$)**: 
+  - **Normal Shrinkage**: $\alpha_d \sim \mathcal{N}(0, \tau_{shrink})$. Equivalent to Ridge regression ($L_2$ penalty). Encourages all markers to share strength.
+  - **Laplace Shrinkage**: $\alpha_d \sim \text{Laplace}(0, \tau_{shrink})$. Equivalent to Lasso regression ($L_1$ penalty). Encourages sparsity, effectively selecting relevant markers that drive the risk.
+- **Rationale**: In joint models with many biomarkers, it is a priori unlikely that all markers contribute equally to the risk. Shrinkage priors automatically attenuate noise markers, improving out-of-sample prediction performance.
+
+### Marker Weights ($\omega_d$)
+When estimating a composite score (e.g., weighted sum of current values), weights are modeled as signed perturbations around base weights and then RMS-stabilized.
+- **Prior**: Normal or Laplace shrinkage on perturbations $z_d$ (controlled by `shrinkage`), scaled by $\tau_{marker\_weights}$ (Park & Casella 2008).
+- **Rationale**: Allows protective and harmful marker contributions (negative/positive weights) while controlling global scale non-identifiability with identity transforms.
+
+### Nonlinear Transformations
+When `type = "ispline_penalized"`, the association function $f(x)$ is modeled via Monotone I-splines.
+- **Prior**: Second-order difference penalty strictly on the I-spline coefficients.
+- **Constraint**: Coefficients must be positive to ensure monotonicity.
+- **Rationale**: Nonlinear associations (e.g., risk increases only after a threshold) are powerful but prone to overfitting in sparse data regions. The penalty forces the function toward linearity in the absence of strong evidence for curvature.
+
+### Covariance Regression (VCOV)
+- **Latent Effect ($u_L$)**: Normal(0, $\tau_L$).
+- **Coefficients**: Normal priors on regression terms linking baseline covariates to the log-volatility.
+- **Rationale**: This structure allows the variability of the biomarkers (and their correlation) to itself be a predictor of survival (e.g., highly labile blood pressure predicts stroke), regularized by the hierarchical structure of the latent variable.
+
+# References
+
+::: {#refs}
+:::
+
+---
+
+**Document Version**: 1.0  
+**Last Updated**: {{< meta date >}}  
+**Package**: JoinME  
+**Stan Version**: ≥ 2.32

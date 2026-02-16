@@ -34,6 +34,30 @@ Association transforms apply to all supported longitudinal families (including
 double_exponential, skew_double_exponential, beta, and cumulative_logit) and to
 competing-risk survival models.
 
+## Step-by-step: how association summaries are constructed
+
+At the event time and at the 15 Gauss-Kronrod nodes used for integration, the
+longitudinal linear predictor is decomposed into a mean component and a marker
+component. From these components, `joinme` constructs:
+
+- **CV_total**: total current value (mean + marker components).
+- **CV_mean**: current value of the mean component only.
+- **CV_marker**: current value of the marker component only.
+- **CS_total**: total current slope, approximated by a forward finite difference
+  and rescaled to the original time units.
+- **CS_mean**: slope of the mean component.
+- **CS_marker**: slope of the marker component.
+- **VCOV**: a subject-specific variance summary of the marker-by-id covariance
+  structure, constant across time.
+
+Each component can be included or excluded using the `assoc` argument. If
+`assoc` does not include a component, the corresponding coefficient is prior-only
+and does not enter the likelihood.
+
+The VCOV component requires marker-by-id random effects. If the marker block
+does not include an inner `( ... | id )` term, then `Q_idm = 0` and VCOV is not
+available.
+
 # Marker-weighted CV and CS
 
 When multiple biomarkers are modeled, `joinme` constructs marker-average association
@@ -43,7 +67,9 @@ current value (CV) and current slope (CS) marker summaries and then flow into th
 
 In practice, provide fixed weights via `marker_weights`, or set
 `estimate_marker_weights = TRUE` to estimate them with shrinkage (Normal or Laplace
-depending on `shrinkage`).
+depending on `shrinkage`). Internally, `joinme` uses signed additive perturbations
+around base weights and then rescales to unit RMS. This allows both positive and
+negative marker contributions while stabilizing global scale for identifiability.
 
 # Association coefficients and naming
 
@@ -54,6 +80,17 @@ $\eta$ used throughout the longitudinal and survival submodels.
 When an association component is not selected in `assoc`, its coefficient is
 prior-only and does not enter the likelihood. Summaries only report active
 components to keep interpretation focused on the fitted association structure.
+
+# Transform modes
+
+`joinme` supports four transformation modes for association features:
+
+- **Identity** (`type = "identity"`): no transformation.
+- **Functional** (`type = "functional"`): a user-defined expression converted
+  into a fixed bytecode program.
+- **Monotone I-spline** (`type = "ispline"` or `"ispline_penalized"`): a smooth
+  monotone mapping.
+- **Piecewise linear** (`type = "pwlin"`): linear interpolation across knots.
 
 # Functional Transform
 
@@ -71,6 +108,10 @@ transforms <- list(
   )
 )
 ```
+
+The functional evaluator supports common arithmetic and functions such as
+`log`, `exp`, `sqrt`, `sin`, `cos`, `tanh`, plus aliases `sigmoid`/`expit`,
+`softplus`/`log1p_exp`, and helpers like `cbrt` and `power`.
 
 **When to use**
 
@@ -178,8 +219,8 @@ graph TD
 ```{r fit-custom-association, eval=FALSE}
 fit <- joinme(
   formulaLong = y ~ 1 + time + x1 +
-    (1 + time | id) +
-    (0 + x1 + (1 + time | id) | marker),
+    (1 + time || id) +
+    (0 + x1 + (1 + time || id) || marker),
   dataLong = sim$dataLong,
   formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
   dataEvent = sim$dataEvent,

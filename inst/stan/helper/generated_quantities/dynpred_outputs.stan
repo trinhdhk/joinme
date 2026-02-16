@@ -1,3 +1,4 @@
+/* Outputs per draw and per row/time */
 matrix[n_draws, n_obs_long] y_fit_linpred;
 matrix[n_draws, n_obs_long] y_fit_epred;
 matrix[n_draws, n_obs_pred] y_pred_linpred;
@@ -18,7 +19,7 @@ for (k in 1 : n_draws) {
     L_u = diag_matrix(tau_id[k]);
   else
     L_u = diag_pre_multiply(tau_id[k], Lcorr_id[k]);
-  vector[n_random_id] u_id = L_u * z_u[k];
+  vector[n_random_id] u_id = L_u * z_u[k]; // realized id random effects
 
   // Marker-Specific Random Effects (optional): v_marker
   matrix[n_random_marker, n_random_marker] L_v;
@@ -28,7 +29,7 @@ for (k in 1 : n_draws) {
     else
       L_v = diag_pre_multiply(tau_marker[k], Lcorr_marker[k]);
   }
-  array[n_marker_types] vector[n_random_marker] v_marker;
+  array[n_marker_types] vector[n_random_marker] v_marker; // realized marker REs
   if (n_random_marker > 0) {
     for (d in 1 : n_marker_types)
       v_marker[d] = L_v * z_v[k, d];
@@ -41,7 +42,7 @@ for (k in 1 : n_draws) {
   else
     L_w = diag_pre_multiply(tau_marker_id[k], Lcorr_marker_id[k]);
 
-  array[n_marker_types] vector[n_random_marker_id] z_w;
+  array[n_marker_types] vector[n_random_marker_id] z_w; // latent marker-id effects
   for (d in 1 : n_marker_types) {
     vector[n_random_marker_id] cross = rep_vector(0.0, n_random_marker_id);
     if (flag_allow_marker_crosscorr == 1 && n_random_marker > 0)
@@ -50,7 +51,7 @@ for (k in 1 : n_draws) {
   }
 
   // Use Covariance Regression to construct L_i
-  real u_Lk = tau_vcov_reg[k] * z_L[k];
+  real u_Lk = tau_vcov_reg[k] * z_L[k]; // latent vcov effect for this draw
   matrix[n_random_marker_id, n_random_marker_id] Li = rep_matrix(0.0,
                                                                  n_random_marker_id,
                                                                  n_random_marker_id);
@@ -66,33 +67,32 @@ for (k in 1 : n_draws) {
   }
 
   // Scale latent effects: w_idscaled
-  array[n_marker_types] vector[n_random_marker_id] w_idscaled;
+  array[n_marker_types] vector[n_random_marker_id] w_idscaled; // scaled marker-id REs
   for (d in 1 : n_marker_types)
     w_idscaled[d] = Li * z_w[d];
 
   // -------------------------------------------------------------
   // 2. Prepare for Association (Averages)
   // -------------------------------------------------------------
-  vector[n_marker_types] marker_weights_k = to_vector(marker_weights_draws[k, ]);
-  real sum_w = sum(marker_weights_k);
-  if (sum_w <= 0) sum_w = 1;
-  vector[n_random_marker] vbar;
+  vector[n_marker_types] marker_weights_k = to_vector(marker_weights_draws[k, ]); // draw-specific weights
+  // Aggregation is by marker count D to match fit-time construction.
+  vector[n_random_marker] vbar; // weighted mean marker REs
   if (n_random_marker > 0) {
     for (r in 1 : n_random_marker) {
       real acc = 0;
       for (d in 1 : n_marker_types)
         acc += marker_weights_k[d] * v_marker[d][r];
-      vbar[r] = acc / sum_w;
+      vbar[r] = acc / n_marker_types;
     }
   }
-  vector[n_random_marker_id] zbar;
+  vector[n_random_marker_id] zbar; // weighted mean marker-id latents
   for (q in 1 : n_random_marker_id) {
     real acc = 0;
     for (d in 1 : n_marker_types)
       acc += marker_weights_k[d] * z_w[d][q];
-    zbar[q] = acc / sum_w;
+    zbar[q] = acc / n_marker_types;
   }
-  vector[n_random_marker_id] wbar_i = Li * zbar;
+  vector[n_random_marker_id] wbar_i = Li * zbar; // scaled mean marker-id effects
 
   // Global Association Scales
   real a_cv_total = flag_assoc_cv_total * coeff_assoc_cv_total[k];
@@ -109,11 +109,12 @@ for (k in 1 : n_draws) {
   // -------------------------------------------------------------
   for (n in 1 : n_obs_long) {
     int d = idx_marker_obs[n];
-    real eta_long = dot_product(mat_fixed_obs[n], beta_fixed[k])
+     real eta_long = dot_product(mat_fixed_obs[n], beta_fixed[k])
                     + dot_product(mat_id_obs[n], u_id)
                     + ((n_random_marker > 0)
                        ? dot_product(mat_marker_obs[n], v_marker[d]) : 0.0)
                     + dot_product(mat_marker_id_obs[n], w_idscaled[d]);
+     // eta_long: linear predictor for observed history
 
     y_fit_linpred[k, n] = eta_long;
 
@@ -156,11 +157,12 @@ for (k in 1 : n_draws) {
   // -------------------------------------------------------------
   for (n in 1 : n_obs_pred) {
     int d = idx_marker_pred[n];
-    real eta_long = dot_product(mat_fixed_pred[n], beta_fixed[k])
+     real eta_long = dot_product(mat_fixed_pred[n], beta_fixed[k])
                     + dot_product(mat_id_pred[n], u_id)
                     + ((n_random_marker > 0)
                        ? dot_product(mat_marker_pred[n], v_marker[d]) : 0.0)
                     + dot_product(mat_marker_id_pred[n], w_idscaled[d]);
+     // eta_long: linear predictor for prediction grid
 
     y_pred_linpred[k, n] = eta_long;
 
@@ -169,6 +171,7 @@ for (k in 1 : n_draws) {
       real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_pred[n], beta_sigma[k]))
                  : ((flag_resid_dim == 1) ? sigma_marker_specific[k][d]
                     : sigma_y_shared[k]);
+      // sig: residual scale for Gaussian prediction
       y_pred_epred[k, n] = eta_long;
       y_pred[k, n] = normal_rng(eta_long, sig);
     } else if (family_long[d] == 2) {
@@ -178,30 +181,32 @@ for (k in 1 : n_draws) {
                     : sigma_y_shared[k]);
       real nu = (P_nu > 0) ? (2 + exp(dot_product(X_nu_pred[n], beta_nu[k])))
                 : nu_marker[k][d];
+      // nu: degrees of freedom for Student-t prediction
       y_pred_epred[k, n] = eta_long;
       y_pred[k, n] = student_t_rng(nu, eta_long, sig);
     } else if (family_long[d] == 3) {
       // Bernoulli (logit link)
-      real p = inv_logit(eta_long);
+      real p = inv_logit(eta_long); // Bernoulli probability
       y_pred_epred[k, n] = p;
       y_pred[k, n] = bernoulli_rng(p);
     } else if (family_long[d] == 4) {
       // Binomial (logit link)
-      real p = inv_logit(eta_long);
+      real p = inv_logit(eta_long); // Binomial success probability
       y_pred_epred[k, n] = trials_pred[n] * p;
       y_pred[k, n] = binomial_rng(trials_pred[n], p);
     } else if (family_long[d] == 5) {
       // Poisson (log link)
-      real mu = exp(eta_long);
+      real mu = exp(eta_long); // Poisson mean
       y_pred_epred[k, n] = mu;
       y_pred[k, n] = poisson_rng(mu);
     } else if (family_long[d] == 6) {
       // Negative binomial 2 (log link)
-      real mu = exp(eta_long);
+      real mu = exp(eta_long); // NegBin mean
       y_pred_epred[k, n] = mu;
       {
         real phi = (P_phi > 0) ? exp(dot_product(X_phi_pred[n], beta_phi[k]))
                    : phi_nb_marker[k][d];
+        // phi: dispersion for NegBin2
         y_pred[k, n] = neg_binomial_2_rng(mu, phi);
       }
     } else if (family_long[d] == 7) {
@@ -211,6 +216,7 @@ for (k in 1 : n_draws) {
                     : sigma_y_shared[k]);
       real alpha = (P_alpha > 0) ? dot_product(X_alpha_pred[n], beta_alpha[k])
                   : alpha_skew_marker[k][d];
+      // sig: residual scale, alpha: skew parameter
       y_pred_epred[k, n] = eta_long;
       y_pred[k, n] = skew_normal_rng(eta_long, sig, alpha);
     } else if (family_long[d] == 8) {
@@ -218,6 +224,7 @@ for (k in 1 : n_draws) {
       real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_pred[n], beta_sigma[k]))
                  : ((flag_resid_dim == 1) ? sigma_marker_specific[k][d]
                     : sigma_y_shared[k]);
+      // sig: Laplace scale
       y_pred_epred[k, n] = eta_long;
       y_pred[k, n] = double_exponential_rng(eta_long, sig);
     } else if (family_long[d] == 9) {
@@ -227,6 +234,7 @@ for (k in 1 : n_draws) {
                     : sigma_y_shared[k]);
       real tau_sde = (P_tau_sde > 0) ? inv_logit(dot_product(X_tau_sde_pred[n], beta_tau_sde[k]))
                      : tau_sde_marker[k][d];
+      // sig: scale, tau_sde: skewness in (0,1)
       y_pred_epred[k, n] = eta_long;
       y_pred[k, n] = skew_double_exponential_rng(eta_long, sig, tau_sde);
     } else if (family_long[d] == 10) {
@@ -236,6 +244,7 @@ for (k in 1 : n_draws) {
       real mu = inv_logit(eta_long);
       real shape1 = fmax(mu * phi_beta, 1e-6);
       real shape2 = fmax((1 - mu) * phi_beta, 1e-6);
+      // mu: mean, phi_beta: precision, shape1/shape2: beta shapes
       y_pred_epred[k, n] = mu;
       y_pred[k, n] = beta_rng(shape1, shape2);
     } else {
@@ -248,6 +257,7 @@ for (k in 1 : n_draws) {
       p[K_ord] = 1 - inv_logit(cutpoints_ord[k][K_ord - 1] - eta_long);
       real acc = 0;
       for (c in 1 : K_ord) acc += c * p[c];
+      // p: category probabilities, acc: expected category
       y_pred_epred[k, n] = acc;
       y_pred[k, n] = ordered_logistic_rng(eta_long, cutpoints_ord[k]);
     }
@@ -257,9 +267,9 @@ for (k in 1 : n_draws) {
   // 5. Survival Prediction S(t | T_cond)
   // -------------------------------------------------------------
   // Calculate Cumulative Hazard at Conditioning Time: H(T_cond)
-  real H_cond;
+  real H_cond; // cumulative hazard at conditioning time
   {
-    vector[15] cvm, cvk, cvm_f, cvk_f;
+    vector[15] cvm, cvk, cvm_f, cvk_f; // mean/marker CV at nodes and forward shift
     for (j in 1 : 15) {
       // Mean trajectory association (Current Value)
       cvm[j] = dot_product(mat_fixed_gk_cond[j], beta_fixed[k])
@@ -278,13 +288,13 @@ for (k in 1 : n_draws) {
                  + dot_product(mat_marker_id_gk_cond_fwd[j], wbar_i);
     }
 
-    vector[15] csm_raw = eta_fd(cvm, cvm_f, eps_finite_diff);
-    vector[15] csk_raw = eta_fd(cvk, cvk_f, eps_finite_diff);
+    vector[15] csm_raw = eta_fd(cvm, cvm_f, eps_finite_diff); // mean slope
+    vector[15] csk_raw = eta_fd(cvk, cvk_f, eps_finite_diff); // marker slope
     vector[15] vcov_raw = eta_vcov_varonly_weighted_const(15, Li,
-                            a_vcov_var);
+                            a_vcov_var); // variance association feature
 
-    vector[15] cv_tot = cvm + cvk;
-    vector[15] cs_tot = csm_raw + csk_raw;
+    vector[15] cv_tot = cvm + cvk; // total current value
+    vector[15] cs_tot = csm_raw + csk_raw; // total current slope
 
     vector[15] cv_tot_tf = apply_transform_vector(
       cv_tot,
@@ -358,10 +368,11 @@ for (k in 1 : n_draws) {
                                  + a_cs_mean * cs_mean_tf
                                  + a_cs_marker * cs_marker_tf
                                  + vcov_tf;
+    // eta_assoc_nodes: association predictor at GK nodes
 
-    vector[15] log_h_total;
+    vector[15] log_h_total; // total log-hazard at GK nodes
     for (j in 1 : 15) {
-      vector[K_event] log_h_cause;
+      vector[K_event] log_h_cause; // cause-specific log hazards
       for (k_ev in 1 : K_event) {
         real eta_w = 0;
         if (n_cov_hazard > 0)
@@ -375,20 +386,21 @@ for (k in 1 : n_draws) {
     }
 
     H_cond = cumhaz(time_condition, log_h_total, rep_vector(0.0, 15));
+    // H_cond: cumulative hazard at time_condition
   }
 
   // Calculate H(t_surv) for each prediction time and compute S(t_surv | T_cond)
   for (s in 1 : n_times_surv) {
-    real H_t;
+    real H_t; // cumulative hazard at prediction time s
 
-    vector[15] cvm, cvk, cvm_f, cvk_f;
+    vector[15] cvm, cvk, cvm_f, cvk_f; // CV features at GK nodes for time s
     for (j in 1 : 15) {
       cvm[j] = dot_product(mat_fixed_gk_surv[s][j], beta_fixed[k])
                + dot_product(mat_id_gk_surv[s][j], u_id);
       cvm_f[j] = dot_product(mat_fixed_gk_surv_fwd[s][j], beta_fixed[k])
                  + dot_product(mat_id_gk_surv_fwd[s][j], u_id);
 
-      real mk_part = 0, mk_part_f = 0;
+      real mk_part = 0, mk_part_f = 0; // marker-only contribution
       if (n_random_marker > 0) {
         mk_part = dot_product(mat_marker_gk_surv[s][j], vbar);
         mk_part_f = dot_product(mat_marker_gk_surv_fwd[s][j], vbar);
@@ -398,13 +410,13 @@ for (k in 1 : n_draws) {
                  + dot_product(mat_marker_id_gk_surv_fwd[s][j], wbar_i);
     }
 
-    vector[15] csm_raw = eta_fd(cvm, cvm_f, eps_finite_diff);
-    vector[15] csk_raw = eta_fd(cvk, cvk_f, eps_finite_diff);
+    vector[15] csm_raw = eta_fd(cvm, cvm_f, eps_finite_diff); // mean slope
+    vector[15] csk_raw = eta_fd(cvk, cvk_f, eps_finite_diff); // marker slope
     vector[15] vcov_raw = eta_vcov_varonly_weighted_const(15, Li,
-                            a_vcov_var);
+                a_vcov_var); // variance feature
 
-    vector[15] cv_tot = cvm + cvk;
-    vector[15] cs_tot = csm_raw + csk_raw;
+    vector[15] cv_tot = cvm + cvk; // total current value
+    vector[15] cs_tot = csm_raw + csk_raw; // total current slope
 
     vector[15] cv_tot_tf = apply_transform_vector(
       cv_tot,
@@ -478,10 +490,11 @@ for (k in 1 : n_draws) {
                                  + a_cs_mean * cs_mean_tf
                                  + a_cs_marker * cs_marker_tf
                                  + vcov_tf;
+    // eta_assoc_nodes: association predictor at GK nodes
 
-    vector[15] log_h_total;
+    vector[15] log_h_total; // total log-hazard at GK nodes
     for (j in 1 : 15) {
-      vector[K_event] log_h_cause;
+      vector[K_event] log_h_cause; // cause-specific log hazards
       for (k_ev in 1 : K_event) {
         real eta_w = 0;
         if (n_cov_hazard > 0)
@@ -495,7 +508,7 @@ for (k in 1 : n_draws) {
     }
 
     H_t = cumhaz(vec_time_surv[s], log_h_total, rep_vector(0.0, 15));
-    surv_prob[k, s] = exp(H_cond - H_t);
-    cumhaz_cond[k, s] = H_t - H_cond;
+    surv_prob[k, s] = exp(H_cond - H_t); // S(t | T_cond)
+    cumhaz_cond[k, s] = H_t - H_cond;    // H(t) - H(T_cond)
   }
 }

@@ -3,12 +3,14 @@ test_that("summary reports only active association components", {
   testthat::skip_if_not_installed("rstan")
 
   set.seed(303)
-  sim <- simulate_joinme_joint_student_t_cvtotal(
+  sim <- simulate_joinme(
     n_id = 4,
-    D = 2,
-    n_t = 3,
+    families = rep("student_t", 2),
+    n_obs_per_marker_per_id = 3,
+    times_obs = seq(0, 4, length.out = 8),
     seed = 303,
-    include_marker_only = TRUE
+    assoc = c("cv_total"),
+    assoc_coefs = c(cv_total = 0.6)
   )
 
   formulaLong <- y ~ 1 + time + x1 +
@@ -23,7 +25,7 @@ test_that("summary reports only active association components", {
     dataEvent = sim$dataEvent,
     assoc = c("cv_total"),
     families = rep("student_t", 2),
-    transforms = list(cv_total = list(type = "identity")),
+    transforms = list(cv_total = list(type = "functional", expr = ~ softplus(x))),
     control = list(
       engine = "rstan",
       chains = 1,
@@ -35,7 +37,11 @@ test_that("summary reports only active association components", {
     )
   )
 
-  assoc_tbl <- summary(fit)$tables$assoc
+  sum_obj <- summary(fit)
+  assoc_tbl <- sum_obj$tables$assoc
   expect_true(any(assoc_tbl$term == "cv_total"))
   expect_false(any(assoc_tbl$term %in% c("cv_mean", "cv_marker", "cs_total", "cs_mean", "cs_marker")))
+  tf_tbl <- sum_obj$metadata$transform_formulas
+  expect_true(any(tf_tbl$term == "cv_total"))
+  expect_true(any(grepl("softplus", tf_tbl$formula)))
 })

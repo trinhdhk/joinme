@@ -38,12 +38,14 @@ library(joinme)
 set.seed(2026)
 
 # Simulate a small dataset
-sim <- simulate_joinme_joint_student_t_cvtotal(
+sim <- simulate_joinme(
   n_id = 10,
-  D = 2,
-  n_t = 4,
+  families = rep("student_t", 2),
+  n_obs_per_marker_per_id = 4,
+  times_obs = seq(0, 5, length.out = 8),
   seed = 2026,
-  include_marker_only = TRUE
+  assoc = c("cv_total"),
+  assoc_coefs = c(cv_total = 0.6)
 )
 
 formulaLong <- y ~ 1 + time + x1 +
@@ -76,20 +78,24 @@ summary(fit)
 # Dynamic prediction for one subject
 ndL <- sim$dataLong[sim$dataLong$id == 1, ]
 ndE <- sim$dataEvent[sim$dataEvent$id == 1, ]
-Tstart <- max(ndL$time)
+time_start <- max(ndL$time)
 
 pred <- posterior_epred(
   fit,
   newdataLong = ndL,
   newdataEvent = ndE,
-  Tstart = Tstart,
-  times = seq(Tstart, Tstart + 1, length.out = 20),
+  time_start = time_start,
+  times = seq(time_start, time_start + 1, length.out = 20),
   n_samples = 50,
   seed = 69
 )
 
 # Plot longitudinal and survival predictions
-plot(pred)
+plot(pred, which = c("longitudinal", "survival"), combined = TRUE)
+
+# For multiple subjects with combined=TRUE: returns one combined plot per subject
+# (named list). If combiner packages are unavailable, falls back to the
+# standard subject/outcome nested list.
 ```
 
 Trinh Dong, 2026

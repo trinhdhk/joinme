@@ -1,15 +1,16 @@
 /**
  * @file composite_transform.stanfunctions
- * @brief Orchestrates functional opcode and basis-function transformations.
+ * @brief Dispatches association transformations by mode.
  *
- * This layer sits between the data specification and the evaluators,
- * handling the dispatch logic for different transformation modes:
- *   - Mode 0: No transformation (identity)
- *   - Mode 1: Functional opcode evaluation
- *   - Mode 2: I-spline basis
- *   - Mode 3: Piecewise-linear
+ * @details This layer provides a consistent interface for applying
+ * transformations to scalar or vector inputs. It dispatches to one of:
+ *   - Mode 0: Identity (no transformation)
+ *   - Mode 1: Functional opcode evaluator (stack-based)
+ *   - Mode 2: I-spline basis (monotone smooth)
+ *   - Mode 3: Piecewise-linear interpolation
  *
- * Modes 1–3 accept data-driven specifications with no recompilation needed.
+ * Modes 1-3 are fully data-driven, allowing transformations to be updated
+ * without recompiling the Stan model.
  */
 
   /**
@@ -19,8 +20,8 @@
   * @param mode Transformation mode (0=identity, 1=functional opcode, 2=ispline, 3=pwlin)
   * @param opcodes Functional opcodes (for mode 1)
   * @param const_data Functional opcode constants (for mode 1)
-   * @param spline_knots Knot vector (for modes 2–3)
-   * @param spline_coeff Spline or piecewise coefficients (for modes 2–3)
+  * @param spline_knots Knot vector (for modes 2-3)
+  * @param spline_coeff Spline or piecewise coefficients (for modes 2-3)
    * @param spline_degree Spline degree (for mode 2)
    * @return Transformed scalar
    */
@@ -36,10 +37,13 @@
     if (mode == 0) {
       return x;
     } else if (mode == 1) {
+      // Functional opcode evaluation
       return eval_functional_scalar(x, opcodes, const_data);
     } else if (mode == 2) {
+      // I-spline basis evaluation (monotone)
       return ispline_eval(x, spline_knots, spline_degree, spline_coeff);
     } else if (mode == 3) {
+      // Piecewise-linear interpolation
       return pwlin_eval(spline_knots, spline_coeff, x);
     } else {
       reject("Unknown transformation mode: ", mode);
@@ -53,8 +57,8 @@
   * @param mode Transformation mode (0=identity, 1=functional opcode, 2=ispline, 3=pwlin)
   * @param opcodes Functional opcodes (for mode 1)
   * @param const_data Functional opcode constants (for mode 1)
-   * @param spline_knots Knot vector (for modes 2–3)
-   * @param spline_coeff Spline or piecewise coefficients (for modes 2–3)
+  * @param spline_knots Knot vector (for modes 2-3)
+  * @param spline_coeff Spline or piecewise coefficients (for modes 2-3)
    * @param spline_degree Spline degree (for mode 2)
    * @return Vector of transformed values
    */
@@ -70,10 +74,13 @@
     if (mode == 0) {
       return x;
     } else if (mode == 1) {
+      // Functional opcode evaluation (element-wise)
       return eval_functional_vector(x, opcodes, const_data);
     } else if (mode == 2) {
+      // I-spline basis evaluation (element-wise)
       return ispline_eval_vec(x, spline_knots, spline_degree, spline_coeff);
     } else if (mode == 3) {
+      // Piecewise-linear interpolation (element-wise)
       return pwlin_eval_vec(spline_knots, spline_coeff, x);
     } else {
       reject("Unknown transformation mode: ", mode);

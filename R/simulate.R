@@ -16,10 +16,14 @@
 #' @keywords internal
 NULL
 
+# File overview:
+# - Simulate longitudinal + survival data consistent with Stan semantics.
+# - Provide helper utilities for hazards and root finding.
+
 #' Stable softplus
 #' @keywords internal
 .softplus <- function(x) {
-  ifelse(x > 20, x, log1p(exp(x)))
+  ifelse(x > 0, x - log1p(exp(-x)), log1p(exp(x)))
 }
 
 #' Weibull baseline hazard factory
@@ -110,6 +114,8 @@ simulate_joinme_joint_student_t_cvtotal <- function(
   integration_control = list(rel.tol = 1e-6, subdivisions = 2000L, stop.on.error = TRUE),
   root_control = list(t_init = 1.0, t_max = 50.0, expand = 1.7, max_expand = 60L)
 ) {
+  # Workflow: simulate covariates -> random effects -> longitudinal -> survival
+  # - matches Stan semantics for CV_total association
   set.seed(seed)
 
   dist_formulas <- .normalize_formula_dist(formulaDist)
@@ -253,6 +259,7 @@ simulate_joinme_joint_student_t_cvtotal <- function(
     }
   }
 
+  # Draw event times by inverse transform sampling
   death <- lapply(seq_len(n_id), draw_event_time)
   dataEvent$time <- vapply(death, `[[`, numeric(1), "time")
   dataEvent$event <- vapply(death, `[[`, integer(1), "event")
@@ -305,6 +312,7 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 
   tmax <- max(dataEvent$time)
 
+  # Store latent truth for debugging or benchmark comparisons
   truth <- list(
     beta = beta,
     gamma_w = gamma_w,
@@ -336,6 +344,7 @@ simulate_joinme_joint_student_t_cvtotal <- function(
     w_idscaled = w_idscaled
   )
 
+  # Return helper closures for CV and hazard functions
   helpers <- list(
     cv_mean = cv_mean_i,
     cv_marker = cv_marker_i,
@@ -348,29 +357,95 @@ simulate_joinme_joint_student_t_cvtotal <- function(
   list(dataLong = dataLong, dataEvent = dataEvent, truth = truth, helpers = helpers, tmax = tmax)
 }
 
-#' Simulate joint model data with mixed families
+#' Simulate joint model data with formula-driven multistructure support
 #'
 #' @description
-#' Simulate multivariate longitudinal + survival data with marker-specific families.
+#' Generalized simulator for `joinme` that mirrors the fitting syntax as closely as
+#' possible. The simulator supports:
+#' - multivariate outcomes via marker-level families,
+#' - multi-structure random effects from `formulaLong` (id, marker, marker-by-id),
+#' - formula-based covariate generation through user-provided random generators,
+#' - association-driven survival via `assoc`/`formulaAssoc` terms consistent with
+#'   the model fit interface.
 #'
+#' The implementation is model-matrix based end-to-end, so every simulated component
+#' is generated from the same formula machinery used during fitting.
+#'
+#' @param formulaLong Longitudinal formula (same role as in `joinme()`).
+#' @param formulaEvent Event/survival formula (same role as in `joinme()`).
+#' @param formulaDist Optional distributional regression formulas (same role as in `joinme()`).
+#' @param formulaAssoc Optional formula for association terms in hazard, e.g. `~ cv_total + vcov`.
+#'   If provided, it overrides `assoc`.
 #' @param n_id Number of subjects.
-#' @param n_obs_per_marker_per_id Observations per marker per subject.
-#' @param families Character vector of family names (one per marker).
-#' @param times_obs Observation times (e.g., seq(0, 5, length.out = 10)).
-#' @param seed Random seed.
-#' @param family_params List of additional parameters per family.
+#' @param families Marker-specific family names.
+#' @param marker_levels Optional marker names; defaults to `m1`, `m2`, ...
+#' @param n_obs_per_marker_per_id Target number of observations per (id, marker).
+#' @param times_obs Optional candidate observation time grid.
+#' @param n_t Optional alias for `n_obs_per_marker_per_id` for compatibility.
+#' @param seed RNG seed.
+#' @param covariate_formulas Named or LHS formulas used to generate event-level covariates,
+#'   e.g. `list(x1 ~ rnorm(n_id), x2 ~ rt(n_id, df = 5))`.
+#' @param assoc Association components (same names as fit): `cv_total`, `cv_mean`,
+#'   `cv_marker`, `cs_total`, `cs_mean`, `cs_marker`, `vcov`.
+#' @param assoc_coefs Named coefficients for association terms in the hazard.
+#' @param beta_long Fixed-effect coefficients for `formulaLong` fixed part. If NULL,
+#'   coefficients are randomly generated and named by model-matrix columns.
+#' @param beta_event Survival baseline-covariate coefficients for `formulaEvent` RHS.
+#'   If NULL, coefficients are randomly generated.
+#' @param dist_coefs Named list of vectors for distributional regressions (`sigma`, `nu`,
+#'   `phi`, `alpha`, `phi_beta`, `tau_sde`).
+#' @param re_params Random-effects simulation controls.
+#' @param family_params Family-specific simulation parameters.
+#' @param h0 Optional baseline hazard function `h0(t)` for backward compatibility.
+#'   If supplied, it takes precedence over `baseline_hazard`/`formulaBasehaz`.
+#' @param baseline_hazard Optional baseline hazard specification. Supported forms:
+#'   - character: one of `"constant"`, `"linear"`, `"piecewise"`, `"weibull"`, `"spline"`.
+#'   - named list: `list(type = ..., ...)` with mode-specific parameters.
+#' @param formulaBasehaz Optional formula-based baseline hazard model on time,
+#'   e.g. `~ 1 + time + I(time^2)`.
+#' @param beta_basehaz Optional coefficients for `formulaBasehaz` (aligned by
+#'   model-matrix column names). If NULL, coefficients are generated.
+#' @param t_admin Administrative censoring horizon.
+#' @param eps_cs Finite-difference step for slope-type associations (`cs_*`).
+#' @param integration_control Control list passed to `integrate()`.
+#' @param root_control Root finding control for inverse-CDF sampling.
+#' @param id_var,marker_var,time_var,y_var,event_time_var,event_var Column names aligned
+#'   with `joinme_standata()` defaults.
 #'
-#' @return list(dataLong, dataEvent, true_params, marker_info)
+#' @return list(dataLong, dataEvent, true_params, marker_info, helpers, tmax)
 #' @export
 simulate_joinme <- function(
+  formulaLong = y ~ 1 + time + x1 +
+    (1 + time | id) +
+    (0 + x1 + (1 + time | id) | marker),
+  formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
+  formulaDist = NULL,
+  formulaAssoc = NULL,
   n_id = 50,
-  n_obs_per_marker_per_id = 8,
   families = c("gaussian", "student_t", "binomial"),
+  marker_levels = NULL,
+  n_obs_per_marker_per_id = 8,
   times_obs = seq(0, 5, length.out = 8),
+  n_t = NULL,
   seed = 42,
+  covariate_formulas = list(
+    x1 ~ rnorm(n_id),
+    x2 ~ rnorm(n_id)
+  ),
+  assoc = c("cv_total"),
+  assoc_coefs = c(cv_total = 0.6),
+  beta_long = NULL,
+  beta_event = NULL,
+  dist_coefs = list(),
+  re_params = list(
+    id = list(sd = NULL, corr = NULL),
+    marker = list(sd = NULL, corr = NULL),
+    id_marker = list(sd = NULL, corr = NULL)
+  ),
   family_params = list(
     gaussian = list(sigma = 1.0),
     student_t = list(sigma = 1.5, nu = 4),
+    bernoulli = list(),
     binomial = list(trials = 10),
     poisson = list(),
     negbin2 = list(phi = 2),
@@ -379,123 +454,630 @@ simulate_joinme <- function(
     skew_double_exponential = list(sigma = 1.0, tau_sde = 0.5),
     beta = list(phi_beta = 10),
     cumulative_logit = list(cutpoints = c(-1, 1))
-  )
+  ),
+  h0 = NULL,
+  baseline_hazard = list(type = "weibull", shape = 1.4, scale = 6.0),
+  formulaBasehaz = NULL,
+  beta_basehaz = NULL,
+  t_admin = 8.0,
+  eps_cs = 1e-3,
+  integration_control = list(rel.tol = 1e-6, subdivisions = 2000L, stop.on.error = TRUE),
+  root_control = list(t_init = 1.0, t_max = 50.0, expand = 1.7, max_expand = 60L),
+  id_var = "id",
+  marker_var = "marker",
+  time_var = "time",
+  y_var = "y",
+  event_time_var = "time",
+  event_var = "event"
 ) {
+  # Workflow:
+  # 1) Parse model formulas and random-effects structure.
+  # 2) Generate subject-level covariates using formula-driven RNG expressions.
+  # 3) Draw fixed/random coefficients and define latent trajectory evaluators.
+  # 4) Simulate event times by inverse transform using hazard linked to assoc terms.
+  # 5) Simulate observation times, generate responses by family, and return truth.
   set.seed(seed)
 
-  D <- length(families)
-  family_codes <- integer(D)
-  for (d in seq_len(D)) {
-    family_codes[d] <- .parse_family(families[d])
+  .sim_align_coef <- function(col_names, user_coef = NULL, sd_default = 0.4, intercept_default = 0.0) {
+    if (length(col_names) == 0) return(numeric(0))
+    if (is.null(user_coef)) {
+      out <- stats::rnorm(length(col_names), 0, sd_default)
+      names(out) <- col_names
+      if ("(Intercept)" %in% col_names) out["(Intercept)"] <- intercept_default
+      return(out)
+    }
+    out <- rep(0, length(col_names))
+    names(out) <- col_names
+    if (!is.null(names(user_coef))) {
+      out[names(user_coef)] <- as.numeric(user_coef)
+    } else {
+      out[seq_len(min(length(out), length(user_coef)))] <- as.numeric(user_coef)[seq_len(min(length(out), length(user_coef)))]
+    }
+    out
   }
 
-  marker_names <- if (D <= 3) {
-    c("m1", "m2", "m3")[seq_len(D)]
-  } else {
-    paste0("marker_", seq_len(D))
-  }
+  .sim_eval_covariate_formulas <- function(n_subjects, formulas, base_df) {
+    if (is.null(formulas) || length(formulas) == 0) return(base_df)
+    if (!is.list(formulas)) formulas <- list(formulas)
+    if (is.null(names(formulas))) names(formulas) <- rep("", length(formulas))
 
-  beta <- c(0.5, -0.2, 0.1)
-  sigma_b <- c(0.8, 0.4)
-  tau_w <- 0.6
+    out <- base_df
+    for (j in seq_along(formulas)) {
+      fj <- formulas[[j]]
+      if (!inherits(fj, "formula")) fj <- stats::as.formula(fj)
 
-  obs_list <- vector("list", D * n_id)
-  idx_obs <- 1
-
-  for (i in seq_len(n_id)) {
-    b_i <- c(rnorm(1, 0, sigma_b[1]), rnorm(1, 0, sigma_b[2]))
-
-    for (d in seq_len(D)) {
-      w_id <- rnorm(1, 0, tau_w)
-      n_obs <- sample(n_obs_per_marker_per_id - 2, 1) + 2
-      times <- sort(sample(times_obs, n_obs, replace = FALSE))
-
-      for (t in times) {
-        x1 <- rnorm(1, 0, 1)
-        x2 <- rnorm(1, 0, 1)
-        eta <- beta[1] + b_i[1] + (beta[2] + b_i[2]) * t + w_id + 0.3 * x1 - 0.2 * x2
-
-        fam <- families[d]
-        if (fam == "gaussian") {
-          sig <- family_params$gaussian$sigma %||% 1.0
-          y <- rnorm(1, eta, sig)
-        } else if (fam == "student_t") {
-          sig <- family_params$student_t$sigma %||% 1.5
-          nu <- family_params$student_t$nu %||% 4
-          y <- stats::rt(1, df = nu) * sig + eta
-        } else if (fam == "binomial") {
-          trials <- family_params$binomial$trials %||% 10
-          p <- stats::plogis(eta)
-          y <- stats::rbinom(1, size = trials, prob = p)
-        } else if (fam == "bernoulli") {
-          p <- stats::plogis(eta)
-          y <- stats::rbinom(1, size = 1, prob = p)
-        } else if (fam == "poisson") {
-          mu <- exp(eta)
-          y <- stats::rpois(1, lambda = mu)
-        } else if (fam == "negbin2") {
-          mu <- exp(eta)
-          phi <- family_params$negbin2$phi %||% 2
-          y <- stats::rnbinom(1, size = phi, mu = mu)
-        } else if (fam == "skew_normal") {
-          sig <- family_params$skew_normal$sigma %||% 1.0
-          y <- rnorm(1, eta, sig)
-        } else if (fam == "double_exponential") {
-          sig <- family_params$double_exponential$sigma %||% 1.0
-          sign <- sample(c(-1, 1), size = 1)
-          y <- eta + sign * rexp(1, rate = 1 / sig)
-        } else if (fam == "skew_double_exponential") {
-          sig <- family_params$skew_double_exponential$sigma %||% 1.0
-          tau <- family_params$skew_double_exponential$tau_sde %||% 0.5
-          u <- runif(1)
-          e <- rexp(1, rate = 1)
-          y <- if (u < tau) eta + e * sig / tau else eta - e * sig / (1 - tau)
-        } else if (fam == "beta") {
-          phi_beta <- family_params$beta$phi_beta %||% 10
-          mu <- plogis(eta)
-          shape1 <- pmax(mu * phi_beta, 1e-6)
-          shape2 <- pmax((1 - mu) * phi_beta, 1e-6)
-          y <- rbeta(1, shape1 = shape1, shape2 = shape2)
-        } else if (fam == "cumulative_logit") {
-          # Simple 3-category ordinal outcome using fixed cutpoints
-          cutpoints <- family_params$cumulative_logit$cutpoints %||% c(-1, 1)
-          p1 <- plogis(cutpoints[1] - eta)
-          p2 <- plogis(cutpoints[2] - eta) - p1
-          p3 <- 1 - plogis(cutpoints[2] - eta)
-          y <- sample(1:3, size = 1, prob = c(p1, p2, p3))
-        } else {
-          cli::cli_abort(c(x = "Unknown family: {fam}.", i = "Check the families argument."))
+      lhs_name <- names(formulas)[j]
+      if (!nzchar(lhs_name)) {
+        if (length(fj) < 3) {
+          cli::cli_abort(c(
+            x = "Each entry in {.arg covariate_formulas} must be named or have an LHS.",
+            i = "Example: list(x1 ~ rnorm(n_id), x2 ~ runif(n_id))."
+          ))
         }
+        lhs_vars <- all.vars(fj[[2]])
+        if (length(lhs_vars) != 1) {
+          cli::cli_abort(c(
+            x = "Covariate generation LHS must contain exactly one variable.",
+            i = "Use syntax like x1 ~ rnorm(n_id)."
+          ))
+        }
+        lhs_name <- lhs_vars[1]
+      }
 
-        obs_list[[idx_obs]] <- data.frame(
-          id = i,
-          marker = marker_names[d],
-          time = t,
-          y = y,
-          x1 = x1,
-          x2 = x2,
-          stringsAsFactors = FALSE
+      rhs_expr <- if (length(fj) >= 3) fj[[3]] else fj[[2]]
+      eval_env <- list2env(c(as.list(out), list(n_id = n_subjects, id = seq_len(n_subjects))), parent = parent.frame())
+      sampled <- eval(rhs_expr, envir = eval_env)
+
+      if (length(sampled) == 1) sampled <- rep(sampled, n_subjects)
+      if (length(sampled) != n_subjects) {
+        cli::cli_abort(c(
+          x = "Covariate formula for '{lhs_name}' returned length {length(sampled)}.",
+          i = "Expected length {.val {n_subjects}} or scalar."
+        ))
+      }
+      out[[lhs_name]] <- sampled
+    }
+    out
+  }
+
+  .sim_draw_re_block <- function(n_group, K, cfg, label) {
+    if (K <= 0) return(matrix(0.0, n_group, 0))
+    sd_vec <- cfg$sd
+    if (is.null(sd_vec)) sd_vec <- rep(0.5, K)
+    if (length(sd_vec) == 1) sd_vec <- rep(sd_vec, K)
+    if (length(sd_vec) != K) {
+      cli::cli_abort(c(
+        x = "Random-effect SD length mismatch for {label}.",
+        i = "Expected length {K}, got {length(sd_vec)}."
+      ))
+    }
+    corr <- cfg$corr
+    if (is.null(corr)) corr <- diag(K)
+    if (!is.matrix(corr) || any(dim(corr) != c(K, K))) {
+      cli::cli_abort(c(
+        x = "Random-effect correlation matrix mismatch for {label}.",
+        i = "Expected a {K}x{K} matrix."
+      ))
+    }
+    Sigma <- diag(as.numeric(sd_vec), K, K) %*% corr %*% diag(as.numeric(sd_vec), K, K)
+    R <- chol(Sigma)
+    Z <- matrix(stats::rnorm(n_group * K), n_group, K)
+    Z %*% R
+  }
+
+  .sim_rhs_matrix <- function(rhs_list, data) {
+    if (length(rhs_list) == 0) {
+      return(matrix(0.0, nrow(data), 0))
+    }
+    mats <- lapply(rhs_list, function(rhs) .mm(rhs, data))
+    do.call(cbind, mats)
+  }
+
+  .sim_get_family_param <- function(fam_name, param_name, fallback) {
+    val <- family_params[[fam_name]][[param_name]]
+    if (is.null(val)) fallback else val
+  }
+
+  .sim_sample_ordinal <- function(eta, cutpoints) {
+    cp <- sort(as.numeric(cutpoints))
+    cdf_vals <- stats::plogis(cp - eta)
+    probs <- c(cdf_vals[1], diff(cdf_vals), 1 - cdf_vals[length(cdf_vals)])
+    probs <- pmax(probs, 1e-12)
+    probs <- probs / sum(probs)
+    sample.int(length(probs), size = 1, prob = probs)
+  }
+
+  .sim_assoc_from_formula <- function(f) {
+    if (is.null(f)) return(NULL)
+    vars <- all.vars(f)
+    unique(vars[vars %in% c("cv_total", "cv_mean", "cv_marker", "cs_total", "cs_mean", "cs_marker", "vcov")])
+  }
+
+  .sim_make_baseline_hazard <- function(spec, formula_basehaz = NULL, beta_basehaz = NULL) {
+    if (!is.null(formula_basehaz)) {
+      f_bh <- stats::as.formula(formula_basehaz)
+      return(function(t) {
+        df_t <- data.frame(time = as.numeric(t))
+        X_bh <- stats::model.matrix(f_bh, data = df_t)
+        coef_bh <- .sim_align_coef(
+          colnames(X_bh),
+          user_coef = beta_basehaz,
+          sd_default = 0.2,
+          intercept_default = -2.0
         )
-        idx_obs <- idx_obs + 1
+        as.numeric(exp(X_bh %*% coef_bh))
+      })
+    }
+
+    if (is.null(spec)) {
+      spec <- list(type = "weibull", shape = 1.4, scale = 6.0)
+    }
+    if (is.character(spec)) {
+      spec <- list(type = spec)
+    }
+    if (!is.list(spec) || is.null(spec$type)) {
+      cli::cli_abort(c(
+        x = "{.arg baseline_hazard} must be a character mode or named list with {.arg type}.",
+        i = "Supported types: constant, linear, piecewise, weibull, spline."
+      ))
+    }
+
+    mode <- tolower(as.character(spec$type)[1])
+    if (mode == "constant") {
+      rate <- as.numeric(spec$rate %||% spec$lambda %||% 0.08)
+      return(function(t) rep(rate, length(t)))
+    }
+
+    if (mode == "linear") {
+      intercept <- as.numeric(spec$intercept %||% -2.2)
+      slope <- as.numeric(spec$slope %||% 0.25)
+      return(function(t) {
+        t <- as.numeric(t)
+        .softplus(intercept + slope * pmax(t, 0))
+      })
+    }
+
+    if (mode %in% c("piecewise", "pwlin", "piecewise_linear")) {
+      breaks <- sort(as.numeric(spec$breaks %||% c(2, 5)))
+      rates <- as.numeric(spec$rates %||% c(0.05, 0.12, 0.25))
+      if (length(rates) != length(breaks) + 1L) {
+        cli::cli_abort(c(
+          x = "Piecewise baseline requires length(rates) = length(breaks) + 1.",
+          i = "Got {.val {length(rates)}} rates and {.val {length(breaks)}} breaks."
+        ))
+      }
+      return(function(t) {
+        t <- pmax(as.numeric(t), 0)
+        idx <- findInterval(t, vec = breaks, rightmost.closed = TRUE) + 1L
+        rates[idx]
+      })
+    }
+
+    if (mode == "weibull") {
+      shape <- as.numeric(spec$shape %||% 1.4)
+      scale <- as.numeric(spec$scale %||% 6.0)
+      return(weibull_h0(shape = shape, scale = scale))
+    }
+
+    if (mode %in% c("spline", "bs", "ns")) {
+      basis_type <- tolower(as.character(spec$basis %||% if (mode == "ns") "ns" else "bs")[1])
+      knots <- as.numeric(spec$knots %||% stats::quantile(seq(0, t_admin, length.out = 100), probs = c(0.25, 0.5, 0.75)))
+      degree <- as.integer(spec$degree %||% 3L)
+      coef <- spec$coef
+      intercept <- as.logical(spec$intercept %||% TRUE)
+
+      return(function(t) {
+        t <- pmax(as.numeric(t), 0)
+        if (basis_type == "ns") {
+          B <- splines::ns(t, knots = knots, Boundary.knots = c(0, t_admin), intercept = intercept)
+        } else {
+          B <- splines::bs(t, knots = knots, Boundary.knots = c(0, t_admin), degree = degree, intercept = intercept)
+        }
+        B <- as.matrix(B)
+        coef_vec <- .sim_align_coef(
+          colnames(B),
+          user_coef = coef,
+          sd_default = 0.25,
+          intercept_default = -2.2
+        )
+        as.numeric(exp(B %*% coef_vec))
+      })
+    }
+
+    cli::cli_abort(c(
+      x = "Unsupported baseline hazard mode: {.val {mode}}.",
+      i = "Use one of: constant, linear, piecewise, weibull, spline."
+    ))
+  }
+
+  # ---- Basic dimensions and marker metadata
+  if (!is.null(n_t)) n_obs_per_marker_per_id <- n_t
+  if (length(families) == 1L && !is.null(marker_levels) && length(marker_levels) > 1L) {
+    families <- rep(families, length(marker_levels))
+  }
+  D <- length(families)
+  if (D < 1) {
+    cli::cli_abort(c(
+      x = "{.arg families} must include at least one marker family.",
+      i = "Example: families = c('gaussian', 'student_t')."
+    ))
+  }
+  if (is.null(marker_levels)) marker_levels <- paste0("m", seq_len(D))
+  if (length(marker_levels) != D) {
+    cli::cli_abort(c(
+      x = "{.arg marker_levels} length must match {.arg families}.",
+      i = "Expected {D}, got {length(marker_levels)}."
+    ))
+  }
+  family_codes <- .parse_family(families)
+
+  # ---- Parse longitudinal formula structure
+  f_exp <- reformulas::expandDoubleVerts(formulaLong)
+  bars <- reformulas::findbars(f_exp)
+  if (length(bars) == 0) {
+    cli::cli_abort(c(
+      x = "{.arg formulaLong} must include random-effects terms.",
+      i = "Include at least ( ... | id ) and typically a marker block."
+    ))
+  }
+  fixed_formula <- reformulas::nobars(f_exp)
+  fixed_rhs <- stats::update(fixed_formula, . ~ .)
+  fixed_rhs[[2]] <- NULL
+
+  grp_names <- vapply(bars, function(b) .group_name_from_expr(b[[3]]), character(1))
+  id_idx <- which(grp_names == id_var)
+  id_rhs_list <- if (length(id_idx) > 0) .bar_terms_to_rhs_list(bars[id_idx]) else list()
+
+  nested_terms <- .extract_nested_marker_terms(formulaLong, marker_var = marker_var, id_var = id_var)
+  mk_rhs_list <- nested_terms$mk_rhs_list
+  idm_rhs_list <- nested_terms$idm_rhs_list
+
+  # ---- Build event-level frame and covariates
+  dataEvent <- data.frame(id = seq_len(n_id), stringsAsFactors = FALSE)
+  dataEvent <- .sim_eval_covariate_formulas(n_subjects = n_id, formulas = covariate_formulas, base_df = dataEvent)
+  names(dataEvent)[names(dataEvent) == "id"] <- id_var
+
+  # ---- Build prototype data for matrix column alignment
+  prototype <- dataEvent[rep(1, D), , drop = FALSE]
+  prototype[[marker_var]] <- factor(marker_levels, levels = marker_levels)
+  prototype[[time_var]] <- rep(mean(range(times_obs)), D)
+
+  X_proto <- .mm(fixed_rhs, prototype)
+  Z_id_proto <- .sim_rhs_matrix(id_rhs_list, prototype)
+  Z_mk_proto <- .sim_rhs_matrix(mk_rhs_list, prototype)
+  Z_idm_proto <- .sim_rhs_matrix(idm_rhs_list, prototype)
+
+  beta_long <- .sim_align_coef(colnames(X_proto), beta_long, sd_default = 0.35, intercept_default = 1.0)
+
+  event_rhs <- stats::delete.response(stats::terms(formulaEvent))
+  W_event <- stats::model.matrix(event_rhs, dataEvent)
+  storage.mode(W_event) <- "double"
+  beta_event <- .sim_align_coef(colnames(W_event), beta_event, sd_default = 0.25, intercept_default = 0.0)
+
+  # ---- Draw random effects from user-configurable covariance structures
+  K_id <- ncol(Z_id_proto)
+  K_mk <- ncol(Z_mk_proto)
+  K_idm <- ncol(Z_idm_proto)
+
+  re_id <- .sim_draw_re_block(n_id, K_id, re_params$id %||% list(), "id")
+  re_marker <- .sim_draw_re_block(D, K_mk, re_params$marker %||% list(), "marker")
+  re_idm_flat <- .sim_draw_re_block(n_id * D, K_idm, re_params$id_marker %||% list(), "id_marker")
+
+  re_idm <- array(0.0, dim = c(n_id, D, K_idm))
+  if (K_idm > 0) {
+    for (i in seq_len(n_id)) {
+      for (d in seq_len(D)) {
+        re_idm[i, d, ] <- re_idm_flat[(i - 1L) * D + d, ]
       }
     }
   }
 
-  dataLong <- do.call(rbind, obs_list)
+  # ---- Association terms driving survival (syntax aligned with fit)
+  assoc_from_formula <- .sim_assoc_from_formula(formulaAssoc)
+  if (!is.null(assoc_from_formula)) assoc <- assoc_from_formula
+  assoc <- unique(assoc)
+  if (length(assoc) == 0) assoc <- "cv_total"
 
-  dataEvent <- data.frame(
-    id = seq_len(n_id),
-    time = runif(n_id, min = min(times_obs), max = max(times_obs) + 2),
-    event = stats::rbinom(n_id, size = 1, prob = 0.7),
-    x1 = rnorm(n_id),
-    x2 = rnorm(n_id),
-    stringsAsFactors = FALSE
+  assoc_coef_vec <- rep(0.0, length(assoc))
+  names(assoc_coef_vec) <- assoc
+  if (!is.null(names(assoc_coefs))) {
+    common_assoc <- intersect(names(assoc_coefs), assoc)
+    assoc_coef_vec[common_assoc] <- as.numeric(assoc_coefs[common_assoc])
+  } else if (length(assoc_coefs) > 0) {
+    assoc_coef_vec[seq_len(min(length(assoc), length(assoc_coefs)))] <- as.numeric(assoc_coefs)[seq_len(min(length(assoc), length(assoc_coefs)))]
+  }
+
+  # ---- Latent trajectory evaluators at arbitrary (id, marker, time)
+  make_row_df <- function(i, d, t) {
+    out <- dataEvent[i, , drop = FALSE]
+    out[[time_var]] <- t
+    out[[marker_var]] <- factor(marker_levels[d], levels = marker_levels)
+    out
+  }
+
+  eta_components <- function(i, d, t) {
+    row_df <- make_row_df(i, d, t)
+    x_fix <- .mm(fixed_rhs, row_df)
+    z_id <- .sim_rhs_matrix(id_rhs_list, row_df)
+    z_mk <- .sim_rhs_matrix(mk_rhs_list, row_df)
+    z_idm <- .sim_rhs_matrix(idm_rhs_list, row_df)
+
+    fixed_part <- if (ncol(x_fix) > 0) as.numeric(x_fix %*% beta_long) else 0
+    id_part <- if (ncol(z_id) > 0) sum(z_id[1, ] * re_id[i, ]) else 0
+    mk_part <- if (ncol(z_mk) > 0) sum(z_mk[1, ] * re_marker[d, ]) else 0
+    idm_part <- if (ncol(z_idm) > 0) sum(z_idm[1, ] * re_idm[i, d, ]) else 0
+
+    list(
+      fixed_id = fixed_part + id_part,
+      marker_specific = mk_part + idm_part,
+      total = fixed_part + id_part + mk_part + idm_part
+    )
+  }
+
+  assoc_components <- function(i, t) {
+    mu_total <- numeric(D)
+    mu_mean <- numeric(D)
+    mu_marker <- numeric(D)
+    for (d in seq_len(D)) {
+      part <- eta_components(i, d, t)
+      mu_total[d] <- part$total
+      mu_mean[d] <- part$fixed_id
+      mu_marker[d] <- part$marker_specific
+    }
+    cv_total <- mean(mu_total)
+    cv_mean <- mean(mu_mean)
+    cv_marker <- mean(mu_marker)
+
+    t_eps <- t + eps_cs
+    mu_total_eps <- numeric(D)
+    mu_mean_eps <- numeric(D)
+    mu_marker_eps <- numeric(D)
+    for (d in seq_len(D)) {
+      part_eps <- eta_components(i, d, t_eps)
+      mu_total_eps[d] <- part_eps$total
+      mu_mean_eps[d] <- part_eps$fixed_id
+      mu_marker_eps[d] <- part_eps$marker_specific
+    }
+
+    list(
+      cv_total = cv_total,
+      cv_mean = cv_mean,
+      cv_marker = cv_marker,
+      cs_total = (mean(mu_total_eps) - cv_total) / eps_cs,
+      cs_mean = (mean(mu_mean_eps) - cv_mean) / eps_cs,
+      cs_marker = (mean(mu_marker_eps) - cv_marker) / eps_cs,
+      vcov = if (D > 1) stats::var(mu_total) else 0
+    )
+  }
+
+  h0_fn <- if (is.function(h0)) {
+    h0
+  } else {
+    .sim_make_baseline_hazard(
+      spec = baseline_hazard,
+      formula_basehaz = formulaBasehaz,
+      beta_basehaz = beta_basehaz
+    )
+  }
+
+  eta_event_i <- as.numeric(W_event %*% beta_event)
+
+  hazard_i <- function(i, t) {
+    if (length(t) > 1) {
+      return(vapply(t, function(tt) hazard_i(i, tt), numeric(1)))
+    }
+    comp <- assoc_components(i, t)
+    assoc_lp <- 0.0
+    for (nm in assoc) {
+      assoc_lp <- assoc_lp + assoc_coef_vec[[nm]] * comp[[nm]]
+    }
+    h0_fn(t) * exp(eta_event_i[i] + assoc_lp)
+  }
+
+  cumhaz_i <- function(i, t) {
+    if (t <= 0) return(0)
+    out <- do.call(integrate, c(list(f = function(u) hazard_i(i, u), lower = 0, upper = t), integration_control))
+    as.numeric(out$value)
+  }
+
+  draw_event_time <- function(i) {
+    U <- stats::runif(1)
+    target_H <- -log(U)
+    f_root <- function(t) cumhaz_i(i, t) - target_H
+    br <- .find_bracket(
+      f_root,
+      lower = 0,
+      upper = root_control$t_init,
+      upper_max = root_control$t_max,
+      expand = root_control$expand,
+      max_expand = root_control$max_expand
+    )
+    if (is.null(br)) {
+      return(list(time = t_admin, event = 0L, bracketing_failed = TRUE))
+    }
+    T_star <- stats::uniroot(f_root, lower = br$lower, upper = br$upper)$root
+    if (T_star > t_admin) {
+      list(time = t_admin, event = 0L, bracketing_failed = FALSE)
+    } else {
+      list(time = T_star, event = 1L, bracketing_failed = FALSE)
+    }
+  }
+
+  # ---- Draw event/censoring times
+  event_draws <- lapply(seq_len(n_id), draw_event_time)
+  dataEvent[[event_time_var]] <- vapply(event_draws, `[[`, numeric(1), "time")
+  dataEvent[[event_var]] <- vapply(event_draws, `[[`, integer(1), "event")
+
+  # ---- Build longitudinal observation schedule conditional on event times
+  obs_rows <- vector("list", n_id * D)
+  idx_row <- 1L
+  n_obs_target <- max(2L, as.integer(n_obs_per_marker_per_id))
+
+  for (i in seq_len(n_id)) {
+    obs_upper <- max(1e-8, min(dataEvent[[event_time_var]][i], t_admin))
+    for (d in seq_len(D)) {
+      if (!is.null(times_obs) && length(times_obs) > 0) {
+        candidate_times <- times_obs[times_obs <= obs_upper]
+        if (length(candidate_times) == 0) {
+          t_obs <- sort(stats::runif(n_obs_target, 0, obs_upper))
+        } else {
+          t_obs <- sort(sample(candidate_times, size = n_obs_target, replace = length(candidate_times) < n_obs_target))
+        }
+      } else {
+        t_obs <- sort(stats::runif(n_obs_target, 0, obs_upper))
+      }
+
+      row_df <- data.frame(
+        id = rep(dataEvent[[id_var]][i], length(t_obs)),
+        marker = factor(rep(marker_levels[d], length(t_obs)), levels = marker_levels),
+        time = t_obs,
+        stringsAsFactors = FALSE
+      )
+      names(row_df)[names(row_df) == "id"] <- id_var
+      names(row_df)[names(row_df) == "time"] <- time_var
+      names(row_df)[names(row_df) == "marker"] <- marker_var
+
+      cov_names <- setdiff(colnames(dataEvent), c(id_var, event_time_var, event_var))
+      for (cov_nm in cov_names) {
+        row_df[[cov_nm]] <- dataEvent[[cov_nm]][i]
+      }
+
+      obs_rows[[idx_row]] <- row_df
+      idx_row <- idx_row + 1L
+    }
+  }
+  dataLong <- do.call(rbind, obs_rows)
+  rownames(dataLong) <- NULL
+
+  # ---- Mean structure from model matrices and sampled random effects
+  X_long <- .mm(fixed_rhs, dataLong)
+  Z_id_long <- .sim_rhs_matrix(id_rhs_list, dataLong)
+  Z_mk_long <- .sim_rhs_matrix(mk_rhs_list, dataLong)
+  Z_idm_long <- .sim_rhs_matrix(idm_rhs_list, dataLong)
+
+  id_index <- match(as.character(dataLong[[id_var]]), as.character(dataEvent[[id_var]]))
+  marker_index <- match(as.character(dataLong[[marker_var]]), marker_levels)
+
+  mu_long <- as.numeric(X_long %*% beta_long)
+  if (K_id > 0) {
+    mu_long <- mu_long + rowSums(Z_id_long * re_id[id_index, , drop = FALSE])
+  }
+  if (K_mk > 0) {
+    mu_long <- mu_long + rowSums(Z_mk_long * re_marker[marker_index, , drop = FALSE])
+  }
+  if (K_idm > 0) {
+    idm_effect <- matrix(0.0, nrow(dataLong), K_idm)
+    for (r in seq_len(nrow(dataLong))) {
+      idm_effect[r, ] <- re_idm[id_index[r], marker_index[r], ]
+    }
+    mu_long <- mu_long + rowSums(Z_idm_long * idm_effect)
+  }
+
+  # ---- Distributional parameters (family defaults + formulaDist overrides)
+  family_by_row <- families[marker_index]
+
+  sigma_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "sigma", 1.0), numeric(1))
+  nu_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "nu", 4.0), numeric(1))
+  phi_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "phi", 2.0), numeric(1))
+  alpha_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "alpha", 0.0), numeric(1))
+  phi_beta_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "phi_beta", 10.0), numeric(1))
+  tau_sde_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "tau_sde", 0.5), numeric(1))
+  trials_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "trials", 10L), numeric(1))
+
+  dist_formulas <- .normalize_formula_dist(formulaDist)
+  for (param_name in names(dist_formulas)) {
+    X_param <- .build_dist_matrix(dist_formulas[[param_name]], dataLong)$X
+    beta_param <- .sim_align_coef(colnames(X_param), dist_coefs[[param_name]], sd_default = 0.15, intercept_default = 0.0)
+    eta_param <- as.numeric(X_param %*% beta_param)
+
+    if (param_name == "sigma") sigma_vec <- exp(eta_param)
+    if (param_name == "nu") nu_vec <- 2 + exp(eta_param)
+    if (param_name == "phi") phi_vec <- exp(eta_param)
+    if (param_name == "alpha") alpha_vec <- eta_param
+    if (param_name == "phi_beta") phi_beta_vec <- exp(eta_param)
+    if (param_name == "tau_sde") tau_sde_vec <- stats::plogis(eta_param)
+  }
+
+  # ---- Draw outcomes by marker-specific family
+  y_out <- numeric(nrow(dataLong))
+  for (r in seq_len(nrow(dataLong))) {
+    fam_name <- family_by_row[r]
+    fam_code <- .parse_family(fam_name)
+    eta_r <- mu_long[r]
+
+    if (fam_code == 11L) {
+      cp <- family_params[[fam_name]]$cutpoints %||% c(-1, 1)
+      y_out[r] <- .sim_sample_ordinal(eta = eta_r, cutpoints = cp)
+    } else {
+      y_out[r] <- .sample_from_family(
+        n = 1,
+        eta = eta_r,
+        family = fam_code,
+        sigma = sigma_vec[r],
+        nu = nu_vec[r],
+        phi = phi_vec[r],
+        phi_beta = phi_beta_vec[r],
+        tau_sde = tau_sde_vec[r],
+        trials = as.integer(round(trials_vec[r])),
+        skew = alpha_vec[r]
+      )
+    }
+  }
+  dataLong[[y_var]] <- y_out
+
+  # ---- Final formatting and metadata
+  dataLong[[marker_var]] <- factor(dataLong[[marker_var]], levels = marker_levels)
+  dataLong <- dataLong[order(dataLong[[id_var]], dataLong[[marker_var]], dataLong[[time_var]]), , drop = FALSE]
+  rownames(dataLong) <- NULL
+
+  true_params <- list(
+    beta_long = beta_long,
+    beta_event = beta_event,
+    beta = beta_long,
+    gamma_w = beta_event,
+    alpha_cv_total = assoc_coef_vec[["cv_total"]] %||% NA_real_,
+    assoc = assoc,
+    assoc_coefs = assoc_coef_vec,
+    baseline_hazard = baseline_hazard,
+    formulaBasehaz = formulaBasehaz,
+    beta_basehaz = beta_basehaz,
+    dist_coefs = dist_coefs,
+    re_params = re_params,
+    formulaLong = formulaLong,
+    formulaEvent = formulaEvent,
+    formulaDist = dist_formulas
   )
+
+  marker_info <- list(
+    names = marker_levels,
+    families = families,
+    family_codes = family_codes
+  )
+
+  helpers <- list(
+    cv_total = function(i, t) assoc_components(i, t)$cv_total,
+    cv_mean = function(i, t) assoc_components(i, t)$cv_mean,
+    cv_marker = function(i, t) assoc_components(i, t)$cv_marker,
+    cs_total = function(i, t) assoc_components(i, t)$cs_total,
+    cs_mean = function(i, t) assoc_components(i, t)$cs_mean,
+    cs_marker = function(i, t) assoc_components(i, t)$cs_marker,
+    vcov = function(i, t) assoc_components(i, t)$vcov,
+    assoc_components = assoc_components,
+    baseline_hazard = h0_fn,
+    hazard = hazard_i,
+    cumhaz = cumhaz_i,
+    survival_prob = function(i, t) exp(-cumhaz_i(i, t))
+  )
+
+  tmax <- max(dataEvent[[event_time_var]])
 
   list(
     dataLong = dataLong,
     dataEvent = dataEvent,
-    true_params = list(beta = beta, sigma_b = sigma_b, tau_w = tau_w),
-    marker_info = list(names = marker_names, families = families, family_codes = family_codes)
+    truth = true_params,
+    true_params = true_params,
+    marker_info = marker_info,
+    helpers = helpers,
+    tmax = tmax
   )
 }

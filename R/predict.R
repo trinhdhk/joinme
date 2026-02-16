@@ -7,6 +7,10 @@
 #' @name predict.JoinMeFit
 NULL
 
+# File overview:
+# - Build subject-specific Stan data for dynamic prediction.
+# - Run the dynpred model and summarize longitudinal/survival draws.
+
 #' Dynamic prediction for a fitted `JoinMeFit` model
 #'
 #' @rdname predict.JoinMeFit
@@ -34,10 +38,13 @@ NULL
 #'   - "predict": predictive draw (includes noise).
 #' @param times Numeric vector of times at which to predict the longitudinal and survival trajectories.
 #' Can also be a named list of numeric vectors (one per subject id). If NULL, a grid
-#' from `Tstart` to `Tstart + 5` (scaled) is generated. If fewer than 50 points are
+#' from `time_start` to `time_start + 5` (scaled) is generated. If fewer than 50 points are
 #' supplied for a subject, a warning is emitted when `n_times = 50`.
-#' @param Tstart Numeric scalar. The conditioning time (last observation time).
-#' If NULL, defaults to the maximum observed time in `newdataLong` for the subject.
+#' @param time_start Numeric scalar or character. The conditioning time (last observation time).
+#' If numeric, a single value is reused for all subjects, or a named vector supplies
+#' subject-specific values. If character, it is interpreted as a column name in
+#' `newdataEvent` holding subject-specific conditioning times. If NULL, defaults to
+#' the maximum observed time in `newdataLong` for each subject.
 #' @param ci_levels Numeric vector of credible interval levels for plotting.
 #' Must be strictly between 0 and 1.
 #' @param tmax Numeric scalar. The maximum time used for scaling during model fitting.
@@ -53,6 +60,7 @@ NULL
 #'     For engine = "rstan", threading uses options(stan.thread = threads_per_chain).
 #'   - grainsize: integer; reduce_sum grainsize for threaded prediction
 #'     (default max(1, ceiling(n_id/(4*threads_per_chain)))).
+#'   - progress: logical; show sampling progress bar (default TRUE).
 #' @param seed Integer. Random seed for reproducibility of random effect sampling.
 #' @importFrom stats predict median sd quantile na.omit optim terms
 #' @param ... Additional arguments (unused).
@@ -60,8 +68,8 @@ NULL
 #' @return A list with two components:
 #' \item{longitudinal}{A data.frame containing longitudinal predictions (Mean, Median, SD, 95% CrI) for each time point in `times`. Columns: id, time, marker, Estimate, Median, Est.Error, L95, U95.}
 #' \item{longitudinal_fitted}{A data.frame containing fitted values for observed history on the linpred and epred scales. Includes a `scale` column.}
-#' \item{survival}{A data.frame containing survival probabilities (S(t|Tstart)) for each time point in `times`. Columns: id, time, Survival, Median, Est.Error, L95, U95.}
-#' \item{cumhaz}{A data.frame containing conditional cumulative hazards H(t|Tstart). Columns: id, time, Cumhaz, Median, Est.Error, L95, U95.}
+#' \item{survival}{A data.frame containing survival probabilities (S(t|time_start)) for each time point in `times`. Columns: id, time, Survival, Median, Est.Error, L95, U95.}
+#' \item{cumhaz}{A data.frame containing conditional cumulative hazards H(t|time_start). Columns: id, time, Cumhaz, Median, Est.Error, L95, U95.}
 #' \item{draws}{A list containing raw posterior draws (`longitudinal`, `survival`, `cumhaz`).}
 #'
 #' @details
@@ -78,7 +86,7 @@ predict.JoinMeFit <- function(object,
                            pred_type = c("per_marker_id", "marginal_marker", "marginal_id", "marker_subject", "subject_marker"),
                            scale = c("epred", "linpred", "predict"),
                            times = NULL,
-                           Tstart = NULL,
+                           time_start = NULL,
                            tmax = NULL,
                            ci_levels = c(0.5, 0.95),
                            n_samples = 200,
@@ -103,6 +111,7 @@ predict.JoinMeFit <- function(object,
     ci_levels <- .validate_ci_levels(ci_levels)
     quantile_probs <- .quantile_probs_from_ci(ci_levels)
 
+    # Workflow: recover metadata -> build prediction data -> run dynpred -> summarize
     # 1. Recover Metadata
     meta <- .recover_metadata(object, tmax)
     tmax_val <- meta$tmax
@@ -117,6 +126,46 @@ predict.JoinMeFit <- function(object,
     ids <- unique(newdataEvent[[id_var]])
     if (length(ids) == 0) {
         cli::cli_abort("No subjects found in {.code newdataEvent}.")
+    }
+
+    # Conditioning time inputs
+    # - support scalar numeric, per-subject numeric, or column name in newdataEvent
+    time_start_col <- NULL
+    time_start_map <- NULL
+    if (!is.null(time_start)) {
+        if (is.character(time_start)) {
+            if (length(time_start) != 1) {
+                cli::cli_abort(c(
+                    x = "{.arg time_start} must be a single column name when character.",
+                    i = "Example: time_start = 'time_start'"
+                ))
+            }
+            time_start_col <- time_start
+            if (!(time_start_col %in% names(newdataEvent))) {
+                cli::cli_abort(c(
+                    x = "{.arg time_start} column {time_start_col} not found in {.code newdataEvent}.",
+                    i = "Provide a valid column name or a numeric value."
+                ))
+            }
+        } else if (is.numeric(time_start)) {
+            if (length(time_start) > 1) {
+                if (!is.null(names(time_start))) {
+                    time_start_map <- time_start
+                } else if (length(time_start) == length(ids)) {
+                    time_start_map <- stats::setNames(as.numeric(time_start), ids)
+                } else {
+                    cli::cli_abort(c(
+                        x = "{.arg time_start} must be a single numeric value or match the number of subjects.",
+                        i = "Use a named vector to specify subject-specific values."
+                    ))
+                }
+            }
+        } else {
+            cli::cli_abort(c(
+                x = "{.arg time_start} must be numeric or a column name string.",
+                i = "Example: time_start = 2.5 or time_start = 'time_start'."
+            ))
+        }
     }
 
     if (!is.list(control)) {
@@ -156,28 +205,30 @@ predict.JoinMeFit <- function(object,
         ))
     }
 
-    stan_candidates <- if (threads_per_chain > 1) {
-        c(
-            system.file("stan/joinme_dynpred_threading.stan", package = "joinme"),
-            file.path("inst", "stan", "joinme_dynpred_threading.stan"),
-            file.path("..", "inst", "stan", "joinme_dynpred_threading.stan"),
-            file.path("..", "..", "inst", "stan", "joinme_dynpred_threading.stan")
-        )
+    # Extract posterior draws early so threading can be finalized before
+    # selecting threaded vs non-threaded Stan program (same ordering as fit()).
+    draws_list <- .extract_draws_for_pred(object, n_samples, seed)
+    n_samples_extracted <- if (ncol(draws_list$alpha_vcov_reg) > 0) {
+        nrow(draws_list$alpha_vcov_reg)
     } else {
-        c(
-            system.file("stan/joinme_dynpred.stan", package = "joinme"),
-            file.path("inst", "stan", "joinme_dynpred.stan"),
-            file.path("..", "inst", "stan", "joinme_dynpred.stan"),
-            file.path("..", "..", "inst", "stan", "joinme_dynpred.stan")
-        )
+        nrow(draws_list$beta_fixed)
     }
-    stan_file <- stan_candidates[file.exists(stan_candidates)][1]
-    if (is.na(stan_file) || !nzchar(stan_file)) {
-        cli::cli_abort(c(
-            x = "Prediction Stan model file not found.",
-            i = "Reinstall the package or restore inst/stan files."
+
+    # Finalize threads_per_chain from control only, capped by available work.
+    n_cores <- parallel::detectCores(logical = FALSE) %||% 1L
+    max_threads <- min(n_samples_extracted, n_cores)
+    if (threads_per_chain > max_threads) {
+        cli::cli_warn(c(
+            x = "Requested {threads_per_chain} threads exceeds max {max_threads}.",
+            i = "Capping threads_per_chain to {max_threads}."
         ))
+        threads_per_chain <- max_threads
     }
+
+    stan_file <- .get_stan_file(
+        program = "joinme_dynpred",
+        threaded = threads_per_chain > 1
+    )
 
     engine_default <- getOption("stan_preferred_engine", object$config$engine %||% "cmdstanr")
     engine <- .resolve_stan_engine(control$engine %||% engine_default)
@@ -207,37 +258,48 @@ predict.JoinMeFit <- function(object,
         )
     }
 
+    if (engine == "cmdstanr" && threads_per_chain > 1 && !.cmdstan_threads_enabled(mod)) {
+        cli::cli_warn(c(
+            x = "threads_per_chain > 1 requested but the CmdStan model is not compiled with stan_threads.",
+            i = "Recompiling the prediction model with stan_threads enabled."
+        ))
+        mod <- .get_cmdstan_model(
+            stan_file,
+            cpp_options = list(stan_threads = TRUE),
+            force_recompile = TRUE
+        )
+        if (!.cmdstan_threads_enabled(mod)) {
+            cli::cli_warn(c(
+                x = "Thread-enabled compilation failed; falling back to single-thread prediction.",
+                i = "Proceeding with threads_per_chain = 1."
+            ))
+            threads_per_chain <- 1L
+            stan_file <- .get_stan_file(program = "joinme_dynpred", threaded = FALSE)
+            mod <- .get_cmdstan_model(
+                stan_file,
+                cpp_options = NULL,
+                force_recompile = force_recompile
+            )
+        }
+    }
+
     allowed_data <- if (engine == "rstan" && isTRUE(getOption("joinme.filter_rstan_data", FALSE))) {
         .stan_data_names(stan_file)
     } else {
         NULL
     }
 
-    # 5. Extract Draws
-    draws_list <- .extract_draws_for_pred(object, n_samples, seed)
-    n_samples_extracted <- if (ncol(draws_list$alpha_vcov_reg) > 0) {
-        nrow(draws_list$alpha_vcov_reg)
-    } else {
-        nrow(draws_list$beta_fixed)
-    }
-
-    n_cores <- parallel::detectCores(logical = FALSE) %||% 1L
-    max_threads <- min(n_samples_extracted, n_cores)
-    if (threads_per_chain > max_threads) {
-        cli::cli_warn(c(
-            x = "Requested {threads_per_chain} threads exceeds max {max_threads}.",
-            i = "Capping threads_per_chain to {max_threads}."
-        ))
-        threads_per_chain <- max_threads
-    }
-
+    # reduce_sum grainsize for prediction (draw-level parallelism)
     grainsize <- control$grainsize
     if (is.null(grainsize)) {
-        n_id_pred <- length(ids)
+        # reduce_sum in dynpred parallelizes over posterior draws, not subjects.
+        # Tune default grainsize using number of draws to avoid overly tiny slices
+        # and to keep work balanced across threads/chains.
+        n_draws_pred <- n_samples_extracted
         n_chains <- control$chains %||% 1L
         denom <- 4L * as.integer(threads_per_chain) * as.integer(n_chains)
         denom <- max(1L, denom)
-        grainsize <- max(1L, as.integer(ceiling(n_id_pred / denom)))
+        grainsize <- max(1L, as.integer(ceiling(n_draws_pred / denom)))
         grainsize <- min(as.integer(n_cores), grainsize)
     }
     if (!is.numeric(grainsize) || length(grainsize) != 1) {
@@ -255,6 +317,7 @@ predict.JoinMeFit <- function(object,
     }
 
     # 6. Loop
+    # - iterate over subjects, build per-subject standata, run dynpred
     sample_control <- control[setdiff(names(control), c(
         "threads_per_chain",
         "threads",
@@ -277,7 +340,23 @@ predict.JoinMeFit <- function(object,
     time_var <- eval(object$call$time_var) %||% "time"
     marker_var <- eval(object$call$marker_var) %||% "marker"
 
+    time_start_by_id <- numeric(0)
+   
+    if (control$progress %||% TRUE) {
+        has_progressr <- requireNamespace("progressr", quietly = TRUE)
+    
+        if (has_progressr) {
+            progressr::handlers(global=TRUE)
+            progressr::handlers(control$progress_handler %||% progressr::handler_progress())
+            pb <- progressr::progressor(along = ids)
+        } else {
+            pb <- utils::txtProgressBar(min = 0, max = length(ids), style = 3, width = 60)
+        }
+    }
     for (id in ids) {
+        if (control$progress %||% TRUE && has_progressr) {
+            pb(step = 0, message = glue::glue("Predicting for subject {id}"))
+        }
         dE <- newdataEvent[newdataEvent[[id_var]] == id, , drop = FALSE]
         dL <- newdataLong[newdataLong[[id_var]] == id, , drop = FALSE]
 
@@ -287,13 +366,26 @@ predict.JoinMeFit <- function(object,
         }
 
         # T_cond
-        if (!is.null(Tstart)) {
-            t_cond <- Tstart
+        # - conditioning time is last observed time by default
+        if (!is.null(time_start_col)) {
+            t_cond <- dE[[time_start_col]][1]
+        } else if (!is.null(time_start_map)) {
+            t_cond <- time_start_map[[as.character(id)]]
+        } else if (!is.null(time_start)) {
+            t_cond <- time_start
         } else {
             t_cond <- max(dL[[time_var]], na.rm = TRUE)
         }
+        if (!is.finite(t_cond)) {
+            cli::cli_abort(c(
+                x = "Conditioning time is not finite for subject {id}.",
+                i = "Check {.arg time_start} or the time column in {.code newdataLong}."
+            ))
+        }
+        time_start_by_id[as.character(id)] <- t_cond
 
         # Grids
+        # - longitudinal and survival grids can differ in density
         t_grid <- numeric(0)
         if ("longitudinal" %in% process) {
             t_grid <- .resolve_time_grid(
@@ -321,11 +413,13 @@ predict.JoinMeFit <- function(object,
         }
 
         # SD Prep
+        # - assemble subject-specific data list for Stan
         grainsize_data <- if (threads_per_chain > 1) grainsize else NULL
         sd_pred <- .prepare_subject_standata(
             dE, dL, object, tmax_val, knots, col_means,
             t_cond, t_grid, t_surv_grid,
-            forms, draws_list, grainsize_data
+            forms, draws_list, grainsize_data,
+            degree = meta$degree
         )
         # Ensure time index arrays are preserved for cmdstanr JSON (avoid auto-unbox)
         sd_pred <- .coerce_rstan_time_indices(sd_pred)
@@ -348,6 +442,7 @@ predict.JoinMeFit <- function(object,
         }
 
         # Run Stan
+        # - 1 chain, 1 post-warmup iteration, draws taken from input arrays
         sample_args <- list(
             chains = 1,
             iter_warmup = 100,
@@ -356,7 +451,7 @@ predict.JoinMeFit <- function(object,
             refresh = 0,
             show_messages = FALSE,
             seed = seed,
-            adapt_delta = 0.95
+            adapt_delta = 0.8
         )
         sample_args <- utils::modifyList(sample_args, sample_control)
         if (threads_per_chain > 1) sample_args$threads_per_chain <- threads_per_chain
@@ -403,8 +498,17 @@ predict.JoinMeFit <- function(object,
         )
 
         if (nrow(dL) > 0) {
+            # Align marker levels to fitted model ordering
             marker_levels <- object$stan_data$marker_levels %||% levels(dL[[marker_var]]) %||% sort(unique(dL[[marker_var]]))
-            marker_int_obs <- match(as.character(dL[[marker_var]]), marker_levels)
+            marker_values_obs <- as.character(dL[[marker_var]])
+            unknown_markers <- setdiff(unique(marker_values_obs), marker_levels)
+            if (length(unknown_markers) > 0) {
+                cli::cli_abort(c(
+                    x = "Found marker level(s) in {.arg newdataLong} not seen during fitting: {.val {paste(unknown_markers, collapse = ', ')}}.",
+                    i = "Use only training marker levels: {.val {paste(marker_levels, collapse = ', ')}}."
+                ))
+            }
+            marker_int_obs <- match(marker_values_obs, marker_levels)
             if (any(is.na(marker_int_obs))) {
                 cli::cli_abort(c(
                     x = "Markers in newdataLong don't match fitted model levels.",
@@ -484,6 +588,14 @@ predict.JoinMeFit <- function(object,
                 cumhaz_mat, t_surv_grid, id, probs = quantile_probs
             )
         }
+
+        if (control$progress %||% TRUE) {
+            if (has_progressr) {
+                pb()
+            } else {
+                utils::setTxtProgressBar(pb, which(ids == id))
+            }
+        }
     }
 
     # Compute population-level trajectories (average over subjects, keeping marker)
@@ -562,7 +674,8 @@ predict.JoinMeFit <- function(object,
     )
     
     metadata <- list(
-        conditioning_time = if (!is.null(Tstart)) Tstart else max(newdataLong[[eval(object$call$time_var) %||% "time"]], na.rm = TRUE),
+        conditioning_time = if (length(time_start_by_id) > 0) max(time_start_by_id, na.rm = TRUE) else NA_real_,
+        conditioning_time_by_id = time_start_by_id,
         n_samples = n_samples_extracted,
         n_subjects = length(ids),
         pred_type = pred_type,
@@ -625,7 +738,10 @@ predict.JoinMeFit <- function(object,
 #'
 #' @export
 posterior_linpred.JoinMeFit <- function(object, ...) {
-    predict(object, scale = "linpred", ...)
+    call_ <- match.call()
+    call_[[1]] <- quote(predict)
+    call_$scale <- "linpred"
+    eval(call_, parent.frame())
 }
 
 #' Posterior Expected Predictor
@@ -638,11 +754,14 @@ posterior_linpred.JoinMeFit <- function(object, ...) {
 #' @param object A fitted object of class `JoinMeFit`.
 #' @param ... Additional arguments passed to [predict].
 #'
-#' @importFrom rstantools posterior_linpred
+#' @importFrom rstantools posterior_epred
 #' @return A `JoinMeDynPred` object with `metadata$scale = "epred"`
 #' @export
 posterior_epred.JoinMeFit <- function(object, ...) {
-    predict(object, scale = "epred", ...)
+    call_ <- match.call()
+    call_[[1]] <- quote(predict)
+    call_$scale <- "epred"
+    eval(call_, parent.frame())
 }
 
 #' Posterior Predictive Draws
@@ -659,7 +778,10 @@ posterior_epred.JoinMeFit <- function(object, ...) {
 #' @return A `JoinMeDynPred` object with `metadata$scale = "predict"`.
 #' @export
 posterior_predict.JoinMeFit <- function(object, ...) {
-    predict(object, scale = "predict", ...)
+    call_ <- match.call()
+    call_[[1]] <- quote(predict)
+    call_$scale <- "predict"
+    eval(call_, parent.frame())
 }
 
 # ------------------------------------------------------------------------------
@@ -741,7 +863,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
 
     col_means <- colMeans(B_raw - object$stan_data$Bs_event_c)
 
-    list(tmax = tmax, knots = knots, col_means = col_means)
+    list(tmax = tmax, knots = knots, col_means = col_means, degree = degree)
 }
 
 .parse_formulas <- function(object) {
@@ -983,7 +1105,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     )
 }
 
-.prepare_subject_standata <- function(dE, dL, object, tmax, knots, col_means, t_cond, t_grid, t_surv_grid, forms, draws_list, grainsize = NULL) {
+.prepare_subject_standata <- function(dE, dL, object, tmax, knots, col_means, t_cond, t_grid, t_surv_grid, forms, draws_list, grainsize = NULL, degree = NULL) {
     id_var <- eval(object$call$id_var) %||% "id"
     time_var <- eval(object$call$time_var) %||% "time"
     marker_var <- eval(object$call$marker_var) %||% "marker"
@@ -1064,35 +1186,47 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         bs_basis <- as.matrix(predict(object$config$Bs_obj, newx = u_cond))
     } else {
         # Fallback for formula-based or if Bs_obj missing
-        bs_basis <- .make_basehaz_basis(u_cond, basis = "bs", knots = knots, degree = 3, boundary = c(0, 1))
+        degree_val <- degree %||% 3
+        bs_basis <- .make_basehaz_basis(u_cond, basis = "bs", knots = knots, degree = degree_val, boundary = c(0, 1))
     }
     mat_basis_gk_cond <- sweep(bs_basis, 2, col_means, "-")
+
+    # Validate marker levels in newdataLong against fitted marker levels.
+    #
+    # Prediction requires marker design matrices and family vectors indexed on the
+    # training marker space. New marker levels cannot be assigned random effects
+    # or family parameters consistently, so we fail early with a clear message.
+    marker_levels <- object$stan_data$marker_levels
+    if (is.null(marker_levels)) {
+        marker_levels <- levels(dL[[marker_var]]) %||% sort(unique(as.character(dL[[marker_var]])))
+    }
+    marker_levels <- as.character(marker_levels)
+    marker_values <- as.character(dL[[marker_var]])
+    unknown_markers <- setdiff(unique(marker_values), marker_levels)
+    if (length(unknown_markers) > 0) {
+        cli::cli_abort(c(
+            x = "Found marker level(s) in {.arg newdataLong} not seen during fitting: {.val {paste(unknown_markers, collapse = ', ')}}.",
+            i = "Use only training marker levels: {.val {paste(marker_levels, collapse = ', ')}}."
+        ))
+    }
 
     # Get unique markers for this subject
     markers_subject <- unique(dL[[marker_var]])
     n_markers_subject <- length(markers_subject)
     
     # Create prediction grid: expand time grid to include all markers
-    # Each (time, marker) pair gets a row in the prediction data
+    # - vectorized expansion avoids nested loops for speed
     n_obs_pred_per_marker <- length(t_grid)
     n_obs_pred <- n_obs_pred_per_marker * n_markers_subject
     
     if (n_obs_pred > 0) {
-        # Create expanded data frame with (time, marker) combinations
-        # Start with copies of first row to preserve structure
         dl_pred <- dL[rep(1, n_obs_pred), , drop = FALSE]
-        
-        # Fill in prediction grid
-        pred_idx <- 1
-        idx_marker_pred_vec <- integer(n_obs_pred)
-        for (m_idx in seq_along(markers_subject)) {
-            for (t_idx in seq_along(t_grid)) {
-                dl_pred[pred_idx, time_var] <- t_grid[t_idx]
-                dl_pred[pred_idx, marker_var] <- as.character(markers_subject[m_idx])
-                idx_marker_pred_vec[pred_idx] <- m_idx
-                pred_idx <- pred_idx + 1
-            }
-        }
+        time_rep <- rep(t_grid, times = n_markers_subject)
+        marker_rep <- rep(markers_subject, each = n_obs_pred_per_marker)
+        idx_marker_pred_vec <- rep(seq_along(markers_subject), each = n_obs_pred_per_marker)
+
+        dl_pred[[time_var]] <- time_rep
+        dl_pred[[marker_var]] <- as.character(marker_rep)
         
         # Scale time for Stan model
         dl_pred_scaled <- dl_pred
@@ -1157,7 +1291,8 @@ posterior_predict.JoinMeFit <- function(object, ...) {
             if (!is.null(object$config$Bs_obj)) {
                 bs <- as.matrix(predict(object$config$Bs_obj, newx = us))
             } else {
-                bs <- .make_basehaz_basis(us, basis = "bs", knots = knots, degree = 3, boundary = c(0, 1))
+                degree_val <- degree %||% 3
+                bs <- .make_basehaz_basis(us, basis = "bs", knots = knots, degree = degree_val, boundary = c(0, 1))
             }
             mat_basis_gk_surv[s, , ] <- sweep(bs, 2, col_means, "-")
             mat_fixed_gk_surv[s, , ] <- .eval_on_times(list(fixed_rhs), us)
@@ -1200,26 +1335,25 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     # Map markers carefully using fitted levels
     marker_levels <- object$stan_data$marker_levels
     if (is.null(marker_levels)) {
-        marker_levels <- levels(dL[[marker_var]]) %||% sort(unique(dL[[marker_var]]))
+        marker_levels <- levels(dL[[marker_var]]) %||% sort(unique(as.character(dL[[marker_var]])))
     }
 
     # Marker weights (use fitted weights when available)
     marker_weights <- object$stan_data$marker_weights
     if (is.null(marker_weights)) {
-        marker_weights <- rep(1 / length(marker_levels), length(marker_levels))
+        marker_weights <- rep(1, length(marker_levels))
     } else {
         if (!is.null(names(marker_weights))) {
             marker_weights <- marker_weights[marker_levels]
         }
-        if (length(marker_weights) != length(marker_levels) || any(!is.finite(marker_weights)) || any(marker_weights < 0)) {
-            marker_weights <- rep(1 / length(marker_levels), length(marker_levels))
+        if (length(marker_weights) != length(marker_levels) || any(!is.finite(marker_weights))) {
+            marker_weights <- rep(1, length(marker_levels))
         } else {
-            sw <- sum(marker_weights)
-            if (!is.finite(sw) || sw <= 0) {
-                marker_weights <- rep(1 / length(marker_levels), length(marker_levels))
-            } else {
-                marker_weights <- marker_weights / sw
+            if (all(abs(marker_weights) < 1e-12)) {
+                marker_weights <- rep(1, length(marker_levels))
             }
+            # Keep predict-path scale aligned with Stan fit-path convention.
+            marker_weights <- marker_weights / sqrt(mean(marker_weights^2))
         }
     }
 
@@ -1231,7 +1365,13 @@ posterior_predict.JoinMeFit <- function(object, ...) {
 
     dL[[marker_var]] <- factor(dL[[marker_var]], levels = marker_levels)
     marker_int <- as.integer(dL[[marker_var]])
-    if (any(is.na(marker_int))) stop("Markers in newdataLong don't match fitted model levels.")
+    if (any(is.na(marker_int))) {
+        unknown_markers <- sort(unique(as.character(dL[[marker_var]])[is.na(marker_int)]))
+        cli::cli_abort(c(
+            x = "Markers in {.arg newdataLong} do not match fitted model levels: {.val {paste(unknown_markers, collapse = ', ')}}.",
+            i = "Ensure {.arg marker_var} levels match the training data."
+        ))
+    }
 
     # Trials (optional) for binomial predictions
     trials_obs <- rep.int(1L, nrow(dL))
@@ -1240,12 +1380,11 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     }
     trials_pred <- rep.int(1L, n_obs_pred)
     if (n_obs_pred > 0 && "trials" %in% colnames(dL)) {
-        for (m_idx in seq_along(markers_subject)) {
-            m_val <- markers_subject[m_idx]
+        trial_map <- vapply(markers_subject, function(m_val) {
             m_trials <- dL$trials[dL[[marker_var]] == m_val]
-            tr_val <- if (length(m_trials) > 0) m_trials[1] else 1L
-            trials_pred[idx_marker_pred == m_idx] <- as.integer(tr_val)
-        }
+            if (length(m_trials) > 0) as.integer(m_trials[1]) else 1L
+        }, integer(1))
+        trials_pred <- as.integer(trial_map[idx_marker_pred])
     }
 
     out <- list(
@@ -1309,12 +1448,13 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         nu_marker = draws_list$nu_marker, phi_nb_marker = draws_list$phi_nb_marker, alpha_skew_marker = draws_list$alpha_skew_marker,
         phi_beta_marker = draws_list$phi_beta_marker, tau_sde_marker = draws_list$tau_sde_marker,
         family_long = sd$family_long, flag_resid_dim = sd$flag_resid_dim,
+        vcov_diag_link = sd$vcov_diag_link,
+        use_tau_sde_fixed = sd$use_tau_sde_fixed,
+        tau_sde_fixed = sd$tau_sde_fixed,
         coeff_assoc_cv_total = draws_list$coeff_assoc_cv_total, coeff_assoc_cs_total = draws_list$coeff_assoc_cs_total,
         coeff_assoc_cv_mean = draws_list$coeff_assoc_cv_mean, coeff_assoc_cs_mean = draws_list$coeff_assoc_cs_mean,
         coeff_assoc_cv_marker = draws_list$coeff_assoc_cv_marker, coeff_assoc_cs_marker = draws_list$coeff_assoc_cs_marker,
         coeff_assoc_vcov_var = draws_list$coeff_assoc_vcov_var,
-        marker_weights_draws = draws_list$marker_weights_draws,
-        marker_weights_draws = draws_list$marker_weights_draws,
         K_ord = sd$K_ord %||% 2L,
         cutpoints_ord = draws_list$cutpoints_ord,
         flag_assoc_cv_total = sd$assoc_cv_total, flag_assoc_cv_mean = sd$assoc_cv_mean, flag_assoc_cv_marker = sd$assoc_cv_marker,
@@ -1427,6 +1567,42 @@ summary.JoinMeDynPred <- function(object, ...) {
     summary_obj <- SummaryJoinMeDynPred$new(tables = tables, metadata = object$metadata)
     object$cache_set("summary", summary_obj)
     summary_obj
+}
+
+#' Print dynamic prediction results
+#'
+#' @param x A dynamic prediction object.
+#' @param ... Unused.
+#'
+#' @return Invisibly returns the object.
+#' @export
+print.JoinMeDynPred <- function(x, ...) {
+    assertthat::assert_that(inherits(x, "JoinMeDynPred"), msg = "Object must be a JoinMeDynPred instance.")
+
+    cat("JoinMe dynamic prediction\n")
+    cat("=======================\n")
+    if (!is.null(x$call)) {
+        cat("Call:\n")
+        print(x$call)
+    }
+    if (!is.null(x$metadata$pred_type)) {
+        cat("Prediction type: ", x$metadata$pred_type, "\n", sep = "")
+    }
+    if (!is.null(x$metadata$scale)) {
+        cat("Scale: ", x$metadata$scale, "\n", sep = "")
+    }
+    if (!is.null(x$metadata$n_subjects)) {
+        cat("Subjects: ", x$metadata$n_subjects, "\n", sep = "")
+    }
+    if (!is.null(x$n_samples)) {
+        cat("Posterior draws: ", x$n_samples, "\n", sep = "")
+    }
+    if (!is.null(x$tmax)) {
+        cat("tmax: ", x$tmax, "\n", sep = "")
+    }
+    cat("Use summary() for prediction summaries.\n")
+    cat("Use plot() for trajectory and interval visualization.\n")
+    invisible(x)
 }
 
 #' @export
@@ -1577,6 +1753,15 @@ print.summary_JoinMeDynPred <- function(x, ...) {
         ))
     }
     grid
+}
+
+.cmdstan_threads_enabled <- function(mod) {
+    if (is.null(mod)) return(FALSE)
+    cpp_opts <- tryCatch(mod$cpp_options, error = function(e) NULL)
+    if (is.function(cpp_opts)) {
+        cpp_opts <- tryCatch(cpp_opts(), error = function(e) NULL)
+    }
+    isTRUE(cpp_opts$stan_threads)
 }
 
 `%||%` <- function(x, y) if (is.null(x)) y else x

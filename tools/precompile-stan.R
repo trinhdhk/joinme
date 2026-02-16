@@ -43,7 +43,7 @@ if (quiet_require("cmdstanr")) {
         for (sf in stan_files) {
             cmdstanr::cmdstan_model(
                 sf,
-                cpp_options = if (grepl('threading', sf, fixed=TRUE)) list(stan_threads = TRUE) else NULL,
+                cpp_options = list(STAN_THREADS = TRUE), #if (grepl('thread', sf, fixed=TRUE)) list(stan_threads = TRUE) else NULL,
                 include_paths = dirname(sf),
                 dir = cache_dir,
                 force_recompile = TRUE
