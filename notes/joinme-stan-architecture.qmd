@@ -41,6 +41,33 @@ Additional implementation details that are central to the interpretation:
 - Competing risks are supported through event-type indexing; the overall survival
   in prediction integrates the sum of cause-specific hazards.
 
+## Diagnostics and extraction contract
+
+The user-facing diagnostics and extraction APIs are intentionally aligned across
+fit and prediction objects:
+
+- `diagnosis()` returns a common diagnostics table schema for both
+  `JoinMeFit` and `JoinMeDynPred`.
+- `ranef()` and `vcov()` on `JoinMeFit` return nested structures organized by
+  `formulaLong` and `formulaDist` (including family-scoped distributional
+  random-effect blocks).
+- `ranef()` and `vcov()` on `JoinMeDynPred` are enabled only when marker
+  covariance depends on id; they return per-id marker-by-id random effects and
+  per-id predicted covariance summaries.
+
+## Family-Scoped Distributional Formulas
+
+`formulaDist` supports bracket scopes such as
+`sigma[family=student_t] ~ 1 + time`. Internally, JoinME builds gated
+distributional design matrices where each scoped block contributes only on rows
+whose marker family matches the scope. Unscoped formulas (for example,
+`sigma ~ 1 + time`) remain global and apply to all rows where that parameter is
+defined.
+
+This allows separate regression structures for shared parameter names across
+families (for example, separate `sigma` regressions for Gaussian and Student-t)
+without changing the Stan data schema.
+
 # High-Level Architecture
 
 ```{mermaid}
@@ -399,7 +426,13 @@ Strategy:
 1. For each posterior draw k:
    a. Sample subject-specific random effects u, v, w | y_obs, θ^(k)
    b. Compute longitudinal and survival predictions given u, v, w
-2. Average predictions across draws to get marginal estimates
+2. Within each indexed output `[..., k, n]`, average over dynpred posterior rows
+  to marginalize latent augmentation noise.
+3. Aggregate over draw index k to obtain marginal estimates and intervals.
+
+Implementation note:
+- `newdataLong$marker` is validated against fitted marker levels before prediction.
+  Unseen marker levels abort early to prevent silent index misalignment.
 
 ## Data Flow
 

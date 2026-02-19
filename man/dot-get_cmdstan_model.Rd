@@ -4,7 +4,12 @@
 \alias{.get_cmdstan_model}
 \title{Resolve cached CmdStanR model}
 \usage{
-.get_cmdstan_model(stan_file, cpp_options = NULL, force_recompile = FALSE)
+.get_cmdstan_model(
+  stan_file,
+  cpp_options = NULL,
+  force_recompile = FALSE,
+  warn_missing = TRUE
+)
 }
 \arguments{
 \item{stan_file}{Path to the Stan file.}
@@ -12,6 +17,8 @@
 \item{cpp_options}{Optional C++ options for compilation.}
 
 \item{force_recompile}{Logical; force recompilation even if cached.}
+
+\item{warn_missing}{Logical; whether to warn out if no exe file exists}
 }
 \value{
 A CmdStanR model object.

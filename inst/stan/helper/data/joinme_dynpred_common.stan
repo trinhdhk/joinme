@@ -93,6 +93,18 @@
 
   /* Model configuration flags and draws */
   array[n_marker_types] int<lower=1, upper=11> family_long; // family codes
+  int<lower=0> n_family_sigma;
+  array[n_marker_types] int<lower=0, upper=n_family_sigma> marker_to_sigma_family;
+  int<lower=0> n_family_nu;
+  array[n_marker_types] int<lower=0, upper=n_family_nu> marker_to_nu_family;
+  int<lower=0> n_family_phi;
+  array[n_marker_types] int<lower=0, upper=n_family_phi> marker_to_phi_family;
+  int<lower=0> n_family_alpha;
+  array[n_marker_types] int<lower=0, upper=n_family_alpha> marker_to_alpha_family;
+  int<lower=0> n_family_phi_beta;
+  array[n_marker_types] int<lower=0, upper=n_family_phi_beta> marker_to_phi_beta_family;
+  int<lower=0> n_family_tau_sde;
+  array[n_marker_types] int<lower=0, upper=n_family_tau_sde> marker_to_tau_sde_family;
   int<lower=0, upper=1> flag_resid_dim;                      // sigma dimension flag
   int<lower=0, upper=1> vcov_diag_link;                      // 0 softplus, 1 exp
   int<lower=0, upper=1> use_tau_sde_fixed;                   // 1 use fixed tau
@@ -125,13 +137,12 @@
   array[n_draws] vector[P_phi_beta] beta_phi_beta; // phi_beta regression betas
   array[n_draws] vector[P_tau_sde] beta_tau_sde;   // tau_sde regression betas
 
-  array[n_draws] real sigma_y_shared;           // shared residual SD
-  array[n_draws] vector[n_marker_types] sigma_marker_specific; // marker SDs
-  array[n_draws] vector[n_marker_types] nu_marker;             // t df per marker
-  array[n_draws] vector[n_marker_types] phi_nb_marker;         // negbin dispersion
-  array[n_draws] vector[n_marker_types] alpha_skew_marker;     // skewness params
-  array[n_draws] vector[n_marker_types] phi_beta_marker;       // beta precision
-  array[n_draws] vector[n_marker_types] tau_sde_marker;        // sde skew params
+  array[n_draws] vector[n_family_sigma] sigma_family;          // family-shared sigma
+  array[n_draws] vector[n_family_nu] nu_family;                // family-shared nu
+  array[n_draws] vector[n_family_phi] phi_family;              // family-shared phi
+  array[n_draws] vector[n_family_alpha] alpha_family;          // family-shared alpha
+  array[n_draws] vector[n_family_phi_beta] phi_beta_family;    // family-shared phi_beta
+  array[n_draws] vector[n_family_tau_sde] tau_sde_family;      // family-shared tau_sde
 
   /* Ordinal (cumulative logit) cutpoints */
   int<lower=2> K_ord;                           // number of ordinal categories

@@ -2,37 +2,134 @@
 % Please edit documentation in R/simulate.R
 \name{simulate_joinme}
 \alias{simulate_joinme}
-\title{Simulate joint model data with mixed families}
+\title{Simulate joint model data with formula-driven multistructure support}
 \usage{
 simulate_joinme(
+  formulaLong = y ~ 1 + time + x1 + (1 + time | id) + (0 + x1 + (1 + time | id) | marker),
+  formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
+  formulaDist = NULL,
+  formulaAssoc = NULL,
   n_id = 50,
-  n_obs_per_marker_per_id = 8,
   families = c("gaussian", "student_t", "binomial"),
+  marker_levels = NULL,
+  n_obs_per_marker_per_id = 8,
   times_obs = seq(0, 5, length.out = 8),
+  n_t = NULL,
   seed = 42,
+  covariate_formulas = list(x1 ~ rnorm(n_id), x2 ~ rnorm(n_id)),
+  assoc = c("cv_total"),
+  assoc_coefs = c(cv_total = 0.6),
+  beta_long = NULL,
+  beta_event = NULL,
+  dist_coefs = list(),
+  re_params = list(id = list(sd = NULL, corr = NULL), marker = list(sd = NULL, corr =
+    NULL), id_marker = list(sd = NULL, corr = NULL)),
   family_params = list(gaussian = list(sigma = 1), student_t = list(sigma = 1.5, nu = 4),
-    binomial = list(trials = 10), poisson = list(), negbin2 = list(phi = 2), skew_normal
-    = list(sigma = 1, alpha = 0), double_exponential = list(sigma = 1),
-    skew_double_exponential = list(sigma = 1, tau_sde = 0.5), beta = list(phi_beta = 10),
-    cumulative_logit = list(cutpoints = c(-1, 1)))
+    bernoulli = list(), binomial = list(trials = 10), poisson = list(), negbin2 =
+    list(phi = 2), skew_normal = list(sigma = 1, alpha = 0), double_exponential =
+    list(sigma = 1), skew_double_exponential = list(sigma = 1, tau_sde = 0.5), beta =
+    list(phi_beta = 10), cumulative_logit = list(cutpoints = c(-1, 1))),
+  h0 = NULL,
+  baseline_hazard = list(type = "weibull", shape = 1.4, scale = 6),
+  formulaBasehaz = NULL,
+  beta_basehaz = NULL,
+  t_admin = 8,
+  eps_cs = 0.001,
+  integration_control = list(rel.tol = 1e-06, subdivisions = 2000L, stop.on.error = TRUE),
+  root_control = list(t_init = 1, t_max = 50, expand = 1.7, max_expand = 60L),
+  id_var = "id",
+  marker_var = "marker",
+  time_var = "time",
+  y_var = "y",
+  event_time_var = "time",
+  event_var = "event"
 )
 }
 \arguments{
+\item{formulaLong}{Longitudinal formula (same role as in \code{joinme()}).}
+
+\item{formulaEvent}{Event/survival formula (same role as in \code{joinme()}).}
+
+\item{formulaDist}{Optional distributional regression formulas (same role as in \code{joinme()}).}
+
+\item{formulaAssoc}{Optional formula for association terms in hazard, e.g. \code{~ cv_total + vcov}.
+If provided, it overrides \code{assoc}.}
+
 \item{n_id}{Number of subjects.}
 
-\item{n_obs_per_marker_per_id}{Observations per marker per subject.}
+\item{families}{Marker-specific family names.}
 
-\item{families}{Character vector of family names (one per marker).}
+\item{marker_levels}{Optional marker names; defaults to \code{m1}, \code{m2}, ...}
 
-\item{times_obs}{Observation times (e.g., seq(0, 5, length.out = 10)).}
+\item{n_obs_per_marker_per_id}{Target number of observations per (id, marker).}
 
-\item{seed}{Random seed.}
+\item{times_obs}{Optional candidate observation time grid.}
 
-\item{family_params}{List of additional parameters per family.}
+\item{n_t}{Optional alias for \code{n_obs_per_marker_per_id} for compatibility.}
+
+\item{seed}{RNG seed.}
+
+\item{covariate_formulas}{Named or LHS formulas used to generate event-level covariates,
+e.g. \code{list(x1 ~ rnorm(n_id), x2 ~ rt(n_id, df = 5))}.}
+
+\item{assoc}{Association components (same names as fit): \code{cv_total}, \code{cv_mean},
+\code{cv_marker}, \code{cs_total}, \code{cs_mean}, \code{cs_marker}, \code{vcov}.}
+
+\item{assoc_coefs}{Named coefficients for association terms in the hazard.}
+
+\item{beta_long}{Fixed-effect coefficients for \code{formulaLong} fixed part. If NULL,
+coefficients are randomly generated and named by model-matrix columns.}
+
+\item{beta_event}{Survival baseline-covariate coefficients for \code{formulaEvent} RHS.
+If NULL, coefficients are randomly generated.}
+
+\item{dist_coefs}{Named list of vectors for distributional regressions (\code{sigma}, \code{nu},
+\code{phi}, \code{alpha}, \code{phi_beta}, \code{tau_sde}).}
+
+\item{re_params}{Random-effects simulation controls.}
+
+\item{family_params}{Family-specific simulation parameters.}
+
+\item{h0}{Optional baseline hazard function \code{h0(t)} for backward compatibility.
+If supplied, it takes precedence over \code{baseline_hazard}/\code{formulaBasehaz}.}
+
+\item{baseline_hazard}{Optional baseline hazard specification. Supported forms:
+\itemize{
+\item character: one of \code{"constant"}, \code{"linear"}, \code{"piecewise"}, \code{"weibull"}, \code{"spline"}.
+\item named list: \code{list(type = ..., ...)} with mode-specific parameters.
+}}
+
+\item{formulaBasehaz}{Optional formula-based baseline hazard model on time,
+e.g. \code{~ 1 + time + I(time^2)}.}
+
+\item{beta_basehaz}{Optional coefficients for \code{formulaBasehaz} (aligned by
+model-matrix column names). If NULL, coefficients are generated.}
+
+\item{t_admin}{Administrative censoring horizon.}
+
+\item{eps_cs}{Finite-difference step for slope-type associations (\verb{cs_*}).}
+
+\item{integration_control}{Control list passed to \code{integrate()}.}
+
+\item{root_control}{Root finding control for inverse-CDF sampling.}
+
+\item{id_var, marker_var, time_var, y_var, event_time_var, event_var}{Column names aligned
+with \code{joinme_standata()} defaults.}
 }
 \value{
-list(dataLong, dataEvent, true_params, marker_info)
+list(dataLong, dataEvent, true_params, marker_info, helpers, tmax)
 }
 \description{
-Simulate multivariate longitudinal + survival data with marker-specific families.
+Generalized simulator for \code{joinme} that mirrors the fitting syntax as closely as
+possible. The simulator supports:
+\itemize{
+\item multivariate outcomes via marker-level families,
+\item multi-structure random effects from \code{formulaLong} (id, marker, marker-by-id),
+\item formula-based covariate generation through user-provided random generators,
+\item association-driven survival via \code{assoc}/\code{formulaAssoc} terms consistent with
+the model fit interface.
+}
+
+The implementation is model-matrix based end-to-end, so every simulated component
+is generated from the same formula machinery used during fitting.
 }

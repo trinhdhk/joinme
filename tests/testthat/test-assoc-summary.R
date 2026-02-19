@@ -41,6 +41,15 @@ test_that("summary reports only active association components", {
   assoc_tbl <- sum_obj$tables$assoc
   expect_true(any(assoc_tbl$term == "cv_total"))
   expect_false(any(assoc_tbl$term %in% c("cv_mean", "cv_marker", "cs_total", "cs_mean", "cs_marker")))
+
+  diag_tbl <- sum_obj$tables$diagnostics
+  expect_true(is.data.frame(diag_tbl))
+  nterm_metrics <- diag_tbl[diag_tbl$metric %in% c(
+    "n_terms_total", "n_terms_bad_rhat", "n_terms_low_ess_bulk", "n_terms_low_ess_tail"
+  ), , drop = FALSE]
+  expect_equal(nrow(nterm_metrics), 4)
+  expect_true(all(is.finite(nterm_metrics$value)))
+
   tf_tbl <- sum_obj$metadata$transform_formulas
   expect_true(any(tf_tbl$term == "cv_total"))
   expect_true(any(grepl("softplus", tf_tbl$formula)))

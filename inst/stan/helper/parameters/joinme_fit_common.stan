@@ -52,13 +52,12 @@
   array[n_re_phi_beta] matrix[G_phi_beta_max, K_phi_beta_max] z_phi_beta; // phi_beta RE latents
   array[n_re_tau_sde] vector<lower=0>[K_tau_sde_max] tau_tau_sde; // tau_sde RE SDs
   array[n_re_tau_sde] matrix[G_tau_sde_max, K_tau_sde_max] z_tau_sde; // tau_sde RE latents
-  real<lower=0> sigma_y;                // shared residual SD
-  vector<lower=0>[D] sigma_marker;      // marker-specific SDs
-  vector<lower=2>[D] nu_marker;         // marker-specific t df
-  vector<lower=0>[D] phi_nb_marker;     // negbin dispersion per marker
-  vector[D] alpha_skew_marker;          // skewness per marker
-  vector<lower=0>[D] phi_beta_marker;   // beta precision per marker
-  vector<lower=0, upper=1>[D] tau_sde_marker; // sde skewness per marker
+  vector<lower=0>[n_family_sigma] sigma_family;        // shared sigma by family
+  vector<lower=2>[n_family_nu] nu_family;              // shared nu by family
+  vector<lower=0>[n_family_phi] phi_family;            // shared phi by family
+  vector[n_family_alpha] alpha_family;                 // shared alpha by family
+  vector<lower=0>[n_family_phi_beta] phi_beta_family;  // shared phi_beta by family
+  vector<lower=0, upper=1>[n_family_tau_sde] tau_sde_family; // shared tau_sde by family
 
   /* Ordinal cutpoints (shared across ordinal markers) */
   ordered[K_ord - 1] cutpoints_ord;     // cumulative-logit cutpoints

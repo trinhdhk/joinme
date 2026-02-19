@@ -67,7 +67,35 @@ Random-effects independence is specified using lme4-style `||` syntax in `formul
 
 Prediction plots separate fitted history from forecast intervals and surface multiple credible bands for longitudinal, survival, and cumulative hazard outputs.
 
-## 2.2. The Survival Submodel with Competing Risks
+Model diagnostics and extraction methods follow a consistent interface across
+fitted and predicted objects:
+
+- `diagnosis(fit)` and `diagnosis(pred)` return the same diagnostics schema
+  (`metric`, `value`) to simplify downstream monitoring.
+- `ranef(fit)` and `vcov(fit)` return nested outputs grouped by
+  `formulaLong` and `formulaDist`, with family-scoped blocks for
+  distributional random effects.
+- `ranef(pred)` and `vcov(pred)` expose marker-by-id predicted random effects
+  and covariance only when marker covariance is subject-dependent.
+
+## 2.2. Family-Scoped Distributional Regression
+
+Distributional parameters can be modeled with family-scoped formulas. A formula
+without scope (for example, `sigma ~ 1 + time`) applies to all rows where
+`sigma` is defined. A scoped formula using brackets,
+`sigma[family=student_t] ~ 1 + time`, applies only to rows belonging to that
+family and is estimated as a separate coefficient block.
+
+This lets users encode distinct variance structures, e.g.:
+
+- `sigma[family=student_t] ~ 1 + time + (1 | marker)`
+- `sigma[family=gaussian] ~ 1 + x1`
+
+The same syntax is supported for `nu`, `phi`, `alpha` (or `alpha_skew`),
+`phi_beta`, and `tau_sde` when those parameters are relevant for the target
+family.
+
+## 2.3. The Survival Submodel with Competing Risks
 
 The hazard function for the $k$-th competing risk is modeled as:
 

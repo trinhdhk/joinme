@@ -45,7 +45,7 @@
       }
       real sig = (P_sigma > 0 || n_re_sigma > 0)
                  ? exp(eta_sigma)
-                 : ((flag_resid_dim == 1) ? sigma_marker[d] : sigma_y);
+                 : sigma_family[marker_to_sigma_family[d]];
       // sig: residual scale for Gaussian
       log_lik_long[n] = normal_lpdf(y_real[n] | eta_long, sig);
     } else if (family_long[d] == 2) {
@@ -61,7 +61,7 @@
       }
       real sig = (P_sigma > 0 || n_re_sigma > 0)
                  ? exp(eta_sigma)
-                 : ((flag_resid_dim == 1) ? sigma_marker[d] : sigma_y);
+                 : sigma_family[marker_to_sigma_family[d]];
       // sig: residual scale for Student-t
       real eta_nu = 0; // linear predictor for df (nu)
       if (P_nu > 0) eta_nu += dot_product(X_nu[n], beta_nu);
@@ -73,7 +73,7 @@
           eta_nu += dot_product(Z_nu[j][n, 1:K_nu[j]], b);
         }
       }
-      real nu = (P_nu > 0 || n_re_nu > 0) ? (2 + exp(eta_nu)) : nu_marker[d];
+      real nu = (P_nu > 0 || n_re_nu > 0) ? (2 + exp(eta_nu)) : nu_family[marker_to_nu_family[d]];
       // nu: degrees of freedom for Student-t
       log_lik_long[n] = student_t_lpdf(y_real[n] | nu, eta_long, sig);
     } else if (family_long[d] == 3) {
@@ -93,7 +93,7 @@
           eta_phi += dot_product(Z_phi[j][n, 1:K_phi[j]], b);
         }
       }
-      real phi = (P_phi > 0 || n_re_phi > 0) ? exp(eta_phi) : phi_nb_marker[d];
+      real phi = (P_phi > 0 || n_re_phi > 0) ? exp(eta_phi) : phi_family[marker_to_phi_family[d]];
       // phi: negbin2 dispersion parameter
       log_lik_long[n] = neg_binomial_2_log_lpmf(y_int[n] | eta_long, phi);
     } else if (family_long[d] == 7) {
@@ -109,7 +109,7 @@
       }
       real sig = (P_sigma > 0 || n_re_sigma > 0)
                  ? exp(eta_sigma)
-                 : ((flag_resid_dim == 1) ? sigma_marker[d] : sigma_y);
+                 : sigma_family[marker_to_sigma_family[d]];
       // sig: residual scale for skew normal
       real eta_alpha = 0; // linear predictor for skew alpha
       if (P_alpha > 0) eta_alpha += dot_product(X_alpha[n], beta_alpha);
@@ -121,7 +121,7 @@
           eta_alpha += dot_product(Z_alpha[j][n, 1:K_alpha[j]], b);
         }
       }
-      real alpha = (P_alpha > 0 || n_re_alpha > 0) ? eta_alpha : alpha_skew_marker[d];
+      real alpha = (P_alpha > 0 || n_re_alpha > 0) ? eta_alpha : alpha_family[marker_to_alpha_family[d]];
       // alpha: skewness parameter
       log_lik_long[n] = skew_normal_lpdf(y_real[n] | eta_long, sig, alpha);
     } else if (family_long[d] == 8) {
@@ -137,7 +137,7 @@
       }
       real sig = (P_sigma > 0 || n_re_sigma > 0)
                  ? exp(eta_sigma)
-                 : ((flag_resid_dim == 1) ? sigma_marker[d] : sigma_y);
+                 : sigma_family[marker_to_sigma_family[d]];
       // sig: residual scale for Laplace
       log_lik_long[n] = double_exponential_lpdf(y_real[n] | eta_long, sig);
     } else if (family_long[d] == 9) {
@@ -153,7 +153,7 @@
       }
       real sig = (P_sigma > 0 || n_re_sigma > 0)
                  ? exp(eta_sigma)
-                 : ((flag_resid_dim == 1) ? sigma_marker[d] : sigma_y);
+                 : sigma_family[marker_to_sigma_family[d]];
       // sig: residual scale for skew Laplace
       real eta_tau = 0; // linear predictor for tau_sde
       if (P_tau_sde > 0) eta_tau += dot_product(X_tau_sde[n], beta_tau_sde);
@@ -165,7 +165,7 @@
           eta_tau += dot_product(Z_tau_sde[j][n, 1:K_tau_sde[j]], b);
         }
       }
-      real tau_sde = (P_tau_sde > 0 || n_re_tau_sde > 0) ? inv_logit(eta_tau) : tau_sde_marker[d];
+      real tau_sde = (P_tau_sde > 0 || n_re_tau_sde > 0) ? inv_logit(eta_tau) : tau_sde_family[marker_to_tau_sde_family[d]];
       // tau_sde: skewness parameter in (0,1)
       log_lik_long[n] = skew_double_exponential_lpdf(y_real[n] | eta_long, sig, tau_sde);
     } else if (family_long[d] == 10) {
@@ -179,7 +179,7 @@
           eta_phi_beta += dot_product(Z_phi_beta[j][n, 1:K_phi_beta[j]], b);
         }
       }
-      real phi_beta = (P_phi_beta > 0 || n_re_phi_beta > 0) ? exp(eta_phi_beta) : phi_beta_marker[d];
+      real phi_beta = (P_phi_beta > 0 || n_re_phi_beta > 0) ? exp(eta_phi_beta) : phi_beta_family[marker_to_phi_beta_family[d]];
       real mu = inv_logit(eta_long); // beta mean on (0,1)
       real shape1 = fmax(mu * phi_beta, 1e-6); // beta shape1
       real shape2 = fmax((1 - mu) * phi_beta, 1e-6); // beta shape2

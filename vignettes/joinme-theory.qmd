@@ -103,6 +103,16 @@ $$
 \log(\sigma_{id}(t)) = \mathbf{x}_{\sigma, id}(t)^\top \boldsymbol{\beta}_\sigma
 $$
 
+JoinME also supports **family-scoped** distributional regressions using bracket
+syntax on the left-hand side, e.g.
+
+- `sigma[family=student_t] ~ 1 + time`
+- `sigma[family=gaussian] ~ 1 + x1`
+
+These scopes are estimated as separate coefficient blocks and only contribute
+to rows of the scoped family. Without brackets (for example, `sigma ~ ...`),
+the formula applies to all rows where the parameter exists.
+
 # 3. Covariance Regression
 
 A unique feature of `joinme` is the ability to model the covariance structure of the marker-by-id effects $\mathbf{w}_{id}$. In standard models, $\Sigma_w$ is constant. In `joinme`, we can allow the variance to depend on subject-level covariates $\mathbf{x}_{cov, i}$:

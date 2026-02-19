@@ -17,6 +17,7 @@
   scale = c("epred", "linpred", "predict"),
   times = NULL,
   time_start = NULL,
+  time_horizon = NULL,
   tmax = NULL,
   ci_levels = c(0.5, 0.95),
   n_samples = 200,
@@ -62,14 +63,18 @@ Options: "longitudinal" (future trajectory), "event" (conditional survival proba
 
 \item{times}{Numeric vector of times at which to predict the longitudinal and survival trajectories.
 Can also be a named list of numeric vectors (one per subject id). If NULL, a grid
-from \code{time_start} to \code{time_start + 5} (scaled) is generated. If fewer than 50 points are
-supplied for a subject, a warning is emitted when \code{n_times = 50}.}
+from \code{time_start} to \code{time_start + time_horizon} is generated (and truncated to
+training support when needed). If fewer than 50 points are supplied for a subject,
+a warning is emitted when \code{n_times = 50}.}
 
 \item{time_start}{Numeric scalar or character. The conditioning time (last observation time).
 If numeric, a single value is reused for all subjects, or a named vector supplies
 subject-specific values. If character, it is interpreted as a column name in
 \code{newdataEvent} holding subject-specific conditioning times. If NULL, defaults to
 the maximum observed time in \code{newdataLong} for each subject.}
+
+\item{time_horizon}{Numeric scalar. Prediction horizon (in time units) used when
+\code{times} is NULL. The default is \code{tmax}.}
 
 \item{tmax}{Numeric scalar. The maximum time used for scaling during model fitting.
 \strong{CRITICAL}: If this is not provided and cannot be inferred from the object, predictions will be on the wrong time scale.}
@@ -91,6 +96,7 @@ Values override defaults except \code{data}.
 For engine = "rstan", threading uses options(stan.thread = threads_per_chain).
 \item grainsize: integer; reduce_sum grainsize for threaded prediction
 (default max(1, ceiling(n_id/(4*threads_per_chain)))).
+\item progress: logical; show sampling progress bar (default TRUE).
 }}
 
 \item{seed}{Integer. Random seed for reproducibility of random effect sampling.}
@@ -103,7 +109,7 @@ A list with two components:
 \item{longitudinal_fitted}{A data.frame containing fitted values for observed history on the linpred and epred scales. Includes a \code{scale} column.}
 \item{survival}{A data.frame containing survival probabilities (S(t|time_start)) for each time point in \code{times}. Columns: id, time, Survival, Median, Est.Error, L95, U95.}
 \item{cumhaz}{A data.frame containing conditional cumulative hazards H(t|time_start). Columns: id, time, Cumhaz, Median, Est.Error, L95, U95.}
-\item{draws}{A list containing raw posterior draws (\code{longitudinal}, \code{survival}, \code{cumhaz}).}
+\item{draws}{A list containing raw posterior draws (\code{longitudinal}, \code{longitudinal_fitted}, \code{survival}, \code{cumhaz}) and reconstructed subject-level id random-effect draws (\code{random_effects_id}).}
 
 A \code{JoinMeDynPred} object with \code{metadata$scale = "linpred"}.
 

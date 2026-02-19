@@ -264,6 +264,63 @@ plot(pred_ep, which = "survival")
 
 Dynamic prediction is conditional on observed history up to `time_start` and (by construction) survival up to that landmark; the survival plot corresponds to $\Pr(T > t \mid T > T_{start}, \mathcal{H}(T_{start}))$.
 
+When `times = NULL`, you can now control the default forecast window with
+`time_horizon` (defaulting to `tmax` from the fitted model):
+
+```{r scenario-a-predict-horizon}
+pred_ep_horizon <- rstantools::posterior_epred(
+  fit,
+  newdataLong = ndL,
+  newdataEvent = ndE,
+  time_start = time_start,
+  times = NULL,
+  time_horizon = 2,
+  n_samples = 100,
+  control = list(
+    iter_sampling = 200,
+    iter_warmup = 200,
+    threads_per_chain = 2,
+    chains = 1
+  )
+)
+
+head(pred_ep_horizon$predictions$survival)
+```
+
+Prediction enforces marker-level consistency: `newdataLong$marker` must use only levels seen during fitting. Internally, dynamic prediction outputs are stabilized by averaging over dynpred posterior rows for each indexed draw before constructing quantile summaries.
+
+### Diagnostics and random-effects extraction
+
+`joinme` now uses the same diagnostics table schema for fitted and predicted
+objects.
+
+```{r scenario-a-diagnosis}
+diagnosis(fit)
+diagnosis(pred_ep)
+```
+
+For fitted models, `ranef()` and `vcov()` are nested by `formulaLong` and
+`formulaDist`:
+
+```{r scenario-a-ranef-vcov-fit}
+re_fit <- ranef(fit)
+vc_fit <- vcov(fit)
+
+# Examples
+re_fit$formulaLong$id
+vc_fit$formulaLong$id
+```
+
+For dynamic prediction, marker-by-id random effects and covariance are exposed
+only when marker covariance depends on id:
+
+```{r scenario-a-ranef-vcov-pred}
+if (isTRUE(pred_ep$metadata$marker_vcov_depends_on_id)) {
+  ranef(pred_ep)
+  vcov(pred_ep)
+}
+```
+
 # Scenario B: Competing-Risk Survival
 
 This example adds a competing-risk indicator via `event_type`. The dynamic

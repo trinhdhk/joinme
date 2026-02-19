@@ -61,9 +61,28 @@
 #'   If the marker block omits the inner `( ... | id )`, marker-by-id effects are
 #'   absent and `vcov` associations are not allowed.
 #' @param formulaDist Optional list of formulas for distributional regression.
-#'   Two forms are supported:
+#'   Supported LHS parameters are:
+#'   - `sigma`
+#'   - `nu`
+#'   - `phi`
+#'   - `alpha` (aliases: `alpha_skew`, `skew`)
+#'   - `phi_beta`
+#'   - `tau_sde`
+#'
+#'   Three input styles are supported:
 #'   1. Named list with RHS-only formulas, e.g. `list(sigma = ~ 1 + time)`.
-#'   2. Unnamed list with LHS parameter names, e.g. `list(sigma ~ 1 + time)`.
+#'   2. Unnamed list with explicit LHS, e.g. `list(sigma ~ 1 + time)`.
+#'   3. Family-scoped LHS using brackets, e.g.
+#'      `list(sigma[family=student_t] ~ 1 + time, sigma[family=gaussian] ~ 1 + x1)`.
+#'
+#'   Semantics of scoping:
+#'   - Without `[family=...]`, the formula applies to all marker rows where that
+#'     parameter is defined.
+#'   - With `[family=...]`, the formula is applied only to rows of that family;
+#'     other rows receive zero contribution from that scoped block.
+#'   - Multiple scoped formulas for the same parameter are allowed and are
+#'     estimated jointly with separate coefficients.
+#'
 #'   Random-effects terms with `|` are supported, but nested random-effects formulas
 #'   are not.
 #' @param control Named list containing sampling configuration.
@@ -84,6 +103,19 @@
 #'   required by that type.
 #' @param priors Named list for priors: list(beta = ..., alpha = ..., lkj = ...).
 #' @param ... Additional args passed to joinme_standata().
+#'
+#' @examples
+#' \dontrun{
+#' formulaDist <- list(
+#'   sigma[family=student_t] ~ 1 + time + (1 | id),
+#'   sigma[family=gaussian] ~ 1 + x1,
+#'   nu[family=student_t] ~ 1,
+#'   alpha[family=skew_normal] ~ 1 + x1,
+#'   phi[family=negbin2] ~ 1,
+#'   phi_beta[family=beta] ~ 1,
+#'   tau_sde[family=skew_double_exponential] ~ 1
+#' )
+#' }
 #'
 #' @export
 # File overview:
@@ -275,18 +307,39 @@ joinme <- function(
     "const_data_vcov"
   ))
 
-  if (engine == "rstan") {
-    allowed_data <- .stan_data_names(stan_file)
-    if (length(allowed_data) > 0) {
-      missing <- setdiff(allowed_data, names(sd_stan))
-      if (length(missing) > 0) {
-        cli::cli_abort(c(
-          x = "Stan data missing required fields for rstan: {paste(missing, collapse = ', ')}.",
-          i = "Check joinme_standata() and Stan data block consistency."
-        ))
-      }
-      sd_stan <- sd_stan[names(sd_stan) %in% allowed_data]
+  has_nonstan_metadata <- function(x) {
+    if (is.null(x)) return(FALSE)
+    if (is.character(x) || is.factor(x) || is.language(x) || inherits(x, c("formula", "call"))) return(TRUE)
+    if (is.list(x) && !is.data.frame(x)) {
+      return(any(vapply(x, has_nonstan_metadata, logical(1))))
     }
+    FALSE
+  }
+  keep_idx <- !vapply(sd_stan, has_nonstan_metadata, logical(1))
+  sd_stan <- sd_stan[keep_idx]
+
+  allowed_data <- if (engine == "cmdstanr") {
+    vars <- tryCatch(mod$variables(), error = function(e) NULL)
+    if (!is.null(vars$data)) names(vars$data) %||% character(0) else character(0)
+  } else {
+    .stan_data_names(stan_file)
+  }
+  required_data <- .stan_data_names(stan_file)
+  if (length(allowed_data) == 0) {
+    allowed_data <- required_data
+  }
+  if (length(required_data) > 0) {
+    missing <- setdiff(required_data, names(sd_stan))
+    if (length(missing) > 0) {
+      cli::cli_abort(c(
+        x = "Stan data missing required fields: {paste(missing, collapse = ', ')}.",
+        i = "Check joinme_standata() and Stan data block consistency."
+      ))
+    }
+  }
+  if (length(allowed_data) > 0) {
+    keep_data <- union(allowed_data, required_data)
+    sd_stan <- sd_stan[names(sd_stan) %in% keep_data]
   }
 
   defaults <- list(

@@ -6,8 +6,8 @@
 \usage{
 \method{pp_check}{JoinMeFit}(
   object,
-  newdataLong,
-  newdataEvent,
+  newdataLong = NULL,
+  newdataEvent = NULL,
   ci_level = 0.95,
   n_samples = 200,
   seed = 123,

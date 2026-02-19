@@ -14,7 +14,7 @@ parse_transform_expr(expr)
 \description{
 The \code{parse_transform_expr} function takes a formula, quosure, quoted expression,
 or character string and converts it to a functional bytecode representation compatible with the
-Stan-side bytecode evaluator.
+Stan-side opcode evaluator.
 
 Supported operations:
 \itemize{
@@ -29,7 +29,7 @@ Supported operations:
 
 The \code{parse_transform_expr} function takes a formula, quosure, quoted expression,
 or character string and converts it to a functional bytecode representation compatible with the
-Stan-side bytecode evaluator.
+Stan-side opcode evaluator.
 
 Supported operations:
 \itemize{

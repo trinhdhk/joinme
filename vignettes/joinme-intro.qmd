@@ -59,6 +59,49 @@ using a functional expression, a monotone I-spline, or a piecewise linear
 mapping. These transformations are configured in R and passed to Stan as
 data so that the likelihood remains fully deterministic.
 
+## Family-shared distributional semantics
+
+For mixed longitudinal families, `joinme` treats distributional parameters as
+**shared by family** when no distributional regression is supplied.
+
+Concretely:
+
+- Markers with the same family share one latent baseline process for each
+  applicable distributional parameter.
+- Markers from different families do not share those baselines.
+- Parameters are instantiated only when a family uses them
+  (for example `nu` for Student-`t`, `phi` for negative-binomial).
+
+Example interpretation:
+
+- If markers `A` and `B` are both Student-`t` and marker `C` is Gaussian,
+  then `A` and `B` share the same baseline `sigma` and `nu` processes,
+  while `C` has its own `sigma` process and no `nu`.
+
+### What changes when `formulaDist` is provided?
+
+Supplying a distributional regression (for example `sigma ~ 1 + time`) switches
+that parameter from a family-level constant baseline to a regression-driven
+process. In that mode, summaries report distributional regression coefficients
+(`(Intercept)`, covariate effects, and random-effect SD terms when present)
+rather than only baseline family constants.
+
+Illustrative `formulaDist` specification:
+
+```r
+formulaDist <- list(
+  sigma ~ 1 + time,
+  nu ~ 1
+)
+```
+
+This means:
+
+- `sigma` is modeled through regression (fixed/random effects if included),
+- `nu` is regression-driven with an intercept-only structure,
+- other distributional parameters without formulas continue using family-shared
+  baselines when applicable.
+
 ## Data requirements (minimal)
 
 You need two data frames:
@@ -186,6 +229,17 @@ plot(pred, which = c("longitudinal", "survival"), combined = TRUE)
 If `patchwork`/`cowplot` is unavailable, `combined = TRUE` falls back to the
 standard per-subject structured return (grouped by subject and outcome) instead
 of any flattened helper list.
+
+### Step 8: Diagnostics and extraction helpers
+
+```{r intro-diagnosis}
+diagnosis(fit)
+diagnosis(pred)
+```
+
+`ranef(fit)` and `vcov(fit)` are nested by `formulaLong` and `formulaDist`.
+For prediction objects, `ranef(pred)` and `vcov(pred)` are available only when
+marker covariance is configured to depend on id.
 
 ## Next steps
 

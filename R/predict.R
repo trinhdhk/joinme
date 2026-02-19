@@ -38,13 +38,16 @@ NULL
 #'   - "predict": predictive draw (includes noise).
 #' @param times Numeric vector of times at which to predict the longitudinal and survival trajectories.
 #' Can also be a named list of numeric vectors (one per subject id). If NULL, a grid
-#' from `time_start` to `time_start + 5` (scaled) is generated. If fewer than 50 points are
-#' supplied for a subject, a warning is emitted when `n_times = 50`.
+#' from `time_start` to `time_start + time_horizon` is generated (and truncated to
+#' training support when needed). If fewer than 50 points are supplied for a subject,
+#' a warning is emitted when `n_times = 50`.
 #' @param time_start Numeric scalar or character. The conditioning time (last observation time).
 #' If numeric, a single value is reused for all subjects, or a named vector supplies
 #' subject-specific values. If character, it is interpreted as a column name in
 #' `newdataEvent` holding subject-specific conditioning times. If NULL, defaults to
 #' the maximum observed time in `newdataLong` for each subject.
+#' @param time_horizon Numeric scalar. Prediction horizon (in time units) used when
+#' `times` is NULL. The default is `tmax`.
 #' @param ci_levels Numeric vector of credible interval levels for plotting.
 #' Must be strictly between 0 and 1.
 #' @param tmax Numeric scalar. The maximum time used for scaling during model fitting.
@@ -70,7 +73,7 @@ NULL
 #' \item{longitudinal_fitted}{A data.frame containing fitted values for observed history on the linpred and epred scales. Includes a `scale` column.}
 #' \item{survival}{A data.frame containing survival probabilities (S(t|time_start)) for each time point in `times`. Columns: id, time, Survival, Median, Est.Error, L95, U95.}
 #' \item{cumhaz}{A data.frame containing conditional cumulative hazards H(t|time_start). Columns: id, time, Cumhaz, Median, Est.Error, L95, U95.}
-#' \item{draws}{A list containing raw posterior draws (`longitudinal`, `survival`, `cumhaz`).}
+#' \item{draws}{A list containing raw posterior draws (`longitudinal`, `longitudinal_fitted`, `survival`, `cumhaz`) and reconstructed subject-level random effects (`random_effects_id`, `random_effects_marker_id`, including marker-by-id covariance draws when id-dependent covariance is active).}
 #'
 #' @details
 #' The function uses a Bayesian approach. For each of the `n_samples` posterior draws from the fitted model:
@@ -87,6 +90,7 @@ predict.JoinMeFit <- function(object,
                            scale = c("epred", "linpred", "predict"),
                            times = NULL,
                            time_start = NULL,
+                           time_horizon = NULL,
                            tmax = NULL,
                            ci_levels = c(0.5, 0.95),
                            n_samples = 200,
@@ -117,6 +121,15 @@ predict.JoinMeFit <- function(object,
     tmax_val <- meta$tmax
     knots <- meta$knots
     col_means <- meta$col_means
+
+    time_horizon_val <- if (is.null(time_horizon)) tmax_val else time_horizon
+    if (!is.numeric(time_horizon_val) || length(time_horizon_val) != 1 ||
+        !is.finite(time_horizon_val) || time_horizon_val <= 0) {
+        cli::cli_abort(c(
+            x = "{.arg time_horizon} must be a single positive finite numeric value.",
+            i = "Set {.arg time_horizon} explicitly, or ensure {.arg tmax} can be recovered from the fitted object."
+        ))
+    }
 
     # 2. Parse Formulas
     forms <- .parse_formulas(object)
@@ -208,6 +221,7 @@ predict.JoinMeFit <- function(object,
     # Extract posterior draws early so threading can be finalized before
     # selecting threaded vs non-threaded Stan program (same ordering as fit()).
     draws_list <- .extract_draws_for_pred(object, n_samples, seed)
+    draws_list <- .scale_draw_dependent_time_terms(draws_list, object$stan_data, tmax_val)
     n_samples_extracted <- if (ncol(draws_list$alpha_vcov_reg) > 0) {
         nrow(draws_list$alpha_vcov_reg)
     } else {
@@ -283,10 +297,15 @@ predict.JoinMeFit <- function(object,
         }
     }
 
-    allowed_data <- if (engine == "rstan" && isTRUE(getOption("joinme.filter_rstan_data", FALSE))) {
-        .stan_data_names(stan_file)
+    allowed_data <- if (engine == "cmdstanr") {
+        vars <- tryCatch(mod$variables(), error = function(e) NULL)
+        if (!is.null(vars$data)) names(vars$data) %||% character(0) else character(0)
     } else {
-        NULL
+        .stan_data_names(stan_file)
+    }
+    required_data <- .stan_data_names(stan_file)
+    if (length(allowed_data) == 0) {
+        allowed_data <- required_data
     }
 
     # reduce_sum grainsize for prediction (draw-level parallelism)
@@ -332,10 +351,13 @@ predict.JoinMeFit <- function(object,
     draws_surv_list <- list()
     draws_cumhaz_list <- list()
     draws_long_fit <- list()
+    draws_re_id_list <- list()
+    draws_re_marker_id_list <- list()
     quantiles_long_list <- list()
     quantiles_surv_list <- list()
     quantiles_cumhaz_list <- list()
     quantiles_long_fit <- list()
+    pred_sampler_diag_list <- list()
 
     time_var <- eval(object$call$time_var) %||% "time"
     marker_var <- eval(object$call$marker_var) %||% "marker"
@@ -346,16 +368,18 @@ predict.JoinMeFit <- function(object,
         has_progressr <- requireNamespace("progressr", quietly = TRUE)
     
         if (has_progressr) {
-            progressr::handlers(global=TRUE)
             progressr::handlers(control$progress_handler %||% progressr::handler_progress())
             pb <- progressr::progressor(along = ids)
         } else {
             pb <- utils::txtProgressBar(min = 0, max = length(ids), style = 3, width = 60)
         }
     }
+    marker_vcov_depends_on_id <- .marker_vcov_depends_on_id(object, newdataEvent)
+
     for (id in ids) {
         if (control$progress %||% TRUE && has_progressr) {
-            pb(step = 0, message = glue::glue("Predicting for subject {id}"))
+            this_id <- as.character(id)
+            pb(amount = 0, message = sprintf("Subject %s", this_id))
         }
         dE <- newdataEvent[newdataEvent[[id_var]] == id, , drop = FALSE]
         dL <- newdataLong[newdataLong[[id_var]] == id, , drop = FALSE]
@@ -393,6 +417,7 @@ predict.JoinMeFit <- function(object,
                 id,
                 t_cond,
                 tmax_val,
+                time_horizon_val,
                 default_n = n_times,
                 min_points = 50,
                 kind = "longitudinal"
@@ -406,6 +431,7 @@ predict.JoinMeFit <- function(object,
                 id,
                 t_cond,
                 tmax_val,
+                time_horizon_val,
                 default_n = n_times,
                 min_points = 50,
                 kind = "survival"
@@ -430,15 +456,21 @@ predict.JoinMeFit <- function(object,
             "const_data_cs",
             "const_data_vcov"
         ))
-        if (!is.null(allowed_data) && length(allowed_data) > 0) {
-            missing <- setdiff(allowed_data, names(sd_pred))
+        if (is.null(sd_pred$n_draws) || length(sd_pred$n_draws) != 1) {
+            sd_pred$n_draws <- as.integer(n_samples_extracted)
+        }
+        if (length(required_data) > 0) {
+            missing <- setdiff(required_data, names(sd_pred))
             if (length(missing) > 0) {
                 cli::cli_abort(c(
-                    x = "Prediction Stan data missing required fields for rstan: {paste(missing, collapse = ', ')}.",
+                    x = "Prediction Stan data missing required fields: {paste(missing, collapse = ', ')}.",
                     i = "Check prediction standata construction and Stan data block."
                 ))
             }
-            sd_pred <- sd_pred[names(sd_pred) %in% allowed_data]
+        }
+        if (!is.null(allowed_data) && length(allowed_data) > 0) {
+            keep_data <- union(allowed_data, required_data)
+            sd_pred <- sd_pred[names(sd_pred) %in% keep_data]
         }
 
         # Run Stan
@@ -484,18 +516,48 @@ predict.JoinMeFit <- function(object,
             if (length(control_list) > 0) rstan_args$control <- control_list
             fit_pred <- do.call(rstan::sampling, rstan_args)
         }
+        pred_sampler_diag_list[[as.character(id)]] <- .joinme_sampler_diagnostics(fit_pred)
 
         long_var <- switch(scale,
                linpred = "y_pred_linpred",
                epred = "y_pred_epred",
                predict = "y_pred",
                "y_pred_epred")
+        draw_variables <- c(long_var, "surv_prob", "cumhaz_cond", "y_fit_linpred", "y_fit_epred", "z_u")
+        if (as.integer(sd_pred$n_random_marker %||% 0L) > 0L) {
+            draw_variables <- c(draw_variables, "z_v")
+        }
+        if (as.integer(sd_pred$n_random_marker_id %||% 0L) > 0L) {
+            draw_variables <- c(draw_variables, "z_w_lat", "z_L")
+        }
         draws_mat <- suppressMessages(
             .get_draws_matrix(
                 fit_pred,
-                variables = c(long_var, "surv_prob", "cumhaz_cond", "y_fit_linpred", "y_fit_epred")
+                variables = draw_variables
             )
         )
+
+        u_id_draws <- .reconstruct_subject_u_id_draws(
+            draws_matrix = draws_mat,
+            standata_subject = sd_pred,
+            n_draws_target = n_samples_extracted
+        )
+        if (!is.null(u_id_draws)) {
+            draws_re_id_list[[as.character(id)]] <- list(
+                matrix = u_id_draws,
+                terms = object$stan_data$zid_cols %||% paste0("u_id[", seq_len(ncol(u_id_draws)), "]")
+            )
+        }
+
+        marker_id_draws <- .reconstruct_subject_marker_id_draws(
+            draws_matrix = draws_mat,
+            standata_subject = sd_pred,
+            n_draws_target = n_samples_extracted,
+            marker_levels = object$stan_data$marker_levels
+        )
+        if (!is.null(marker_id_draws)) {
+            draws_re_marker_id_list[[as.character(id)]] <- marker_id_draws
+        }
 
         if (nrow(dL) > 0) {
             # Align marker levels to fitted model ordering
@@ -678,12 +740,15 @@ predict.JoinMeFit <- function(object,
         conditioning_time_by_id = time_start_by_id,
         n_samples = n_samples_extracted,
         n_subjects = length(ids),
+        marker_vcov_depends_on_id = marker_vcov_depends_on_id,
+        sampler_diagnostics = .aggregate_sampler_diagnostics(pred_sampler_diag_list),
         pred_type = pred_type,
         scale = scale,
         fitted_scales = c("linpred", "epred"),
         ci_levels = ci_levels,
         quantile_levels = quantile_probs,
         time_max = tmax_val,
+        time_horizon = time_horizon_val,
         formula_long = formula_long,
         response_var = resp_var,
         id_var = eval(object$call$id_var) %||% "id",
@@ -709,6 +774,8 @@ predict.JoinMeFit <- function(object,
         draws = list(
             longitudinal = draws_long_list,
             longitudinal_fitted = draws_long_fit,
+            random_effects_id = draws_re_id_list,
+            random_effects_marker_id = draws_re_marker_id_list,
             survival = draws_surv_list,
             cumhaz = draws_cumhaz_list
         ),
@@ -789,26 +856,73 @@ posterior_predict.JoinMeFit <- function(object, ...) {
 # ------------------------------------------------------------------------------
 
 .extract_matrix_from_stan <- function(draws_mat, var_name, N_cols, N_rows) {
-    # Stan output flattened: var_name[k, n]
-    # We want matrix (N_rows x N_cols)
+    # Stan output flattened across posterior rows.
+    # We recover a matrix (N_rows x N_cols), where N_rows is the draw index
+    # embedded in Stan variable indices and N_cols is the observation/time index.
+    # To preserve conditional uncertainty (and avoid over-shrunk intervals),
+    # pair each draw index with a posterior row instead of averaging rows.
     mat <- matrix(0, N_rows, N_cols)
+    n_post_rows <- nrow(draws_mat)
+    row_idx <- ((seq_len(N_rows) - 1L) %% max(1L, n_post_rows)) + 1L
     for (n in 1:N_cols) {
-        # Construct names like "y_pred_new[1,1]", "y_pred_new[2,1]" ...
-        # But wait, CmdStanR output format depends.
-        # If we requested matrix format from fit$draws(..., format="matrix")
-        # Columns are variable names.
-        # "y_pred_new[1,1]", "y_pred_new[2,1]" is likely provided.
-        # Actually, simpler:
-        # loop k=1..N_rows? No that's slow.
-        # We need ALL rows [1..N_rows, n]
-        # Regex or paste loop?
-        # Paste is cleaner if we assume 1-based indexing for k.
         nms <- paste0(var_name, "[", 1:N_rows, ",", n, "]")
+        alt_nms <- paste0(var_name, "[", n, ",", 1:N_rows, "]")
+
         if (all(nms %in% colnames(draws_mat))) {
-            mat[, n] <- as.numeric(draws_mat[1, nms])
+            cur <- draws_mat[row_idx, nms, drop = FALSE]
+            mat[, n] <- as.numeric(diag(cur))
+        } else if (all(alt_nms %in% colnames(draws_mat))) {
+            cur <- draws_mat[row_idx, alt_nms, drop = FALSE]
+            mat[, n] <- as.numeric(diag(cur))
         }
     }
     mat
+}
+
+.scale_draw_dependent_time_terms <- function(draws_list, stan_data, tmax) {
+    if (is.null(draws_list) || is.null(stan_data)) {
+        return(draws_list)
+    }
+    tmax_num <- suppressWarnings(as.numeric(tmax))
+    if (!is.finite(tmax_num) || length(tmax_num) != 1L || abs(tmax_num - 1) < 1e-12) {
+        return(draws_list)
+    }
+
+    .scale_matrix_cols <- function(mat, idx, scale_factor) {
+        if (is.null(mat) || !is.matrix(mat) || ncol(mat) == 0) {
+            return(mat)
+        }
+        idx <- as.integer(idx %||% integer(0))
+        idx <- idx[is.finite(idx) & idx >= 1L & idx <= ncol(mat)]
+        if (length(idx) == 0) {
+            return(mat)
+        }
+        mat[, idx] <- mat[, idx, drop = FALSE] * scale_factor
+        mat
+    }
+
+    draws_list$beta_fixed <- .scale_matrix_cols(
+        draws_list$beta_fixed,
+        stan_data$idx_time_beta,
+        tmax_num
+    )
+    draws_list$tau_id <- .scale_matrix_cols(
+        draws_list$tau_id,
+        stan_data$idx_time_uid,
+        tmax_num
+    )
+    draws_list$tau_marker <- .scale_matrix_cols(
+        draws_list$tau_marker,
+        stan_data$idx_time_vmk,
+        tmax_num
+    )
+    draws_list$tau_marker_id <- .scale_matrix_cols(
+        draws_list$tau_marker_id,
+        stan_data$idx_time_widm,
+        tmax_num
+    )
+
+    draws_list
 }
 
 .recover_metadata <- function(object, tmax_arg) {
@@ -1014,6 +1128,58 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         marker_weights_draws <- matrix(rep(as.numeric(sd$marker_weights), each = n), nrow = n, byrow = TRUE)
     }
 
+    n_family_sigma <- as.integer(sd$n_family_sigma %||% if ((sd$flag_resid_dim %||% 1L) == 0L) 1L else sd$D)
+    n_family_nu <- as.integer(sd$n_family_nu %||% sd$D)
+    n_family_phi <- as.integer(sd$n_family_phi %||% sd$D)
+    n_family_alpha <- as.integer(sd$n_family_alpha %||% sd$D)
+    n_family_phi_beta <- as.integer(sd$n_family_phi_beta %||% sd$D)
+    n_family_tau_sde <- as.integer(sd$n_family_tau_sde %||% sd$D)
+
+    sigma_family <- if (n_family_sigma > 0 && paste0("sigma_family[1]") %in% colnames(dmat)) {
+        get_mat(paste0("sigma_family[", 1:n_family_sigma, "]"))
+    } else if (sd$D > 0 && n_family_sigma == sd$D && "sigma_marker[1]" %in% colnames(dmat)) {
+        get_mat(paste0("sigma_marker[", 1:sd$D, "]"))
+    } else if (n_family_sigma == 1 && "sigma_y" %in% colnames(dmat)) {
+        matrix(get_col("sigma_y", default = 0), ncol = 1)
+    } else {
+        matrix(0, n, n_family_sigma)
+    }
+    nu_family <- if (n_family_nu > 0 && paste0("nu_family[1]") %in% colnames(dmat)) {
+        get_mat(paste0("nu_family[", 1:n_family_nu, "]"))
+    } else if (sd$D > 0 && n_family_nu == sd$D && "nu_marker[1]" %in% colnames(dmat)) {
+        get_mat(paste0("nu_marker[", 1:sd$D, "]"))
+    } else {
+        matrix(0, n, n_family_nu)
+    }
+    phi_family <- if (n_family_phi > 0 && paste0("phi_family[1]") %in% colnames(dmat)) {
+        get_mat(paste0("phi_family[", 1:n_family_phi, "]"))
+    } else if (sd$D > 0 && n_family_phi == sd$D && "phi_nb_marker[1]" %in% colnames(dmat)) {
+        get_mat(paste0("phi_nb_marker[", 1:sd$D, "]"))
+    } else {
+        matrix(0, n, n_family_phi)
+    }
+    alpha_family <- if (n_family_alpha > 0 && paste0("alpha_family[1]") %in% colnames(dmat)) {
+        get_mat(paste0("alpha_family[", 1:n_family_alpha, "]"))
+    } else if (sd$D > 0 && n_family_alpha == sd$D && "alpha_skew_marker[1]" %in% colnames(dmat)) {
+        get_mat(paste0("alpha_skew_marker[", 1:sd$D, "]"))
+    } else {
+        matrix(0, n, n_family_alpha)
+    }
+    phi_beta_family <- if (n_family_phi_beta > 0 && paste0("phi_beta_family[1]") %in% colnames(dmat)) {
+        get_mat(paste0("phi_beta_family[", 1:n_family_phi_beta, "]"))
+    } else if (sd$D > 0 && n_family_phi_beta == sd$D && "phi_beta_marker[1]" %in% colnames(dmat)) {
+        get_mat(paste0("phi_beta_marker[", 1:sd$D, "]"))
+    } else {
+        matrix(0, n, n_family_phi_beta)
+    }
+    tau_sde_family <- if (n_family_tau_sde > 0 && paste0("tau_sde_family[1]") %in% colnames(dmat)) {
+        get_mat(paste0("tau_sde_family[", 1:n_family_tau_sde, "]"))
+    } else if (sd$D > 0 && n_family_tau_sde == sd$D && "tau_sde_marker[1]" %in% colnames(dmat)) {
+        get_mat(paste0("tau_sde_marker[", 1:sd$D, "]"))
+    } else {
+        matrix(0, n, n_family_tau_sde)
+    }
+
     list(
         n_samples = n,
         beta_fixed = beta_fixed,
@@ -1059,37 +1225,12 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         bs_gamma_c = bs_gamma_c,
         gamma_hazard = gamma_hazard,
         marker_weights_draws = marker_weights_draws,
-        sigma_y_shared = get_col("sigma_y", default = 0),
-        sigma_marker_specific = if (sd$D > 0 && "sigma_marker[1]" %in% colnames(dmat)) {
-            get_mat(paste0("sigma_marker[", 1:sd$D, "]"))
-        } else {
-            matrix(0, n, 0)
-        },
-        nu_marker = if (sd$D > 0 && "nu_marker[1]" %in% colnames(dmat)) {
-            get_mat(paste0("nu_marker[", 1:sd$D, "]"))
-        } else {
-            matrix(0, n, 0)
-        },
-        phi_nb_marker = if (sd$D > 0 && "phi_nb_marker[1]" %in% colnames(dmat)) {
-            get_mat(paste0("phi_nb_marker[", 1:sd$D, "]"))
-        } else {
-            matrix(0, n, 0)
-        },
-        alpha_skew_marker = if (sd$D > 0 && "alpha_skew_marker[1]" %in% colnames(dmat)) {
-            get_mat(paste0("alpha_skew_marker[", 1:sd$D, "]"))
-        } else {
-            matrix(0, n, 0)
-        },
-        phi_beta_marker = if (sd$D > 0 && "phi_beta_marker[1]" %in% colnames(dmat)) {
-            get_mat(paste0("phi_beta_marker[", 1:sd$D, "]"))
-        } else {
-            matrix(0, n, 0)
-        },
-        tau_sde_marker = if (sd$D > 0 && "tau_sde_marker[1]" %in% colnames(dmat)) {
-            get_mat(paste0("tau_sde_marker[", 1:sd$D, "]"))
-        } else {
-            matrix(0, n, 0)
-        },
+        sigma_family = sigma_family,
+        nu_family = nu_family,
+        phi_family = phi_family,
+        alpha_family = alpha_family,
+        phi_beta_family = phi_beta_family,
+        tau_sde_family = tau_sde_family,
         coeff_assoc_cv_total = get_col("alpha_cv_total"),
         coeff_assoc_cs_total = get_col("alpha_cs_total"),
         coeff_assoc_cv_mean = get_col("alpha_cv_mean"),
@@ -1142,13 +1283,27 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         matrix(0, nrow(dL), sd$Q_idm)
     }
 
+    marker_levels_fit <- as.character(sd$marker_levels %||% levels(dL[[marker_var]]) %||% sort(unique(as.character(dL[[marker_var]]))))
+    family_codes_fit <- as.integer(sd$family_long %||% integer(0))
+    if (length(marker_levels_fit) != length(family_codes_fit)) {
+        cli::cli_abort(c(
+            x = "Fitted marker/family metadata is inconsistent.",
+            i = "Cannot build family-scoped distributional prediction matrices."
+        ))
+    }
+
     dist_formulas <- .normalize_formula_dist(forms$formulaDist)
-    dist_sigma_obs <- .build_dist_matrix(dist_formulas$sigma, dL)
-    dist_nu_obs <- .build_dist_matrix(dist_formulas$nu, dL)
-    dist_phi_obs <- .build_dist_matrix(dist_formulas$phi, dL)
-    dist_alpha_obs <- .build_dist_matrix(dist_formulas$alpha, dL)
-    dist_phi_beta_obs <- .build_dist_matrix(dist_formulas$phi_beta, dL)
-    dist_tau_sde_obs <- .build_dist_matrix(dist_formulas$tau_sde, dL)
+    family_by_row_obs <- .family_by_row_from_marker(
+        marker_values = dL[[marker_var]],
+        marker_levels = marker_levels_fit,
+        family_codes = family_codes_fit
+    )
+    dist_sigma_obs <- .build_dist_matrix(dist_formulas$sigma, dL, family_by_row = family_by_row_obs)
+    dist_nu_obs <- .build_dist_matrix(dist_formulas$nu, dL, family_by_row = family_by_row_obs)
+    dist_phi_obs <- .build_dist_matrix(dist_formulas$phi, dL, family_by_row = family_by_row_obs)
+    dist_alpha_obs <- .build_dist_matrix(dist_formulas$alpha, dL, family_by_row = family_by_row_obs)
+    dist_phi_beta_obs <- .build_dist_matrix(dist_formulas$phi_beta, dL, family_by_row = family_by_row_obs)
+    dist_tau_sde_obs <- .build_dist_matrix(dist_formulas$tau_sde, dL, family_by_row = family_by_row_obs)
 
     fe_rhs <- stats::update(forms$formulaEvent, . ~ .)
     fe_rhs[[2]] <- NULL
@@ -1202,6 +1357,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     }
     marker_levels <- as.character(marker_levels)
     marker_values <- as.character(dL[[marker_var]])
+    marker_index_lookup <- setNames(seq_along(marker_levels), marker_levels)
     unknown_markers <- setdiff(unique(marker_values), marker_levels)
     if (length(unknown_markers) > 0) {
         cli::cli_abort(c(
@@ -1223,10 +1379,17 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         dl_pred <- dL[rep(1, n_obs_pred), , drop = FALSE]
         time_rep <- rep(t_grid, times = n_markers_subject)
         marker_rep <- rep(markers_subject, each = n_obs_pred_per_marker)
-        idx_marker_pred_vec <- rep(seq_along(markers_subject), each = n_obs_pred_per_marker)
+        marker_rep_chr <- as.character(marker_rep)
+        idx_marker_pred_vec <- as.integer(marker_index_lookup[marker_rep_chr])
+        if (any(is.na(idx_marker_pred_vec))) {
+            cli::cli_abort(c(
+                x = "Prediction marker indexing failed for marker(s): {.val {paste(sort(unique(marker_rep_chr[is.na(idx_marker_pred_vec)])), collapse = ', ')}}.",
+                i = "Ensure prediction marker levels match fitted marker levels."
+            ))
+        }
 
         dl_pred[[time_var]] <- time_rep
-        dl_pred[[marker_var]] <- as.character(marker_rep)
+        dl_pred[[marker_var]] <- factor(marker_rep_chr, levels = marker_levels)
         
         # Scale time for Stan model
         dl_pred_scaled <- dl_pred
@@ -1250,12 +1413,17 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         }
         idx_marker_pred <- idx_marker_pred_vec
 
-        dist_sigma_pred <- .build_dist_matrix(dist_formulas$sigma, dl_pred_scaled)
-        dist_nu_pred <- .build_dist_matrix(dist_formulas$nu, dl_pred_scaled)
-        dist_phi_pred <- .build_dist_matrix(dist_formulas$phi, dl_pred_scaled)
-        dist_alpha_pred <- .build_dist_matrix(dist_formulas$alpha, dl_pred_scaled)
-        dist_phi_beta_pred <- .build_dist_matrix(dist_formulas$phi_beta, dl_pred_scaled)
-        dist_tau_sde_pred <- .build_dist_matrix(dist_formulas$tau_sde, dl_pred_scaled)
+        family_by_row_pred <- .family_by_row_from_marker(
+            marker_values = dl_pred_scaled[[marker_var]],
+            marker_levels = marker_levels_fit,
+            family_codes = family_codes_fit
+        )
+        dist_sigma_pred <- .build_dist_matrix(dist_formulas$sigma, dl_pred_scaled, family_by_row = family_by_row_pred)
+        dist_nu_pred <- .build_dist_matrix(dist_formulas$nu, dl_pred_scaled, family_by_row = family_by_row_pred)
+        dist_phi_pred <- .build_dist_matrix(dist_formulas$phi, dl_pred_scaled, family_by_row = family_by_row_pred)
+        dist_alpha_pred <- .build_dist_matrix(dist_formulas$alpha, dl_pred_scaled, family_by_row = family_by_row_pred)
+        dist_phi_beta_pred <- .build_dist_matrix(dist_formulas$phi_beta, dl_pred_scaled, family_by_row = family_by_row_pred)
+        dist_tau_sde_pred <- .build_dist_matrix(dist_formulas$tau_sde, dl_pred_scaled, family_by_row = family_by_row_pred)
     } else {
         mat_fixed_pred <- matrix(0, 0, sd$P)
         mat_id_pred <- matrix(0, 0, sd$R_id)
@@ -1358,9 +1526,10 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     }
 
     marker_weights_draws <- draws_list$marker_weights_draws
-    if (is.null(marker_weights_draws) || nrow(marker_weights_draws) != length(draws_list$sigma_y_shared)) {
-        marker_weights_draws <- matrix(rep(marker_weights, each = length(draws_list$sigma_y_shared)),
-                                        nrow = length(draws_list$sigma_y_shared), byrow = TRUE)
+    n_draws_pred <- nrow(draws_list$beta_fixed)
+    if (is.null(marker_weights_draws) || nrow(marker_weights_draws) != n_draws_pred) {
+        marker_weights_draws <- matrix(rep(marker_weights, each = n_draws_pred),
+                                        nrow = n_draws_pred, byrow = TRUE)
     }
 
     dL[[marker_var]] <- factor(dL[[marker_var]], levels = marker_levels)
@@ -1380,15 +1549,44 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     }
     trials_pred <- rep.int(1L, n_obs_pred)
     if (n_obs_pred > 0 && "trials" %in% colnames(dL)) {
-        trial_map <- vapply(markers_subject, function(m_val) {
-            m_trials <- dL$trials[dL[[marker_var]] == m_val]
+        trial_map <- setNames(rep.int(1L, length(marker_levels)), marker_levels)
+        for (m_val in unique(as.character(dL[[marker_var]]))) {
+            m_trials <- dL$trials[as.character(dL[[marker_var]]) == m_val]
             if (length(m_trials) > 0) as.integer(m_trials[1]) else 1L
-        }, integer(1))
-        trials_pred <- as.integer(trial_map[idx_marker_pred])
+            trial_map[m_val] <- if (length(m_trials) > 0) as.integer(m_trials[1]) else 1L
+        }
+        trials_pred <- as.integer(trial_map[as.character(marker_levels[idx_marker_pred])])
     }
 
+    .default_marker_family_map <- function(map_vec, n_family) {
+        if (!is.null(map_vec)) {
+            return(as.integer(map_vec))
+        }
+        if (sd$D <= 0) {
+            return(integer(0))
+        }
+        if (n_family <= 0) {
+            return(rep.int(0L, sd$D))
+        }
+        rep.int(1L, sd$D)
+    }
+
+    n_family_sigma_out <- as.integer(sd$n_family_sigma %||% ncol(draws_list$sigma_family))
+    n_family_nu_out <- as.integer(sd$n_family_nu %||% ncol(draws_list$nu_family))
+    n_family_phi_out <- as.integer(sd$n_family_phi %||% ncol(draws_list$phi_family))
+    n_family_alpha_out <- as.integer(sd$n_family_alpha %||% ncol(draws_list$alpha_family))
+    n_family_phi_beta_out <- as.integer(sd$n_family_phi_beta %||% ncol(draws_list$phi_beta_family))
+    n_family_tau_sde_out <- as.integer(sd$n_family_tau_sde %||% ncol(draws_list$tau_sde_family))
+
+    marker_to_sigma_family_out <- .default_marker_family_map(sd$marker_to_sigma_family, n_family_sigma_out)
+    marker_to_nu_family_out <- .default_marker_family_map(sd$marker_to_nu_family, n_family_nu_out)
+    marker_to_phi_family_out <- .default_marker_family_map(sd$marker_to_phi_family, n_family_phi_out)
+    marker_to_alpha_family_out <- .default_marker_family_map(sd$marker_to_alpha_family, n_family_alpha_out)
+    marker_to_phi_beta_family_out <- .default_marker_family_map(sd$marker_to_phi_beta_family, n_family_phi_beta_out)
+    marker_to_tau_sde_family_out <- .default_marker_family_map(sd$marker_to_tau_sde_family, n_family_tau_sde_out)
+
     out <- list(
-        n_draws = length(draws_list$sigma_y_shared),
+        n_draws = n_draws_pred,
         n_obs_long = nrow(dL), idx_marker_obs = marker_int, n_marker_types = sd$D,
         marker_weights = as.numeric(marker_weights),
         marker_weights_draws = marker_weights_draws,
@@ -1444,10 +1642,26 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         beta_alpha = draws_list$beta_alpha,
         beta_phi_beta = draws_list$beta_phi_beta,
         beta_tau_sde = draws_list$beta_tau_sde,
-        sigma_y_shared = draws_list$sigma_y_shared, sigma_marker_specific = draws_list$sigma_marker_specific,
-        nu_marker = draws_list$nu_marker, phi_nb_marker = draws_list$phi_nb_marker, alpha_skew_marker = draws_list$alpha_skew_marker,
-        phi_beta_marker = draws_list$phi_beta_marker, tau_sde_marker = draws_list$tau_sde_marker,
-        family_long = sd$family_long, flag_resid_dim = sd$flag_resid_dim,
+        sigma_family = draws_list$sigma_family,
+        nu_family = draws_list$nu_family,
+        phi_family = draws_list$phi_family,
+        alpha_family = draws_list$alpha_family,
+        phi_beta_family = draws_list$phi_beta_family,
+        tau_sde_family = draws_list$tau_sde_family,
+        family_long = sd$family_long,
+        n_family_sigma = n_family_sigma_out,
+        marker_to_sigma_family = marker_to_sigma_family_out,
+        n_family_nu = n_family_nu_out,
+        marker_to_nu_family = marker_to_nu_family_out,
+        n_family_phi = n_family_phi_out,
+        marker_to_phi_family = marker_to_phi_family_out,
+        n_family_alpha = n_family_alpha_out,
+        marker_to_alpha_family = marker_to_alpha_family_out,
+        n_family_phi_beta = n_family_phi_beta_out,
+        marker_to_phi_beta_family = marker_to_phi_beta_family_out,
+        n_family_tau_sde = n_family_tau_sde_out,
+        marker_to_tau_sde_family = marker_to_tau_sde_family_out,
+        flag_resid_dim = sd$flag_resid_dim,
         vcov_diag_link = sd$vcov_diag_link,
         use_tau_sde_fixed = sd$use_tau_sde_fixed,
         tau_sde_fixed = sd$tau_sde_fixed,
@@ -1528,6 +1742,311 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     )
 }
 
+# Compute per-draw median survival time from S(t) trajectories.
+#
+# Algorithm:
+# 1. Find the first index where S(t) <= threshold for each draw.
+# 2. If no crossing occurs on the grid, median survival is NA for that draw.
+# 3. If crossing is between adjacent points, linearly interpolate crossing time.
+# 4. If first point is already below threshold, use first time point.
+.median_survival_time_by_draw <- function(survival_draw_matrix, time_grid, threshold = 0.5) {
+    if (is.null(survival_draw_matrix) || nrow(survival_draw_matrix) == 0 || ncol(survival_draw_matrix) == 0) {
+        return(numeric(0))
+    }
+    if (length(time_grid) != ncol(survival_draw_matrix)) {
+        return(rep(NA_real_, nrow(survival_draw_matrix)))
+    }
+
+    vapply(seq_len(nrow(survival_draw_matrix)), function(draw_index) {
+        survival_values <- as.numeric(survival_draw_matrix[draw_index, ])
+        if (all(!is.finite(survival_values))) return(NA_real_)
+
+        crossing_index <- which(survival_values <= threshold)[1]
+        if (is.na(crossing_index)) {
+            finite_idx <- which(is.finite(survival_values) & survival_values > 0)
+            if (length(finite_idx) < 2) return(NA_real_)
+
+            tail_idx <- utils::tail(finite_idx, 2)
+            t_left <- as.numeric(time_grid[tail_idx[1]])
+            t_right <- as.numeric(time_grid[tail_idx[2]])
+            s_left <- as.numeric(survival_values[tail_idx[1]])
+            s_right <- as.numeric(survival_values[tail_idx[2]])
+            if (!is.finite(t_left) || !is.finite(t_right) || t_right <= t_left) return(NA_real_)
+            if (!is.finite(s_left) || !is.finite(s_right) || s_left <= 0 || s_right <= 0) return(NA_real_)
+            if (s_right >= s_left) return(NA_real_)
+
+            slope <- (log(s_right) - log(s_left)) / (t_right - t_left)
+            if (!is.finite(slope) || slope >= 0 || abs(slope) < .Machine$double.eps) return(NA_real_)
+
+            t_star <- t_right + (log(threshold) - log(s_right)) / slope
+            if (!is.finite(t_star)) return(NA_real_)
+            return(t_star)
+        }
+        if (crossing_index <= 1) return(as.numeric(time_grid[1]))
+
+        time_left <- as.numeric(time_grid[crossing_index - 1])
+        time_right <- as.numeric(time_grid[crossing_index])
+        survival_left <- as.numeric(survival_values[crossing_index - 1])
+        survival_right <- as.numeric(survival_values[crossing_index])
+
+        if (!is.finite(survival_left) || !is.finite(survival_right) || abs(survival_right - survival_left) < .Machine$double.eps) {
+            return(time_right)
+        }
+
+        time_left + (threshold - survival_left) * (time_right - time_left) / (survival_right - survival_left)
+    }, numeric(1))
+}
+
+# Summarize one draw vector with fit-style diagnostics columns.
+.summarize_draw_vector_with_diagnostics <- function(draw_values) {
+    draw_values <- as.numeric(draw_values)
+    draw_values <- draw_values[is.finite(draw_values)]
+
+    if (length(draw_values) == 0) {
+        return(data.frame(
+            Estimate = NA_real_,
+            Est.Error = NA_real_,
+            Q2.5 = NA_real_,
+            Q97.5 = NA_real_,
+            Rhat = NA_real_,
+            ess_bulk = NA_real_,
+            ess_tail = NA_real_,
+            stringsAsFactors = FALSE
+        ))
+    }
+
+    q_bounds <- stats::quantile(draw_values, probs = c(0.025, 0.975), names = FALSE)
+    rhat_val <- suppressWarnings(tryCatch(as.numeric(posterior::rhat(draw_values)), error = function(e) NA_real_))
+    ess_bulk_val <- suppressWarnings(tryCatch(as.numeric(posterior::ess_basic(draw_values)), error = function(e) NA_real_))
+    ess_tail_val <- suppressWarnings(tryCatch(as.numeric(posterior::ess_tail(draw_values)), error = function(e) NA_real_))
+
+    data.frame(
+        Estimate = mean(draw_values),
+        Est.Error = stats::sd(draw_values),
+        Q2.5 = q_bounds[1],
+        Q97.5 = q_bounds[2],
+        Rhat = rhat_val,
+        ess_bulk = ess_bulk_val,
+        ess_tail = ess_tail_val,
+        stringsAsFactors = FALSE
+    )
+}
+
+# Reconstruct realized id random effects u_id from latent z_u draws.
+.reconstruct_subject_u_id_draws <- function(draws_matrix, standata_subject, n_draws_target) {
+    n_random_id <- as.integer(standata_subject$n_random_id %||% 0L)
+    if (n_random_id <= 0) return(NULL)
+
+    z_u_draws <- .extract_matrix_from_stan(draws_matrix, "z_u", n_random_id, n_draws_target)
+    if (is.null(z_u_draws) || nrow(z_u_draws) == 0 || ncol(z_u_draws) != n_random_id) return(NULL)
+
+    tau_id_draws <- standata_subject$tau_id
+    lcorr_id_draws <- standata_subject$Lcorr_id
+    if (is.null(tau_id_draws) || is.null(lcorr_id_draws)) return(NULL)
+
+    is_indep <- as.integer(standata_subject$flag_indep_id_re %||% standata_subject$indep_id_re %||% 0L) == 1L
+    u_id_draws <- matrix(NA_real_, nrow = n_draws_target, ncol = n_random_id)
+
+    for (draw_index in seq_len(n_draws_target)) {
+        tau_vec <- as.numeric(tau_id_draws[draw_index, ])
+        z_vec <- as.numeric(z_u_draws[draw_index, ])
+
+        if (is_indep) {
+            u_id_draws[draw_index, ] <- tau_vec * z_vec
+        } else {
+            lcorr_mat <- lcorr_id_draws[draw_index, , ]
+            l_u <- diag(tau_vec, nrow = n_random_id, ncol = n_random_id) %*% lcorr_mat
+            u_id_draws[draw_index, ] <- as.numeric(l_u %*% z_vec)
+        }
+    }
+
+    u_id_draws
+}
+
+.reconstruct_subject_marker_id_draws <- function(draws_matrix, standata_subject, n_draws_target, marker_levels = NULL) {
+    n_random_marker_id <- as.integer(standata_subject$n_random_marker_id %||% 0L)
+    n_marker_types <- as.integer(standata_subject$n_marker_types %||% 0L)
+    if (n_random_marker_id <= 0L || n_marker_types <= 0L) {
+        return(NULL)
+    }
+
+    tau_marker_id_draws <- standata_subject$tau_marker_id
+    lcorr_marker_id_draws <- standata_subject$Lcorr_marker_id
+    tau_vcov_reg <- as.numeric(standata_subject$tau_vcov_reg %||% numeric(0))
+    alpha_vcov_reg <- standata_subject$alpha_vcov_reg
+    beta_vcov_reg_flat <- standata_subject$beta_vcov_reg_flat
+    lambda_vcov_reg <- standata_subject$lambda_vcov_reg
+    vec_cov_vcov <- as.numeric(standata_subject$vec_cov_vcov %||% numeric(0))
+    idx_row_cov <- as.integer(standata_subject$idx_row_cov %||% integer(0))
+    idx_col_cov <- as.integer(standata_subject$idx_col_cov %||% integer(0))
+
+    if (is.null(tau_marker_id_draws) || is.null(lcorr_marker_id_draws) ||
+        is.null(alpha_vcov_reg) || is.null(beta_vcov_reg_flat) || is.null(lambda_vcov_reg) ||
+        length(tau_vcov_reg) == 0 || length(idx_row_cov) == 0 || length(idx_col_cov) == 0) {
+        return(NULL)
+    }
+
+    n_random_marker <- as.integer(standata_subject$n_random_marker %||% 0L)
+    tau_marker_draws <- standata_subject$tau_marker
+    lcorr_marker_draws <- standata_subject$Lcorr_marker
+    b_cross_draws <- standata_subject$B_cross
+
+    is_indep_marker <- as.integer(standata_subject$flag_indep_marker_re %||% 0L) == 1L
+    is_indep_marker_id <- as.integer(standata_subject$flag_indep_marker_byid_latent_re %||% 0L) == 1L
+    allow_marker_crosscorr <- as.integer(standata_subject$flag_allow_marker_crosscorr %||% 0L) == 1L
+
+    n_post_rows <- nrow(draws_matrix)
+    row_idx <- ((seq_len(n_draws_target) - 1L) %% max(1L, n_post_rows)) + 1L
+
+    get_draw_scalar <- function(var_name, draw_index) {
+        if (!(var_name %in% colnames(draws_matrix))) return(NA_real_)
+        as.numeric(draws_matrix[row_idx[draw_index], var_name])
+    }
+
+    marker_labels <- as.character(marker_levels %||% seq_len(n_marker_types))
+    if (length(marker_labels) != n_marker_types) {
+        marker_labels <- as.character(seq_len(n_marker_types))
+    }
+    marker_id_terms <- standata_subject$zidm_cols %||% paste0("w_idm[", seq_len(n_random_marker_id), "]")
+
+    out_matrix <- matrix(NA_real_, nrow = n_draws_target, ncol = n_marker_types * n_random_marker_id)
+    out_vcov <- array(NA_real_, dim = c(n_draws_target, n_random_marker_id, n_random_marker_id))
+    col_names <- unlist(lapply(marker_labels, function(marker_name) {
+        paste0(marker_name, "::", marker_id_terms)
+    }), use.names = FALSE)
+    colnames(out_matrix) <- col_names
+
+    for (draw_index in seq_len(n_draws_target)) {
+        l_w <- {
+            tau_vec <- as.numeric(tau_marker_id_draws[draw_index, ])
+            if (is_indep_marker_id) {
+                diag(tau_vec, nrow = n_random_marker_id, ncol = n_random_marker_id)
+            } else {
+                diag(tau_vec, nrow = n_random_marker_id, ncol = n_random_marker_id) %*%
+                    lcorr_marker_id_draws[draw_index, , ]
+            }
+        }
+
+        l_v <- NULL
+        if (n_random_marker > 0 && !is.null(tau_marker_draws) && !is.null(lcorr_marker_draws)) {
+            tau_v <- as.numeric(tau_marker_draws[draw_index, ])
+            if (is_indep_marker) {
+                l_v <- diag(tau_v, nrow = n_random_marker, ncol = n_random_marker)
+            } else {
+                l_v <- diag(tau_v, nrow = n_random_marker, ncol = n_random_marker) %*%
+                    lcorr_marker_draws[draw_index, , ]
+            }
+        }
+
+        m_cov <- length(idx_row_cov)
+        l_i <- matrix(0.0, nrow = n_random_marker_id, ncol = n_random_marker_id)
+        z_l_draw <- as.numeric(get_draw_scalar(paste0("z_L[", draw_index, "]"), draw_index))
+        if (!is.finite(z_l_draw)) z_l_draw <- 0
+        u_lk <- as.numeric(tau_vcov_reg[draw_index] %||% 0) * z_l_draw
+
+        for (m in seq_len(m_cov)) {
+            r_ <- idx_row_cov[m]
+            c_ <- idx_col_cov[m]
+            b_slice_start <- (m - 1L) * length(vec_cov_vcov) + 1L
+            b_slice_end <- m * length(vec_cov_vcov)
+            b_vec <- if (length(vec_cov_vcov) > 0) {
+                as.numeric(beta_vcov_reg_flat[draw_index, b_slice_start:b_slice_end])
+            } else {
+                numeric(0)
+            }
+            lp <- as.numeric(alpha_vcov_reg[draw_index, m]) +
+                if (length(vec_cov_vcov) > 0) sum(b_vec * vec_cov_vcov) else 0 +
+                as.numeric(lambda_vcov_reg[draw_index, m]) * u_lk
+            l_i[r_, c_] <- if (r_ == c_) log1p(exp(lp)) else lp
+        }
+
+        draw_values <- numeric(n_marker_types * n_random_marker_id)
+        col_offset <- 0L
+        for (marker_index in seq_len(n_marker_types)) {
+            z_w_lat <- vapply(seq_len(n_random_marker_id), function(q_index) {
+                get_draw_scalar(
+                    paste0("z_w_lat[", draw_index, ",", marker_index, ",", q_index, "]"),
+                    draw_index
+                )
+            }, numeric(1))
+            z_w_lat[!is.finite(z_w_lat)] <- 0
+
+            cross <- rep(0, n_random_marker_id)
+            if (allow_marker_crosscorr && n_random_marker > 0 && !is.null(l_v) && !is.null(b_cross_draws)) {
+                z_v <- vapply(seq_len(n_random_marker), function(r_index) {
+                    get_draw_scalar(
+                        paste0("z_v[", draw_index, ",", marker_index, ",", r_index, "]"),
+                        draw_index
+                    )
+                }, numeric(1))
+                z_v[!is.finite(z_v)] <- 0
+                v_marker <- as.numeric(l_v %*% z_v)
+                b_cross_mat <- matrix(
+                    as.numeric(b_cross_draws[draw_index, , , drop = FALSE]),
+                    nrow = n_random_marker_id,
+                    ncol = n_random_marker,
+                    byrow = FALSE
+                )
+                if (ncol(b_cross_mat) == length(v_marker)) {
+                    cross <- as.numeric(b_cross_mat %*% v_marker)
+                }
+            }
+
+            z_w <- cross + as.numeric(l_w %*% z_w_lat)
+            w_idscaled <- as.numeric(l_i %*% z_w)
+
+            idx <- (col_offset + 1L):(col_offset + n_random_marker_id)
+            draw_values[idx] <- w_idscaled
+            col_offset <- col_offset + n_random_marker_id
+        }
+
+        out_matrix[draw_index, ] <- draw_values
+        out_vcov[draw_index, , ] <- l_i %*% t(l_i)
+    }
+
+    list(
+        matrix = out_matrix,
+        vcov = out_vcov,
+        markers = marker_labels,
+        terms = marker_id_terms,
+        n_random_marker_id = n_random_marker_id
+    )
+}
+
+.marker_vcov_depends_on_id <- function(object, newdataEvent = NULL) {
+    sd <- object$stan_data
+    q_idm <- as.integer(sd$Q_idm %||% 0L)
+    if (is.null(sd) || q_idm <= 0L) {
+        return(FALSE)
+    }
+
+    # If marker-by-id random-effects are present in the fitted model,
+    # prediction-time marker covariance varies by subject through L_i.
+    # This is the primary availability condition for ranef/vcov extraction.
+    TRUE
+}
+
+#' Summarize dynamic prediction outputs
+#'
+#' @description
+#' Summarizes a `JoinMeDynPred` object with detailed subject-level prediction
+#' summaries and diagnostics.
+#'
+#' The summary includes:
+#' - an overview table of row/subject counts by process,
+#' - median survival time per subject (draw-wise crossing of `S(t)=0.5`,
+#'   summarized with estimate, uncertainty, and diagnostics),
+#' - predicted id-level random effects per subject (estimate, uncertainty,
+#'   interval, and diagnostics),
+#' - predicted marker-by-id random effects and covariance per subject when
+#'   marker covariance depends on id,
+#' - a compact diagnostics table counting potential convergence/ESS issues.
+#'
+#' @param object A `JoinMeDynPred` object produced by [predict].
+#' @param ... Unused.
+#'
+#' @return A `summary_JoinMeDynPred` object containing tabular summaries.
+#' @method summary JoinMeDynPred
 #' @export
 summary.JoinMeDynPred <- function(object, ...) {
     if (!inherits(object, "JoinMeDynPred")) {
@@ -1539,34 +2058,262 @@ summary.JoinMeDynPred <- function(object, ...) {
     cached <- object$cache_get("summary")
     if (!is.null(cached)) return(cached)
 
-    n_long <- if (!is.null(object$predictions$longitudinal)) nrow(object$predictions$longitudinal) else 0
-    n_surv <- if (!is.null(object$predictions$survival)) nrow(object$predictions$survival) else 0
-    ids_long <- if (!is.null(object$predictions$longitudinal)) length(unique(object$predictions$longitudinal$id)) else 0
-    ids_surv <- if (!is.null(object$predictions$survival)) length(unique(object$predictions$survival$id)) else 0
-    n_cumhaz <- if (!is.null(object$predictions$cumhaz)) nrow(object$predictions$cumhaz) else 0
-    ids_cumhaz <- if (!is.null(object$predictions$cumhaz)) length(unique(object$predictions$cumhaz$id)) else 0
+    n_long_rows <- if (!is.null(object$predictions$longitudinal)) nrow(object$predictions$longitudinal) else 0
+    n_surv_rows <- if (!is.null(object$predictions$survival)) nrow(object$predictions$survival) else 0
+    n_cumhaz_rows <- if (!is.null(object$predictions$cumhaz)) nrow(object$predictions$cumhaz) else 0
+    n_long_subjects <- if (!is.null(object$predictions$longitudinal)) length(unique(object$predictions$longitudinal$id)) else 0
+    n_surv_subjects <- if (!is.null(object$predictions$survival)) length(unique(object$predictions$survival$id)) else 0
+    n_cumhaz_subjects <- if (!is.null(object$predictions$cumhaz)) length(unique(object$predictions$cumhaz$id)) else 0
+
+    overview_table <- data.frame(
+        metric = c(
+            "longitudinal_rows",
+            "longitudinal_subjects",
+            "survival_rows",
+            "survival_subjects",
+            "cumhaz_rows",
+            "cumhaz_subjects",
+            "prediction_scale",
+            "posterior_draws"
+        ),
+        value = c(
+            n_long_rows,
+            n_long_subjects,
+            n_surv_rows,
+            n_surv_subjects,
+            n_cumhaz_rows,
+            n_cumhaz_subjects,
+            object$metadata$scale %||% NA_character_,
+            object$n_samples %||% object$metadata$n_samples %||% NA_real_
+        ),
+        stringsAsFactors = FALSE
+    )
+
+    median_survival_table <- NULL
+    if (!is.null(object$draws$survival) && length(object$draws$survival) > 0) {
+        median_survival_rows <- lapply(names(object$draws$survival), function(subject_id) {
+            subject_survival <- object$draws$survival[[subject_id]]
+            draw_median_times <- .median_survival_time_by_draw(
+                survival_draw_matrix = subject_survival$matrix,
+                time_grid = subject_survival$time,
+                threshold = 0.5
+            )
+            draw_summary <- .summarize_draw_vector_with_diagnostics(draw_median_times)
+            cbind(
+                id = subject_id,
+                term = "median_survival_time",
+                n_reached = sum(is.finite(draw_median_times)),
+                n_total = length(draw_median_times),
+                draw_summary,
+                stringsAsFactors = FALSE
+            )
+        })
+        median_survival_table <- do.call(rbind, median_survival_rows)
+    }
+
+    random_effects_id_table <- NULL
+    if (!is.null(object$draws$random_effects_id) && length(object$draws$random_effects_id) > 0) {
+        random_effect_rows <- lapply(names(object$draws$random_effects_id), function(subject_id) {
+            subject_effects <- object$draws$random_effects_id[[subject_id]]
+            u_id_matrix <- subject_effects$matrix
+            u_id_terms <- subject_effects$terms %||% paste0("u_id[", seq_len(ncol(u_id_matrix)), "]")
+
+            per_term <- lapply(seq_len(ncol(u_id_matrix)), function(term_index) {
+                draw_summary <- .summarize_draw_vector_with_diagnostics(u_id_matrix[, term_index])
+                cbind(
+                    id = subject_id,
+                    term = u_id_terms[term_index],
+                    draw_summary,
+                    stringsAsFactors = FALSE
+                )
+            })
+            do.call(rbind, per_term)
+        })
+        random_effects_id_table <- do.call(rbind, random_effect_rows)
+    }
+
+    marker_vcov_depends_on_id <- isTRUE(object$metadata$marker_vcov_depends_on_id)
+
+    random_effects_marker_id_table <- NULL
+    if (marker_vcov_depends_on_id && !is.null(object$draws$random_effects_marker_id) && length(object$draws$random_effects_marker_id) > 0) {
+        marker_id_rows <- lapply(names(object$draws$random_effects_marker_id), function(subject_id) {
+            subject_effects <- object$draws$random_effects_marker_id[[subject_id]]
+            w_idm_matrix <- subject_effects$matrix
+            if (is.null(w_idm_matrix) || ncol(w_idm_matrix) == 0) return(NULL)
+
+            marker_terms <- colnames(w_idm_matrix)
+            if (is.null(marker_terms)) {
+                marker_terms <- paste0("marker_id[", seq_len(ncol(w_idm_matrix)), "]")
+            }
+
+            per_term <- lapply(seq_len(ncol(w_idm_matrix)), function(term_index) {
+                draw_summary <- .summarize_draw_vector_with_diagnostics(w_idm_matrix[, term_index])
+                term_label <- as.character(marker_terms[term_index])
+                marker_label <- if (grepl("::", term_label, fixed = TRUE)) {
+                    sub("::.*$", "", term_label)
+                } else {
+                    NA_character_
+                }
+                basis_term <- if (grepl("::", term_label, fixed = TRUE)) {
+                    sub("^.*::", "", term_label)
+                } else {
+                    term_label
+                }
+                cbind(
+                    id = subject_id,
+                    marker = marker_label,
+                    term = basis_term,
+                    draw_summary,
+                    stringsAsFactors = FALSE
+                )
+            })
+            do.call(rbind, per_term)
+        })
+        marker_id_rows <- Filter(Negate(is.null), marker_id_rows)
+        if (length(marker_id_rows) > 0) {
+            random_effects_marker_id_table <- do.call(rbind, marker_id_rows)
+        }
+    }
+
+    vcov_marker_id_table <- NULL
+    if (marker_vcov_depends_on_id && !is.null(object$draws$random_effects_marker_id) && length(object$draws$random_effects_marker_id) > 0) {
+        vcov_rows <- lapply(names(object$draws$random_effects_marker_id), function(subject_id) {
+            subject_effects <- object$draws$random_effects_marker_id[[subject_id]]
+            vcov_draws <- subject_effects$vcov
+            if (is.null(vcov_draws) || length(dim(vcov_draws)) != 3) return(NULL)
+
+            terms <- as.character(subject_effects$terms %||% paste0("w_idm[", seq_len(dim(vcov_draws)[2]), "]"))
+            q_dim <- dim(vcov_draws)[2]
+
+            per_cell <- lapply(seq_len(q_dim), function(r_idx) {
+                lapply(seq_len(q_dim), function(c_idx) {
+                    draw_summary <- .summarize_draw_vector_with_diagnostics(vcov_draws[, r_idx, c_idx])
+                    cbind(
+                        id = subject_id,
+                        row = terms[r_idx],
+                        col = terms[c_idx],
+                        draw_summary,
+                        stringsAsFactors = FALSE
+                    )
+                })
+            })
+            do.call(rbind, unlist(per_cell, recursive = FALSE))
+        })
+        vcov_rows <- Filter(Negate(is.null), vcov_rows)
+        if (length(vcov_rows) > 0) {
+            vcov_marker_id_table <- do.call(rbind, vcov_rows)
+        }
+    }
+
+    diagnostics_table <- NULL
+    bind_rows_safe <- function(...) {
+        row_list <- Filter(Negate(is.null), list(...))
+        if (length(row_list) == 0) return(NULL)
+        all_columns <- unique(unlist(lapply(row_list, names), use.names = FALSE))
+        row_list <- lapply(row_list, function(df) {
+            missing_columns <- setdiff(all_columns, names(df))
+            if (length(missing_columns) > 0) {
+                for (column_name in missing_columns) df[[column_name]] <- NA
+            }
+            df[, all_columns, drop = FALSE]
+        })
+        do.call(rbind, row_list)
+    }
+    diagnostics_source <- bind_rows_safe(
+        if (!is.null(random_effects_id_table)) transform(random_effects_id_table, section = "random_effects_id") else NULL,
+        if (!is.null(random_effects_marker_id_table)) transform(random_effects_marker_id_table, section = "random_effects_marker_id") else NULL,
+        if (!is.null(median_survival_table)) transform(median_survival_table, section = "median_survival_time") else NULL
+    )
+    term_diag <- .term_diagnostics_from_tables(diagnostics_source)
+    sampler_diag <- object$metadata$sampler_diagnostics %||% list()
+
+    diagnostics_table <- .build_common_diagnostics_table(
+        draws = as.numeric(object$n_samples %||% object$metadata$n_samples %||% NA_real_),
+        divergences = as.numeric(sampler_diag$divergences %||% 0),
+        treedepth_hits = as.numeric(sampler_diag$treedepth_hits %||% 0),
+        ebfmi_min = as.numeric(sampler_diag$ebfmi_min %||% NA_real_),
+        max_rhat = as.numeric(term_diag$max_rhat %||% sampler_diag$max_rhat %||% NA_real_),
+        min_ess_bulk = as.numeric(term_diag$min_ess_bulk %||% sampler_diag$min_ess_bulk %||% NA_real_),
+        min_ess_tail = as.numeric(term_diag$min_ess_tail %||% sampler_diag$min_ess_tail %||% NA_real_),
+        n_terms_total = as.numeric(term_diag$n_terms_total %||% 0),
+        n_terms_bad_rhat = as.numeric(term_diag$n_terms_bad_rhat %||% 0),
+        n_terms_low_ess_bulk = as.numeric(term_diag$n_terms_low_ess_bulk %||% 0),
+        n_terms_low_ess_tail = as.numeric(term_diag$n_terms_low_ess_tail %||% 0)
+    )
 
     tables <- list(
-        longitudinal = data.frame(
-            metric = c("rows", "subjects", "scale"),
-            value = c(n_long, ids_long, object$metadata$scale %||% NA_character_),
-            stringsAsFactors = FALSE
-        ),
-        survival = data.frame(
-            metric = c("rows", "subjects"),
-            value = c(n_surv, ids_surv),
-            stringsAsFactors = FALSE
-        ),
-        cumhaz = data.frame(
-            metric = c("rows", "subjects"),
-            value = c(n_cumhaz, ids_cumhaz),
-            stringsAsFactors = FALSE
-        )
+        diagnostics = diagnostics_table,
+        overview = overview_table,
+        median_survival_time = median_survival_table,
+        random_effects_id = random_effects_id_table,
+        random_effects_marker_id = random_effects_marker_id_table,
+        vcov_marker_id = vcov_marker_id_table
     )
 
     summary_obj <- SummaryJoinMeDynPred$new(tables = tables, metadata = object$metadata)
     object$cache_set("summary", summary_obj)
     summary_obj
+}
+
+#' Extract predicted random effects from dynamic predictions
+#'
+#' @description
+#' Returns predicted random effects from a `JoinMeDynPred` object. Marker-by-id
+#' random effects are available only when marker covariance is configured to be
+#' subject-dependent.
+#'
+#' @param object A `JoinMeDynPred` object.
+#' @param ... Unused.
+#'
+#' @return A named list containing random-effects summary tables.
+#' @importFrom lme4 ranef
+#' @export
+ranef.JoinMeDynPred <- function(object, ...) {
+    assertthat::assert_that(inherits(object, "JoinMeDynPred"), msg = "Object must be a JoinMeDynPred instance.")
+
+    if (!isTRUE(object$metadata$marker_vcov_depends_on_id)) {
+        cli::cli_abort(c(
+            x = "Predicted marker-by-id random effects are only available when marker covariance depends on id.",
+            i = "Refit with subject-dependent covariance structure in {.arg formulaVcov} and marker-by-id random effects (Q_idm > 0)."
+        ))
+    }
+
+    sum_obj <- summary(object)
+    list(
+        formulaLong = list(
+            marker_by_id = sum_obj$tables$random_effects_marker_id
+        )
+    )
+}
+
+#' Extract predicted marker-by-id covariance from dynamic predictions
+#'
+#' @description
+#' Returns per-subject covariance summaries for marker-by-id random effects from
+#' a `JoinMeDynPred` object. This method is available only when marker covariance
+#' depends on id.
+#'
+#' @param object A `JoinMeDynPred` object.
+#' @param ... Unused.
+#'
+#' @return A named list containing covariance summary tables.
+#' @export
+vcov.JoinMeDynPred <- function(object, ...) {
+    assertthat::assert_that(inherits(object, "JoinMeDynPred"), msg = "Object must be a JoinMeDynPred instance.")
+
+    if (!isTRUE(object$metadata$marker_vcov_depends_on_id)) {
+        cli::cli_abort(c(
+            x = "Predicted marker-by-id covariance is only available when marker covariance depends on id.",
+            i = "Refit with subject-dependent covariance structure in {.arg formulaVcov} and marker-by-id random effects (Q_idm > 0)."
+        ))
+    }
+
+    sum_obj <- summary(object)
+    list(
+        formulaLong = list(
+            marker_by_id = sum_obj$tables$vcov_marker_id
+        )
+    )
 }
 
 #' Print dynamic prediction results
@@ -1609,20 +2356,35 @@ print.JoinMeDynPred <- function(x, ...) {
 print.summary_JoinMeDynPred <- function(x, ...) {
     cat("Prediction summary\n")
     cat("==================\n")
-    if (!is.null(x$tables$longitudinal)) {
-        cat("Longitudinal\n")
-        cat("------------\n")
-        print(x$tables$longitudinal, row.names = FALSE)
+    if (!is.null(x$tables$diagnostics)) {
+        cat("Diagnostics\n")
+        cat("-----------\n")
+        print(x$tables$diagnostics, row.names = FALSE)
     }
-    if (!is.null(x$tables$survival)) {
-        cat("\nSurvival\n")
+    if (!is.null(x$tables$overview)) {
+        cat("\nOverview\n")
         cat("--------\n")
-        print(x$tables$survival, row.names = FALSE)
+        print(x$tables$overview, row.names = FALSE)
     }
-    if (!is.null(x$tables$cumhaz)) {
-        cat("\nCumulative hazard\n")
-        cat("-----------------\n")
-        print(x$tables$cumhaz, row.names = FALSE)
+    if (!is.null(x$tables$median_survival_time)) {
+        cat("\nMedian survival time\n")
+        cat("--------------------\n")
+        print(x$tables$median_survival_time, row.names = FALSE)
+    }
+    if (!is.null(x$tables$random_effects_id)) {
+        cat("\nPredicted id random effects\n")
+        cat("---------------------------\n")
+        print(x$tables$random_effects_id, row.names = FALSE)
+    }
+    if (!is.null(x$tables$random_effects_marker_id)) {
+        cat("\nPredicted marker-by-id random effects\n")
+        cat("-------------------------------------\n")
+        print(x$tables$random_effects_marker_id, row.names = FALSE)
+    }
+    if (!is.null(x$tables$vcov_marker_id)) {
+        cat("\nPredicted marker-by-id covariance\n")
+        cat("----------------------------------\n")
+        print(x$tables$vcov_marker_id, row.names = FALSE)
     }
     invisible(x)
 }
@@ -1721,16 +2483,28 @@ print.summary_JoinMeDynPred <- function(x, ...) {
     sort(unique(ci_levels))
 }
 
-.resolve_time_grid <- function(times, id, t_cond, tmax_val, default_n = 50, min_points = 50, kind = "longitudinal") {
+.resolve_time_grid <- function(times, id, t_cond, tmax_val, time_horizon, default_n = 50, min_points = 50, kind = "longitudinal") {
     grid <- NULL
+    horizon_is_default <- is.finite(tmax_val) && isTRUE(all.equal(as.numeric(time_horizon), as.numeric(tmax_val)))
+    raw_upper_time <- if (horizon_is_default) tmax_val else (t_cond + time_horizon)
+    upper_support <- if (is.finite(tmax_val)) max(t_cond, tmax_val) else raw_upper_time
+    upper_time <- min(raw_upper_time, upper_support)
+
+    if (raw_upper_time > upper_support) {
+        cli::cli_warn(c(
+            x = "Requested {kind} horizon exceeds training time support for subject {id}.",
+            i = "Truncating to times <= {format(signif(upper_support, 6), scientific = FALSE)} to avoid extrapolation artifacts."
+        ))
+    }
+
     if (is.null(times)) {
             if (default_n < min_points) {
                 cli::cli_warn(c(
                     x = "Requested {kind} grid size {default_n} is below the minimum of {min_points}.",
-                    i = "Using {min_points} time points instead."
+                    i = "Set {.arg n_times} = {min_points} or ensure {.arg times} has at least {min_points} time points."
                 ))
             }
-            grid <- seq(t_cond, min(t_cond + 5, tmax_val), length.out = max(default_n, min_points))
+            grid <- seq(t_cond, upper_time, length.out = max(default_n, min_points))
     } else if (is.list(times)) {
         key <- as.character(id)
         grid <- times[[key]]
@@ -1739,13 +2513,27 @@ print.summary_JoinMeDynPred <- function(x, ...) {
                 x = "No {kind} time grid found for subject {id}.",
                 i = "Falling back to the default time grid."
             ))
-            grid <- seq(t_cond, min(t_cond + 5, tmax_val), length.out = max(default_n, min_points))
+            grid <- seq(t_cond, upper_time, length.out = max(default_n, min_points))
         }
     } else {
         grid <- times
     }
 
+    if (any(grid > upper_time, na.rm = TRUE)) {
+        cli::cli_warn(c(
+            x = "{kind} grid exceeds configured horizon/support for subject {id}.",
+            i = "Truncating to times <= {format(signif(upper_time, 6), scientific = FALSE)}."
+        ))
+    }
+
     grid <- grid[grid >= t_cond]
+    grid <- grid[grid <= upper_time]
+    grid <- unique(sort(grid))
+
+    if (length(grid) == 0) {
+        grid <- seq(t_cond, upper_time, length.out = max(default_n, min_points))
+    }
+
     if (length(grid) < min_points && default_n == min_points) {
         cli::cli_warn(c(
             x = "{kind} prediction grid has fewer than {min_points} time points for subject {id}.",

@@ -43,6 +43,6 @@ test_that("association summaries include marker weights when estimated", {
   expect_true(any(grepl("^weight:", assoc_tbl$term)))
 
   re <- ranef(fit)
-  expect_true(!is.null(re$assoc_weight))
-  expect_true(any(grepl("^weight:", re$assoc_weight$term)))
+  expect_true(!is.null(re$formulaLong$assoc_weight))
+  expect_true(any(grepl("^weight:", re$formulaLong$assoc_weight$term)))
 })

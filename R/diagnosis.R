@@ -11,6 +11,41 @@ NULL
 # - Extract log-likelihood and compute LOO/WAIC/ELPD summaries.
 # - Provide posterior predictive checks and Bayes factor utilities.
 
+# ---- diagnosis generic ---------------------------------------------------
+
+#' Diagnostic summary for joinme objects
+#'
+#' @description
+#' Returns a compact diagnostics table for fitted (`JoinMeFit`) and dynamic
+#' prediction (`JoinMeDynPred`) objects.
+#'
+#' For `JoinMeFit`, diagnostics summarize the Stan sampler run. For
+#' `JoinMeDynPred`, diagnostics summarize posterior-draw quality for predicted
+#' quantities and are aligned to the same metric schema used for `JoinMeFit`.
+#'
+#' @param object A joinme object.
+#' @param ... Additional arguments passed to class-specific methods.
+#'
+#' @return A data frame with `metric` and `value` columns.
+#' @export
+diagnosis <- function(object, ...) {
+	UseMethod("diagnosis")
+}
+
+#' @export
+diagnosis.JoinMeFit <- function(object, ...) {
+	assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
+	diag <- .joinme_sampler_diagnostics(object$fit)
+	.diagnostics_table_from_sampler(diag)
+}
+
+#' @export
+diagnosis.JoinMeDynPred <- function(object, ...) {
+	assertthat::assert_that(inherits(object, "JoinMeDynPred"), msg = "Object must be a JoinMeDynPred instance.")
+	sum_obj <- summary(object)
+	sum_obj$tables$diagnostics %||% .build_common_diagnostics_table()
+}
+
 # ---- log-likelihood extraction -------------------------------------------
 
 #' Log-likelihood summary

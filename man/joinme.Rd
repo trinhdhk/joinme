@@ -95,8 +95,9 @@ are rescaled within Stan so fixed effects remain interpretable on the original s
 
 Marker weights (see \code{joinme_standata()}) are used to form marker-average summaries
 for both current value (CV) and current slope (CS) association components. When
-\code{estimate_marker_weights = TRUE}, the weights are shrunk via Normal or Laplace
-perturbations depending on the \code{shrinkage} setting.
+\code{estimate_marker_weights = TRUE}, signed perturbations are estimated around base
+weights with Normal or Laplace shrinkage (depending on \code{shrinkage}) and then
+RMS-stabilized to keep global scale identifiable.
 
 Association coefficients are denoted with the \code{alpha_} prefix to match joint-model
 conventions and to avoid confusion with the linear predictor eta used throughout

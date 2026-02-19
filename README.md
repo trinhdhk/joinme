@@ -11,6 +11,62 @@ estimation, and includes helpers for data preparation, model diagnostics (ELPD,
 LOO, WAIC), simulation utilities and plotting. See the vignettes and reference
 for worked examples and API details.
 
+## Family-shared distributional parameters
+
+When you fit mixed longitudinal families, `joinme` now uses **family-shared**
+distributional parameters by default (when no distributional regression is
+provided for that parameter).
+
+- Markers with the same family share one latent parameter for each applicable
+  distributional quantity.
+- Example: for two Student-`t` markers and one Gaussian marker,
+  - Student-`t` markers share one `sigma` and one `nu` process,
+  - Gaussian marker has its own `sigma` process,
+  - `nu` is only defined for Student-`t`.
+- This is family-level pooling, not marker-level duplication.
+
+If you specify `formulaDist` for a distributional parameter (for example
+`sigma ~ 1 + time`), `joinme` uses that regression structure instead of a
+constant family-shared baseline for that parameter. In that case, summaries
+report regression terms (fixed/random effects) for the distributional model.
+
+This behavior is applied consistently across fitting, standata/stancode,
+prediction, and summary extraction methods.
+
+## Family-scoped `formulaDist` syntax
+
+You can now scope distributional regressions by family using square brackets on
+the LHS:
+
+- Global (applies to all rows where parameter exists):
+  - `sigma ~ 1 + time`
+- Family-scoped (separate regression block):
+  - `sigma[family=student_t] ~ 1 + time`
+  - `sigma[family=gaussian] ~ 1 + x1`
+
+Allowed distributional parameters:
+
+- `sigma`
+- `nu`
+- `phi`
+- `alpha` (aliases: `alpha_skew`, `skew`)
+- `phi_beta`
+- `tau_sde`
+
+Example:
+
+```r
+formulaDist <- list(
+  sigma[family=student_t] ~ 1 + time + (1 | id),
+  sigma[family=gaussian] ~ 1 + x1,
+  nu[family=student_t] ~ 1,
+  alpha_skew[family=skew_normal] ~ 1 + x1,
+  phi[family=negbin2] ~ 1,
+  phi_beta[family=beta] ~ 1,
+  tau_sde[family=skew_double_exponential] ~ 1
+)
+```
+
 ## Installation
 
 ```r
@@ -74,6 +130,15 @@ fit <- joinme(
 
 # Summaries
 summary(fit)
+diagnosis(fit)
+
+# Random effects / covariance (nested by formula block)
+re_fit <- ranef(fit)
+vc_fit <- vcov(fit)
+# Example accessors:
+# re_fit$formulaLong$id
+# re_fit$formulaDist$sigma$allFamilies
+# vc_fit$formulaDist$nu$allFamilies
 
 # Dynamic prediction for one subject
 ndL <- sim$dataLong[sim$dataLong$id == 1, ]
@@ -90,12 +155,25 @@ pred <- posterior_epred(
   seed = 69
 )
 
+# Prediction diagnostics + conditional random-effect summaries
+summary(pred)
+diagnosis(pred)
+
+# Available only when marker covariance depends on id
+if (isTRUE(pred$metadata$marker_vcov_depends_on_id)) {
+  re_pred <- ranef(pred)
+  vc_pred <- vcov(pred)
+}
+
 # Plot longitudinal and survival predictions
 plot(pred, which = c("longitudinal", "survival"), combined = TRUE)
 
 # For multiple subjects with combined=TRUE: returns one combined plot per subject
 # (named list). If combiner packages are unavailable, falls back to the
 # standard subject/outcome nested list.
+# New marker levels in newdataLong are rejected; prediction marker levels must
+# match training levels. Dynamic prediction summaries marginalize latent
+# augmentation noise by averaging across dynpred posterior rows per stored draw.
 ```
 
 Trinh Dong, 2026

@@ -25,7 +25,9 @@ NULL
   
   switch(family,
     "gaussian" = 1L,
+    "normal" = 1L,
     "student_t" = 2L,
+    "student" = 2L,
     "student-t" = 2L,
     "bernoulli" = 3L,
     "binomial" = 4L,

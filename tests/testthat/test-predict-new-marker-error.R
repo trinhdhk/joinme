@@ -1,6 +1,6 @@
 test_that("predict errors on marker levels not seen during fitting", {
   skip_on_cran()
-  skip_if_not_installed("rstan")
+  skip_if_not_installed("cmdstanr")
 
   set.seed(551)
   sim <- simulate_joinme(
@@ -27,7 +27,7 @@ test_that("predict errors on marker levels not seen during fitting", {
     families = "student_t",
     transforms = list(cv_total = list(type = "identity")),
     control = list(
-      engine = "rstan",
+      engine = "cmdstanr",
       chains = 1,
       parallel_chains = 1,
       iter_warmup = 30,

@@ -19,6 +19,20 @@
   // 11 cumulative_logit
   array[D] int<lower=1, upper=11> family_long;
 
+  /* Family-level distributional parameter indexing */
+  int<lower=0> n_family_sigma;                    // number of families using sigma
+  array[D] int<lower=0, upper=n_family_sigma> marker_to_sigma_family;
+  int<lower=0> n_family_nu;                       // number of families using nu
+  array[D] int<lower=0, upper=n_family_nu> marker_to_nu_family;
+  int<lower=0> n_family_phi;                      // number of families using phi
+  array[D] int<lower=0, upper=n_family_phi> marker_to_phi_family;
+  int<lower=0> n_family_alpha;                    // number of families using alpha
+  array[D] int<lower=0, upper=n_family_alpha> marker_to_alpha_family;
+  int<lower=0> n_family_phi_beta;                 // number of families using phi_beta
+  array[D] int<lower=0, upper=n_family_phi_beta> marker_to_phi_beta_family;
+  int<lower=0> n_family_tau_sde;                  // number of families using tau_sde
+  array[D] int<lower=0, upper=n_family_tau_sde> marker_to_tau_sde_family;
+
   /* Distributional regression designs */
   int<lower=0> P_sigma;                // fixed-effect column count for sigma regression
   matrix[N, P_sigma] X_sigma;          // fixed-effect design for sigma

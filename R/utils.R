@@ -41,11 +41,95 @@ suppressPackageStartupMessages({
   X
 }
 
+#' @keywords internal
+.new_dist_scope <- function() {
+  structure(list(default = NULL, by_family = list()), class = "joinme_dist_scope")
+}
+
+#' @keywords internal
+.is_dist_scope <- function(x) {
+  is.list(x) && all(c("default", "by_family") %in% names(x))
+}
+
+#' @keywords internal
+.canonical_dist_param <- function(param_raw) {
+  param <- tolower(trimws(as.character(param_raw)))
+  if (param == "skew") param <- "alpha"
+  if (param %in% c("alpha_skew", "skew_alpha")) param <- "alpha"
+  if (param %in% c("phi_beta", "beta_phi", "precision")) param <- "phi_beta"
+  if (param %in% c("tau", "tau_sde", "skew_sde")) param <- "tau_sde"
+  param
+}
+
+#' @keywords internal
+.canonical_family_name <- function(family_raw) {
+  fam <- tolower(trimws(as.character(family_raw)))
+  fam <- gsub("['\"]", "", fam)
+  fam <- switch(fam,
+    normal = "gaussian",
+    gaussian = "gaussian",
+    student = "student_t",
+    "student-t" = "student_t",
+    fam
+  )
+  fam_code <- tryCatch(.parse_family(fam), error = function(e) NA_integer_)
+  if (!is.finite(fam_code)) {
+    cli::cli_abort(c(
+      x = "Unknown family in distributional formula scope: {.val {family_raw}}.",
+      i = "Use a supported family name, e.g. gaussian, student_t, negbin2, skew_normal, skew_double_exponential."
+    ))
+  }
+  .family_code_to_name(fam_code)
+}
+
+#' @keywords internal
+.parse_dist_lhs <- function(lhs_expr) {
+  lhs_txt <- paste(deparse(lhs_expr, width.cutoff = 500L), collapse = " ")
+  lhs_compact <- gsub("\\s+", "", lhs_txt)
+
+  m <- regexec("^([A-Za-z_][A-Za-z0-9_]*)(?:\\[(.*)\\])?$", lhs_compact)
+  cap <- regmatches(lhs_compact, m)[[1]]
+  if (length(cap) == 0) {
+    cli::cli_abort(c(
+      x = "Invalid distributional regression LHS: {.val {lhs_txt}}.",
+      i = "Use {.code param ~ ...} or {.code param[family=name] ~ ...}."
+    ))
+  }
+
+  param <- .canonical_dist_param(cap[2])
+  if (!param %in% c("sigma", "nu", "phi", "alpha", "phi_beta", "tau_sde")) {
+    cli::cli_abort(c(
+      x = "Unknown distributional parameter: {.val {cap[2]}}.",
+      i = "Allowed parameters: sigma, nu, phi, alpha (or alpha_skew/skew), phi_beta, tau_sde."
+    ))
+  }
+
+  family_name <- NULL
+  scope_txt <- cap[3]
+  if (!is.na(scope_txt) && nzchar(scope_txt)) {
+    scope_m <- regexec("^(family|fam)=([A-Za-z0-9_.-]+)$", scope_txt)
+    scope_cap <- regmatches(scope_txt, scope_m)[[1]]
+    if (length(scope_cap) == 0) {
+      cli::cli_abort(c(
+        x = "Invalid distributional formula scope: {.val [{scope_txt}]}",
+        i = "Use {.code [family=<name>]} (example: {.code sigma[family=student_t] ~ 1 + time})."
+      ))
+    }
+    family_name <- .canonical_family_name(scope_cap[3])
+  }
+
+  list(param = param, family = family_name)
+}
+
 #' Normalize distributional formula input
 #' @keywords internal
 .normalize_formula_dist <- function(formulaDist) {
   # Normalize list input to named distributional formulas
   if (is.null(formulaDist)) return(list())
+  if (is.list(formulaDist) && length(formulaDist) > 0 &&
+      all(vapply(formulaDist, .is_dist_scope, logical(1)))) {
+    return(formulaDist)
+  }
   if (inherits(formulaDist, "formula") || is.character(formulaDist)) {
     formulaDist <- list(formulaDist)
   }
@@ -78,43 +162,140 @@ suppressPackageStartupMessages({
       ))
     }
 
-    lhs <- all.vars(f[[2]])
-    if (length(lhs) != 1) {
-      cli::cli_abort(c(
-        x = "Distributional regression LHS must be a single parameter name.",
-        i = "Allowed: sigma, nu, phi, alpha (or skew)."
-      ))
-    }
-    param <- tolower(lhs)
-    if (param == "skew") param <- "alpha"
-    if (param %in% c("phi_beta", "beta_phi", "precision")) param <- "phi_beta"
-    if (param %in% c("tau", "tau_sde", "skew_sde")) param <- "tau_sde"
-    if (!param %in% c("sigma", "nu", "phi", "alpha", "phi_beta", "tau_sde")) {
-      cli::cli_abort(c(
-        x = "Unknown distributional parameter: {lhs}.",
-        i = "Use one of: sigma, nu, phi, alpha (or skew), phi_beta, tau_sde."
-      ))
+    lhs_info <- .parse_dist_lhs(f[[2]])
+    param <- lhs_info$param
+    family_name <- lhs_info$family
+
+    if (has_name) {
+      name_lhs <- stats::as.formula(paste0(nm, " ~ 1"))[[2]]
+      name_info <- .parse_dist_lhs(name_lhs)
+      if (!identical(name_info$param, param) || !identical(name_info$family, family_name)) {
+        cli::cli_abort(c(
+          x = "Distributional formula name '{nm}' does not match LHS '{paste(deparse(f[[2]]), collapse = ' ')}'.",
+          i = "Use matching list names (including optional family scope), or leave entries unnamed."
+        ))
+      }
     }
 
-    if (has_name && tolower(nm) != param) {
-      cli::cli_abort(c(
-        x = "Distributional formula name '{nm}' does not match LHS '{param}'.",
-        i = "Use names matching the LHS, or leave list entries unnamed."
-      ))
+    if (is.null(out[[param]])) out[[param]] <- .new_dist_scope()
+    if (is.null(family_name)) {
+      out[[param]]$default <- f
+    } else {
+      out[[param]]$by_family[[family_name]] <- f
     }
-    out[[param]] <- f
   }
 
   out
 }
 
+#' @keywords internal
+.validate_dist_formula_scopes <- function(dist_formulas, family_names_present) {
+  if (length(dist_formulas) == 0) return(invisible(TRUE))
+  family_names_present <- unique(as.character(family_names_present %||% character(0)))
+
+  for (param_name in names(dist_formulas)) {
+    spec <- dist_formulas[[param_name]]
+    if (!.is_dist_scope(spec)) next
+    scoped_families <- names(spec$by_family %||% list())
+    if (length(scoped_families) == 0) next
+
+    missing_families <- setdiff(scoped_families, family_names_present)
+    if (length(missing_families) > 0) {
+      cli::cli_abort(c(
+        x = "Distributional formula scope for {.val {param_name}} references family/families not present in data: {.val {paste(missing_families, collapse = ', ')}}.",
+        i = "Available families: {.val {paste(family_names_present, collapse = ', ')}}."
+      ))
+    }
+
+    bad_param_families <- scoped_families[!vapply(scoped_families, function(fm) {
+      param_name %in% .family_distrib_params(.parse_family(fm))
+    }, logical(1))]
+
+    if (length(bad_param_families) > 0) {
+      cli::cli_abort(c(
+        x = "Distributional parameter {.val {param_name}} is not used by family/families: {.val {paste(bad_param_families, collapse = ', ')}}.",
+        i = "Use supported combinations only (e.g., nu for student_t, phi for negbin2, phi_beta for beta)."
+      ))
+    }
+  }
+
+  invisible(TRUE)
+}
+
+#' @keywords internal
+.family_by_row_from_marker <- function(marker_values, marker_levels, family_codes) {
+  marker_values <- as.character(marker_values)
+  marker_levels <- as.character(marker_levels)
+  family_codes <- as.integer(family_codes)
+  if (length(marker_levels) != length(family_codes)) {
+    cli::cli_abort(c(
+      x = "Marker levels and family code lengths do not match.",
+      i = "Cannot derive row-level family labels for distributional formulas."
+    ))
+  }
+  family_names <- vapply(family_codes, .family_code_to_name, character(1))
+  fam_map <- setNames(family_names, marker_levels)
+  fam <- unname(fam_map[marker_values])
+  if (any(is.na(fam))) {
+    cli::cli_abort(c(
+      x = "Cannot map marker value(s) to family labels: {.val {paste(sort(unique(marker_values[is.na(fam)])), collapse = ', ')}}.",
+      i = "Ensure marker levels align with fitted marker-family mapping."
+    ))
+  }
+  fam
+}
+
 #' Build distributional design matrix
 #' @keywords internal
-.build_dist_matrix <- function(formula, data) {
+.build_dist_matrix <- function(formula, data, family_by_row = NULL) {
   # Construct fixed-effect matrix for distributional regression
   if (is.null(formula)) {
     return(list(P = 0L, X = matrix(0.0, nrow(data), 0), cols = character(0)))
   }
+
+  if (.is_dist_scope(formula)) {
+    x_parts <- list()
+    col_parts <- character(0)
+
+    if (!is.null(formula$default)) {
+      base_default <- .build_dist_matrix(formula$default, data)
+      if (base_default$P > 0) {
+        Xd <- base_default$X
+        colnames(Xd) <- paste0("all::", base_default$cols)
+        x_parts <- c(x_parts, list(Xd))
+        col_parts <- c(col_parts, colnames(Xd))
+      }
+    }
+
+    fam_specs <- formula$by_family %||% list()
+    if (length(fam_specs) > 0) {
+      if (is.null(family_by_row) || length(family_by_row) != nrow(data)) {
+        cli::cli_abort(c(
+          x = "Family-scoped distributional formulas require {.arg family_by_row} aligned with data rows.",
+          i = "Provide one family label per row when building scoped distributional matrices."
+        ))
+      }
+      family_by_row <- as.character(family_by_row)
+
+      for (family_name in names(fam_specs)) {
+        base_fam <- .build_dist_matrix(fam_specs[[family_name]], data)
+        if (base_fam$P == 0) next
+        gate <- as.numeric(family_by_row == family_name)
+        Xf <- base_fam$X * gate
+        colnames(Xf) <- paste0("family=", family_name, "::", base_fam$cols)
+        x_parts <- c(x_parts, list(Xf))
+        col_parts <- c(col_parts, colnames(Xf))
+      }
+    }
+
+    if (length(x_parts) == 0) {
+      return(list(P = 0L, X = matrix(0.0, nrow(data), 0), cols = character(0)))
+    }
+    X <- do.call(cbind, x_parts)
+    storage.mode(X) <- "double"
+    return(list(P = ncol(X), X = X, cols = col_parts))
+  }
+
   if (!inherits(formula, "formula")) formula <- stats::as.formula(formula)
   rhs <- stats::update(formula, . ~ .)
   rhs[[2]] <- NULL
@@ -130,6 +311,51 @@ suppressPackageStartupMessages({
   if (is.null(formula)) {
     return(list(n_re = 0L, K = integer(0), G = integer(0), Z = list(), J = list(), terms = character(0)))
   }
+
+  if (.is_dist_scope(formula)) {
+    merge_re <- function(base, add) {
+      if (is.null(add) || add$n_re == 0L) return(base)
+      list(
+        n_re = base$n_re + add$n_re,
+        K = c(base$K, add$K),
+        G = c(base$G, add$G),
+        Z = c(base$Z, add$Z),
+        J = c(base$J, add$J),
+        terms = c(base$terms, add$terms)
+      )
+    }
+
+    out <- list(n_re = 0L, K = integer(0), G = integer(0), Z = list(), J = list(), terms = character(0))
+
+    if (!is.null(formula$default)) {
+      out <- merge_re(out, .build_dist_re_terms(formula$default, data))
+    }
+
+    fam_specs <- formula$by_family %||% list()
+    if (length(fam_specs) > 0) {
+      family_by_row <- attr(data, "joinme_family_by_row", exact = TRUE)
+      if (is.null(family_by_row) || length(family_by_row) != nrow(data)) {
+        cli::cli_abort(c(
+          x = "Family-scoped distributional random effects require row-level family labels.",
+          i = "Attach {.code attr(data, 'joinme_family_by_row')} before parsing random effects."
+        ))
+      }
+      family_by_row <- as.character(family_by_row)
+
+      for (family_name in names(fam_specs)) {
+        cur <- .build_dist_re_terms(fam_specs[[family_name]], data)
+        if (cur$n_re == 0L) next
+        gate <- as.numeric(family_by_row == family_name)
+        cur$Z <- lapply(cur$Z, function(Zm) {
+          Zm * gate
+        })
+        cur$terms <- paste0("family=", family_name, "::", cur$terms)
+        out <- merge_re(out, cur)
+      }
+    }
+    return(out)
+  }
+
   if (!inherits(formula, "formula")) formula <- stats::as.formula(formula)
 
   f_exp <- reformulas::expandDoubleVerts(formula)
@@ -699,8 +925,8 @@ suppressPackageStartupMessages({
   lines <- readLines(file, warn = FALSE)
   out <- character(0)
   for (line in lines) {
-    if (grepl("^\\s*#include\\s+", line)) {
-      inc <- sub("^\\s*#include\\s+\"?([^\"\\s]+)\"?.*$", "\\1", line)
+    if (grepl("^[[:space:]]*#include[[:space:]]+", line)) {
+      inc <- sub("^[[:space:]]*#include[[:space:]]+\"?([^\"[:space:]]+)\"?.*$", "\\1", line)
       inc_path <- file.path(dirname(file), inc)
       if (file.exists(inc_path)) {
         out <- c(out, .read_stan_with_includes(inc_path, visited = visited))

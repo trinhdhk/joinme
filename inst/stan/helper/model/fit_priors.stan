@@ -117,13 +117,12 @@
   }
   
   /* Distributional parameters (marker-specific + ordinal cutpoints) */
-  sigma_y ~ exponential(1);
-  sigma_marker ~ exponential(1);
-  nu_marker ~ gamma(2, 1);
-  phi_nb_marker ~ exponential(1);
-  alpha_skew_marker ~ normal(0, 2);
-  phi_beta_marker ~ exponential(1);
-  tau_sde_marker ~ beta(2, 2);
+  sigma_family ~ exponential(1);
+  nu_family ~ gamma(2, 1);
+  phi_family ~ exponential(1);
+  alpha_family ~ normal(0, 2);
+  phi_beta_family ~ exponential(1);
+  tau_sde_family ~ beta(2, 2);
   cutpoints_ord ~ normal(0, 2);
   
   /* Association priors (mean-side) */

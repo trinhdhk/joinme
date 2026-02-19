@@ -4,7 +4,7 @@
 \alias{summary.JoinMeFit}
 \title{Summarize a joinme object}
 \usage{
-\method{summary}{JoinMeFit}(object, draws = NULL, seed = 1, digits = 3, include_vcov = FALSE, ...)
+\method{summary}{JoinMeFit}(object, draws = NULL, seed = 1, digits = 3, include_vcov = TRUE, ...)
 }
 \arguments{
 \item{object}{A joinme fit object.}

@@ -30,8 +30,8 @@ joinme_standata(
   allow_marker_crosscorr = 1L,
   shrinkage = 2L,
   marker_weights = NULL,
-  estimate_marker_weights = FALSE,
-  marker_weight_scale = 0.5,
+  estimate_marker_weights = TRUE,
+  marker_weight_scale = 1,
   flag_resid_dim = 0L,
   basehaz = c("bs", "ns", "formula"),
   n_knots = 5L,
@@ -114,14 +114,13 @@ required by that type (see \code{build_standata_transforms()}).}
 for marker-specific association components. These weights are applied to both
 current value (CV) and current slope (CS) marker summaries. Weights may be
 positive or negative. Internally, base weights are rescaled to unit RMS
-(\eqn{\sqrt{\mathrm{mean}(w^2)} = 1}) for numerical stability and better
-identifiability. When NULL, equal base weights are used.}
+(\code{sqrt(mean(w^2)) = 1}) for numerical stability and better identifiability.
+When NULL, equal base weights are used.}
 
 \item{estimate_marker_weights}{Logical; if TRUE, estimate marker weights via a
 signed additive perturbation around base weights. The effective weights are
 RMS-stabilized so composition can change while overall scale remains stable.
-Latent perturbations follow Normal or Laplace priors depending on
-\code{shrinkage}.}
+Latent perturbations follow Normal or Laplace priors depending on \code{shrinkage}.}
 
 \item{marker_weight_scale}{Non-negative prior scale for marker-weight shrinkage.}
 

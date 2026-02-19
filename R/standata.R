@@ -270,7 +270,46 @@ joinme_standata <- function(
   } else {
     family_codes <- rep(1L, D)  # Default: all gaussian
   }
-  family_names <- .family_code_to_name(family_codes)
+  family_names <- vapply(family_codes, .family_code_to_name, character(1))
+
+  # Family-level distributional parameter indexing.
+  #
+  # Goal:
+  # - for each distributional parameter (sigma, nu, phi, alpha, phi_beta,
+  #   tau_sde), build one shared parameter per unique family that requires it,
+  # - map each marker to its family-level parameter index,
+  # - use index 0 for markers/families that do not use that parameter.
+  .build_family_param_index <- function(param_name) {
+    need_param <- vapply(family_codes, function(fc) {
+      param_name %in% .family_distrib_params(fc)
+    }, logical(1))
+    fam_codes <- sort(unique(as.integer(family_codes[need_param])))
+    map <- integer(D)
+    if (length(fam_codes) > 0) {
+      for (d in seq_len(D)) {
+        if (need_param[d]) {
+          map[d] <- match(as.integer(family_codes[d]), fam_codes)
+        }
+      }
+    }
+    list(
+      n = as.integer(length(fam_codes)),
+      marker_to = as.integer(map),
+      family_codes = as.integer(fam_codes),
+      family_names = if (length(fam_codes) > 0) {
+        vapply(fam_codes, .family_code_to_name, character(1))
+      } else {
+        character(0)
+      }
+    )
+  }
+
+  fam_sigma <- .build_family_param_index("sigma")
+  fam_nu <- .build_family_param_index("nu")
+  fam_phi <- .build_family_param_index("phi")
+  fam_alpha <- .build_family_param_index("alpha")
+  fam_phi_beta <- .build_family_param_index("phi_beta")
+  fam_tau_sde <- .build_family_param_index("tau_sde")
 
   vcov_diag_link_code <- if (vcov_diag_link == "exp") 1L else 0L
 
@@ -301,6 +340,8 @@ joinme_standata <- function(
   }
   
   dist_formulas <- .normalize_formula_dist(formulaDist)
+  family_names_present <- vapply(family_codes, .family_code_to_name, character(1))
+  .validate_dist_formula_scopes(dist_formulas, family_names_present)
   allowed_dist <- unique(unlist(lapply(family_codes, .family_distrib_params)))
   if (length(dist_formulas) > 0) {
     bad <- setdiff(names(dist_formulas), allowed_dist)
@@ -329,13 +370,19 @@ joinme_standata <- function(
   # - distributional regression matrices follow the same scaled timeline
   dl <- dataLong
   dl[[time_var]] <- dl$t_scaled
+  family_by_row <- .family_by_row_from_marker(
+    marker_values = dl[[marker_var]],
+    marker_levels = marker_levels,
+    family_codes = family_codes
+  )
+  attr(dl, "joinme_family_by_row") <- family_by_row
 
-  dist_sigma <- .build_dist_matrix(dist_formulas$sigma, dl)
-  dist_nu <- .build_dist_matrix(dist_formulas$nu, dl)
-  dist_phi <- .build_dist_matrix(dist_formulas$phi, dl)
-  dist_alpha <- .build_dist_matrix(dist_formulas$alpha, dl)
-  dist_phi_beta <- .build_dist_matrix(dist_formulas$phi_beta, dl)
-  dist_tau_sde <- .build_dist_matrix(dist_formulas$tau_sde, dl)
+  dist_sigma <- .build_dist_matrix(dist_formulas$sigma, dl, family_by_row = family_by_row)
+  dist_nu <- .build_dist_matrix(dist_formulas$nu, dl, family_by_row = family_by_row)
+  dist_phi <- .build_dist_matrix(dist_formulas$phi, dl, family_by_row = family_by_row)
+  dist_alpha <- .build_dist_matrix(dist_formulas$alpha, dl, family_by_row = family_by_row)
+  dist_phi_beta <- .build_dist_matrix(dist_formulas$phi_beta, dl, family_by_row = family_by_row)
+  dist_tau_sde <- .build_dist_matrix(dist_formulas$tau_sde, dl, family_by_row = family_by_row)
 
   re_sigma <- .pad_re_terms(.build_dist_re_terms(dist_formulas$sigma, dl), nrow(dl))
   re_nu <- .pad_re_terms(.build_dist_re_terms(dist_formulas$nu, dl), nrow(dl))
@@ -628,6 +675,18 @@ joinme_standata <- function(
     y_int = as.integer(y_int),
     trials = as.integer(trials),
     family_long = as.integer(family_long),
+    n_family_sigma = fam_sigma$n,
+    marker_to_sigma_family = fam_sigma$marker_to,
+    n_family_nu = fam_nu$n,
+    marker_to_nu_family = fam_nu$marker_to,
+    n_family_phi = fam_phi$n,
+    marker_to_phi_family = fam_phi$marker_to,
+    n_family_alpha = fam_alpha$n,
+    marker_to_alpha_family = fam_alpha$marker_to,
+    n_family_phi_beta = fam_phi_beta$n,
+    marker_to_phi_beta_family = fam_phi_beta$marker_to,
+    n_family_tau_sde = fam_tau_sde$n,
+    marker_to_tau_sde_family = fam_tau_sde$marker_to,
     P = as.integer(P),
     X_obs = X_obs,
     R_id = as.integer(R_id),
@@ -663,8 +722,8 @@ joinme_standata <- function(
     P_sigma = as.integer(dist_sigma$P),
     X_sigma = dist_sigma$X,
     n_re_sigma = as.integer(re_sigma$n_re),
-    K_sigma = as.integer(re_sigma$K),
-    G_sigma = as.integer(re_sigma$G),
+    K_sigma = as.array(as.integer(re_sigma$K)),
+    G_sigma = as.array(as.integer(re_sigma$G)),
     K_sigma_max = as.integer(re_sigma$K_max),
     G_sigma_max = as.integer(re_sigma$G_max),
     Z_sigma = re_sigma$Z,
@@ -672,8 +731,8 @@ joinme_standata <- function(
     P_nu = as.integer(dist_nu$P),
     X_nu = dist_nu$X,
     n_re_nu = as.integer(re_nu$n_re),
-    K_nu = as.integer(re_nu$K),
-    G_nu = as.integer(re_nu$G),
+    K_nu = as.array(as.integer(re_nu$K)),
+    G_nu = as.array(as.integer(re_nu$G)),
     K_nu_max = as.integer(re_nu$K_max),
     G_nu_max = as.integer(re_nu$G_max),
     Z_nu = re_nu$Z,
@@ -681,8 +740,8 @@ joinme_standata <- function(
     P_phi = as.integer(dist_phi$P),
     X_phi = dist_phi$X,
     n_re_phi = as.integer(re_phi$n_re),
-    K_phi = as.integer(re_phi$K),
-    G_phi = as.integer(re_phi$G),
+    K_phi = as.array(as.integer(re_phi$K)),
+    G_phi = as.array(as.integer(re_phi$G)),
     K_phi_max = as.integer(re_phi$K_max),
     G_phi_max = as.integer(re_phi$G_max),
     Z_phi = re_phi$Z,
@@ -690,8 +749,8 @@ joinme_standata <- function(
     P_alpha = as.integer(dist_alpha$P),
     X_alpha = dist_alpha$X,
     n_re_alpha = as.integer(re_alpha$n_re),
-    K_alpha = as.integer(re_alpha$K),
-    G_alpha = as.integer(re_alpha$G),
+    K_alpha = as.array(as.integer(re_alpha$K)),
+    G_alpha = as.array(as.integer(re_alpha$G)),
     K_alpha_max = as.integer(re_alpha$K_max),
     G_alpha_max = as.integer(re_alpha$G_max),
     Z_alpha = re_alpha$Z,
@@ -699,8 +758,8 @@ joinme_standata <- function(
     P_phi_beta = as.integer(dist_phi_beta$P),
     X_phi_beta = dist_phi_beta$X,
     n_re_phi_beta = as.integer(re_phi_beta$n_re),
-    K_phi_beta = as.integer(re_phi_beta$K),
-    G_phi_beta = as.integer(re_phi_beta$G),
+    K_phi_beta = as.array(as.integer(re_phi_beta$K)),
+    G_phi_beta = as.array(as.integer(re_phi_beta$G)),
     K_phi_beta_max = as.integer(re_phi_beta$K_max),
     G_phi_beta_max = as.integer(re_phi_beta$G_max),
     Z_phi_beta = re_phi_beta$Z,
@@ -708,8 +767,8 @@ joinme_standata <- function(
     P_tau_sde = as.integer(dist_tau_sde$P),
     X_tau_sde = dist_tau_sde$X,
     n_re_tau_sde = as.integer(re_tau_sde$n_re),
-    K_tau_sde = as.integer(re_tau_sde$K),
-    G_tau_sde = as.integer(re_tau_sde$G),
+    K_tau_sde = as.array(as.integer(re_tau_sde$K)),
+    G_tau_sde = as.array(as.integer(re_tau_sde$G)),
     K_tau_sde_max = as.integer(re_tau_sde$K_max),
     G_tau_sde_max = as.integer(re_tau_sde$G_max),
     Z_tau_sde = re_tau_sde$Z,
@@ -759,13 +818,13 @@ joinme_standata <- function(
     # --------------------------
     tmax = as.numeric(tmax),
     n_time_beta = as.integer(time_meta$n_time_beta),
-    idx_time_beta = as.integer(time_meta$idx_time_beta),
+    idx_time_beta = as.array(as.integer(time_meta$idx_time_beta)),
     n_time_uid = as.integer(time_meta$n_time_uid),
-    idx_time_uid = as.integer(time_meta$idx_time_uid),
+    idx_time_uid = as.array(as.integer(time_meta$idx_time_uid)),
     n_time_vmk = as.integer(time_meta$n_time_vmk),
-    idx_time_vmk = as.integer(time_meta$idx_time_vmk),
+    idx_time_vmk = as.array(as.integer(time_meta$idx_time_vmk)),
     n_time_widm = as.integer(time_meta$n_time_widm),
-    idx_time_widm = as.integer(time_meta$idx_time_widm),
+    idx_time_widm = as.array(as.integer(time_meta$idx_time_widm)),
 
     # --------------------------
     # Other metadata
@@ -782,6 +841,18 @@ joinme_standata <- function(
     marker_weight_scale = as.numeric(marker_weight_scale),
     family_codes = family_codes,
     family_names = family_names,
+    family_sigma_codes = fam_sigma$family_codes,
+    family_sigma_names = fam_sigma$family_names,
+    family_nu_codes = fam_nu$family_codes,
+    family_nu_names = fam_nu$family_names,
+    family_phi_codes = fam_phi$family_codes,
+    family_phi_names = fam_phi$family_names,
+    family_alpha_codes = fam_alpha$family_codes,
+    family_alpha_names = fam_alpha$family_names,
+    family_phi_beta_codes = fam_phi_beta$family_codes,
+    family_phi_beta_names = fam_phi_beta$family_names,
+    family_tau_sde_codes = fam_tau_sde$family_codes,
+    family_tau_sde_names = fam_tau_sde$family_names,
     tf_compositions = NULL,
     basehaz = basehaz,
     n_knots = n_knots,

@@ -11,7 +11,8 @@
 R6 classes used to hold joinme fit and prediction results with mutable state.
 
 \strong{JoinMeFit}: holds fitted model, Stan data, and formulas.
-Public fields: fit, stan_data, formulaLong, formulaEvent, formulaVcov, config, call, tmax.
+Public fields: fit, stan_data, formulaLong, formulaEvent, formulaVcov, config, call, tmax,
+dataLong, dataEvent.
 Methods: initialize, cache_get, cache_set.
 
 \strong{JoinMeDynPred}: holds dynamic predictions and metadata.

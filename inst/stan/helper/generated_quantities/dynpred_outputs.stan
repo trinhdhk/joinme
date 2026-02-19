@@ -169,18 +169,16 @@ for (k in 1 : n_draws) {
     if (family_long[d] == 1) {
       // Gaussian
       real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_pred[n], beta_sigma[k]))
-                 : ((flag_resid_dim == 1) ? sigma_marker_specific[k][d]
-                    : sigma_y_shared[k]);
+             : sigma_family[k][marker_to_sigma_family[d]];
       // sig: residual scale for Gaussian prediction
       y_pred_epred[k, n] = eta_long;
       y_pred[k, n] = normal_rng(eta_long, sig);
     } else if (family_long[d] == 2) {
       // Student-t
       real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_pred[n], beta_sigma[k]))
-                 : ((flag_resid_dim == 1) ? sigma_marker_specific[k][d]
-                    : sigma_y_shared[k]);
+             : sigma_family[k][marker_to_sigma_family[d]];
       real nu = (P_nu > 0) ? (2 + exp(dot_product(X_nu_pred[n], beta_nu[k])))
-                : nu_marker[k][d];
+            : nu_family[k][marker_to_nu_family[d]];
       // nu: degrees of freedom for Student-t prediction
       y_pred_epred[k, n] = eta_long;
       y_pred[k, n] = student_t_rng(nu, eta_long, sig);
@@ -205,42 +203,39 @@ for (k in 1 : n_draws) {
       y_pred_epred[k, n] = mu;
       {
         real phi = (P_phi > 0) ? exp(dot_product(X_phi_pred[n], beta_phi[k]))
-                   : phi_nb_marker[k][d];
+             : phi_family[k][marker_to_phi_family[d]];
         // phi: dispersion for NegBin2
         y_pred[k, n] = neg_binomial_2_rng(mu, phi);
       }
     } else if (family_long[d] == 7) {
       // Skew-normal
       real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_pred[n], beta_sigma[k]))
-                 : ((flag_resid_dim == 1) ? sigma_marker_specific[k][d]
-                    : sigma_y_shared[k]);
+             : sigma_family[k][marker_to_sigma_family[d]];
       real alpha = (P_alpha > 0) ? dot_product(X_alpha_pred[n], beta_alpha[k])
-                  : alpha_skew_marker[k][d];
+          : alpha_family[k][marker_to_alpha_family[d]];
       // sig: residual scale, alpha: skew parameter
       y_pred_epred[k, n] = eta_long;
       y_pred[k, n] = skew_normal_rng(eta_long, sig, alpha);
     } else if (family_long[d] == 8) {
       // Double exponential (Laplace)
       real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_pred[n], beta_sigma[k]))
-                 : ((flag_resid_dim == 1) ? sigma_marker_specific[k][d]
-                    : sigma_y_shared[k]);
+             : sigma_family[k][marker_to_sigma_family[d]];
       // sig: Laplace scale
       y_pred_epred[k, n] = eta_long;
       y_pred[k, n] = double_exponential_rng(eta_long, sig);
     } else if (family_long[d] == 9) {
       // Skew double exponential (asymmetric Laplace)
-      real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_pred[n], beta_sigma[k]))
-                 : ((flag_resid_dim == 1) ? sigma_marker_specific[k][d]
-                    : sigma_y_shared[k]);
+        real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_pred[n], beta_sigma[k]))
+             : sigma_family[k][marker_to_sigma_family[d]];
       real tau_sde = (P_tau_sde > 0) ? inv_logit(dot_product(X_tau_sde_pred[n], beta_tau_sde[k]))
-                     : tau_sde_marker[k][d];
+               : tau_sde_family[k][marker_to_tau_sde_family[d]];
       // sig: scale, tau_sde: skewness in (0,1)
       y_pred_epred[k, n] = eta_long;
       y_pred[k, n] = skew_double_exponential_rng(eta_long, sig, tau_sde);
     } else if (family_long[d] == 10) {
       // Beta
       real phi_beta = (P_phi_beta > 0) ? exp(dot_product(X_phi_beta_pred[n], beta_phi_beta[k]))
-                      : phi_beta_marker[k][d];
+                      : phi_beta_family[k][marker_to_phi_beta_family[d]];
       real mu = inv_logit(eta_long);
       real shape1 = fmax(mu * phi_beta, 1e-6);
       real shape2 = fmax((1 - mu) * phi_beta, 1e-6);

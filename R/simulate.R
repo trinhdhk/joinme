@@ -119,6 +119,7 @@ simulate_joinme_joint_student_t_cvtotal <- function(
   set.seed(seed)
 
   dist_formulas <- .normalize_formula_dist(formulaDist)
+  .validate_dist_formula_scopes(dist_formulas, "student_t")
 
   # Event-level data (exogenous)
   dataEvent <- data.frame(
@@ -294,7 +295,7 @@ simulate_joinme_joint_student_t_cvtotal <- function(
         sigma_fun(i, t_obs, dataEvent)
       }
       if (is.null(sigma_fun) && !is.null(dist_formulas$sigma) && !is.null(beta_sigma)) {
-        X_sigma <- .build_dist_matrix(dist_formulas$sigma, df)$X
+        X_sigma <- .build_dist_matrix(dist_formulas$sigma, df, family_by_row = rep("student_t", nrow(df)))$X
         sig <- as.numeric(exp(X_sigma %*% beta_sigma))
       }
       if (length(sig) != length(mu)) {
@@ -302,7 +303,7 @@ simulate_joinme_joint_student_t_cvtotal <- function(
       }
       nu_vec <- rep(nu, length(mu))
       if (!is.null(dist_formulas$nu) && !is.null(beta_nu)) {
-        X_nu <- .build_dist_matrix(dist_formulas$nu, df)$X
+        X_nu <- .build_dist_matrix(dist_formulas$nu, df, family_by_row = rep("student_t", nrow(df)))$X
         nu_vec <- 2 + exp(as.numeric(X_nu %*% beta_nu))
       }
       df$y <- vapply(seq_along(mu), function(k) mu[k] + rt(1, df = nu_vec[k]) * sig[k], numeric(1))
@@ -374,6 +375,16 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #' @param formulaLong Longitudinal formula (same role as in `joinme()`).
 #' @param formulaEvent Event/survival formula (same role as in `joinme()`).
 #' @param formulaDist Optional distributional regression formulas (same role as in `joinme()`).
+#'   Supported LHS parameters are `sigma`, `nu`, `phi`, `alpha` (aliases:
+#'   `alpha_skew`, `skew`), `phi_beta`, and `tau_sde`.
+#'
+#'   Family-scoped syntax is supported with square brackets:
+#'   `param[family=<name>] ~ ...`, for example
+#'   `sigma[family=student_t] ~ 1 + time`.
+#'
+#'   If no bracket is used (e.g. `sigma ~ 1 + time`), the formula applies to all
+#'   rows where that parameter exists. If a bracket is used, it only applies to
+#'   rows of that family and is estimated separately from other scopes.
 #' @param formulaAssoc Optional formula for association terms in hazard, e.g. `~ cv_total + vcov`.
 #'   If provided, it overrides `assoc`.
 #' @param n_id Number of subjects.
@@ -413,6 +424,20 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   with `joinme_standata()` defaults.
 #'
 #' @return list(dataLong, dataEvent, true_params, marker_info, helpers, tmax)
+#'
+#' @examples
+#' \dontrun{
+#' sim <- simulate_joinme(
+#'   n_id = 30,
+#'   families = c("gaussian", "student_t", "skew_normal"),
+#'   formulaDist = list(
+#'     sigma[family=gaussian] ~ 1 + x1,
+#'     sigma[family=student_t] ~ 1 + time,
+#'     nu[family=student_t] ~ 1,
+#'     alpha_skew[family=skew_normal] ~ 1 + x1
+#'   )
+#' )
+#' }
 #' @export
 simulate_joinme <- function(
   formulaLong = y ~ 1 + time + x1 +
@@ -985,8 +1010,10 @@ simulate_joinme <- function(
   trials_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "trials", 10L), numeric(1))
 
   dist_formulas <- .normalize_formula_dist(formulaDist)
+  family_names_present <- vapply(.parse_family(unique(families)), .family_code_to_name, character(1))
+  .validate_dist_formula_scopes(dist_formulas, family_names_present)
   for (param_name in names(dist_formulas)) {
-    X_param <- .build_dist_matrix(dist_formulas[[param_name]], dataLong)$X
+    X_param <- .build_dist_matrix(dist_formulas[[param_name]], dataLong, family_by_row = family_by_row)$X
     beta_param <- .sim_align_coef(colnames(X_param), dist_coefs[[param_name]], sd_default = 0.15, intercept_default = 0.0)
     eta_param <- as.numeric(X_param %*% beta_param)
 

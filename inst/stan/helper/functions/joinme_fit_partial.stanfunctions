@@ -298,6 +298,18 @@ real partial_joinme(
     array[] int y_int,
     array[] int trials,
     array[] int family_long,
+    int n_family_sigma,
+    array[] int marker_to_sigma_family,
+    int n_family_nu,
+    array[] int marker_to_nu_family,
+    int n_family_phi,
+    array[] int marker_to_phi_family,
+    int n_family_alpha,
+    array[] int marker_to_alpha_family,
+    int n_family_phi_beta,
+    array[] int marker_to_phi_beta_family,
+    int n_family_tau_sde,
+    array[] int marker_to_tau_sde_family,
     int flag_resid_dim,
     int use_tau_sde_fixed,
     real tau_sde_fixed,
@@ -372,13 +384,12 @@ real partial_joinme(
     array[] vector v_marker,
     array[,] vector w_idscaled,
     array[] vector wbar_i,
-    real sigma_y,
-    vector sigma_marker,
-    vector nu_marker,
-    vector phi_nb_marker,
-    vector alpha_skew_marker,
-    vector phi_beta_marker,
-    vector tau_sde_marker,
+    vector sigma_family,
+    vector nu_family,
+    vector phi_family,
+    vector alpha_family,
+    vector phi_beta_family,
+    vector tau_sde_family,
     int K_ord,
     vector cutpoints_ord,
     int p_w,
@@ -538,8 +549,8 @@ real partial_joinme(
         
         // Compute sigma from regression or use marker/global constant
         real sig = (P_sigma > 0 || n_re_sigma > 0)
-                   ? exp(eta_sigma)  // If regression present, exponentiate to ensure sigma > 0
-                   : ((flag_resid_dim == 1) ? sigma_marker[d] : sigma_y);  // Else use constant
+             ? exp(eta_sigma)
+             : sigma_family[marker_to_sigma_family[d]];
         // sig: residual scale
         
         lp += normal_lpdf(y_real[n] | eta_long, sig);
@@ -561,8 +572,8 @@ real partial_joinme(
           }
         }
         real sig = (P_sigma > 0 || n_re_sigma > 0)
-                   ? exp(eta_sigma)
-                   : ((flag_resid_dim == 1) ? sigma_marker[d] : sigma_y);
+             ? exp(eta_sigma)
+             : sigma_family[marker_to_sigma_family[d]];
         // sig: residual scale
         
         // --- Compute nu (degrees of freedom) ---
@@ -576,7 +587,7 @@ real partial_joinme(
             eta_nu += dot_product(Z_nu[j][n, 1:K_nu[j]], b);
           }
         }
-        real nu = (P_nu > 0 || n_re_nu > 0) ? (2 + exp(eta_nu)) : nu_marker[d];
+        real nu = (P_nu > 0 || n_re_nu > 0) ? (2 + exp(eta_nu)) : nu_family[marker_to_nu_family[d]];
         // nu: degrees of freedom
         
         lp += student_t_lpdf(y_real[n] | nu, eta_long, sig);
@@ -614,7 +625,7 @@ real partial_joinme(
             eta_phi += dot_product(Z_phi[j][n, 1:K_phi[j]], b);
           }
         }
-        real phi = (P_phi > 0 || n_re_phi > 0) ? exp(eta_phi) : phi_nb_marker[d];
+        real phi = (P_phi > 0 || n_re_phi > 0) ? exp(eta_phi) : phi_family[marker_to_phi_family[d]];
         // phi: negbin dispersion
         
         lp += neg_binomial_2_log_lpmf(y_int[n] | eta_long, phi);
@@ -635,8 +646,8 @@ real partial_joinme(
           }
         }
         real sig = (P_sigma > 0 || n_re_sigma > 0)
-                   ? exp(eta_sigma)
-                   : ((flag_resid_dim == 1) ? sigma_marker[d] : sigma_y);
+             ? exp(eta_sigma)
+             : sigma_family[marker_to_sigma_family[d]];
         // sig: residual scale
         
         // Compute alpha (skewness parameter, unrestricted real)
@@ -649,7 +660,7 @@ real partial_joinme(
             eta_alpha += dot_product(Z_alpha[j][n, 1:K_alpha[j]], b);
           }
         }
-        real alpha = (P_alpha > 0 || n_re_alpha > 0) ? eta_alpha : alpha_skew_marker[d];
+        real alpha = (P_alpha > 0 || n_re_alpha > 0) ? eta_alpha : alpha_family[marker_to_alpha_family[d]];
         // alpha: skewness
         
         lp += skew_normal_lpdf(y_real[n] | eta_long, sig, alpha);
@@ -670,8 +681,8 @@ real partial_joinme(
           }
         }
         real sig = (P_sigma > 0 || n_re_sigma > 0)
-                   ? exp(eta_sigma)
-                   : ((flag_resid_dim == 1) ? sigma_marker[d] : sigma_y);
+             ? exp(eta_sigma)
+             : sigma_family[marker_to_sigma_family[d]];
         // sig: residual scale
         lp += double_exponential_lpdf(y_real[n] | eta_long, sig);
       } else if (family_long[d] == 9) {
@@ -685,8 +696,8 @@ real partial_joinme(
           }
         }
         real sig = (P_sigma > 0 || n_re_sigma > 0)
-                   ? exp(eta_sigma)
-                   : ((flag_resid_dim == 1) ? sigma_marker[d] : sigma_y);
+             ? exp(eta_sigma)
+             : sigma_family[marker_to_sigma_family[d]];
         // sig: residual scale
         
         // Compute tau (asymmetry parameter, constrained to (0,1) via logit link)
@@ -704,7 +715,7 @@ real partial_joinme(
               eta_tau += dot_product(Z_tau_sde[j][n, 1:K_tau_sde[j]], b);
             }
           }
-          tau_sde = (P_tau_sde > 0 || n_re_tau_sde > 0) ? inv_logit(eta_tau) : tau_sde_marker[d];
+          tau_sde = (P_tau_sde > 0 || n_re_tau_sde > 0) ? inv_logit(eta_tau) : tau_sde_family[marker_to_tau_sde_family[d]];
         }
         // tau_sde: asymmetry parameter in (0,1)
         
@@ -727,7 +738,7 @@ real partial_joinme(
             eta_phi_beta += dot_product(Z_phi_beta[j][n, 1:K_phi_beta[j]], b);
           }
         }
-        real phi_beta = (P_phi_beta > 0 || n_re_phi_beta > 0) ? exp(eta_phi_beta) : phi_beta_marker[d];
+        real phi_beta = (P_phi_beta > 0 || n_re_phi_beta > 0) ? exp(eta_phi_beta) : phi_beta_family[marker_to_phi_beta_family[d]];
         // phi_beta: precision
         
         // Convert eta to mean mu in (0,1) via inverse logit

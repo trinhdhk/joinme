@@ -32,16 +32,17 @@ NULL
   )
 
   diag_df <- suppressWarnings(tryCatch(
-    posterior::summarise_draws(draws_obj, "rhat", "ess_bulk"),
+    posterior::summarise_draws(draws_obj, "rhat", "ess_bulk", "ess_tail"),
     error = function(e) NULL
   ))
   if (!is.null(diag_df)) {
-    diag_df <- diag_df[, c("variable", "rhat", "ess_bulk"), drop = FALSE]
-    names(diag_df) <- c("variable", "Rhat", "ESS")
+    diag_df <- diag_df[, c("variable", "rhat", "ess_bulk", "ess_tail"), drop = FALSE]
+    names(diag_df) <- c("variable", "Rhat", "ess_bulk", "ess_tail")
     sum_df <- merge(sum_df, diag_df, by = "variable", all.x = TRUE, sort = FALSE)
   } else {
     sum_df$Rhat <- NA_real_
-    sum_df$ESS <- NA_real_
+    sum_df$ess_bulk <- NA_real_
+    sum_df$ess_tail <- NA_real_
   }
   sum_df
 }
@@ -102,10 +103,12 @@ NULL
   # Build a family-aware map from Stan variable names to human-readable
   # distributional summary terms.
   #
-  # The key contract is:
-  # - report marker-specific distributional parameters only for markers whose
-  #   family actually uses that parameter,
-  # - label marker parameters with marker names, not numeric positions.
+  # Key contract:
+  # - when no distributional regression is used for a parameter, report one
+  #   family-level parameter per required family (shared across markers of the
+  #   same family),
+  # - when regression is used, fixed/random regression summaries are reported in
+  #   distributional_regression and baseline family constants are omitted there.
   family_long <- sd$family_long %||% cfg$family_long %||% integer(0)
   D <- sd$D %||% length(family_long)
   if (D <= 0) {
@@ -134,37 +137,88 @@ NULL
 
   term_map <- character(0)
 
-  # Include shared sigma_y only if at least one marker family uses sigma.
-  if ("sigma_y" %in% all_vars && any(vapply(req_by_marker, function(x) "sigma" %in% x, logical(1)))) {
-    term_map["sigma_y"] <- "sigma_y"
+  # Resolve which parameters are regression-driven.
+  P_sigma <- as.integer(sd$P_sigma %||% 0L)
+  P_nu <- as.integer(sd$P_nu %||% 0L)
+  P_phi <- as.integer(sd$P_phi %||% 0L)
+  P_alpha <- as.integer(sd$P_alpha %||% 0L)
+  P_phi_beta <- as.integer(sd$P_phi_beta %||% 0L)
+  P_tau_sde <- as.integer(sd$P_tau_sde %||% 0L)
+  n_re_sigma <- as.integer(sd$n_re_sigma %||% 0L)
+  n_re_nu <- as.integer(sd$n_re_nu %||% 0L)
+  n_re_phi <- as.integer(sd$n_re_phi %||% 0L)
+  n_re_alpha <- as.integer(sd$n_re_alpha %||% 0L)
+  n_re_phi_beta <- as.integer(sd$n_re_phi_beta %||% 0L)
+  n_re_tau_sde <- as.integer(sd$n_re_tau_sde %||% 0L)
+
+  has_reg <- list(
+    sigma = (P_sigma > 0 || n_re_sigma > 0),
+    nu = (P_nu > 0 || n_re_nu > 0),
+    phi = (P_phi > 0 || n_re_phi > 0),
+    alpha = (P_alpha > 0 || n_re_alpha > 0),
+    phi_beta = (P_phi_beta > 0 || n_re_phi_beta > 0),
+    tau_sde = (P_tau_sde > 0 || n_re_tau_sde > 0)
+  )
+
+  # Family names for readable labels.
+  fam_name <- function(code) {
+    nm <- tryCatch(.family_name(code), error = function(e) as.character(code))
+    as.character(nm)
   }
 
-  # Marker-specific parameters are included only when required by family[d].
+  fam_sets <- list(
+    sigma = sort(unique(family_long[vapply(req_by_marker, function(x) "sigma" %in% x, logical(1))])),
+    nu = sort(unique(family_long[vapply(req_by_marker, function(x) "nu" %in% x, logical(1))])),
+    phi = sort(unique(family_long[vapply(req_by_marker, function(x) "phi" %in% x, logical(1))])),
+    alpha = sort(unique(family_long[vapply(req_by_marker, function(x) "alpha" %in% x, logical(1))])),
+    phi_beta = sort(unique(family_long[vapply(req_by_marker, function(x) "phi_beta" %in% x, logical(1))])),
+    tau_sde = sort(unique(family_long[vapply(req_by_marker, function(x) "tau_sde" %in% x, logical(1))]))
+  )
+
+  add_family_terms <- function(stan_prefix, label_prefix, fam_codes, use_regression) {
+    if (length(fam_codes) == 0 || isTRUE(use_regression)) return(invisible(NULL))
+    for (idx in seq_along(fam_codes)) {
+      var_nm <- paste0(stan_prefix, "[", idx, "]")
+      if (var_nm %in% all_vars) {
+        term_map[var_nm] <<- paste0(label_prefix, "[family=", fam_name(fam_codes[idx]), "]")
+      }
+    }
+  }
+
+  add_family_terms("sigma_family", "sigma", fam_sets$sigma, has_reg$sigma)
+  add_family_terms("nu_family", "nu", fam_sets$nu, has_reg$nu)
+  add_family_terms("phi_family", "phi", fam_sets$phi, has_reg$phi)
+  add_family_terms("alpha_family", "alpha", fam_sets$alpha, has_reg$alpha)
+  add_family_terms("phi_beta_family", "phi_beta", fam_sets$phi_beta, has_reg$phi_beta)
+  add_family_terms("tau_sde_family", "tau_sde", fam_sets$tau_sde, has_reg$tau_sde)
+
+  # Backward-compatible fallback for older fits that still expose marker-level
+  # distributional constants.
   for (d in seq_len(D)) {
     req <- req_by_marker[[d]]
     mk <- marker_levels[d]
 
-    if ("sigma" %in% req) {
+    if ("sigma" %in% req && !isTRUE(has_reg$sigma)) {
       var_nm <- paste0("sigma_marker[", d, "]")
       term_map[var_nm] <- paste0("sigma_marker[", mk, "]")
     }
-    if ("nu" %in% req) {
+    if ("nu" %in% req && !isTRUE(has_reg$nu)) {
       var_nm <- paste0("nu_marker[", d, "]")
       term_map[var_nm] <- paste0("nu_marker[", mk, "]")
     }
-    if ("phi" %in% req) {
+    if ("phi" %in% req && !isTRUE(has_reg$phi)) {
       var_nm <- paste0("phi_nb_marker[", d, "]")
       term_map[var_nm] <- paste0("phi_nb_marker[", mk, "]")
     }
-    if ("alpha" %in% req) {
+    if ("alpha" %in% req && !isTRUE(has_reg$alpha)) {
       var_nm <- paste0("alpha_skew_marker[", d, "]")
       term_map[var_nm] <- paste0("alpha_skew_marker[", mk, "]")
     }
-    if ("phi_beta" %in% req) {
+    if ("phi_beta" %in% req && !isTRUE(has_reg$phi_beta)) {
       var_nm <- paste0("phi_beta_marker[", d, "]")
       term_map[var_nm] <- paste0("phi_beta_marker[", mk, "]")
     }
-    if ("tau_sde" %in% req) {
+    if ("tau_sde" %in% req && !isTRUE(has_reg$tau_sde)) {
       var_nm <- paste0("tau_sde_marker[", d, "]")
       term_map[var_nm] <- paste0("tau_sde_marker[", mk, "]")
     }
@@ -183,6 +237,8 @@ NULL
     treedepth_hits = NA_integer_,
     ebfmi_min = NA_real_,
     max_rhat = NA_real_,
+    min_ess_bulk = NA_real_,
+    min_ess_tail = NA_real_,
     min_ess = NA_real_
   )
 
@@ -206,9 +262,13 @@ NULL
     sumdf <- tryCatch(fit$summary(), error = function(e) NULL)
     if (!is.null(sumdf) && all(c("rhat", "ess_bulk") %in% names(sumdf))) {
       out$max_rhat <- suppressWarnings(max(sumdf$rhat, na.rm = TRUE))
-      out$min_ess <- suppressWarnings(min(sumdf$ess_bulk, na.rm = TRUE))
+      out$min_ess_bulk <- suppressWarnings(min(sumdf$ess_bulk, na.rm = TRUE))
+      if ("ess_tail" %in% names(sumdf)) {
+        out$min_ess_tail <- suppressWarnings(min(sumdf$ess_tail, na.rm = TRUE))
+      }
       if (!is.finite(out$max_rhat)) out$max_rhat <- NA_real_
-      if (!is.finite(out$min_ess)) out$min_ess <- NA_real_
+      if (!is.finite(out$min_ess_bulk)) out$min_ess_bulk <- NA_real_
+      if (!is.finite(out$min_ess_tail)) out$min_ess_tail <- NA_real_
     }
   } else if (.is_rstan_fit(fit)) {
     params <- tryCatch(rstan::get_sampler_params(fit, inc_warmup = FALSE), error = function(e) NULL)
@@ -222,12 +282,179 @@ NULL
         if (!is.finite(out$max_rhat)) out$max_rhat <- NA_real_
       }
       if ("n_eff" %in% colnames(sumdf)) {
-        out$min_ess <- suppressWarnings(min(sumdf[, "n_eff"], na.rm = TRUE))
-        if (!is.finite(out$min_ess)) out$min_ess <- NA_real_
+        out$min_ess_bulk <- suppressWarnings(min(sumdf[, "n_eff"], na.rm = TRUE))
+        if (!is.finite(out$min_ess_bulk)) out$min_ess_bulk <- NA_real_
       }
     }
   }
 
+  if (is.na(out$min_ess) || !is.finite(out$min_ess)) {
+    out$min_ess <- out$min_ess_bulk
+  }
+  if (!is.finite(out$min_ess_tail)) {
+    out$min_ess_tail <- out$min_ess_bulk
+  }
+
+  out
+}
+
+#' @keywords internal
+.build_common_diagnostics_table <- function(draws = NA_real_,
+                                            divergences = NA_real_,
+                                            treedepth_hits = NA_real_,
+                                            ebfmi_min = NA_real_,
+                                            max_rhat = NA_real_,
+                                            min_ess_bulk = NA_real_,
+                                            min_ess_tail = NA_real_,
+                                            n_terms_total = NA_real_,
+                                            n_terms_bad_rhat = NA_real_,
+                                            n_terms_low_ess_bulk = NA_real_,
+                                            n_terms_low_ess_tail = NA_real_) {
+  data.frame(
+    metric = c(
+      "draws",
+      "divergences",
+      "treedepth_hits",
+      "ebfmi_min",
+      "max_rhat",
+      "min_ess_bulk",
+      "min_ess_tail",
+      "n_terms_total",
+      "n_terms_bad_rhat",
+      "n_terms_low_ess_bulk",
+      "n_terms_low_ess_tail"
+    ),
+    value = as.numeric(c(
+      draws,
+      divergences,
+      treedepth_hits,
+      ebfmi_min,
+      max_rhat,
+      min_ess_bulk,
+      min_ess_tail,
+      n_terms_total,
+      n_terms_bad_rhat,
+      n_terms_low_ess_bulk,
+      n_terms_low_ess_tail
+    )),
+    stringsAsFactors = FALSE
+  )
+}
+
+#' @keywords internal
+.diagnostics_table_from_sampler <- function(diag) {
+  .build_common_diagnostics_table(
+    draws = as.numeric(diag$draws %||% NA_real_),
+    divergences = as.numeric(diag$divergences %||% NA_real_),
+    treedepth_hits = as.numeric(diag$treedepth_hits %||% NA_real_),
+    ebfmi_min = as.numeric(diag$ebfmi_min %||% NA_real_),
+    max_rhat = as.numeric(diag$max_rhat %||% NA_real_),
+    min_ess_bulk = as.numeric(diag$min_ess_bulk %||% diag$min_ess %||% NA_real_),
+    min_ess_tail = as.numeric(diag$min_ess_tail %||% diag$min_ess %||% NA_real_),
+    n_terms_total = NA_real_,
+    n_terms_bad_rhat = NA_real_,
+    n_terms_low_ess_bulk = NA_real_,
+    n_terms_low_ess_tail = NA_real_
+  )
+}
+
+#' @keywords internal
+.term_diagnostics_from_tables <- function(x) {
+  extract_df <- function(obj) {
+    if (is.null(obj)) return(list())
+    if (is.data.frame(obj)) {
+      if (any(c("Rhat", "ess_bulk", "ess_tail") %in% names(obj))) {
+        return(list(obj))
+      }
+      return(list())
+    }
+    if (is.list(obj)) {
+      return(unlist(lapply(obj, extract_df), recursive = FALSE))
+    }
+    list()
+  }
+
+  dfs <- extract_df(x)
+  if (length(dfs) == 0) {
+    return(list(
+      n_terms_total = 0,
+      n_terms_bad_rhat = 0,
+      n_terms_low_ess_bulk = 0,
+      n_terms_low_ess_tail = 0,
+      max_rhat = NA_real_,
+      min_ess_bulk = NA_real_,
+      min_ess_tail = NA_real_
+    ))
+  }
+
+  all_cols <- unique(unlist(lapply(dfs, names), use.names = FALSE))
+  dfs <- lapply(dfs, function(df) {
+    miss <- setdiff(all_cols, names(df))
+    if (length(miss) > 0) {
+      for (m in miss) df[[m]] <- NA_real_
+    }
+    df[, all_cols, drop = FALSE]
+  })
+  d <- do.call(rbind, dfs)
+  if (!"Rhat" %in% names(d)) d$Rhat <- NA_real_
+  if (!"ess_bulk" %in% names(d)) d$ess_bulk <- NA_real_
+  if (!"ess_tail" %in% names(d)) d$ess_tail <- NA_real_
+
+  n_terms_total <- nrow(d)
+  n_terms_bad_rhat <- sum(is.finite(d$Rhat) & d$Rhat > 1.01, na.rm = TRUE)
+  n_terms_low_ess_bulk <- sum(is.finite(d$ess_bulk) & d$ess_bulk < 100, na.rm = TRUE)
+  n_terms_low_ess_tail <- sum(is.finite(d$ess_tail) & d$ess_tail < 100, na.rm = TRUE)
+
+  max_rhat <- suppressWarnings(max(d$Rhat, na.rm = TRUE))
+  min_ess_bulk <- suppressWarnings(min(d$ess_bulk, na.rm = TRUE))
+  min_ess_tail <- suppressWarnings(min(d$ess_tail, na.rm = TRUE))
+  if (!is.finite(max_rhat)) max_rhat <- NA_real_
+  if (!is.finite(min_ess_bulk)) min_ess_bulk <- NA_real_
+  if (!is.finite(min_ess_tail)) min_ess_tail <- NA_real_
+
+  list(
+    n_terms_total = as.numeric(n_terms_total),
+    n_terms_bad_rhat = as.numeric(n_terms_bad_rhat),
+    n_terms_low_ess_bulk = as.numeric(n_terms_low_ess_bulk),
+    n_terms_low_ess_tail = as.numeric(n_terms_low_ess_tail),
+    max_rhat = as.numeric(max_rhat),
+    min_ess_bulk = as.numeric(min_ess_bulk),
+    min_ess_tail = as.numeric(min_ess_tail)
+  )
+}
+
+#' @keywords internal
+.aggregate_sampler_diagnostics <- function(diags) {
+  if (is.null(diags) || length(diags) == 0) {
+    return(list(
+      draws = NA_real_,
+      divergences = 0,
+      treedepth_hits = 0,
+      ebfmi_min = NA_real_,
+      max_rhat = NA_real_,
+      min_ess_bulk = NA_real_,
+      min_ess_tail = NA_real_
+    ))
+  }
+
+  get_num <- function(name) as.numeric(vapply(diags, function(d) d[[name]] %||% NA_real_, numeric(1)))
+  draws <- get_num("draws")
+  divergences <- get_num("divergences")
+  treedepth_hits <- get_num("treedepth_hits")
+  ebfmi_min <- get_num("ebfmi_min")
+  max_rhat <- get_num("max_rhat")
+  min_ess_bulk <- get_num("min_ess_bulk")
+  min_ess_tail <- get_num("min_ess_tail")
+
+  out <- list(
+    draws = if (any(is.finite(draws))) max(draws, na.rm = TRUE) else NA_real_,
+    divergences = if (any(is.finite(divergences))) sum(divergences[is.finite(divergences)]) else 0,
+    treedepth_hits = if (any(is.finite(treedepth_hits))) sum(treedepth_hits[is.finite(treedepth_hits)]) else 0,
+    ebfmi_min = if (any(is.finite(ebfmi_min))) min(ebfmi_min, na.rm = TRUE) else NA_real_,
+    max_rhat = if (any(is.finite(max_rhat))) max(max_rhat, na.rm = TRUE) else NA_real_,
+    min_ess_bulk = if (any(is.finite(min_ess_bulk))) min(min_ess_bulk, na.rm = TRUE) else NA_real_,
+    min_ess_tail = if (any(is.finite(min_ess_tail))) min(min_ess_tail, na.rm = TRUE) else NA_real_
+  )
   out
 }
 
@@ -277,7 +504,7 @@ print.JoinMeFit <- function(x, ...) {
 #' @return A summary_JoinMeFit object.
 #' @export
 summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
-                           include_vcov = FALSE, ...) {
+                           include_vcov = TRUE, ...) {
   assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
 
   fit <- object$fit
@@ -300,13 +527,12 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
   beta_vars <- paste0("beta[", seq_len(sd$P), "]")
   s_beta <- as.data.frame(.summarise_draws_diag(fit, beta_vars, draws = draws, seed = seed))
   s_beta$term <- if (!is.null(sd$x_cols) && length(sd$x_cols) == nrow(s_beta)) sd$x_cols else s_beta$variable
-  s_beta <- s_beta[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ESS"), drop = FALSE]
+  s_beta <- s_beta[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
   s_beta$Estimate <- round(s_beta$Estimate, digits)
   s_beta$Est.Error <- round(s_beta$Est.Error, digits)
   s_beta$Q2.5 <- round(s_beta$Q2.5, digits)
   s_beta$Q97.5 <- round(s_beta$Q97.5, digits)
   s_beta$Rhat <- round(s_beta$Rhat, 3)
-  s_beta$ESS <- round(s_beta$ESS, 1)
 
   s_g <- NULL
   if (sd$p_w > 0) {
@@ -315,13 +541,12 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     if (length(g_vars) > 0) {
       s_g <- as.data.frame(.summarise_draws_diag(fit, g_vars, draws = draws, seed = seed))
       s_g$term <- if (!is.null(sd$w_cols) && length(sd$w_cols) == nrow(s_g)) sd$w_cols else s_g$variable
-      s_g <- s_g[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ESS"), drop = FALSE]
+      s_g <- s_g[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
       s_g$Estimate <- round(s_g$Estimate, digits)
       s_g$Est.Error <- round(s_g$Est.Error, digits)
       s_g$Q2.5 <- round(s_g$Q2.5, digits)
       s_g$Q97.5 <- round(s_g$Q97.5, digits)
       s_g$Rhat <- round(s_g$Rhat, 3)
-      s_g$ESS <- round(s_g$ESS, 1)
     }
   }
 
@@ -354,13 +579,12 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     )
     s_a$term <- assoc_map[s_a$variable]
     s_a$term[is.na(s_a$term)] <- sub("^alpha_", "", s_a$variable[is.na(s_a$term)])
-    s_a <- s_a[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ESS"), drop = FALSE]
+    s_a <- s_a[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
     s_a$Estimate <- round(s_a$Estimate, digits)
     s_a$Est.Error <- round(s_a$Est.Error, digits)
     s_a$Q2.5 <- round(s_a$Q2.5, digits)
     s_a$Q97.5 <- round(s_a$Q97.5, digits)
     s_a$Rhat <- round(s_a$Rhat, 3)
-    s_a$ESS <- round(s_a$ESS, 1)
   }
 
   # Marker-weight association summaries (when estimated)
@@ -375,13 +599,12 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
       } else {
         s_mw$term <- s_mw$variable
       }
-      s_mw <- s_mw[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ESS"), drop = FALSE]
+      s_mw <- s_mw[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
       s_mw$Estimate <- round(s_mw$Estimate, digits)
       s_mw$Est.Error <- round(s_mw$Est.Error, digits)
       s_mw$Q2.5 <- round(s_mw$Q2.5, digits)
       s_mw$Q97.5 <- round(s_mw$Q97.5, digits)
       s_mw$Rhat <- round(s_mw$Rhat, 3)
-      s_mw$ESS <- round(s_mw$ESS, 1)
       s_a <- if (is.null(s_a)) s_mw else rbind(s_a, s_mw)
     } else if (isTRUE(as.logical(sd$estimate_marker_weights)) && !is.null(sd$marker_weights)) {
       marker_terms <- sd$marker_levels %||% paste0("marker_", seq_len(sd$D))
@@ -392,7 +615,8 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
         Q2.5 = NA_real_,
         Q97.5 = NA_real_,
         Rhat = NA_real_,
-        ESS = NA_real_,
+        ess_bulk = NA_real_,
+        ess_tail = NA_real_,
         stringsAsFactors = FALSE
       )
       s_a <- if (is.null(s_a)) s_mw else rbind(s_a, s_mw)
@@ -410,13 +634,12 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
   if (length(dist_vars) > 0) {
     s_d <- as.data.frame(.summarise_draws_diag(fit, dist_vars, draws = draws, seed = seed))
     s_d$term <- unname(dist_term_map[s_d$variable])
-    s_d <- s_d[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ESS"), drop = FALSE]
+    s_d <- s_d[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
     s_d$Estimate <- round(s_d$Estimate, digits)
     s_d$Est.Error <- round(s_d$Est.Error, digits)
     s_d$Q2.5 <- round(s_d$Q2.5, digits)
     s_d$Q97.5 <- round(s_d$Q97.5, digits)
     s_d$Rhat <- round(s_d$Rhat, 3)
-    s_d$ESS <- round(s_d$ESS, 1)
   }
 
   s_dr <- NULL
@@ -440,13 +663,12 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
         tmp$term <- tmp$variable
       }
       tmp$parameter <- nm
-      tmp <- tmp[, c("parameter", "term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ESS"), drop = FALSE]
+      tmp <- tmp[, c("parameter", "term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
       tmp$Estimate <- round(tmp$Estimate, digits)
       tmp$Est.Error <- round(tmp$Est.Error, digits)
       tmp$Q2.5 <- round(tmp$Q2.5, digits)
       tmp$Q97.5 <- round(tmp$Q97.5, digits)
       tmp$Rhat <- round(tmp$Rhat, 3)
-      tmp$ESS <- round(tmp$ESS, 1)
       dist_reg_tables[[nm]] <- tmp
     }
   }
@@ -467,8 +689,24 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
   transform_specs <- cfg$transforms_spec %||% object$call$transforms
   transform_formulas <- .transform_formulas_from_specs(transform_specs)
 
+  term_diag <- .term_diagnostics_from_tables(list(s_beta, s_g, s_a, s_d, s_dr, vcov_tables))
+  diag_table <- .build_common_diagnostics_table(
+    draws = as.numeric(diag$draws %||% NA_real_),
+    divergences = as.numeric(diag$divergences %||% NA_real_),
+    treedepth_hits = as.numeric(diag$treedepth_hits %||% NA_real_),
+    ebfmi_min = as.numeric(diag$ebfmi_min %||% NA_real_),
+    max_rhat = as.numeric(term_diag$max_rhat %||% diag$max_rhat %||% NA_real_),
+    min_ess_bulk = as.numeric(term_diag$min_ess_bulk %||% diag$min_ess_bulk %||% diag$min_ess %||% NA_real_),
+    min_ess_tail = as.numeric(term_diag$min_ess_tail %||% diag$min_ess_tail %||% diag$min_ess %||% NA_real_),
+    n_terms_total = as.numeric(term_diag$n_terms_total %||% 0),
+    n_terms_bad_rhat = as.numeric(term_diag$n_terms_bad_rhat %||% 0),
+    n_terms_low_ess_bulk = as.numeric(term_diag$n_terms_low_ess_bulk %||% 0),
+    n_terms_low_ess_tail = as.numeric(term_diag$n_terms_low_ess_tail %||% 0)
+  )
+
   summary_obj <- SummaryJoinMeFit$new(
     tables = list(
+      diagnostics = diag_table,
       fixef = s_beta,
       gamma_w = s_g,
       assoc = s_a,
@@ -657,15 +895,14 @@ print.summary_JoinMeFit <- function(x, ...) {
     cat("tmax: ", x$metadata$tmax, "\n", sep = "")
   }
   cat("\n")
-  if (!is.null(x$diagnostics)) {
+  diag_tbl <- x$tables$diagnostics
+  if (is.null(diag_tbl) && !is.null(x$diagnostics)) {
+    diag_tbl <- .diagnostics_table_from_sampler(x$diagnostics)
+  }
+  if (!is.null(diag_tbl)) {
     cat("Sampler diagnostics\n")
     cat("-------------------\n")
-    cat(sprintf("Draws: %s\n", x$diagnostics$draws %||% NA))
-    cat(sprintf("Divergences: %s\n", x$diagnostics$divergences %||% NA))
-    cat(sprintf("Max treedepth hits: %s\n", x$diagnostics$treedepth_hits %||% NA))
-    cat(sprintf("Min E-BFMI: %s\n", ifelse(is.finite(x$diagnostics$ebfmi_min), sprintf("%.3f", x$diagnostics$ebfmi_min), "NA")))
-    cat(sprintf("Max R-hat: %s\n", ifelse(is.finite(x$diagnostics$max_rhat), sprintf("%.3f", x$diagnostics$max_rhat), "NA")))
-    cat(sprintf("Min bulk ESS: %s\n", ifelse(is.finite(x$diagnostics$min_ess), sprintf("%.1f", x$diagnostics$min_ess), "NA")))
+    print(diag_tbl, row.names = FALSE)
   }
   if (!is.null(x$tables$fixef)) {
     cat("\nFixed effects (beta)\n")
@@ -696,6 +933,22 @@ print.summary_JoinMeFit <- function(x, ...) {
     cat("\nDistributional regression\n")
     cat("---------------------------\n")
     print(x$tables$distributional_regression, row.names = FALSE)
+  }
+  if (!is.null(x$tables$vcov)) {
+    cat("\nCovariance summaries\n")
+    cat("----------------------\n")
+    if (!is.null(x$tables$vcov$id)) {
+      cat("id\n")
+      print(x$tables$vcov$id, row.names = FALSE)
+    }
+    if (!is.null(x$tables$vcov$marker)) {
+      cat("\nmarker\n")
+      print(x$tables$vcov$marker, row.names = FALSE)
+    }
+    if (!is.null(x$tables$vcov$marker_by_id_latent)) {
+      cat("\nid:marker\n")
+      print(x$tables$vcov$marker_by_id_latent, row.names = FALSE)
+    }
   }
   invisible(x)
 }
@@ -729,14 +982,13 @@ fixef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
 
   s <- as.data.frame(.summarise_draws_diag(fit, beta_vars, draws = draws, seed = seed))
   s$term <- if (!is.null(sd$x_cols) && length(sd$x_cols) == nrow(s)) sd$x_cols else s$variable
-  out <- s[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ESS"), drop = FALSE]
+  out <- s[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
 
   out$Estimate <- round(out$Estimate, digits)
   out$Est.Error <- round(out$Est.Error, digits)
   out$Q2.5 <- round(out$Q2.5, digits)
   out$Q97.5 <- round(out$Q97.5, digits)
   out$Rhat <- round(out$Rhat, 3)
-  out$ESS <- round(out$ESS, 1)
 
   # Append marker-weight summaries as association-like terms
   if (sd$D > 0) {
@@ -750,13 +1002,12 @@ fixef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
       } else {
         mw$term <- mw$variable
       }
-      mw <- mw[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ESS"), drop = FALSE]
+      mw <- mw[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
       mw$Estimate <- round(mw$Estimate, digits)
       mw$Est.Error <- round(mw$Est.Error, digits)
       mw$Q2.5 <- round(mw$Q2.5, digits)
       mw$Q97.5 <- round(mw$Q97.5, digits)
       mw$Rhat <- round(mw$Rhat, 3)
-      mw$ESS <- round(mw$ESS, 1)
       out <- rbind(out, mw)
     }
   }
@@ -772,7 +1023,11 @@ fixef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
 #' @param digits Number of digits to round summary values.
 #' @param ... Unused.
 #'
-#' @return A list of data.frames for random effects.
+#' @return A nested list with top-level entries `formulaLong` and `formulaDist`.
+#'   `formulaLong` contains random-effect summaries for longitudinal model
+#'   components (`id`, `marker`, `marker_by_id_latent`, when present).
+#'   `formulaDist` contains distributional random-effect summaries organized by
+#'   parameter and family scope (e.g., `sigma$student_t`, `nu$allFamilies`).
 #' @importFrom lme4 ranef
 #' @export
 ranef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
@@ -787,10 +1042,28 @@ ranef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
 
   vars <- tryCatch(posterior::variables(.get_draws_obj(fit)), error = function(e) character(0))
 
+  summarize_vector <- function(values) {
+    values <- as.numeric(values)
+    values <- values[is.finite(values)]
+    if (length(values) == 0) {
+      return(c(Estimate = NA_real_, Est.Error = NA_real_, Q2.5 = NA_real_, Q97.5 = NA_real_, Rhat = NA_real_, ess_bulk = NA_real_, ess_tail = NA_real_))
+    }
+    qs <- stats::quantile(values, probs = c(0.025, 0.975), names = FALSE)
+    c(
+      Estimate = mean(values),
+      Est.Error = stats::sd(values),
+      Q2.5 = qs[1],
+      Q97.5 = qs[2],
+      Rhat = suppressWarnings(tryCatch(as.numeric(posterior::rhat(values)), error = function(e) NA_real_)),
+      ess_bulk = suppressWarnings(tryCatch(as.numeric(posterior::ess_basic(values)), error = function(e) NA_real_)),
+      ess_tail = suppressWarnings(tryCatch(as.numeric(posterior::ess_tail(values)), error = function(e) NA_real_))
+    )
+  }
+
   summarize_block <- function(varnames, group) {
     if (length(varnames) == 0) return(NULL)
     s <- as.data.frame(.summarise_draws_diag(fit, varnames, draws = draws, seed = seed))
-    out <- s[, c("variable", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ESS"), drop = FALSE]
+    out <- s[, c("variable", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
     names(out)[1] <- "term"
     out$group <- group
 
@@ -799,7 +1072,6 @@ ranef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
     out$Q2.5 <- round(out$Q2.5, digits)
     out$Q97.5 <- round(out$Q97.5, digits)
     out$Rhat <- round(out$Rhat, 3)
-    out$ESS <- round(out$ESS, 1)
     out
   }
 
@@ -807,10 +1079,10 @@ ranef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
   v_vars <- vars[grepl("^v_marker\\[", vars)]
   zw_vars <- vars[grepl("^z_w\\[", vars)]
 
-  out <- list(
+  out_long <- list(
     id = summarize_block(u_vars, "id"),
     marker = if (sd$R_mk > 0) summarize_block(v_vars, "marker") else NULL,
-    marker_byid_latent = summarize_block(zw_vars, "marker_byid_latent")
+    marker_by_id_latent = summarize_block(zw_vars, "marker_by_id_latent")
   )
 
   mw_vars <- vars[grepl("^marker_weights_eff\\[", vars)]
@@ -822,7 +1094,7 @@ ranef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
         mw$term <- paste0("weight: ", marker_terms)
       }
     }
-    out$assoc_weight <- mw
+    out_long$assoc_weight <- mw
   } else if (isTRUE(as.logical(sd$estimate_marker_weights)) && !is.null(sd$marker_weights)) {
     marker_terms <- sd$marker_levels %||% paste0("marker_", seq_len(sd$D))
     mw <- data.frame(
@@ -832,12 +1104,103 @@ ranef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
       Q2.5 = NA_real_,
       Q97.5 = NA_real_,
       Rhat = NA_real_,
-      ESS = NA_real_,
+      ess_bulk = NA_real_,
+      ess_tail = NA_real_,
       group = "assoc_weight",
       stringsAsFactors = FALSE
     )
-    out$assoc_weight <- mw
+    out_long$assoc_weight <- mw
   }
+
+  # Distributional random effects are represented as latent z and scale tau.
+  # For each distributional parameter and RE term j, compute b = z * tau per
+  # (group, coefficient) cell and summarize across draws.
+  summarize_dist_ranef <- function(param_name) {
+    n_re <- as.integer(sd[[paste0("n_re_", param_name)]] %||% 0L)
+    if (n_re <= 0L) return(NULL)
+
+    K_vec <- as.integer(sd[[paste0("K_", param_name)]] %||% integer(0))
+    G_vec <- as.integer(sd[[paste0("G_", param_name)]] %||% integer(0))
+    if (length(K_vec) != n_re || length(G_vec) != n_re) return(NULL)
+
+    tau_prefix <- paste0("tau_", param_name)
+    z_prefix <- paste0("z_", param_name)
+    term_labels <- object$config$dist$dist_re_terms[[param_name]] %||% rep(NA_character_, n_re)
+
+    required_vars <- character(0)
+    for (j in seq_len(n_re)) {
+      required_vars <- c(required_vars, paste0(tau_prefix, "[", j, ",", seq_len(K_vec[j]), "]"))
+      required_vars <- c(required_vars, as.vector(outer(seq_len(G_vec[j]), seq_len(K_vec[j]), function(g, k) {
+        paste0(z_prefix, "[", j, ",", g, ",", k, "]")
+      })))
+    }
+    required_vars <- unique(required_vars)
+    required_vars <- required_vars[required_vars %in% vars]
+    if (length(required_vars) == 0) return(NULL)
+
+    dmat <- .get_draws_matrix(fit, variables = required_vars, draws = draws, seed = seed)
+    rows <- list()
+    idx <- 1L
+    for (j in seq_len(n_re)) {
+      for (g in seq_len(G_vec[j])) {
+        for (k in seq_len(K_vec[j])) {
+          tau_nm <- paste0(tau_prefix, "[", j, ",", k, "]")
+          z_nm <- paste0(z_prefix, "[", j, ",", g, ",", k, "]")
+          if (!(tau_nm %in% colnames(dmat)) || !(z_nm %in% colnames(dmat))) next
+          vals <- as.numeric(dmat[, tau_nm]) * as.numeric(dmat[, z_nm])
+          ss <- summarize_vector(vals)
+          rows[[idx]] <- data.frame(
+            term_index = j,
+            group = g,
+            coefficient = k,
+            term = term_labels[j] %||% paste0("re_term_", j),
+            Estimate = ss[["Estimate"]],
+            Est.Error = ss[["Est.Error"]],
+            Q2.5 = ss[["Q2.5"]],
+            Q97.5 = ss[["Q97.5"]],
+            Rhat = ss[["Rhat"]],
+            ess_bulk = ss[["ess_bulk"]],
+            ess_tail = ss[["ess_tail"]],
+            stringsAsFactors = FALSE
+          )
+          idx <- idx + 1L
+        }
+      }
+    }
+    if (length(rows) == 0) return(NULL)
+    out_df <- do.call(rbind, rows)
+    out_df$Estimate <- round(out_df$Estimate, digits)
+    out_df$Est.Error <- round(out_df$Est.Error, digits)
+    out_df$Q2.5 <- round(out_df$Q2.5, digits)
+    out_df$Q97.5 <- round(out_df$Q97.5, digits)
+    out_df$Rhat <- round(out_df$Rhat, 3)
+    out_df
+  }
+
+  split_dist_scopes <- function(df) {
+    if (is.null(df) || nrow(df) == 0) return(NULL)
+    scope_names <- ifelse(grepl("^family=", df$term),
+                          sub("^family=([^:]+)::.*$", "\\1", df$term),
+                          "allFamilies")
+    out <- split(df, scope_names)
+    out <- out[order(names(out))]
+    out
+  }
+
+  out_dist <- list(
+    sigma = split_dist_scopes(summarize_dist_ranef("sigma")),
+    nu = split_dist_scopes(summarize_dist_ranef("nu")),
+    phi = split_dist_scopes(summarize_dist_ranef("phi")),
+    alpha = split_dist_scopes(summarize_dist_ranef("alpha")),
+    phi_beta = split_dist_scopes(summarize_dist_ranef("phi_beta")),
+    tau_sde = split_dist_scopes(summarize_dist_ranef("tau_sde"))
+  )
+  out_dist <- out_dist[!vapply(out_dist, is.null, logical(1))]
+
+  out <- list(
+    formulaLong = out_long,
+    formulaDist = out_dist
+  )
   object$cache_set(cache_key, out)
   out
 }
@@ -847,18 +1210,25 @@ ranef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
 #' Extract covariance summaries
 #'
 #' @param object A joinme fit object.
-#' @param what Covariance block: "id", "marker", or "marker_by_id_latent".
+#' @param what Optional covariance block selector (`"id"`, `"marker"`,
+#'   `"marker_by_id_latent"`). When `NULL` (default), returns a nested list for
+#'   all covariance components in `formulaLong` and `formulaDist`.
 #' @param draws Number of draws to use for summaries.
 #' @param ... Unused.
 #'
-#' @return A data.frame with covariance summaries.
+#' @return If `what` is supplied, a data frame for the requested covariance
+#'   block. Otherwise, a nested list with `formulaLong` and `formulaDist`
+#'   covariance summaries.
 #' @export
-vcov.JoinMeFit <- function(object, what = c("id", "marker", "marker_by_id_latent"), draws = NULL, ...) {
+vcov.JoinMeFit <- function(object, what = NULL, draws = NULL, ...) {
   assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
-  what <- match.arg(what)
   fit <- object$fit
   sd <- object$stan_data
   if (is.null(draws)) draws <- object$config$draws_default
+
+  if (!is.null(what)) {
+    what <- match.arg(what, choices = c("id", "marker", "marker_by_id_latent"))
+  }
 
   summarize_cov_matrix <- function(tau_prefix, Lcorr_prefix, dim, label) {
     if (dim <= 0) {
@@ -872,9 +1242,9 @@ vcov.JoinMeFit <- function(object, what = c("id", "marker", "marker_by_id_latent
                               function(r, c) paste0(Lcorr_prefix, "[", r, ",", c, "]")))
     vars <- c(tau_vars, L_vars)
 
-    ddf <- .get_draws_df(fit, variables = vars, draws = draws, seed = 1)
-    tau_draws <- as.matrix(ddf[, tau_vars, drop = FALSE])
-    L_draws <- as.matrix(ddf[, L_vars, drop = FALSE])
+    dmat <- .get_draws_matrix(fit, variables = vars, draws = draws, seed = 1)
+    tau_draws <- dmat[, tau_vars, drop = FALSE]
+    L_draws <- dmat[, L_vars, drop = FALSE]
     nD <- nrow(tau_draws)
 
     Sigma_list <- vector("list", nD)
@@ -889,7 +1259,10 @@ vcov.JoinMeFit <- function(object, what = c("id", "marker", "marker_by_id_latent
     out <- list()
     for (r in seq_len(dim)) for (c in seq_len(dim)) {
       vals <- vapply(Sigma_list, function(S) S[r, c], numeric(1))
-      out[[length(out) + 1]] <- cbind(block = label, row = r, col = c, t(.summarize_draw_col(vals)))
+      ss <- .summarize_draw_col(vals)
+      ess_bulk <- suppressWarnings(tryCatch(as.numeric(posterior::ess_basic(vals)), error = function(e) NA_real_))
+      ess_tail <- suppressWarnings(tryCatch(as.numeric(posterior::ess_tail(vals)), error = function(e) NA_real_))
+      out[[length(out) + 1]] <- cbind(block = label, row = r, col = c, t(ss), ess_bulk = ess_bulk, ess_tail = ess_tail)
     }
     df <- as.data.frame(do.call(rbind, out), stringsAsFactors = FALSE)
     df$row <- as.integer(df$row)
@@ -898,15 +1271,92 @@ vcov.JoinMeFit <- function(object, what = c("id", "marker", "marker_by_id_latent
     df$Est.Error <- as.numeric(df$Est.Error)
     df$Q2.5 <- as.numeric(df$Q2.5)
     df$Q97.5 <- as.numeric(df$Q97.5)
+    df$ess_bulk <- as.numeric(df$ess_bulk)
+    df$ess_tail <- as.numeric(df$ess_tail)
     df
   }
 
-  if (what == "id") return(summarize_cov_matrix("tau_u", "Lcorr_u", sd$R_id, "Sigma_u"))
-  if (what == "marker") {
-    if (sd$R_mk <= 0) {
-      cli::cli_abort("Marker vcov requested but R_mk = 0.")
+  if (!is.null(what)) {
+    if (what == "id") return(summarize_cov_matrix("tau_u", "Lcorr_u", sd$R_id, "id"))
+    if (what == "marker") {
+      if (sd$R_mk <= 0) {
+        cli::cli_abort("Marker vcov requested but R_mk = 0.")
+      }
+      return(summarize_cov_matrix("tau_v", "Lcorr_v", sd$R_mk, "marker"))
     }
-    return(summarize_cov_matrix("tau_v", "Lcorr_v", sd$R_mk, "Sigma_v"))
+    return(summarize_cov_matrix("tau_w", "Lcorr_w", sd$Q_idm, "id:marker"))
   }
-  summarize_cov_matrix("tau_w", "Lcorr_w", sd$Q_idm, "Sigma_w")
+
+  summarize_dist_vcov <- function(param_name) {
+    n_re <- as.integer(sd[[paste0("n_re_", param_name)]] %||% 0L)
+    if (n_re <= 0L) return(NULL)
+
+    K_vec <- as.integer(sd[[paste0("K_", param_name)]] %||% integer(0))
+    if (length(K_vec) != n_re) return(NULL)
+
+    tau_prefix <- paste0("tau_", param_name)
+    term_labels <- object$config$dist$dist_re_terms[[param_name]] %||% rep(NA_character_, n_re)
+
+    out_terms <- vector("list", n_re)
+    for (j in seq_len(n_re)) {
+      tau_vars <- paste0(tau_prefix, "[", j, ",", seq_len(K_vec[j]), "]")
+      dmat <- .get_draws_matrix(fit, variables = tau_vars, draws = draws, seed = 1)
+      if (ncol(dmat) == 0) next
+
+      rows <- list()
+      idx <- 1L
+      for (r in seq_len(K_vec[j])) {
+        for (c in seq_len(K_vec[j])) {
+          if (r == c) {
+            vals <- as.numeric(dmat[, tau_vars[r]])^2
+          } else {
+            vals <- rep(0, nrow(dmat))
+          }
+          ss <- .summarize_draw_col(vals)
+          ess_bulk <- suppressWarnings(tryCatch(as.numeric(posterior::ess_basic(vals)), error = function(e) NA_real_))
+          ess_tail <- suppressWarnings(tryCatch(as.numeric(posterior::ess_tail(vals)), error = function(e) NA_real_))
+          rows[[idx]] <- data.frame(
+            block = term_labels[j] %||% paste0("re_term_", j),
+            row = r,
+            col = c,
+            Estimate = as.numeric(ss[["Estimate"]]),
+            Est.Error = as.numeric(ss[["Est.Error"]]),
+            Q2.5 = as.numeric(ss[["Q2.5"]]),
+            Q97.5 = as.numeric(ss[["Q97.5"]]),
+            ess_bulk = ess_bulk,
+            ess_tail = ess_tail,
+            stringsAsFactors = FALSE
+          )
+          idx <- idx + 1L
+        }
+      }
+      out_terms[[j]] <- do.call(rbind, rows)
+    }
+    out_terms <- Filter(Negate(is.null), out_terms)
+    if (length(out_terms) == 0) return(NULL)
+    out_df <- do.call(rbind, out_terms)
+    scope_names <- ifelse(grepl("^family=", out_df$block),
+                          sub("^family=([^:]+)::.*$", "\\1", out_df$block),
+                          "allFamilies")
+    split(out_df, scope_names)
+  }
+
+  out <- list(
+    formulaLong = list(
+      id = summarize_cov_matrix("tau_u", "Lcorr_u", sd$R_id, "id"),
+      marker = if (sd$R_mk > 0) summarize_cov_matrix("tau_v", "Lcorr_v", sd$R_mk, "marker") else NULL,
+      marker_by_id_latent = summarize_cov_matrix("tau_w", "Lcorr_w", sd$Q_idm, "id:marker")
+    ),
+    formulaDist = list(
+      sigma = summarize_dist_vcov("sigma"),
+      nu = summarize_dist_vcov("nu"),
+      phi = summarize_dist_vcov("phi"),
+      alpha = summarize_dist_vcov("alpha"),
+      phi_beta = summarize_dist_vcov("phi_beta"),
+      tau_sde = summarize_dist_vcov("tau_sde")
+    )
+  )
+  out$formulaLong <- out$formulaLong[!vapply(out$formulaLong, is.null, logical(1))]
+  out$formulaDist <- out$formulaDist[!vapply(out$formulaDist, is.null, logical(1))]
+  out
 }

@@ -2,11 +2,21 @@
 % Please edit documentation in R/diagnosis.R
 \name{concordance.JoinMeFit}
 \alias{concordance.JoinMeFit}
-	itle{Time-varying concordance for the survival component}
+\title{Time-varying concordance for the survival component}
 \usage{
-\method{concordance}{JoinMeFit}(object, newdataLong = NULL, newdataEvent = NULL,
-	time_start, time_horizon = NULL, Dt = NULL, cause = 1, n_samples = 200,
-	seed = 123, type_weights = "none", ...)
+\method{concordance}{JoinMeFit}(
+  object,
+  newdataLong = NULL,
+  newdataEvent = NULL,
+  time_start,
+  time_horizon = NULL,
+  Dt = NULL,
+  cause = 1,
+  n_samples = 200,
+  seed = 123,
+  type_weights = "none",
+  ...
+)
 }
 \arguments{
 \item{object}{A fitted object of class \code{JoinMeFit}.}

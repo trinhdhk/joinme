@@ -4,7 +4,7 @@
 \alias{update.JoinMeFit}
 \title{Update a joinme fit}
 \usage{
-update.JoinMeFit(
+\method{update}{JoinMeFit}(
   object,
   formulaLong = NULL,
   dataLong = NULL,
