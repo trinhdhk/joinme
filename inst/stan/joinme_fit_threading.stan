@@ -203,6 +203,7 @@ model {
     Z_idm_event_fwd,
     /* Association features + covariance regression */
     vbar,
+    marker_weights_eff,
     L_i,
     a_cv_total,
     a_cs_total,

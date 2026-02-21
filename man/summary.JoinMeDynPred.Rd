@@ -25,6 +25,8 @@ The summary includes:
 summarized with estimate, uncertainty, and diagnostics),
 \item predicted id-level random effects per subject (estimate, uncertainty,
 interval, and diagnostics),
+\item predicted marker-by-id random effects and covariance per subject when
+marker covariance depends on id,
 \item a compact diagnostics table counting potential convergence/ESS issues.
 }
 }

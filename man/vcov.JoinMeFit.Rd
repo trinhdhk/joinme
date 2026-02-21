@@ -4,24 +4,23 @@
 \alias{vcov.JoinMeFit}
 \title{Extract covariance summaries}
 \usage{
-\method{vcov}{JoinMeFit}(
-  object,
-  what = c("id", "marker", "marker_by_id_latent"),
-  draws = NULL,
-  ...
-)
+\method{vcov}{JoinMeFit}(object, what = NULL, draws = NULL, ...)
 }
 \arguments{
 \item{object}{A joinme fit object.}
 
-\item{what}{Covariance block: "id", "marker", or "marker_by_id_latent".}
+\item{what}{Optional covariance block selector (\code{"id"}, \code{"marker"},
+\code{"marker_by_id_latent"}). When \code{NULL} (default), returns a nested list for
+all covariance components in \code{formulaLong} and \code{formulaDist}.}
 
 \item{draws}{Number of draws to use for summaries.}
 
 \item{...}{Unused.}
 }
 \value{
-A data.frame with covariance summaries.
+If \code{what} is supplied, a data frame for the requested covariance
+block. Otherwise, a nested list with \code{formulaLong} and \code{formulaDist}
+covariance summaries.
 }
 \description{
 Extract covariance summaries

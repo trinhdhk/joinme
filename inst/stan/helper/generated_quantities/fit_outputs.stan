@@ -223,15 +223,8 @@
     vector[15] cv_tot = cvm_now + cvk_now; // total CV at GK nodes
     vector[15] cs_tot = csm_raw + csk_raw; // total CS at GK nodes
 
-    vector[15] cv_tot_tf = apply_transform_vector(
-      cv_tot,
-      tf_mode_cv_tot,
-      functional_ops_cv,
-      const_data_cv,
-      knots_cv,
-      coeff_cv,
-      spline_degree_cv
-    );
+    int D_mkrs = size(v_marker);
+    vector[15] cv_tot_tf;
     vector[15] cv_mean_tf = apply_transform_vector(
       cvm_now,
       tf_mode_cv_mean,
@@ -241,15 +234,28 @@
       coeff_cv_mean,
       spline_degree_cv_mean
     );
-    vector[15] cv_marker_tf = apply_transform_vector(
-      cvk_now,
-      tf_mode_cv_marker,
-      functional_ops_cv_marker,
-      const_data_cv_marker,
-      knots_cv_marker,
-      coeff_cv_marker,
-      spline_degree_cv_marker
-    );
+    vector[15] cv_marker_tf;
+    for (j in 1 : 15) {
+      real acc_cv_tot_tf = 0;
+      real acc_cv_marker_tf = 0;
+      for (d in 1 : D_mkrs) {
+        real mk_part_now_d = 0;
+        if (R_mk > 0)
+          mk_part_now_d = dot_product(Z_mk_gk_now[i][j], v_marker[d]);
+        real cvk_now_d = mk_part_now_d + dot_product(Z_idm_gk_now[i][j], w_idscaled[i, d]);
+        real cv_tot_now_d = cvm_now[j] + cvk_now_d;
+        acc_cv_tot_tf += marker_weights_eff[d]
+          * apply_transform_scalar(cv_tot_now_d, tf_mode_cv_tot,
+                                   functional_ops_cv, const_data_cv,
+                                   knots_cv, coeff_cv, spline_degree_cv);
+        acc_cv_marker_tf += marker_weights_eff[d]
+          * apply_transform_scalar(cvk_now_d, tf_mode_cv_marker,
+                                   functional_ops_cv_marker, const_data_cv_marker,
+                                   knots_cv_marker, coeff_cv_marker, spline_degree_cv_marker);
+      }
+      cv_tot_tf[j] = acc_cv_tot_tf / D_mkrs;
+      cv_marker_tf[j] = acc_cv_marker_tf / D_mkrs;
+    }
 
     vector[15] cs_tot_tf = apply_transform_vector(
       cs_tot,

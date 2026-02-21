@@ -23,7 +23,7 @@ NULL
 #' Stable softplus
 #' @keywords internal
 .softplus <- function(x) {
-  ifelse(x > 0, x - log1p(exp(-x)), log1p(exp(x)))
+  ifelse(x > 0, x + log1p(exp(-x)), log1p(exp(x)))
 }
 
 #' Weibull baseline hazard factory
@@ -387,6 +387,17 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   rows of that family and is estimated separately from other scopes.
 #' @param formulaAssoc Optional formula for association terms in hazard, e.g. `~ cv_total + vcov`.
 #'   If provided, it overrides `assoc`.
+#' @param transforms Optional transform specifications for association terms.
+#'   Supports the same structure as `joinme(..., transforms=...)` for
+#'   `cv_total`, `cv_mean`, `cv_marker`, `cs_total`, `cs_mean`, `cs_marker`, `vcov`.
+#'   Simulation applies `cv_total` and `cv_marker` transforms at marker level before
+#'   weighted averaging (aligned with fit/predict Stan semantics).
+#'   Functional transforms support arithmetic and common nonlinear functions,
+#'   including `inv_logit`/`expit`/`sigmoid`, `exp`, `log`, `sqrt`, `power`,
+#'   `cbrt`, `softplus`/`log1p_exp`, trigonometric and hyperbolic functions.
+#' @param marker_weights Optional marker weights used in association aggregation.
+#'   If `NULL`, equal weights are used. Internally rescaled to unit RMS and aggregated
+#'   as weighted means divided by marker count.
 #' @param n_id Number of subjects.
 #' @param families Marker-specific family names.
 #' @param marker_levels Optional marker names; defaults to `m1`, `m2`, ...
@@ -446,6 +457,7 @@ simulate_joinme <- function(
   formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
   formulaDist = NULL,
   formulaAssoc = NULL,
+  transforms = NULL,
   n_id = 50,
   families = c("gaussian", "student_t", "binomial"),
   marker_levels = NULL,
@@ -457,6 +469,7 @@ simulate_joinme <- function(
     x1 ~ rnorm(n_id),
     x2 ~ rnorm(n_id)
   ),
+  marker_weights = NULL,
   assoc = c("cv_total"),
   assoc_coefs = c(cv_total = 0.6),
   beta_long = NULL,
@@ -618,6 +631,116 @@ simulate_joinme <- function(
     unique(vars[vars %in% c("cv_total", "cv_mean", "cv_marker", "cs_total", "cs_mean", "cs_marker", "vcov")])
   }
 
+  .sim_normalize_transform_list <- function(transform_list) {
+    if (is.null(transform_list)) return(list())
+    if (!is.list(transform_list)) {
+      cli::cli_abort(c(
+        x = "{.arg transforms} must be a named list.",
+        i = "Use entries such as transforms = list(cv_total = list(type='functional', expr = ~ log1p(x)))."
+      ))
+    }
+    allowed <- c("cv_total", "cv_mean", "cv_marker", "cs_total", "cs_mean", "cs_marker", "vcov")
+    bad <- setdiff(names(transform_list), allowed)
+    if (length(bad) > 0) {
+      cli::cli_abort(c(
+        x = "Unknown transform terms in {.arg transforms}: {paste(bad, collapse = ', ')}.",
+        i = "Allowed terms: cv_total, cv_mean, cv_marker, cs_total, cs_mean, cs_marker, vcov."
+      ))
+    }
+    transform_list
+  }
+
+  .sim_make_assoc_transform <- function(spec, term_name) {
+    if (is.null(spec) || is.null(spec$type) || identical(spec$type, "identity")) {
+      return(function(x) x)
+    }
+
+    tf_type <- as.character(spec$type)[1]
+
+    if (identical(tf_type, "functional")) {
+      expr_node <- .coerce_transform_expr(spec$expr)
+      env_template <- list(
+        exp = base::exp,
+        log = base::log,
+        sqrt = base::sqrt,
+        abs = base::abs,
+        sin = base::sin,
+        cos = base::cos,
+        tan = base::tan,
+        sinh = base::sinh,
+        cosh = base::cosh,
+        tanh = base::tanh,
+        asinh = base::asinh,
+        acosh = base::acosh,
+        atanh = base::atanh,
+        inv_logit = stats::plogis,
+        expit = stats::plogis,
+        sigmoid = stats::plogis,
+        softplus = .softplus,
+        log1p_exp = .softplus,
+        power = function(a, b) a^b,
+        pow = function(a, b) a^b,
+        rec = function(a) 1 / a,
+        cbrt = function(a) sign(a) * abs(a)^(1 / 3)
+      )
+      return(function(x) {
+        eval_env <- list2env(c(list(x = x), env_template), parent = baseenv())
+        as.numeric(eval(expr_node, envir = eval_env))
+      })
+    }
+
+    if (tf_type %in% c("ispline", "ispline_penalized", "pmonospline", "pmono")) {
+      if (tf_type %in% c("ispline_penalized", "pmonospline", "pmono")) {
+        spec <- .fit_penalized_ispline_spec(spec)
+      }
+      if (!requireNamespace("splines2", quietly = TRUE)) {
+        cli::cli_abort(c(
+          x = "Transform type {.val {tf_type}} for {.val {term_name}} requires {.pkg splines2}.",
+          i = "Install {.pkg splines2} or use identity/functional/pwlin in simulation."
+        ))
+      }
+      knots <- as.numeric(spec$knots)
+      coeff <- as.numeric(spec$coeff)
+      degree <- as.integer(spec$degree %||% 3L)
+      return(function(x) {
+        x <- as.numeric(x)
+        boundary <- range(c(knots, x), finite = TRUE)
+        basis <- splines2::iSpline(x,
+          knots = knots,
+          degree = degree,
+          intercept = TRUE,
+          Boundary.knots = boundary
+        )
+        coef_len <- ncol(basis)
+        if (length(coeff) < coef_len) {
+          coeff_use <- c(coeff, rep(0, coef_len - length(coeff)))
+        } else {
+          coeff_use <- coeff[seq_len(coef_len)]
+        }
+        as.numeric(basis %*% coeff_use)
+      })
+    }
+
+    if (identical(tf_type, "pwlin")) {
+      xk <- as.numeric(spec$x)
+      yk <- as.numeric(spec$y)
+      if (length(xk) < 2 || length(yk) != length(xk)) {
+        cli::cli_abort(c(
+          x = "Piecewise transform for {.val {term_name}} needs matching x/y vectors (length >= 2).",
+          i = "Use list(type='pwlin', x=..., y=...)."
+        ))
+      }
+      return(function(x) {
+        stats::approx(x = xk, y = yk, xout = as.numeric(x), method = "linear", rule = 2)$y
+      })
+    }
+
+    cli::cli_abort(c(
+      x = "Unsupported transform type for {.val {term_name}}: {.val {tf_type}}.",
+      i = "Use one of identity, functional, ispline, ispline_penalized, pwlin."
+    ))
+  }
+
   .sim_make_baseline_hazard <- function(spec, formula_basehaz = NULL, beta_basehaz = NULL) {
     if (!is.null(formula_basehaz)) {
       f_bh <- stats::as.formula(formula_basehaz)
@@ -736,6 +859,17 @@ simulate_joinme <- function(
   }
   family_codes <- .parse_family(families)
 
+  marker_weights_raw <- marker_weights %||% rep(1, D)
+  if (length(marker_weights_raw) == 1L) marker_weights_raw <- rep(marker_weights_raw, D)
+  marker_weights_raw <- as.numeric(marker_weights_raw)
+  if (length(marker_weights_raw) != D || any(!is.finite(marker_weights_raw))) {
+    cli::cli_abort(c(
+      x = "{.arg marker_weights} must be finite numeric with length equal to number of markers ({D}).",
+      i = "Provide one weight per marker or a scalar recycled across markers."
+    ))
+  }
+  marker_weights_eff <- marker_weights_raw / sqrt(mean(marker_weights_raw^2) + 1e-12)
+
   # ---- Parse longitudinal formula structure
   f_exp <- reformulas::expandDoubleVerts(formulaLong)
   bars <- reformulas::findbars(f_exp)
@@ -812,66 +946,114 @@ simulate_joinme <- function(
     assoc_coef_vec[seq_len(min(length(assoc), length(assoc_coefs)))] <- as.numeric(assoc_coefs)[seq_len(min(length(assoc), length(assoc_coefs)))]
   }
 
+  assoc_coef_full <- c(
+    cv_total = 0,
+    cv_mean = 0,
+    cv_marker = 0,
+    cs_total = 0,
+    cs_mean = 0,
+    cs_marker = 0,
+    vcov = 0
+  )
+  assoc_coef_full[names(assoc_coef_vec)] <- assoc_coef_vec
+
+  transforms <- .sim_normalize_transform_list(transforms)
+  tf_funs <- list(
+    cv_total = .sim_make_assoc_transform(transforms$cv_total, "cv_total"),
+    cv_mean = .sim_make_assoc_transform(transforms$cv_mean, "cv_mean"),
+    cv_marker = .sim_make_assoc_transform(transforms$cv_marker, "cv_marker"),
+    cs_total = .sim_make_assoc_transform(transforms$cs_total, "cs_total"),
+    cs_mean = .sim_make_assoc_transform(transforms$cs_mean, "cs_mean"),
+    cs_marker = .sim_make_assoc_transform(transforms$cs_marker, "cs_marker"),
+    vcov = .sim_make_assoc_transform(transforms$vcov, "vcov")
+  )
+
+  has_tf_cv_marker <- !is.null(transforms$cv_marker)
+  has_tf_cv_total <- !is.null(transforms$cv_total)
+
   # ---- Latent trajectory evaluators at arbitrary (id, marker, time)
-  make_row_df <- function(i, d, t) {
-    out <- dataEvent[i, , drop = FALSE]
-    out[[time_var]] <- t
-    out[[marker_var]] <- factor(marker_levels[d], levels = marker_levels)
-    out
+ 
+  assoc_row_template <- vector("list", n_id)
+  marker_factor <- factor(marker_levels, levels = marker_levels)
+  for (i in seq_len(n_id)) {
+    row_df_i <- dataEvent[rep(i, D), , drop = FALSE]
+    row_df_i[[marker_var]] <- marker_factor
+    assoc_row_template[[i]] <- row_df_i
   }
 
-  eta_components <- function(i, d, t) {
-    row_df <- make_row_df(i, d, t)
+  eta_components_all_markers <- function(i, t) {
+    row_df <- assoc_row_template[[i]]
+    row_df[[time_var]] <- t
+
     x_fix <- .mm(fixed_rhs, row_df)
     z_id <- .sim_rhs_matrix(id_rhs_list, row_df)
     z_mk <- .sim_rhs_matrix(mk_rhs_list, row_df)
     z_idm <- .sim_rhs_matrix(idm_rhs_list, row_df)
 
-    fixed_part <- if (ncol(x_fix) > 0) as.numeric(x_fix %*% beta_long) else 0
-    id_part <- if (ncol(z_id) > 0) sum(z_id[1, ] * re_id[i, ]) else 0
-    mk_part <- if (ncol(z_mk) > 0) sum(z_mk[1, ] * re_marker[d, ]) else 0
-    idm_part <- if (ncol(z_idm) > 0) sum(z_idm[1, ] * re_idm[i, d, ]) else 0
+    fixed_part <- if (ncol(x_fix) > 0) as.numeric(x_fix %*% beta_long) else rep(0, D)
+    id_part <- if (ncol(z_id) > 0) as.numeric(z_id %*% re_id[i, ]) else rep(0, D)
+    mk_part <- if (ncol(z_mk) > 0) rowSums(z_mk * re_marker) else rep(0, D)
+    idm_part <- if (ncol(z_idm) > 0) rowSums(z_idm * re_idm[i, , ]) else rep(0, D)
 
+    mu_mean <- fixed_part + id_part
+    mu_marker <- mk_part + idm_part
     list(
-      fixed_id = fixed_part + id_part,
-      marker_specific = mk_part + idm_part,
-      total = fixed_part + id_part + mk_part + idm_part
+      mu_mean = mu_mean,
+      mu_marker = mu_marker,
+      mu_total = mu_mean + mu_marker
     )
   }
 
   assoc_components <- function(i, t) {
-    mu_total <- numeric(D)
-    mu_mean <- numeric(D)
-    mu_marker <- numeric(D)
-    for (d in seq_len(D)) {
-      part <- eta_components(i, d, t)
-      mu_total[d] <- part$total
-      mu_mean[d] <- part$fixed_id
-      mu_marker[d] <- part$marker_specific
-    }
-    cv_total <- mean(mu_total)
-    cv_mean <- mean(mu_mean)
-    cv_marker <- mean(mu_marker)
+    now <- eta_components_all_markers(i, t)
+    eps <- eta_components_all_markers(i, t + eps_cs)
 
-    t_eps <- t + eps_cs
-    mu_total_eps <- numeric(D)
-    mu_mean_eps <- numeric(D)
-    mu_marker_eps <- numeric(D)
-    for (d in seq_len(D)) {
-      part_eps <- eta_components(i, d, t_eps)
-      mu_total_eps[d] <- part_eps$total
-      mu_mean_eps[d] <- part_eps$fixed_id
-      mu_marker_eps[d] <- part_eps$marker_specific
+    cv_mean_raw <- mean(now$mu_mean)
+    cv_marker_raw <- sum(marker_weights_eff * now$mu_marker) / D
+    cv_total_raw <- sum(marker_weights_eff * now$mu_total) / D
+
+    cv_mean <- tf_funs$cv_mean(cv_mean_raw)
+    cv_marker <- cv_marker_raw
+    cv_total <- cv_total_raw
+
+    if (has_tf_cv_marker) {
+      cv_marker <- sum(marker_weights_eff * tf_funs$cv_marker(now$mu_marker)) / D
     }
+    if (has_tf_cv_total) {
+      cv_total <- sum(marker_weights_eff * tf_funs$cv_total(now$mu_total)) / D
+    }
+
+    cs_mean_raw <- (mean(eps$mu_mean) - cv_mean_raw) / eps_cs
+    cs_marker_raw <- ((sum(marker_weights_eff * eps$mu_marker) / D) - cv_marker_raw) / eps_cs
+    cs_total_raw <- ((sum(marker_weights_eff * eps$mu_total) / D) - cv_total_raw) / eps_cs
+
+    if (has_tf_cv_marker) {
+      cs_marker_raw <- ((sum(marker_weights_eff * tf_funs$cv_marker(eps$mu_marker)) / D) - cv_marker) / eps_cs
+    }
+    if (has_tf_cv_total) {
+      cs_total_raw <- ((sum(marker_weights_eff * tf_funs$cv_total(eps$mu_total)) / D) - cv_total) / eps_cs
+    }
+
+    vcov_raw <- if (D > 1) stats::var(now$mu_total) else 0
 
     list(
       cv_total = cv_total,
       cv_mean = cv_mean,
       cv_marker = cv_marker,
-      cs_total = (mean(mu_total_eps) - cv_total) / eps_cs,
-      cs_mean = (mean(mu_mean_eps) - cv_mean) / eps_cs,
-      cs_marker = (mean(mu_marker_eps) - cv_marker) / eps_cs,
-      vcov = if (D > 1) stats::var(mu_total) else 0
+      cs_total = tf_funs$cs_total(cs_total_raw),
+      cs_mean = tf_funs$cs_mean(cs_mean_raw),
+      cs_marker = tf_funs$cs_marker(cs_marker_raw),
+      vcov = tf_funs$vcov(vcov_raw),
+      raw = list(
+        cv_total = cv_total_raw,
+        cv_mean = cv_mean_raw,
+        cv_marker = cv_marker_raw,
+        cs_total = cs_total_raw,
+        cs_mean = cs_mean_raw,
+        cs_marker = cs_marker_raw,
+        vcov = vcov_raw,
+        marker_values = now
+      )
     )
   }
 
@@ -887,22 +1069,110 @@ simulate_joinme <- function(
 
   eta_event_i <- as.numeric(W_event %*% beta_event)
 
+  .sim_assoc_lp_from_components <- function(comp) {
+    assoc_coef_full[["cv_total"]] * comp$cv_total +
+      assoc_coef_full[["cv_mean"]] * comp$cv_mean +
+      assoc_coef_full[["cv_marker"]] * comp$cv_marker +
+      assoc_coef_full[["cs_total"]] * comp$cs_total +
+      assoc_coef_full[["cs_mean"]] * comp$cs_mean +
+      assoc_coef_full[["cs_marker"]] * comp$cs_marker +
+      assoc_coef_full[["vcov"]] * comp$vcov
+  }
+
+  .sim_time_key <- function(t) sprintf("%.12f", as.numeric(t))
+  assoc_lp_cache <- replicate(n_id, new.env(parent = emptyenv(), hash = TRUE), simplify = FALSE)
+  cumhaz_cache <- replicate(n_id, new.env(parent = emptyenv(), hash = TRUE), simplify = FALSE)
+
+  .assoc_lp_cached <- function(i, t) {
+    key <- .sim_time_key(t)
+    cache_i <- assoc_lp_cache[[i]]
+    if (exists(key, envir = cache_i, inherits = FALSE)) {
+      return(get(key, envir = cache_i, inherits = FALSE))
+    }
+    lp_val <- .sim_assoc_lp_from_components(assoc_components(i, t))
+    assign(key, lp_val, envir = cache_i)
+    lp_val
+  }
+
+  .gk15_nodes <- c(
+    -0.9914553711208126, -0.9491079123427585, -0.8648644233597691,
+    -0.7415311855993945, -0.5860872354676911, -0.4058451513773972,
+    -0.2077849550078985, 0.0,
+    0.2077849550078985, 0.4058451513773972, 0.5860872354676911,
+    0.7415311855993945, 0.8648644233597691, 0.9491079123427585,
+    0.9914553711208126
+  )
+  .gk15_weights <- c(
+    0.02293532201052922, 0.06309209262997855, 0.1047900103222502,
+    0.1406532597155259, 0.1690047266392679, 0.1903505780647854,
+    0.2044329400752989, 0.2094821410847278,
+    0.2044329400752989, 0.1903505780647854, 0.1690047266392679,
+    0.1406532597155259, 0.1047900103222502, 0.06309209262997855,
+    0.02293532201052922
+  )
+
+  .sim_composite_gk15 <- function(f, upper, panels) {
+    if (upper <= 0) return(0)
+    edges <- seq(0, upper, length.out = panels + 1L)
+    total <- 0
+    for (p in seq_len(panels)) {
+      a <- edges[p]
+      b <- edges[p + 1L]
+      center <- 0.5 * (a + b)
+      half <- 0.5 * (b - a)
+      nodes <- center + half * .gk15_nodes
+      vals <- f(nodes)
+      total <- total + half * sum(.gk15_weights * vals)
+    }
+    total
+  }
+
   hazard_i <- function(i, t) {
-    if (length(t) > 1) {
-      return(vapply(t, function(tt) hazard_i(i, tt), numeric(1)))
+    t <- as.numeric(t)
+    if (length(t) > 1L) {
+      return(vapply(t, function(tt) h0_fn(tt) * exp(eta_event_i[i] + .assoc_lp_cached(i, tt)), numeric(1)))
     }
-    comp <- assoc_components(i, t)
-    assoc_lp <- 0.0
-    for (nm in assoc) {
-      assoc_lp <- assoc_lp + assoc_coef_vec[[nm]] * comp[[nm]]
-    }
-    h0_fn(t) * exp(eta_event_i[i] + assoc_lp)
+    h0_fn(t) * exp(eta_event_i[i] + .assoc_lp_cached(i, t))
   }
 
   cumhaz_i <- function(i, t) {
+    t <- as.numeric(t)
+    if (length(t) > 1L) return(vapply(t, function(tt) cumhaz_i(i, tt), numeric(1)))
     if (t <= 0) return(0)
-    out <- do.call(integrate, c(list(f = function(u) hazard_i(i, u), lower = 0, upper = t), integration_control))
-    as.numeric(out$value)
+
+    key <- .sim_time_key(t)
+    cache_i <- cumhaz_cache[[i]]
+    if (exists(key, envir = cache_i, inherits = FALSE)) {
+      return(get(key, envir = cache_i, inherits = FALSE))
+    }
+
+    method <- tolower(as.character(integration_control$method %||% "integrate")[1])
+    rel_tol <- as.numeric(integration_control$rel.tol %||% 1e-6)
+    max_panels <- max(1L, as.integer(integration_control$subdivisions %||% 512L))
+    max_refine <- max(1L, as.integer(integration_control$max_refine %||% 8L))
+
+    value <- if (identical(method, "integrate")) {
+      integrate_ctrl <- integration_control
+      integrate_ctrl$method <- NULL
+      integrate_ctrl$max_refine <- NULL
+      out <- do.call(integrate, c(list(f = function(u) hazard_i(i, u), lower = 0, upper = t), integrate_ctrl))
+      as.numeric(out$value)
+    } else {
+      panels <- 1L
+      prev <- NA_real_
+      curr <- NA_real_
+      for (iter in seq_len(max_refine)) {
+        curr <- .sim_composite_gk15(function(u) hazard_i(i, u), upper = t, panels = panels)
+        if (is.finite(prev) && abs(curr - prev) <= rel_tol * max(1, abs(prev))) break
+        prev <- curr
+        if (panels >= max_panels) break
+        panels <- min(max_panels, panels * 2L)
+      }
+      as.numeric(curr)
+    }
+
+    assign(key, value, envir = cache_i)
+    value
   }
 
   draw_event_time <- function(i) {
@@ -1062,9 +1332,12 @@ simulate_joinme <- function(
     beta_event = beta_event,
     beta = beta_long,
     gamma_w = beta_event,
-    alpha_cv_total = assoc_coef_vec[["cv_total"]] %||% NA_real_,
+    alpha_cv_total = if ("cv_total" %in% names(assoc_coef_vec)) assoc_coef_vec[["cv_total"]] else NA_real_,
     assoc = assoc,
     assoc_coefs = assoc_coef_vec,
+    marker_weights = marker_weights_raw,
+    marker_weights_eff = marker_weights_eff,
+    transforms = transforms,
     baseline_hazard = baseline_hazard,
     formulaBasehaz = formulaBasehaz,
     beta_basehaz = beta_basehaz,
@@ -1089,6 +1362,7 @@ simulate_joinme <- function(
     cs_mean = function(i, t) assoc_components(i, t)$cs_mean,
     cs_marker = function(i, t) assoc_components(i, t)$cs_marker,
     vcov = function(i, t) assoc_components(i, t)$vcov,
+    assoc_components_raw = function(i, t) assoc_components(i, t)$raw,
     assoc_components = assoc_components,
     baseline_hazard = h0_fn,
     hazard = hazard_i,

@@ -69,6 +69,10 @@ Accepted specifications include:
 
 We simulate a multi-marker longitudinal dataset with a survival process linked through **current value (CV)**. The simulator also returns truth values for fixed effects and survival coefficients.
 
+For marker-aggregated terms (`cv_total`, `cv_marker`), both simulation and Stan
+fit/prediction apply transforms at marker level before weighted averaging. This
+keeps nonlinear association terms consistent end-to-end.
+
 ```{r scenario-a-sim}
 sim <- simulate_joinme(
   n_id = 100,

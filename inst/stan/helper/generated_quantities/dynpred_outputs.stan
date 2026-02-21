@@ -76,23 +76,27 @@ for (k in 1 : n_draws) {
   // -------------------------------------------------------------
   vector[n_marker_types] marker_weights_k = to_vector(marker_weights_draws[k, ]); // draw-specific weights
   // Aggregation is by marker count D to match fit-time construction.
-  vector[n_random_marker] vbar; // weighted mean marker REs
+  // Marker weights are applied in transformed marker aggregation, not here.
+  vector[n_random_marker] vbar; // unweighted mean marker REs
   if (n_random_marker > 0) {
     for (r in 1 : n_random_marker) {
       real acc = 0;
       for (d in 1 : n_marker_types)
-        acc += marker_weights_k[d] * v_marker[d][r];
+        acc += v_marker[d][r];
       vbar[r] = acc / n_marker_types;
     }
   }
-  vector[n_random_marker_id] zbar; // weighted mean marker-id latents
+  vector[n_random_marker_id] zbar; // unweighted mean marker-id latents
   for (q in 1 : n_random_marker_id) {
     real acc = 0;
     for (d in 1 : n_marker_types)
-      acc += marker_weights_k[d] * z_w[d][q];
+      acc += z_w[d][q];
     zbar[q] = acc / n_marker_types;
   }
   vector[n_random_marker_id] wbar_i = Li * zbar; // scaled mean marker-id effects
+    array[n_marker_types] vector[n_random_marker_id] w_draw;
+    for (d in 1 : n_marker_types)
+      w_draw[d] = Li * z_w[d];
 
   // Global Association Scales
   real a_cv_total = flag_assoc_cv_total * coeff_assoc_cv_total[k];
@@ -291,15 +295,7 @@ for (k in 1 : n_draws) {
     vector[15] cv_tot = cvm + cvk; // total current value
     vector[15] cs_tot = csm_raw + csk_raw; // total current slope
 
-    vector[15] cv_tot_tf = apply_transform_vector(
-      cv_tot,
-      tf_mode_cv_tot,
-      functional_ops_cv,
-      const_data_cv,
-      knots_cv,
-      coeff_cv,
-      spline_degree_cv
-    );
+    vector[15] cv_tot_tf;
     vector[15] cv_mean_tf = apply_transform_vector(
       cvm,
       tf_mode_cv_mean,
@@ -309,15 +305,29 @@ for (k in 1 : n_draws) {
       coeff_cv_mean,
       spline_degree_cv_mean
     );
-    vector[15] cv_marker_tf = apply_transform_vector(
-      cvk,
-      tf_mode_cv_marker,
-      functional_ops_cv_marker,
-      const_data_cv_marker,
-      knots_cv_marker,
-      coeff_cv_marker,
-      spline_degree_cv_marker
-    );
+    vector[15] cv_marker_tf;
+    for (j in 1 : 15) {
+      real acc_cv_tot_tf = 0;
+      real acc_cv_marker_tf = 0;
+      for (d in 1 : n_marker_types) {
+        real mk_part_d = 0;
+        if (n_random_marker > 0)
+          mk_part_d = dot_product(mat_marker_gk_cond[j], v_marker[d]);
+        real cvk_d = mk_part_d + dot_product(mat_marker_id_gk_cond[j], w_draw[d]);
+        real cv_tot_d = cvm[j] + cvk_d;
+
+        acc_cv_tot_tf += marker_weights_k[d]
+          * apply_transform_scalar(cv_tot_d, tf_mode_cv_tot,
+                                   functional_ops_cv, const_data_cv,
+                                   knots_cv, coeff_cv, spline_degree_cv);
+        acc_cv_marker_tf += marker_weights_k[d]
+          * apply_transform_scalar(cvk_d, tf_mode_cv_marker,
+                                   functional_ops_cv_marker, const_data_cv_marker,
+                                   knots_cv_marker, coeff_cv_marker, spline_degree_cv_marker);
+      }
+      cv_tot_tf[j] = acc_cv_tot_tf / n_marker_types;
+      cv_marker_tf[j] = acc_cv_marker_tf / n_marker_types;
+    }
 
     vector[15] cs_tot_tf = apply_transform_vector(
       cs_tot,
@@ -413,15 +423,7 @@ for (k in 1 : n_draws) {
     vector[15] cv_tot = cvm + cvk; // total current value
     vector[15] cs_tot = csm_raw + csk_raw; // total current slope
 
-    vector[15] cv_tot_tf = apply_transform_vector(
-      cv_tot,
-      tf_mode_cv_tot,
-      functional_ops_cv,
-      const_data_cv,
-      knots_cv,
-      coeff_cv,
-      spline_degree_cv
-    );
+    vector[15] cv_tot_tf;
     vector[15] cv_mean_tf = apply_transform_vector(
       cvm,
       tf_mode_cv_mean,
@@ -431,15 +433,29 @@ for (k in 1 : n_draws) {
       coeff_cv_mean,
       spline_degree_cv_mean
     );
-    vector[15] cv_marker_tf = apply_transform_vector(
-      cvk,
-      tf_mode_cv_marker,
-      functional_ops_cv_marker,
-      const_data_cv_marker,
-      knots_cv_marker,
-      coeff_cv_marker,
-      spline_degree_cv_marker
-    );
+    vector[15] cv_marker_tf;
+    for (j in 1 : 15) {
+      real acc_cv_tot_tf = 0;
+      real acc_cv_marker_tf = 0;
+      for (d in 1 : n_marker_types) {
+        real mk_part_d = 0;
+        if (n_random_marker > 0)
+          mk_part_d = dot_product(mat_marker_gk_surv[s][j], v_marker[d]);
+        real cvk_d = mk_part_d + dot_product(mat_marker_id_gk_surv[s][j], w_draw[d]);
+        real cv_tot_d = cvm[j] + cvk_d;
+
+        acc_cv_tot_tf += marker_weights_k[d]
+          * apply_transform_scalar(cv_tot_d, tf_mode_cv_tot,
+                                   functional_ops_cv, const_data_cv,
+                                   knots_cv, coeff_cv, spline_degree_cv);
+        acc_cv_marker_tf += marker_weights_k[d]
+          * apply_transform_scalar(cvk_d, tf_mode_cv_marker,
+                                   functional_ops_cv_marker, const_data_cv_marker,
+                                   knots_cv_marker, coeff_cv_marker, spline_degree_cv_marker);
+      }
+      cv_tot_tf[j] = acc_cv_tot_tf / n_marker_types;
+      cv_marker_tf[j] = acc_cv_marker_tf / n_marker_types;
+    }
 
     vector[15] cs_tot_tf = apply_transform_vector(
       cs_tot,

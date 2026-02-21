@@ -61,9 +61,19 @@ available.
 # Marker-weighted CV and CS
 
 When multiple biomarkers are modeled, `joinme` constructs marker-average association
-components using weights $\omega_d$ (one per marker). These weights affect **both**
-current value (CV) and current slope (CS) marker summaries and then flow into the
-`cv_marker` and `cs_marker` association terms after any transformations.
+components using weights $\omega_d$ (one per marker). For `cv_total` and
+`cv_marker`, transforms are applied at the marker level first and then averaged
+with weights. This matters whenever transforms are nonlinear.
+
+For example, with marker-specific total current values $CV_{id}(t)$ and transform
+$f_{cv}$:
+
+$$
+	ext{cv\_total}(t) = \frac{1}{D}\sum_{d=1}^{D} \omega_d\, f_{cv}\!\left(CV_{id}(t)\right),
+$$
+
+which differs from $f_{cv}(\frac{1}{D}\sum_d \omega_d CV_{id}(t))$ unless $f_{cv}$
+is linear.
 
 In practice, provide fixed weights via `marker_weights`, or set
 `estimate_marker_weights = TRUE` to estimate them with shrinkage (Normal or Laplace
@@ -112,6 +122,16 @@ transforms <- list(
 The functional evaluator supports common arithmetic and functions such as
 `log`, `exp`, `sqrt`, `sin`, `cos`, `tanh`, plus aliases `sigmoid`/`expit`,
 `softplus`/`log1p_exp`, and helpers like `cbrt` and `power`.
+
+```{r functional-transform-mixed-demo, eval=FALSE}
+transforms <- list(
+  cv_total = list(type = "functional", expr = ~ inv_logit(x)),
+  cv_mean = list(type = "functional", expr = ~ exp(0.2 * x)),
+  cv_marker = list(type = "functional", expr = ~ power(x, 2)),
+  cs_total = list(type = "functional", expr = ~ sqrt(abs(x) + 1e-6)),
+  vcov = list(type = "functional", expr = ~ cbrt(x))
+)
+```
 
 **When to use**
 

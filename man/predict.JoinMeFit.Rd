@@ -109,7 +109,7 @@ A list with two components:
 \item{longitudinal_fitted}{A data.frame containing fitted values for observed history on the linpred and epred scales. Includes a \code{scale} column.}
 \item{survival}{A data.frame containing survival probabilities (S(t|time_start)) for each time point in \code{times}. Columns: id, time, Survival, Median, Est.Error, L95, U95.}
 \item{cumhaz}{A data.frame containing conditional cumulative hazards H(t|time_start). Columns: id, time, Cumhaz, Median, Est.Error, L95, U95.}
-\item{draws}{A list containing raw posterior draws (\code{longitudinal}, \code{longitudinal_fitted}, \code{survival}, \code{cumhaz}) and reconstructed subject-level id random-effect draws (\code{random_effects_id}).}
+\item{draws}{A list containing raw posterior draws (\code{longitudinal}, \code{longitudinal_fitted}, \code{survival}, \code{cumhaz}) and reconstructed subject-level random effects (\code{random_effects_id}, \code{random_effects_marker_id}, including marker-by-id covariance draws when id-dependent covariance is active).}
 
 A \code{JoinMeDynPred} object with \code{metadata$scale = "linpred"}.
 

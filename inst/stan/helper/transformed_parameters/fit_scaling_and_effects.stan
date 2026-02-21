@@ -134,26 +134,26 @@
     marker_weights_eff = raw_w / rms_w;
   }
 
-  /* -------------------- marker averages for survival association (weighted mean across markers) */
-  // These averages are used for both current value (CV) and current slope (CS) terms.
-  // Aggregation is by marker count D (not by sum of weights) to keep scale
-  // interpretation stable with signed weights.
-  vector[R_mk] vbar; // weighted mean of marker REs
+  /* -------------------- marker averages for survival association (unweighted mean across markers) */
+  // For transformed marker-aggregated CV terms, signed marker weights are applied
+  // only after transformation. vbar/wbar_i stay unweighted means to avoid
+  // double-weighting when transformed marker aggregation is enabled.
+  vector[R_mk] vbar; // unweighted mean of marker REs
   if (R_mk > 0) {
     for (r in 1 : R_mk) {
       real acc = 0;
       for (d in 1 : D) 
-        acc += marker_weights_eff[d] * v_marker[d][r];
+        acc += v_marker[d][r];
       vbar[r] = acc / D;
     }
   }
   
-  array[n_id] vector[Q_idm] zbar; // weighted mean of marker-id latents
+  array[n_id] vector[Q_idm] zbar; // unweighted mean of marker-id latents
   for (i in 1 : n_id) {
     for (q in 1 : Q_idm) {
       real acc = 0;
       for (d in 1 : D)
-        acc += marker_weights_eff[d] * z_w[i, d][q];
+        acc += z_w[i, d][q];
       zbar[i][q] = acc / D;
     }
   }

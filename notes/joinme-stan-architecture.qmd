@@ -262,19 +262,19 @@ FUNCTION partial_joinme(id_seq, start, end, ... [all data & parameters]):
     FOR j = 1 TO 15:  // For each GK node
       // a. Compute current value (CV) components
       cvm_now[j] = X_gk_now[i][j]'β_scaled + Z_id_gk_now[i][j]'u_id[i]  // Mean component
-      cvk_now[j] = Z_mk_gk_now[i][j]'vbar + Z_idm_gk_now[i][j]'wbar_i[i]  // Marker component
-      
-      // b. Compute forward step for finite-difference slope
       cvm_fwd[j] = X_gk_fwd[i][j]'β_scaled + Z_id_gk_fwd[i][j]'u_id[i]
-      cvk_fwd[j] = Z_mk_gk_fwd[i][j]'vbar + Z_idm_gk_fwd[i][j]'wbar_i[i]
+
+      // b. Compute marker-level totals first (per marker d)
+      FOR each marker d:
+        cvmkr_now[d,j] = Z_mk_gk_now[i][j,d]'v_marker[d] + Z_idm_gk_now[i][j,d]'w_idscaled[i,d]
+        cvtot_now[d,j] = cvm_now[j] + cvmkr_now[d,j]
+        cvmkr_fwd[d,j] = Z_mk_gk_fwd[i][j,d]'v_marker[d] + Z_idm_gk_fwd[i][j,d]'w_idscaled[i,d]
+        cvtot_fwd[d,j] = cvm_fwd[j] + cvmkr_fwd[d,j]
+      END FOR
     END FOR
     
     // 2. Compute current slopes (CS) via finite differences
     csm_raw = eta_fd(cvm_now, cvm_fwd, eps_fd) / tmax  // Time-rescaled slope
-    csk_raw = eta_fd(cvk_now, cvk_fwd, eps_fd) / tmax
-
-    // 2b. Marker-weighted means used for cvk and csk
-    //     vbar and wbar_i are weighted means across markers using weights ω_d
     
     // 3. Compute variance-covariance association feature
     //    (logarithm of variances from Cholesky factor L_i)
@@ -283,18 +283,25 @@ FUNCTION partial_joinme(id_seq, start, end, ... [all data & parameters]):
     //    L_i[r,c] = log1p_exp(lp_m) if r == c, else lp_m
     vcov_raw = weighted_log_variances(L_i[i], a_vcov_var)
     
-    // 4. Aggregate association features
-    cv_total[j] = cvm_now[j] + cvk_now[j]  // Total current value
-    cs_total[j] = csm_raw[j] + csk_raw[j]  // Total current slope
-    
-    // 5. Apply nonlinear transformations to association features
-    //    Transformations can be: identity, log, exp, splines, functional opcodes, etc.
-    cv_total_tf = apply_transform(cv_total, tf_mode_cv_tot, ops_cv, coeff_cv, ...)
+    // 4. Transform marker-level quantities and then aggregate with weights
+    FOR j = 1 TO 15:
+      cv_total_tf[j] = (1/D) * Σ_d ω_d * apply_transform(cvtot_now[d,j], tf_mode_cv_tot, ops_cv, coeff_cv, ...)
+      cv_marker_tf[j] = (1/D) * Σ_d ω_d * apply_transform(cvmkr_now[d,j], tf_mode_cv_marker, ...)
+
+      cs_total_tf[j] = (1/D) * Σ_d ω_d * (
+        apply_transform(cvtot_fwd[d,j], tf_mode_cv_tot, ops_cv, coeff_cv, ...)
+        - apply_transform(cvtot_now[d,j], tf_mode_cv_tot, ops_cv, coeff_cv, ...)
+      ) / (eps_fd * tmax)
+
+      cs_marker_tf[j] = (1/D) * Σ_d ω_d * (
+        apply_transform(cvmkr_fwd[d,j], tf_mode_cv_marker, ...)
+        - apply_transform(cvmkr_now[d,j], tf_mode_cv_marker, ...)
+      ) / (eps_fd * tmax)
+    END FOR
+
+    // 5. Apply nonlinear transformations to non-marker-aggregated features
     cv_mean_tf  = apply_transform(cvm_now, tf_mode_cv_mean, ...)
-    cv_marker_tf = apply_transform(cvk_now, tf_mode_cv_marker, ...)
-    cs_total_tf = apply_transform(cs_total, tf_mode_cs_tot, ...)
     cs_mean_tf  = apply_transform(csm_raw, tf_mode_cs_mean, ...)
-    cs_marker_tf = apply_transform(csk_raw, tf_mode_cs_marker, ...)
     vcov_tf     = apply_transform(vcov_raw, tf_mode_vcov, ...)
     
     // 6. Combine transformed features into survival predictor at GK nodes
@@ -302,7 +309,7 @@ FUNCTION partial_joinme(id_seq, start, end, ... [all data & parameters]):
       η_assoc_nodes[j] = α_cv_total * cv_total_tf[j]
                        + α_cv_mean * cv_mean_tf[j]
                        + α_cv_marker * cv_marker_tf[j]
-                       + α_cs_total * cs_total_tf[j]
+               + α_cs_total * cs_total_tf[j]
                        + α_cs_mean * cs_mean_tf[j]
                        + α_cs_marker * cs_marker_tf[j]
                        + vcov_tf[j]
@@ -583,29 +590,37 @@ FUNCTION partial_draw(draw_ids_slice, start, end, ... [data & posterior draws]):
     // -------------------
     // Same logic as joinme_fit, but at conditioning time T_cond
     
-    // Weighted averages of REs across markers
+    // Marker-specific association features with draw-specific weights
     marker_weights_k = marker_weights_draws[k, :]
-    vbar = weighted_average(v_marker, marker_weights_k)
-    wbar_i = L_i * weighted_average(z_w, marker_weights_k)
-    
+
     FOR j = 1 TO 15:  // GK nodes in [0, T_cond]
       cvm[j] = mat_fixed_gk_cond[j]' * β_fixed^(k) + mat_id_gk_cond[j]' * u_id
       cvm_f[j] = mat_fixed_gk_cond_fwd[j]' * β_fixed^(k) + mat_id_gk_cond_fwd[j]' * u_id
-      
-      cvk[j] = mat_marker_gk_cond[j]' * vbar + mat_marker_id_gk_cond[j]' * wbar_i
-      cvk_f[j] = mat_marker_gk_cond_fwd[j]' * vbar + mat_marker_id_gk_cond_fwd[j]' * wbar_i
+
+      FOR each marker d:
+        cvk[d,j] = mat_marker_gk_cond[j,d]' * v_marker[d] + mat_marker_id_gk_cond[j,d]' * w_idscaled[d]
+        cvk_f[d,j] = mat_marker_gk_cond_fwd[j,d]' * v_marker[d] + mat_marker_id_gk_cond_fwd[j,d]' * w_idscaled[d]
+        cvtot[d,j] = cvm[j] + cvk[d,j]
+        cvtot_f[d,j] = cvm_f[j] + cvk_f[d,j]
+      END FOR
     END FOR
-    
-    // Compute slopes, aggregate, transform
+
+    // Compute slopes with transform-before-averaging for marker-aggregated terms
     csm_raw = eta_fd(cvm, cvm_f, eps_finite_diff)
-    csk_raw = eta_fd(cvk, cvk_f, eps_finite_diff)
     vcov_raw = weighted_log_variances(L_i, coeff_assoc_vcov_var^(k))
-    
-    cv_total = cvm + cvk
-    cs_total = csm_raw + csk_raw
-    
-    // Apply transformations
-    cv_total_tf = apply_transform(cv_total, ...)
+
+    FOR j = 1 TO 15:
+      cv_total_tf[j] = (1/D) * Σ_d marker_weights_k[d] * apply_transform(cvtot[d,j], tf_mode_cv_total, ...)
+      cv_marker_tf[j] = (1/D) * Σ_d marker_weights_k[d] * apply_transform(cvk[d,j], tf_mode_cv_marker, ...)
+      cs_total_tf[j] = (1/D) * Σ_d marker_weights_k[d] *
+        (apply_transform(cvtot_f[d,j], tf_mode_cv_total, ...) - apply_transform(cvtot[d,j], tf_mode_cv_total, ...)) / eps_finite_diff
+      cs_marker_tf[j] = (1/D) * Σ_d marker_weights_k[d] *
+        (apply_transform(cvk_f[d,j], tf_mode_cv_marker, ...) - apply_transform(cvk[d,j], tf_mode_cv_marker, ...)) / eps_finite_diff
+    END FOR
+
+    // Apply remaining transformations
+    cv_mean_tf = apply_transform(cvm, ...)
+    cs_mean_tf = apply_transform(csm_raw, ...)
     ... [other transforms]
     
     // Aggregate association
@@ -916,10 +931,13 @@ $$ L_i[r,c] = \eta_{r,c} $$
 
 ## Marker Weighting
 
-Association features use **weighted averages** of marker-specific REs:
+Marker-aggregated association features (`cv_total`, `cv_marker`, and derived
+finite-difference slopes) use **transform-before-averaging** semantics:
 
-$$ \bar{v} = \frac{1}{D}\sum_d \omega_d v_{marker}[d] $$
-$$ \bar{w}_i = L_i \cdot \frac{1}{D}\sum_d \omega_d z_w[d] $$
+$$ A_i(t) = \frac{1}{D}\sum_d \omega_d\, f\!\left(m_{id}(t)\right). $$
+
+With identity transforms, this reduces to weighted averaging of marker-level
+random-effects contributions.
 
 **Weights** $\omega_d$:
 - Fixed: User-specified (e.g., equal weights $1/D$).

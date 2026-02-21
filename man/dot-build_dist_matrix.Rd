@@ -4,7 +4,7 @@
 \alias{.build_dist_matrix}
 \title{Build distributional design matrix}
 \usage{
-.build_dist_matrix(formula, data)
+.build_dist_matrix(formula, data, family_by_row = NULL)
 }
 \description{
 Build distributional design matrix

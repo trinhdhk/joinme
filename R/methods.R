@@ -494,6 +494,12 @@ print.JoinMeFit <- function(x, ...) {
 
 #' Summarize a joinme object
 #'
+#' @description
+#' Builds posterior summaries for the longitudinal process, survival process,
+#' association terms, and optional covariance blocks. For survival, the summary
+#' now includes a dedicated `survival_process` report whenever the event model
+#' contains non-intercept covariates beyond association features.
+#'
 #' @param object A joinme fit object.
 #' @param draws Number of draws to use for summaries.
 #' @param seed Random seed for subsetting draws.
@@ -501,7 +507,8 @@ print.JoinMeFit <- function(x, ...) {
 #' @param include_vcov Logical; include covariance summaries.
 #' @param ... Unused.
 #'
-#' @return A summary_JoinMeFit object.
+#' @return A `summary_JoinMeFit` object containing tables such as `fixef`,
+#'   `gamma_w`, `survival_process` (when applicable), `assoc`, and diagnostics.
 #' @export
 summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
                            include_vcov = TRUE, ...) {
@@ -547,6 +554,33 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
       s_g$Q2.5 <- round(s_g$Q2.5, digits)
       s_g$Q97.5 <- round(s_g$Q97.5, digits)
       s_g$Rhat <- round(s_g$Rhat, 3)
+    }
+  }
+
+  # Survival-process report (non-association baseline covariates only)
+  #
+  # Algorithm:
+  # 1) Start from gamma_w summaries (the survival linear predictor terms).
+  # 2) Exclude intercept-like terms so this report is shown only when user-level
+  #    survival covariates exist beyond the baseline intercept.
+  # 3) Add hazard-ratio summaries exp(beta) for direct interpretation.
+  s_surv <- NULL
+  if (!is.null(s_g) && nrow(s_g) > 0) {
+    is_intercept_term <- function(term) {
+      term_chr <- trimws(as.character(term))
+      tolower(term_chr) %in% c("(intercept)", "intercept", "1")
+    }
+
+    keep_idx <- !vapply(s_g$term, is_intercept_term, logical(1))
+    if (any(keep_idx)) {
+      s_surv <- s_g[keep_idx, , drop = FALSE]
+      s_surv$Hazard.Ratio <- round(exp(s_surv$Estimate), digits)
+      s_surv$HR.Q2.5 <- round(exp(s_surv$Q2.5), digits)
+      s_surv$HR.Q97.5 <- round(exp(s_surv$Q97.5), digits)
+      s_surv <- s_surv[, c(
+        "term", "Estimate", "Hazard.Ratio", "Est.Error", "Q2.5", "Q97.5",
+        "HR.Q2.5", "HR.Q97.5", "Rhat", "ess_bulk", "ess_tail"
+      ), drop = FALSE]
     }
   }
 
@@ -709,6 +743,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
       diagnostics = diag_table,
       fixef = s_beta,
       gamma_w = s_g,
+      survival_process = s_surv,
       assoc = s_a,
       distributional = s_d,
       distributional_regression = s_dr,
@@ -913,6 +948,11 @@ print.summary_JoinMeFit <- function(x, ...) {
     cat("\nSurvival effects (gamma_w)\n")
     cat("---------------------------\n")
     print(x$tables$gamma_w, row.names = FALSE)
+  }
+  if (!is.null(x$tables$survival_process)) {
+    cat("\nSurvival process (non-association covariates)\n")
+    cat("-----------------------------------------------\n")
+    print(x$tables$survival_process, row.names = FALSE)
   }
   if (!is.null(x$tables$assoc)) {
     cat("\nAssociation parameters\n")

@@ -130,6 +130,17 @@ Raw biomarkers often affect survival nonlinearly (e.g., only extremely high valu
 *   **Functional Opcodes**: A stack-based evaluator allows users to specify compositions like $\log(1 + \exp(x))$ or $\sqrt{\max(0, x)}$ which are evaluated inside the Stan leapfrog integrator.
 *   **Monotone I-Splines**: For data-driven shapes, we use Integrated Splines (I-splines) with non-negative coefficients, ensuring the association is monotonic but nonlinear.
 
+For marker-aggregated current-value terms (`cv_total`, `cv_marker`), `joinme`
+uses transform-before-averaging semantics. Let $m_{id}(t)$ be a marker-level
+feature and $f(\cdot)$ the configured transform:
+
+$$
+A_i(t) = \frac{1}{D}\sum_{d=1}^{D} \omega_d f\!\left(m_{id}(t)\right).
+$$
+
+This avoids conflating aggregation and nonlinearity, and is equivalent to
+transforming an already-averaged marker value only when $f$ is linear.
+
 # 4. Bayesian Implementation and Regularization
 
 Valid inference in high dimensions requires principled priors. `JoinME` employs a hierarchy of regularization:

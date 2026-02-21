@@ -556,31 +556,28 @@ real partial_draw(
     vector[15] cvm_f; // mean CV forward
     vector[15] cvk_f; // marker CV forward
 
-    // Weighted averages across markers for "total" association features
-    // Marker weights for draw k (used to aggregate marker-specific REs)
-    // These weights allow association features to focus on more influential markers.
+    // Marker weights for draw k (used only for transformed marker aggregation).
     vector[n_marker_types] marker_weights_k = to_vector(marker_weights_draws[k, ]); // draw-specific signed weights
-    // Weighted average of marker-level random effects
-    // vbar[r] = (1 / D) * sum_d w_d * v_marker[d][r]
-    vector[n_random_marker] vbar; // weighted mean of marker REs
+    // Unweighted average of marker-level random effects for baseline CV/CS paths.
+    vector[n_random_marker] vbar; // unweighted mean of marker REs
     if (n_random_marker > 0) {
       for (r in 1 : n_random_marker) {
         real acc = 0;
         for (d in 1 : n_marker_types)
-          acc += marker_weights_k[d] * v_marker[d][r];
+          acc += v_marker[d][r];
         vbar[r] = acc / n_marker_types;
       }
     }
-    // Weighted average of marker-by-id latent effects (on z-scale)
-    vector[n_random_marker_id] zbar; // weighted mean of marker-id latents
+    // Unweighted average of marker-by-id latent effects (on z-scale)
+    vector[n_random_marker_id] zbar; // unweighted mean of marker-id latents
     for (q in 1 : n_random_marker_id) {
       real acc = 0;
       for (d in 1 : n_marker_types)
-        acc += marker_weights_k[d] * z_w[d][q];
+        acc += z_w[d][q];
       zbar[q] = acc / n_marker_types;
     }
-    // Convert weighted latent effects into actual ID-by-marker REs
-    vector[n_random_marker_id] wbar_i = Li * zbar; // scaled weighted mean
+    // Convert unweighted latent effects into actual ID-by-marker REs
+    vector[n_random_marker_id] wbar_i = Li * zbar; // scaled unweighted mean
 
     for (j in 1 : 15) {
       cvm[j] = dot_product(mat_fixed_gk_cond[j], beta_fixed[k]) + dot_product(mat_id_gk_cond[j], u_id);
@@ -616,9 +613,36 @@ real partial_draw(
     real a_cs_marker = flag_assoc_cs_marker * coeff_assoc_cs_marker[k];
 
     // Apply nonlinear transforms to association features
-    vector[15] cv_tot_tf = apply_transform_vector(cv_tot, tf_mode_cv_tot, functional_ops_cv, const_data_cv, knots_cv, coeff_cv, spline_degree_cv);
+    // CV total and CV marker are transformed per marker, then weighted-averaged.
+    array[n_marker_types] vector[n_random_marker_id] w_draw;
+    for (d in 1 : n_marker_types)
+      w_draw[d] = Li * z_w[d];
+
+    vector[15] cv_tot_tf;
     vector[15] cv_mean_tf = apply_transform_vector(cvm, tf_mode_cv_mean, functional_ops_cv_mean, const_data_cv_mean, knots_cv_mean, coeff_cv_mean, spline_degree_cv_mean);
-    vector[15] cv_marker_tf = apply_transform_vector(cvk, tf_mode_cv_marker, functional_ops_cv_marker, const_data_cv_marker, knots_cv_marker, coeff_cv_marker, spline_degree_cv_marker);
+    vector[15] cv_marker_tf;
+    for (j in 1 : 15) {
+      real acc_cv_tot_tf = 0;
+      real acc_cv_marker_tf = 0;
+      for (d in 1 : n_marker_types) {
+        real mk_part_d = 0;
+        if (n_random_marker > 0)
+          mk_part_d = dot_product(mat_marker_gk_cond[j], v_marker[d]);
+        real cvk_d = mk_part_d + dot_product(mat_marker_id_gk_cond[j], w_draw[d]);
+        real cv_tot_d = cvm[j] + cvk_d;
+
+        acc_cv_tot_tf += marker_weights_k[d]
+          * apply_transform_scalar(cv_tot_d, tf_mode_cv_tot,
+                                   functional_ops_cv, const_data_cv,
+                                   knots_cv, coeff_cv, spline_degree_cv);
+        acc_cv_marker_tf += marker_weights_k[d]
+          * apply_transform_scalar(cvk_d, tf_mode_cv_marker,
+                                   functional_ops_cv_marker, const_data_cv_marker,
+                                   knots_cv_marker, coeff_cv_marker, spline_degree_cv_marker);
+      }
+      cv_tot_tf[j] = acc_cv_tot_tf / n_marker_types;
+      cv_marker_tf[j] = acc_cv_marker_tf / n_marker_types;
+    }
 
     vector[15] cs_tot_tf = apply_transform_vector(cs_tot, tf_mode_cs_tot, functional_ops_cs, const_data_cs, knots_cs, coeff_cs, spline_degree_cs);
     vector[15] cs_mean_tf = apply_transform_vector(csm_raw, tf_mode_cs_mean, functional_ops_cs_mean, const_data_cs_mean, knots_cs_mean, coeff_cs_mean, spline_degree_cs_mean);

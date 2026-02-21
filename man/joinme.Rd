@@ -38,13 +38,36 @@ If the marker block omits the inner \code{( ... | id )}, marker-by-id effects ar
 absent and \code{vcov} associations are not allowed.}
 
 \item{formulaDist}{Optional list of formulas for distributional regression.
-Two forms are supported:
+Supported LHS parameters are:
+\itemize{
+\item \code{sigma}
+\item \code{nu}
+\item \code{phi}
+\item \code{alpha} (aliases: \code{alpha_skew}, \code{skew})
+\item \code{phi_beta}
+\item \code{tau_sde}
+}
+
+Three input styles are supported:
 \enumerate{
 \item Named list with RHS-only formulas, e.g. \code{list(sigma = ~ 1 + time)}.
-\item Unnamed list with LHS parameter names, e.g. \code{list(sigma ~ 1 + time)}.
+\item Unnamed list with explicit LHS, e.g. \code{list(sigma ~ 1 + time)}.
+\item Family-scoped LHS using brackets, e.g.
+\code{list(sigma[family=student_t] ~ 1 + time, sigma[family=gaussian] ~ 1 + x1)}.
+}
+
+Semantics of scoping:
+\itemize{
+\item Without \verb{[family=...]}, the formula applies to all marker rows where that
+parameter is defined.
+\item With \verb{[family=...]}, the formula is applied only to rows of that family;
+other rows receive zero contribution from that scoped block.
+\item Multiple scoped formulas for the same parameter are allowed and are
+estimated jointly with separate coefficients.
+}
+
 Random-effects terms with \code{|} are supported, but nested random-effects formulas
-are not.
-}}
+are not.}
 
 \item{control}{Named list containing sampling configuration.
 \itemize{
@@ -118,4 +141,18 @@ Example:
 Additional arguments are forwarded to \code{joinme_standata()} (e.g., \code{assoc},
 \code{basehaz}, \code{basehaz_degree}, \code{n_knots}, \code{time_var}, and \code{shrinkage}). Use
 lme4-style \code{||} in \code{formulaLong} to request diagonal random-effect covariance.
+}
+\examples{
+\dontrun{
+formulaDist <- list(
+  sigma[family=student_t] ~ 1 + time + (1 | id),
+  sigma[family=gaussian] ~ 1 + x1,
+  nu[family=student_t] ~ 1,
+  alpha[family=skew_normal] ~ 1 + x1,
+  phi[family=negbin2] ~ 1,
+  phi_beta[family=beta] ~ 1,
+  tau_sde[family=skew_double_exponential] ~ 1
+)
+}
+
 }

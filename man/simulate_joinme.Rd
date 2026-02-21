@@ -9,6 +9,7 @@ simulate_joinme(
   formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
   formulaDist = NULL,
   formulaAssoc = NULL,
+  transforms = NULL,
   n_id = 50,
   families = c("gaussian", "student_t", "binomial"),
   marker_levels = NULL,
@@ -17,6 +18,7 @@ simulate_joinme(
   n_t = NULL,
   seed = 42,
   covariate_formulas = list(x1 ~ rnorm(n_id), x2 ~ rnorm(n_id)),
+  marker_weights = NULL,
   assoc = c("cv_total"),
   assoc_coefs = c(cv_total = 0.6),
   beta_long = NULL,
@@ -50,10 +52,29 @@ simulate_joinme(
 
 \item{formulaEvent}{Event/survival formula (same role as in \code{joinme()}).}
 
-\item{formulaDist}{Optional distributional regression formulas (same role as in \code{joinme()}).}
+\item{formulaDist}{Optional distributional regression formulas (same role as in \code{joinme()}).
+Supported LHS parameters are \code{sigma}, \code{nu}, \code{phi}, \code{alpha} (aliases:
+\code{alpha_skew}, \code{skew}), \code{phi_beta}, and \code{tau_sde}.
+
+Family-scoped syntax is supported with square brackets:
+\verb{param[family=<name>] ~ ...}, for example
+\code{sigma[family=student_t] ~ 1 + time}.
+
+If no bracket is used (e.g. \code{sigma ~ 1 + time}), the formula applies to all
+rows where that parameter exists. If a bracket is used, it only applies to
+rows of that family and is estimated separately from other scopes.}
 
 \item{formulaAssoc}{Optional formula for association terms in hazard, e.g. \code{~ cv_total + vcov}.
 If provided, it overrides \code{assoc}.}
+
+\item{transforms}{Optional transform specifications for association terms.
+Supports the same structure as \code{joinme(..., transforms=...)} for
+\code{cv_total}, \code{cv_mean}, \code{cv_marker}, \code{cs_total}, \code{cs_mean}, \code{cs_marker}, \code{vcov}.
+Simulation applies \code{cv_total} and \code{cv_marker} transforms at marker level before
+weighted averaging (aligned with fit/predict Stan semantics).
+Functional transforms support arithmetic and common nonlinear functions,
+including \code{inv_logit}/\code{expit}/\code{sigmoid}, \code{exp}, \code{log}, \code{sqrt}, \code{power},
+\code{cbrt}, \code{softplus}/\code{log1p_exp}, trigonometric and hyperbolic functions.}
 
 \item{n_id}{Number of subjects.}
 
@@ -71,6 +92,10 @@ If provided, it overrides \code{assoc}.}
 
 \item{covariate_formulas}{Named or LHS formulas used to generate event-level covariates,
 e.g. \code{list(x1 ~ rnorm(n_id), x2 ~ rt(n_id, df = 5))}.}
+
+\item{marker_weights}{Optional marker weights used in association aggregation.
+If \code{NULL}, equal weights are used. Internally rescaled to unit RMS and aggregated
+as weighted means divided by marker count.}
 
 \item{assoc}{Association components (same names as fit): \code{cv_total}, \code{cv_mean},
 \code{cv_marker}, \code{cs_total}, \code{cs_mean}, \code{cs_marker}, \code{vcov}.}
@@ -132,4 +157,18 @@ the model fit interface.
 
 The implementation is model-matrix based end-to-end, so every simulated component
 is generated from the same formula machinery used during fitting.
+}
+\examples{
+\dontrun{
+sim <- simulate_joinme(
+  n_id = 30,
+  families = c("gaussian", "student_t", "skew_normal"),
+  formulaDist = list(
+    sigma[family=gaussian] ~ 1 + x1,
+    sigma[family=student_t] ~ 1 + time,
+    nu[family=student_t] ~ 1,
+    alpha_skew[family=skew_normal] ~ 1 + x1
+  )
+)
+}
 }

@@ -12,7 +12,7 @@ sim <- simulate_joinme(
   beta_long = c(0.5, -1, 1),
   seed = 12,
   assoc = c("cv_total", "vcov"),
-  # transforms = list(cv_total = list(type = "functional",)),
+  transforms = list(cv_total = list(type = "functional", expr =  ~ expit(x))),
   assoc_coefs = c(cv_total = -0.25, vcov = c(0.1, -0.5, 0.1))
 )
 
