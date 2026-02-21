@@ -216,8 +216,12 @@ pred <- rstantools::posterior_epred(
   time_start = time_start,
   times = seq(time_start, time_start + 1, length.out = 20),
   n_samples = 50,
+  control = list(n_pred_draws = 80),
   seed = 2026
 )
+
+# n_samples: extracted posterior parameter draws
+# control$n_pred_draws: dynpred output draw count
 ```
 
 ### Step 7: Plot longitudinal and survival predictions

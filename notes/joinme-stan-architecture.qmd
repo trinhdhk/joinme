@@ -430,12 +430,14 @@ integrates the sum of cause-specific hazards. Cause-specific survival curves are
 not returned directly by the default dynpred outputs.
 
 Strategy:
-1. For each posterior draw k:
+1. Extract posterior parameter draws from the fitted object (`n_samples`).
+2. Re-index extracted draws to prediction draw count (`control$n_pred_draws`).
+3. For each prediction draw k:
    a. Sample subject-specific random effects u, v, w | y_obs, θ^(k)
    b. Compute longitudinal and survival predictions given u, v, w
-2. Within each indexed output `[..., k, n]`, average over dynpred posterior rows
+4. Within each indexed output `[..., k, n]`, average over dynpred posterior rows
   to marginalize latent augmentation noise.
-3. Aggregate over draw index k to obtain marginal estimates and intervals.
+5. Aggregate over draw index k to obtain marginal estimates and intervals.
 
 Implementation note:
 - `newdataLong$marker` is validated against fitted marker levels before prediction.
@@ -1027,7 +1029,8 @@ pred <- predict(
   newdataEvent = new_event,
   time_start = 5,  # Condition on data up to t=5
   times = seq(5, 10, length.out = 50),  # Predict t ∈ [5, 10]
-  n_samples = 200
+  n_samples = 200,
+  control = list(n_pred_draws = 400)
 )
 
 plot(pred, type = "survival")

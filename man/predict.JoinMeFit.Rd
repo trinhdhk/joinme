@@ -82,7 +82,8 @@ the maximum observed time in \code{newdataLong} for each subject.}
 \item{ci_levels}{Numeric vector of credible interval levels for plotting.
 Must be strictly between 0 and 1.}
 
-\item{n_samples}{Integer. Number of posterior draws to use for prediction (Monte Carlo integration). Default 200.}
+\item{n_samples}{Integer. Number of posterior parameter draws to extract from
+the fitted model before running dynamic prediction. Default 200.}
 
 \item{n_times}{Integer. Number of time points for the prediction grid when \code{times} is NULL. Default 50.}
 
@@ -92,6 +93,9 @@ Must be strictly between 0 and 1.}
 \code{iter_warmup}, \code{iter_sampling}, \code{seed}, \code{refresh}, \code{adapt_delta}).
 Values override defaults except \code{data}.
 \item engine: "cmdstanr" or "rstan". Defaults to options(stan_preferred_engine).
+\item n_pred_draws: integer; number of prediction draws produced by the dynpred
+object. This is independent of \code{n_samples} (posterior parameter draw
+extraction count). If omitted, defaults to the extracted posterior draw count.
 \item threads_per_chain: integer; if > 1 uses \code{joinme_dynpred_threading.stan}.
 For engine = "rstan", threading uses options(stan.thread = threads_per_chain).
 \item grainsize: integer; reduce_sum grainsize for threaded prediction
@@ -132,11 +136,15 @@ Convenience wrapper around the \link{predict} method returning posterior
 predictive draws (includes observation noise).
 }
 \details{
-The function uses a Bayesian approach. For each of the \code{n_samples} posterior draws from the fitted model:
+The function uses a Bayesian approach in two draw layers:
 \enumerate{
-\item It samples subject-specific random effects (ID-level and marker-level) from their posterior distribution \emph{conditional} on the observed history in \code{newdataLong} and the fixed parameters.
-\item It calculates the expected longitudinal value and survival probability at the requested future times.
-\item Results are pooled to provide the marginal predictive distribution.
+\item Extract posterior parameter draws from the fitted object (\code{n_samples}).
+\item Re-index those draws to the dynpred draw count (\code{control$n_pred_draws}),
+allowing independent control of prediction Monte Carlo size.
+\item For each dynpred draw, sample subject-specific random effects
+\emph{conditional} on observed history in \code{newdataLong}.
+\item Evaluate longitudinal and survival quantities on requested future grids.
+\item Pool draws to form marginal predictive summaries and intervals.
 }
 }
 \keyword{internal}

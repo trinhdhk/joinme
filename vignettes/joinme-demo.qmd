@@ -255,6 +255,7 @@ pred_ep <- rstantools::posterior_epred(
   times = times,
   n_samples = 200,
   control = list(
+    n_pred_draws = 400,
     iter_sampling = 500,
     iter_warmup = 400,
     threads_per_chain = 5,
@@ -267,6 +268,11 @@ plot(pred_ep, which = "survival")
 ```
 
 Dynamic prediction is conditional on observed history up to `time_start` and (by construction) survival up to that landmark; the survival plot corresponds to $\Pr(T > t \mid T > T_{start}, \mathcal{H}(T_{start}))$.
+
+`n_samples` controls how many posterior parameter draws are extracted from the
+fitted model, while `control$n_pred_draws` controls how many draws are produced
+in the dynpred output object. This decoupling allows lightweight posterior
+extraction with a larger prediction Monte Carlo layer when needed.
 
 When `times = NULL`, you can now control the default forecast window with
 `time_horizon` (defaulting to `tmax` from the fitted model):
@@ -281,6 +287,7 @@ pred_ep_horizon <- rstantools::posterior_epred(
   time_horizon = 2,
   n_samples = 100,
   control = list(
+    n_pred_draws = 150,
     iter_sampling = 200,
     iter_warmup = 200,
     threads_per_chain = 2,

@@ -52,13 +52,18 @@ NULL
 #' Must be strictly between 0 and 1.
 #' @param tmax Numeric scalar. The maximum time used for scaling during model fitting.
 #' **CRITICAL**: If this is not provided and cannot be inferred from the object, predictions will be on the wrong time scale.
-#' @param n_samples Integer. Number of posterior draws to use for prediction (Monte Carlo integration). Default 200.
+#' @param n_samples Integer. Number of posterior parameter draws to extract from
+#'   the fitted model before running dynamic prediction. Default 200.
 #' @param n_times Integer. Number of time points for the prediction grid when `times` is NULL. Default 50.
 #' @param control Named list for prediction configuration.
 #'   - cmdstanr::model$sample() arguments (e.g., `chains`, `parallel_chains`,
 #'     `iter_warmup`, `iter_sampling`, `seed`, `refresh`, `adapt_delta`).
 #'     Values override defaults except `data`.
 #'   - engine: "cmdstanr" or "rstan". Defaults to options(stan_preferred_engine).
+#'   - n_pred_draws: integer; number of prediction draws produced by the dynpred
+#'     object. This is independent of `n_samples` (posterior parameter draw
+#'     extraction count). If omitted, defaults to the extracted posterior draw
+#'     count.
 #'   - threads_per_chain: integer; if > 1 uses `joinme_dynpred_threading.stan`.
 #'     For engine = "rstan", threading uses options(stan.thread = threads_per_chain).
 #'   - grainsize: integer; reduce_sum grainsize for threaded prediction
@@ -76,10 +81,14 @@ NULL
 #' \item{draws}{A list containing raw posterior draws (`longitudinal`, `longitudinal_fitted`, `survival`, `cumhaz`) and reconstructed subject-level random effects (`random_effects_id`, `random_effects_marker_id`, including marker-by-id covariance draws when id-dependent covariance is active).}
 #'
 #' @details
-#' The function uses a Bayesian approach. For each of the `n_samples` posterior draws from the fitted model:
-#' 1.  It samples subject-specific random effects (ID-level and marker-level) from their posterior distribution *conditional* on the observed history in `newdataLong` and the fixed parameters.
-#' 2.  It calculates the expected longitudinal value and survival probability at the requested future times.
-#' 3.  Results are pooled to provide the marginal predictive distribution.
+#' The function uses a Bayesian approach in two draw layers:
+#' 1.  Extract posterior parameter draws from the fitted object (`n_samples`).
+#' 2.  Re-index those draws to the dynpred draw count (`control$n_pred_draws`),
+#'     allowing independent control of prediction Monte Carlo size.
+#' 3.  For each dynpred draw, sample subject-specific random effects
+#'     *conditional* on observed history in `newdataLong`.
+#' 4.  Evaluate longitudinal and survival quantities on requested future grids.
+#' 5.  Pool draws to form marginal predictive summaries and intervals.
 #'
 #' @export
 predict.JoinMeFit <- function(object,
@@ -218,19 +227,23 @@ predict.JoinMeFit <- function(object,
         ))
     }
 
-    # Extract posterior draws early so threading can be finalized before
-    # selecting threaded vs non-threaded Stan program (same ordering as fit()).
-    draws_list <- .extract_draws_for_pred(object, n_samples, seed)
-    draws_list <- .scale_draw_dependent_time_terms(draws_list, object$stan_data, tmax_val)
-    n_samples_extracted <- if (ncol(draws_list$alpha_vcov_reg) > 0) {
-        nrow(draws_list$alpha_vcov_reg)
-    } else {
-        nrow(draws_list$beta_fixed)
-    }
+    # 4) Draw-layer setup
+    #
+    # Algorithm:
+    # a) Extract posterior parameter draws from the fitted object (n_samples).
+    # b) Apply time-scaling corrections to draw-dependent coefficients.
+    # c) Resolve dynpred draw count from control$n_pred_draws (independent knob).
+    # d) Re-index draw arrays so Stan receives exactly n_pred_draws rows.
+    draws_list_raw <- .extract_draws_for_pred(object, n_samples, seed)
+    draws_list_raw <- .scale_draw_dependent_time_terms(draws_list_raw, object$stan_data, tmax_val)
+    n_samples_extracted <- .n_draws_in_prediction_list(draws_list_raw)
+    n_pred_draws <- .resolve_n_pred_draws(control$n_pred_draws, n_samples_extracted)
+    pred_draw_index <- .prediction_draw_index(n_samples_extracted, n_pred_draws, seed)
+    draws_list <- .subset_draws_for_prediction(draws_list_raw, pred_draw_index)
 
     # Finalize threads_per_chain from control only, capped by available work.
     n_cores <- parallel::detectCores(logical = FALSE) %||% 1L
-    max_threads <- min(n_samples_extracted, n_cores)
+    max_threads <- min(n_pred_draws, n_cores)
     if (threads_per_chain > max_threads) {
         cli::cli_warn(c(
             x = "Requested {threads_per_chain} threads exceeds max {max_threads}.",
@@ -314,7 +327,7 @@ predict.JoinMeFit <- function(object,
         # reduce_sum in dynpred parallelizes over posterior draws, not subjects.
         # Tune default grainsize using number of draws to avoid overly tiny slices
         # and to keep work balanced across threads/chains.
-        n_draws_pred <- n_samples_extracted
+        n_draws_pred <- n_pred_draws
         n_chains <- control$chains %||% 1L
         denom <- 4L * as.integer(threads_per_chain) * as.integer(n_chains)
         denom <- max(1L, denom)
@@ -341,7 +354,8 @@ predict.JoinMeFit <- function(object,
         "threads_per_chain",
         "threads",
         "mc.cores",
-        "grainsize"
+        "grainsize",
+        "n_pred_draws"
     ))]
     results_long <- list()
     results_surv <- list()
@@ -457,7 +471,7 @@ predict.JoinMeFit <- function(object,
             "const_data_vcov"
         ))
         if (is.null(sd_pred$n_draws) || length(sd_pred$n_draws) != 1) {
-            sd_pred$n_draws <- as.integer(n_samples_extracted)
+            sd_pred$n_draws <- as.integer(n_pred_draws)
         }
         if (length(required_data) > 0) {
             missing <- setdiff(required_data, names(sd_pred))
@@ -540,7 +554,7 @@ predict.JoinMeFit <- function(object,
         u_id_draws <- .reconstruct_subject_u_id_draws(
             draws_matrix = draws_mat,
             standata_subject = sd_pred,
-            n_draws_target = n_samples_extracted
+            n_draws_target = n_pred_draws
         )
         if (!is.null(u_id_draws)) {
             draws_re_id_list[[as.character(id)]] <- list(
@@ -552,7 +566,7 @@ predict.JoinMeFit <- function(object,
         marker_id_draws <- .reconstruct_subject_marker_id_draws(
             draws_matrix = draws_mat,
             standata_subject = sd_pred,
-            n_draws_target = n_samples_extracted,
+            n_draws_target = n_pred_draws,
             marker_levels = object$stan_data$marker_levels
         )
         if (!is.null(marker_id_draws)) {
@@ -578,8 +592,8 @@ predict.JoinMeFit <- function(object,
                 ))
             }
 
-            fit_lin_mat <- .extract_matrix_from_stan(draws_mat, "y_fit_linpred", nrow(dL), n_samples_extracted)
-            fit_epred_mat <- .extract_matrix_from_stan(draws_mat, "y_fit_epred", nrow(dL), n_samples_extracted)
+            fit_lin_mat <- .extract_matrix_from_stan(draws_mat, "y_fit_linpred", nrow(dL), n_pred_draws)
+            fit_epred_mat <- .extract_matrix_from_stan(draws_mat, "y_fit_epred", nrow(dL), n_pred_draws)
 
             draws_long_fit[[as.character(id)]] <- list(
                 linpred = fit_lin_mat,
@@ -609,7 +623,7 @@ predict.JoinMeFit <- function(object,
             # Extract predictions for all (time, marker) combinations
             n_obs_pred_total <- nrow(sd_pred$mat_fixed_pred)  # This is n_time_points * n_markers
             n_markers_actual <- length(unique(dL[[marker_var]]))
-            long_mat <- .extract_matrix_from_stan(draws_mat, long_var, n_obs_pred_total, n_samples_extracted)
+            long_mat <- .extract_matrix_from_stan(draws_mat, long_var, n_obs_pred_total, n_pred_draws)
 
             draws_long_list[[as.character(id)]] <- list(
                 matrix = long_mat,
@@ -627,8 +641,8 @@ predict.JoinMeFit <- function(object,
             )
         }
         if (length(t_surv_grid) > 0) {
-            surv_mat <- .extract_matrix_from_stan(draws_mat, "surv_prob", length(t_surv_grid), n_samples_extracted)
-            cumhaz_mat <- .extract_matrix_from_stan(draws_mat, "cumhaz_cond", length(t_surv_grid), n_samples_extracted)
+            surv_mat <- .extract_matrix_from_stan(draws_mat, "surv_prob", length(t_surv_grid), n_pred_draws)
+            cumhaz_mat <- .extract_matrix_from_stan(draws_mat, "cumhaz_cond", length(t_surv_grid), n_pred_draws)
 
             draws_surv_list[[as.character(id)]] <- list(
                 matrix = surv_mat,
@@ -738,7 +752,9 @@ predict.JoinMeFit <- function(object,
     metadata <- list(
         conditioning_time = if (length(time_start_by_id) > 0) max(time_start_by_id, na.rm = TRUE) else NA_real_,
         conditioning_time_by_id = time_start_by_id,
-        n_samples = n_samples_extracted,
+        n_samples = n_pred_draws,
+        n_posterior_draws = n_samples_extracted,
+        n_pred_draws = n_pred_draws,
         n_subjects = length(ids),
         marker_vcov_depends_on_id = marker_vcov_depends_on_id,
         sampler_diagnostics = .aggregate_sampler_diagnostics(pred_sampler_diag_list),
@@ -786,8 +802,84 @@ predict.JoinMeFit <- function(object,
         metadata = metadata,
         call = match.call(),
         tmax = tmax_val,
-        n_samples = n_samples_extracted
+        n_samples = n_pred_draws
     )
+}
+
+# Return number of posterior rows in the prediction draw list.
+.n_draws_in_prediction_list <- function(draws_list) {
+    if (!is.null(draws_list$beta_fixed) && is.matrix(draws_list$beta_fixed)) {
+        return(as.integer(nrow(draws_list$beta_fixed)))
+    }
+    cli::cli_abort("Unable to determine number of posterior draws for prediction.")
+}
+
+# Resolve prediction draw count independent of posterior extraction count.
+.resolve_n_pred_draws <- function(n_pred_draws, n_available) {
+    if (is.null(n_pred_draws)) {
+        return(as.integer(n_available))
+    }
+    if (!is.numeric(n_pred_draws) || length(n_pred_draws) != 1 || !is.finite(n_pred_draws)) {
+        cli::cli_abort(c(
+            x = "{.arg control$n_pred_draws} must be a single finite numeric value.",
+            i = "Use a positive integer, e.g. {.code control = list(n_pred_draws = 400)}."
+        ))
+    }
+    n_pred_draws <- as.integer(n_pred_draws)
+    if (n_pred_draws < 1L) {
+        cli::cli_abort(c(
+            x = "{.arg control$n_pred_draws} must be >= 1.",
+            i = "Use a positive integer for dynpred output draw count."
+        ))
+    }
+    n_pred_draws
+}
+
+# Build draw re-index map from extracted posterior draws to prediction draws.
+.prediction_draw_index <- function(n_available, n_target, seed) {
+    n_available <- as.integer(n_available)
+    n_target <- as.integer(n_target)
+    if (n_available < 1L || n_target < 1L) {
+        cli::cli_abort("Both available and target draw counts must be >= 1.")
+    }
+    if (n_available == n_target) {
+        return(seq_len(n_available))
+    }
+
+    # Use deterministic pseudo-random indexing for reproducibility.
+    has_seed <- exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+    if (has_seed) {
+        old_seed <- get(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+        on.exit(assign(".Random.seed", old_seed, envir = .GlobalEnv), add = TRUE)
+    } else {
+        on.exit(rm(".Random.seed", envir = .GlobalEnv), add = TRUE)
+    }
+    set.seed(as.integer(seed) + 7001L)
+    sample.int(n_available, size = n_target, replace = n_target > n_available)
+}
+
+# Apply draw re-indexing to all draw-dependent containers.
+.subset_draws_for_prediction <- function(draws_list, draw_index) {
+    reindex_first_dim <- function(x, idx) {
+        if (is.null(x)) return(NULL)
+        if (is.matrix(x)) return(x[idx, , drop = FALSE])
+        if (is.array(x)) {
+            dims <- dim(x)
+            if (length(dims) < 1L) return(x)
+            subs <- c(list(idx), rep(list(TRUE), length(dims) - 1L), list(drop = FALSE))
+            return(do.call(`[`, c(list(x), subs)))
+        }
+        if (is.atomic(x) && is.vector(x) && length(x) >= max(idx)) {
+            return(x[idx])
+        }
+        x
+    }
+
+    out <- draws_list
+    for (nm in names(out)) {
+        out[[nm]] <- reindex_first_dim(out[[nm]], draw_index)
+    }
+    out
 }
 
 #' Posterior Linear Predictor

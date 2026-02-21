@@ -206,11 +206,13 @@ We estimate:
 $$ \pi_j(u | T_{cond}) = P(T_j \ge u | T_j > T_{cond}, \mathcal{Y}_j, \mathcal{D}_{train}) $$
 
 **Algorithm**:
-1.  Draw parameter set $\theta^{(m)}$ from posterior.
-2.  Sample random effects $\mathbf{b}_j^{(m)} \sim p(\mathbf{b} | \mathcal{Y}_j, \theta^{(m)})$. This is a mini-MCMC or optimization step leveraging the same likelihood function.
-3.  Compute trajectory $\eta_j(t)$ and hazard $\lambda_j(t)$ for $t > T_{cond}$.
-4.  Integrate hazard to get survival $S(t)$.
-5.  Average over $M$ draws.
+1.  Extract posterior parameter draws from the fitted model (`n_samples`).
+2.  Re-index to a prediction draw count (`control$n_pred_draws`) used by the
+  dynpred object.
+3.  For each prediction draw, sample random effects
+  $\mathbf{b}_j^{(m)} \sim p(\mathbf{b} | \mathcal{Y}_j, \theta^{(m)})$.
+4.  Compute trajectory $\eta_j(t)$ and hazard $\lambda_j(t)$ for $t > T_{cond}$.
+5.  Integrate hazard to get survival $S(t)$ and average over prediction draws.
 
 Under competing risks, this procedure yields the **overall event-free survival** probability.
 
