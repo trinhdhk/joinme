@@ -1,6 +1,6 @@
 testthat::test_that("combined multi-subject returns per-subject combined plots", {
   testthat::local_mocked_bindings(
-    .combine_plot_grid = function(plots, ncol = NULL, fallback = c("flat", "input")) {
+    .combine_plot_grid = function(plots, ncol = NULL, ..., fallback = c("flat", "input")) {
       ggplot2::ggplot()
     },
     .package = "joinme"
@@ -88,7 +88,7 @@ testthat::test_that("combined multi-subject returns per-subject combined plots",
 
 testthat::test_that("combined multi-subject fallback preserves per-subject structure", {
   testthat::local_mocked_bindings(
-    .combine_plot_grid = function(plots, ncol = NULL, fallback = c("flat", "input")) {
+    .combine_plot_grid = function(plots, ncol = NULL, ..., fallback = c("flat", "input")) {
       fallback <- match.arg(fallback)
       if (identical(fallback, "input")) return(plots)
       list(flat = ggplot2::ggplot())

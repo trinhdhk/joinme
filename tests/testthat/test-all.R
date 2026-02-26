@@ -25,7 +25,6 @@ test_that("all", {
     families = "student_t",
     transforms = list(cv_total = list(type = "identity")),
     estimate_marker_weights = TRUE,
-    marker_weight_scale = 0.5,
     control = list(
       # engine = "rstan",
       parallel_chains = 2,
@@ -48,8 +47,8 @@ test_that("all", {
     newdataEvent = sim$dataEvent,
     time_start = max(sim$dataLong$time),
     times = seq(0, max(sim$dataLong$time) + 1, length.out = 20),
-    n_samples = 20,
     control = list(
+      n_samples = 20,
       chains = 1,
       iter_warmup = 10,
       iter_sampling = 10,

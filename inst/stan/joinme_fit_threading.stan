@@ -15,7 +15,7 @@
 functions {
   #include helper/functions/eta_fd.stanfunctions
   
-  #include helper/functions/eta_vcov_varonly_weighted_const.stanfunctions
+  #include helper/functions/eta_corr_varonly_weighted_const.stanfunctions
   
   #include helper/functions/cumhaz.stanfunctions
   
@@ -181,6 +181,7 @@ model {
     /* Event times + integration controls */
     S_event,
     d_event,
+    subject_weights,
     K_event,
     event_type,
     eps_fd,
@@ -211,11 +212,11 @@ model {
     a_cv_marker,
     a_cs_mean,
     a_cs_marker,
-    a_vcov_var,
+    a_corr,
     /* Transform modes (which path to use) */
     tf_mode_cv_tot,
     tf_mode_cs_tot,
-    tf_mode_vcov,
+    tf_mode_corr,
     tf_mode_cv_mean,
     tf_mode_cv_marker,
     tf_mode_cs_mean,
@@ -231,11 +232,11 @@ model {
     knots_cs,
     coeff_cs,
     spline_degree_cs,
-    functional_ops_vcov,
-    const_data_vcov,
-    knots_vcov,
-    coeff_vcov,
-    spline_degree_vcov,
+    functional_ops_corr,
+    const_data_corr,
+    knots_corr,
+    coeff_corr,
+    spline_degree_corr,
     functional_ops_cv_mean,
     const_data_cv_mean,
     knots_cv_mean,
@@ -266,3 +267,4 @@ model {
 generated quantities {
   #include helper/generated_quantities/fit_outputs.stan
 }
+

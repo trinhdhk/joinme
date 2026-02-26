@@ -52,9 +52,9 @@ test_that("predict errors on marker levels not seen during fitting", {
       newdataEvent = ndE,
       time_start = max(sim$dataLong$time),
       times = seq(0, max(sim$dataLong$time) + 0.5, length.out = 12),
-      n_samples = 10,
+      control = list(n_samples = 10),
       seed = 551
     ),
-    regexp = "not seen during fitting|do not match fitted model levels"
+    regexp = "not seen during fitting|do not match fitted model levels|Cannot map marker value\\(s\\)"
   )
 })

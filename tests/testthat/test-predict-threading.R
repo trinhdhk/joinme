@@ -55,8 +55,8 @@ test_that("predict works with and without threading (cmdstanr)", {
       newdataEvent = ndE,
       time_start = max(ndL$time),
       times = seq(max(ndL$time), max(ndL$time) + 0.5, length.out = 10),
-      n_samples = 20,
       control = list(
+        n_samples = 20,
         engine = "cmdstanr",
         chains = 1,
         iter_warmup = 50,
@@ -76,8 +76,8 @@ test_that("predict works with and without threading (cmdstanr)", {
       newdataEvent = ndE,
       time_start = max(ndL$time),
       times = seq(max(ndL$time), max(ndL$time) + 0.5, length.out = 10),
-      n_samples = 20,
       control = list(
+        n_samples = 20,
         engine = "cmdstanr",
         chains = 1,
         iter_warmup = 50,

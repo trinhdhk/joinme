@@ -62,20 +62,23 @@
   /* Ordinal cutpoints (shared across ordinal markers) */
   ordered[K_ord - 1] cutpoints_ord;     // cumulative-logit cutpoints
 
-  /* association coefficients */
-  real alpha_cv_total;                 // total CV association coefficient
-  real alpha_cs_total;                 // total CS association coefficient
-  real alpha_cv_mean;                  // mean CV association coefficient
-  real alpha_cs_mean;                  // mean CS association coefficient
-  real alpha_cv_marker;                // marker CV association coefficient
-  real alpha_cs_marker;                // marker CS association coefficient
-  vector[Q_idm] alpha_vcov_var;         // vcov association coefficients
+  /* association coefficients (non-centered for CV/CS total + marker) */
+  real<lower=0> z_alpha_cv_total;               // latent for total CV association
+  real<lower=0> z_alpha_cs_total;               // latent for total CS association
+  real z_alpha_cv_mean;                // latent for mean CV association
+  real z_alpha_cs_mean;                // latent for mean CS association
+  real<lower=0> z_alpha_cv_marker;              // latent for marker CV association
+  real<lower=0> z_alpha_cs_marker;              // latent for marker CS association
+  vector[M_corr] alpha_corr; // corr association coefficients (off-diagonal correlations)
 
-  /* marker-weight shrinkage (global across ids) */
-  vector[D] z_marker_weights;          // latent signed perturbations for marker weights
-  real<lower=0> tau_marker_weights;    // global perturbation scale (RMS-stabilized downstream)
+  /* marker-weight perturbations (global across ids) */
+  vector[D * estimate_marker_weights * use_marker_weight_assoc] z_marker_weights; // latent signed perturbations (active only when needed)
 
-  /* marker-side shrinkage scales */
-  real<lower=0> s_cv_marker;           // scale for marker CV association
-  real<lower=0> s_cs_marker;           // scale for marker CS association
-  real<lower=0> s_vcov;                // scale for vcov association
+  /* association scales */
+  real<lower=0> sd_alpha_cv_total;     // scale for total CV association
+  real<lower=0> sd_alpha_cs_total;     // scale for total CS association
+  real<lower=0> sd_alpha_cv_mean;      // scale for mean CV association
+  real<lower=0> sd_alpha_cs_mean;      // scale for mean CS association
+  real<lower=0> sd_alpha_cv_marker;    // scale for marker CV association
+  real<lower=0> sd_alpha_cs_marker;    // scale for marker CS association
+  real<lower=0> s_corr;                // scale for corr association

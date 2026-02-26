@@ -373,6 +373,10 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #' is generated from the same formula machinery used during fitting.
 #'
 #' @param formulaLong Longitudinal formula (same role as in `joinme()`).
+#'   Grouping terms may use `weighted(group, weights = <column>)` to mirror
+#'   fitting syntax. The referenced weight column
+#'   should be available in generated covariates (for example via
+#'   `covariate_formulas`).
 #' @param formulaEvent Event/survival formula (same role as in `joinme()`).
 #' @param formulaDist Optional distributional regression formulas (same role as in `joinme()`).
 #'   Supported LHS parameters are `sigma`, `nu`, `phi`, `alpha` (aliases:
@@ -385,19 +389,20 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   If no bracket is used (e.g. `sigma ~ 1 + time`), the formula applies to all
 #'   rows where that parameter exists. If a bracket is used, it only applies to
 #'   rows of that family and is estimated separately from other scopes.
-#' @param formulaAssoc Optional formula for association terms in hazard, e.g. `~ cv_total + vcov`.
+#' @param formulaAssoc Optional formula for association terms in hazard, e.g. `~ cv_total + corr`.
 #'   If provided, it overrides `assoc`.
 #' @param transforms Optional transform specifications for association terms.
 #'   Supports the same structure as `joinme(..., transforms=...)` for
-#'   `cv_total`, `cv_mean`, `cv_marker`, `cs_total`, `cs_mean`, `cs_marker`, `vcov`.
+#'   `cv_total`, `cv_mean`, `cv_marker`, `cs_total`, `cs_mean`, `cs_marker`, `corr`.
 #'   Simulation applies `cv_total` and `cv_marker` transforms at marker level before
 #'   weighted averaging (aligned with fit/predict Stan semantics).
 #'   Functional transforms support arithmetic and common nonlinear functions,
 #'   including `inv_logit`/`expit`/`sigmoid`, `exp`, `log`, `sqrt`, `power`,
 #'   `cbrt`, `softplus`/`log1p_exp`, trigonometric and hyperbolic functions.
 #' @param marker_weights Optional marker weights used in association aggregation.
-#'   If `NULL`, equal weights are used. Internally rescaled to unit RMS and aggregated
-#'   as weighted means divided by marker count.
+#'   If `NULL`, equal weights are used and aggregated
+#'   as weighted means divided by marker count. Inputs are treated as direct
+#'   signed weights used in association aggregation.
 #' @param n_id Number of subjects.
 #' @param families Marker-specific family names.
 #' @param marker_levels Optional marker names; defaults to `m1`, `m2`, ...
@@ -408,8 +413,12 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #' @param covariate_formulas Named or LHS formulas used to generate event-level covariates,
 #'   e.g. `list(x1 ~ rnorm(n_id), x2 ~ rt(n_id, df = 5))`.
 #' @param assoc Association components (same names as fit): `cv_total`, `cv_mean`,
-#'   `cv_marker`, `cs_total`, `cs_mean`, `cs_marker`, `vcov`.
-#' @param assoc_coefs Named coefficients for association terms in the hazard.
+#'   `cv_marker`, `cs_total`, `cs_mean`, `cs_marker`, `corr`.
+#' @param assoc_coefs Association coefficients for hazard terms.
+#'   Non-`corr` terms accept scalar values. The `corr` term accepts a vector of
+#'   off-diagonal correlation coefficients ordered as `(2,1), (3,1), (3,2), ...`
+#'   in lower-triangular row-major order of the marker-by-id random-effect
+#'   covariance dimension.
 #' @param beta_long Fixed-effect coefficients for `formulaLong` fixed part. If NULL,
 #'   coefficients are randomly generated and named by model-matrix columns.
 #' @param beta_event Survival baseline-covariate coefficients for `formulaEvent` RHS.
@@ -628,7 +637,7 @@ simulate_joinme <- function(
   .sim_assoc_from_formula <- function(f) {
     if (is.null(f)) return(NULL)
     vars <- all.vars(f)
-    unique(vars[vars %in% c("cv_total", "cv_mean", "cv_marker", "cs_total", "cs_mean", "cs_marker", "vcov")])
+    unique(vars[vars %in% c("cv_total", "cv_mean", "cv_marker", "cs_total", "cs_mean", "cs_marker", "corr")])
   }
 
   .sim_normalize_transform_list <- function(transform_list) {
@@ -639,12 +648,12 @@ simulate_joinme <- function(
         i = "Use entries such as transforms = list(cv_total = list(type='functional', expr = ~ log1p(x)))."
       ))
     }
-    allowed <- c("cv_total", "cv_mean", "cv_marker", "cs_total", "cs_mean", "cs_marker", "vcov")
+    allowed <- c("cv_total", "cv_mean", "cv_marker", "cs_total", "cs_mean", "cs_marker", "corr")
     bad <- setdiff(names(transform_list), allowed)
     if (length(bad) > 0) {
       cli::cli_abort(c(
         x = "Unknown transform terms in {.arg transforms}: {paste(bad, collapse = ', ')}.",
-        i = "Allowed terms: cv_total, cv_mean, cv_marker, cs_total, cs_mean, cs_marker, vcov."
+        i = "Allowed terms: cv_total, cv_mean, cv_marker, cs_total, cs_mean, cs_marker, corr."
       ))
     }
     transform_list
@@ -868,7 +877,7 @@ simulate_joinme <- function(
       i = "Provide one weight per marker or a scalar recycled across markers."
     ))
   }
-  marker_weights_eff <- marker_weights_raw / sqrt(mean(marker_weights_raw^2) + 1e-12)
+  marker_weights_eff <- marker_weights_raw
 
   # ---- Parse longitudinal formula structure
   f_exp <- reformulas::expandDoubleVerts(formulaLong)
@@ -908,10 +917,30 @@ simulate_joinme <- function(
 
   beta_long <- .sim_align_coef(colnames(X_proto), beta_long, sd_default = 0.35, intercept_default = 1.0)
 
+  assoc_from_formula <- .sim_assoc_from_formula(formulaAssoc)
+  assoc_effective <- if (!is.null(assoc_from_formula)) assoc_from_formula else assoc
+  assoc_effective <- unique(assoc_effective)
+  if (length(assoc_effective) == 0) assoc_effective <- "cv_total"
+
   event_rhs <- stats::delete.response(stats::terms(formulaEvent))
   W_event <- stats::model.matrix(event_rhs, dataEvent)
   storage.mode(W_event) <- "double"
-  beta_event <- .sim_align_coef(colnames(W_event), beta_event, sd_default = 0.25, intercept_default = 0.0)
+
+  if (is.null(beta_event)) {
+    beta_event <- .sim_align_coef(
+      colnames(W_event),
+      user_coef = NULL,
+      sd_default = 0.25,
+      intercept_default = 0.0
+    )
+  } else {
+    beta_event <- .sim_align_coef(
+      colnames(W_event),
+      beta_event,
+      sd_default = 0.25,
+      intercept_default = 0.0
+    )
+  }
 
   # ---- Draw random effects from user-configurable covariance structures
   K_id <- ncol(Z_id_proto)
@@ -932,30 +961,113 @@ simulate_joinme <- function(
   }
 
   # ---- Association terms driving survival (syntax aligned with fit)
-  assoc_from_formula <- .sim_assoc_from_formula(formulaAssoc)
   if (!is.null(assoc_from_formula)) assoc <- assoc_from_formula
   assoc <- unique(assoc)
   if (length(assoc) == 0) assoc <- "cv_total"
 
-  assoc_coef_vec <- rep(0.0, length(assoc))
-  names(assoc_coef_vec) <- assoc
-  if (!is.null(names(assoc_coefs))) {
-    common_assoc <- intersect(names(assoc_coefs), assoc)
-    assoc_coef_vec[common_assoc] <- as.numeric(assoc_coefs[common_assoc])
-  } else if (length(assoc_coefs) > 0) {
-    assoc_coef_vec[seq_len(min(length(assoc), length(assoc_coefs)))] <- as.numeric(assoc_coefs)[seq_len(min(length(assoc), length(assoc_coefs)))]
-  }
+  M_corr <- if (K_idm >= 2) K_idm * (K_idm - 1) / 2 else 0
 
-  assoc_coef_full <- c(
+  assoc_coef_scalar <- c(
     cv_total = 0,
     cv_mean = 0,
     cv_marker = 0,
     cs_total = 0,
     cs_mean = 0,
-    cs_marker = 0,
-    vcov = 0
+    cs_marker = 0
   )
-  assoc_coef_full[names(assoc_coef_vec)] <- assoc_coef_vec
+  assoc_coef_corr <- rep(0.0, M_corr)
+
+  .sim_extract_named_corr <- function(x) {
+    if (length(x) == 0) return(numeric(0))
+    nms <- names(x)
+    if (is.null(nms)) return(numeric(0))
+    idx <- grepl("^corr($|\\[[0-9]+\\]$|[._]?[0-9]+$)", nms)
+    if (!any(idx)) return(numeric(0))
+    vals <- as.numeric(x[idx])
+    nms_sel <- nms[idx]
+    ord_key <- rep(NA_integer_, length(nms_sel))
+    ord_key[nms_sel == "corr"] <- 1L
+    idx_num <- nms_sel != "corr"
+    if (any(idx_num)) {
+      ord_key[idx_num] <- suppressWarnings(as.integer(gsub("[^0-9]", "", nms_sel[idx_num])))
+      ord_key[is.na(ord_key)] <- seq_len(sum(is.na(ord_key))) + 1L
+    }
+    vals[order(ord_key)]
+  }
+
+  .sim_fill_assoc_coefs <- function(assoc, assoc_coefs, M_corr) {
+    scalar <- assoc_coef_scalar
+    vc <- rep(0.0, M_corr)
+
+    if (is.list(assoc_coefs) && !is.null(assoc_coefs$corr) && M_corr > 0) {
+      vc_in <- as.numeric(assoc_coefs$corr)
+      take <- min(M_corr, length(vc_in))
+      if (take > 0) vc[seq_len(take)] <- vc_in[seq_len(take)]
+    }
+
+    if (!is.null(names(assoc_coefs))) {
+      named_terms <- intersect(names(scalar), names(assoc_coefs))
+      named_terms <- intersect(named_terms, assoc)
+      if (length(named_terms) > 0) {
+        scalar[named_terms] <- as.numeric(assoc_coefs[named_terms])
+      }
+
+      if (M_corr > 0 && !is.list(assoc_coefs)) {
+        vc_named <- .sim_extract_named_corr(assoc_coefs)
+        if (length(vc_named) > 0) {
+          take <- min(M_corr, length(vc_named))
+          vc[seq_len(take)] <- vc_named[seq_len(take)]
+        }
+      }
+    } else if (length(assoc_coefs) > 0) {
+      vals <- as.numeric(assoc_coefs)
+      cursor <- 1L
+      for (term in assoc) {
+        if (cursor > length(vals)) break
+        if (identical(term, "corr")) {
+          if (M_corr > 0) {
+            take <- min(M_corr, length(vals) - cursor + 1L)
+            if (take > 0) {
+              vc[seq_len(take)] <- vals[cursor:(cursor + take - 1L)]
+              cursor <- cursor + take
+            }
+          }
+        } else if (term %in% names(scalar)) {
+          scalar[[term]] <- vals[cursor]
+          cursor <- cursor + 1L
+        }
+      }
+    }
+
+    list(scalar = scalar, corr = vc)
+  }
+
+  assoc_coef_parts <- .sim_fill_assoc_coefs(assoc, assoc_coefs, M_corr)
+  assoc_coef_scalar <- assoc_coef_parts$scalar
+  assoc_coef_corr <- assoc_coef_parts$corr
+
+  weighted_terms <- intersect(c("cv_total", "cs_total", "cv_marker", "cs_marker"), assoc)
+  if (length(weighted_terms) > 0) {
+    anchor <- weighted_terms[1]
+    anchor_val <- as.numeric(assoc_coef_scalar[[anchor]])
+    if (is.finite(anchor_val) && anchor_val < 0) {
+      marker_weights_raw <- -marker_weights_raw
+      marker_weights_eff <- -marker_weights_eff
+      assoc_coef_scalar[weighted_terms] <- -assoc_coef_scalar[weighted_terms]
+    }
+    assoc_coef_scalar[weighted_terms] <- abs(assoc_coef_scalar[weighted_terms])
+  }
+  if ("corr" %in% assoc && M_corr > 0) {
+    assoc_coef_corr <- abs(assoc_coef_corr)
+  }
+
+  # Use signed marker weights directly (no logistic bounding), aligned with Stan.
+
+  assoc_coef_vec <- assoc_coef_scalar[intersect(names(assoc_coef_scalar), assoc)]
+  if ("corr" %in% assoc && M_corr > 0) {
+    vc_names <- paste0("corr[", seq_len(M_corr), "]")
+    assoc_coef_vec <- c(assoc_coef_vec, stats::setNames(assoc_coef_corr, vc_names))
+  }
 
   transforms <- .sim_normalize_transform_list(transforms)
   tf_funs <- list(
@@ -965,7 +1077,7 @@ simulate_joinme <- function(
     cs_total = .sim_make_assoc_transform(transforms$cs_total, "cs_total"),
     cs_mean = .sim_make_assoc_transform(transforms$cs_mean, "cs_mean"),
     cs_marker = .sim_make_assoc_transform(transforms$cs_marker, "cs_marker"),
-    vcov = .sim_make_assoc_transform(transforms$vcov, "vcov")
+    corr = .sim_make_assoc_transform(transforms$corr, "corr")
   )
 
   has_tf_cv_marker <- !is.null(transforms$cv_marker)
@@ -1004,54 +1116,92 @@ simulate_joinme <- function(
     )
   }
 
+  .sim_corr_features <- function(i) {
+    # Build subject-level raw correlation features in the same lower-triangular
+    # ordering used by Stan: (2,1), (3,1), (3,2), ... .
+    #
+    # Important: this returns raw correlation features only.
+    # Association weighting (assoc_coef_corr) is applied later *after* the
+    # optional transform, so simulation matches Stan semantics:
+    #   sum_j a_corr[j] * transform(corr_raw[j])
+    if (K_idm < 2) return(numeric(0))
+    if (D < 2) return(rep(0.0, M_corr))
+
+    re_mat <- matrix(re_idm[i, , ], nrow = D, ncol = K_idm)
+    cov_re <- stats::cov(re_mat)
+    if (!all(is.finite(cov_re))) return(rep(0.0, M_corr))
+
+    sd_re <- sqrt(pmax(diag(cov_re), 1e-12))
+    corr_re <- cov_re / (outer(sd_re, sd_re) + 1e-12)
+    corr_re[!is.finite(corr_re)] <- 0
+
+    out <- numeric(M_corr)
+    m <- 1L
+    # for (r in 2:K_idm) {
+    #   for (c in 1:(r - 1L)) {
+    #     out[m] <- max(-0.999999, min(0.999999, corr_re[r, c]))
+    #     m <- m + 1L
+    #   }
+    # }
+    out
+  }
+
+  corr_by_id <- lapply(seq_len(n_id), .sim_corr_features)
+
   assoc_components <- function(i, t) {
     now <- eta_components_all_markers(i, t)
     eps <- eta_components_all_markers(i, t + eps_cs)
 
+    w_mean <- function(x) sum(marker_weights_eff * x) / D
+
     cv_mean_raw <- mean(now$mu_mean)
-    cv_marker_raw <- sum(marker_weights_eff * now$mu_marker) / D
-    cv_total_raw <- sum(marker_weights_eff * now$mu_total) / D
+    cv_marker_raw <- w_mean(now$mu_marker)
+    cv_total_raw <- w_mean(now$mu_total)
 
     cv_mean <- tf_funs$cv_mean(cv_mean_raw)
-    cv_marker <- cv_marker_raw
-    cv_total <- cv_total_raw
-
-    if (has_tf_cv_marker) {
-      cv_marker <- sum(marker_weights_eff * tf_funs$cv_marker(now$mu_marker)) / D
-    }
-    if (has_tf_cv_total) {
-      cv_total <- sum(marker_weights_eff * tf_funs$cv_total(now$mu_total)) / D
-    }
+    cv_marker <- if (has_tf_cv_marker) w_mean(tf_funs$cv_marker(now$mu_marker)) else cv_marker_raw
+    cv_total <- if (has_tf_cv_total) w_mean(tf_funs$cv_total(now$mu_total)) else cv_total_raw
 
     cs_mean_raw <- (mean(eps$mu_mean) - cv_mean_raw) / eps_cs
-    cs_marker_raw <- ((sum(marker_weights_eff * eps$mu_marker) / D) - cv_marker_raw) / eps_cs
-    cs_total_raw <- ((sum(marker_weights_eff * eps$mu_total) / D) - cv_total_raw) / eps_cs
 
-    if (has_tf_cv_marker) {
-      cs_marker_raw <- ((sum(marker_weights_eff * tf_funs$cv_marker(eps$mu_marker)) / D) - cv_marker) / eps_cs
-    }
-    if (has_tf_cv_total) {
-      cs_total_raw <- ((sum(marker_weights_eff * tf_funs$cv_total(eps$mu_total)) / D) - cv_total) / eps_cs
-    }
+    # Marker-level slopes for marker and total components.
+    # We keep these at marker resolution so cs transforms can be applied
+    # per marker before weighted averaging, mirroring Stan.
+    cs_marker_raw_by_marker <- (eps$mu_marker - now$mu_marker) / eps_cs
+    cs_total_raw_by_marker <- (eps$mu_total - now$mu_total) / eps_cs
 
-    vcov_raw <- if (D > 1) stats::var(now$mu_total) else 0
+    # CS aggregation semantics (aligned with CV aggregation semantics):
+    # transform first at marker level, then weighted-average across markers.
+    cs_marker <- w_mean(tf_funs$cs_marker(cs_marker_raw_by_marker))
+    cs_total <- w_mean(tf_funs$cs_total(cs_total_raw_by_marker))
+
+    # Keep weighted raw summaries for debugging/inspection helpers.
+    cs_marker_raw <- w_mean(cs_marker_raw_by_marker)
+    cs_total_raw <- w_mean(cs_total_raw_by_marker)
+
+    corr_vals <- corr_by_id[[i]]
+    # CORR semantics are transform-first, then weight:
+    #   corr_assoc = sum_j assoc_coef_corr[j] * tf_corr(corr_vals[j])
+    # This mirrors Stan and intentionally avoids tf_corr(sum_j a_j * corr_j).
+    corr_vals_tf <- if (length(corr_vals) > 0) as.numeric(tf_funs$corr(corr_vals)) else numeric(0)
+    corr_assoc <- if (length(corr_vals_tf) > 0) sum(assoc_coef_corr * corr_vals_tf) else 0
 
     list(
       cv_total = cv_total,
       cv_mean = cv_mean,
       cv_marker = cv_marker,
-      cs_total = tf_funs$cs_total(cs_total_raw),
+      cs_total = cs_total,
       cs_mean = tf_funs$cs_mean(cs_mean_raw),
-      cs_marker = tf_funs$cs_marker(cs_marker_raw),
-      vcov = tf_funs$vcov(vcov_raw),
+      cs_marker = cs_marker,
+      corr = corr_assoc,
       raw = list(
-        cv_total = cv_total_raw,
         cv_mean = cv_mean_raw,
-        cv_marker = cv_marker_raw,
         cs_total = cs_total_raw,
-        cs_mean = cs_mean_raw,
         cs_marker = cs_marker_raw,
-        vcov = vcov_raw,
+        cs_mean = cs_mean_raw,
+        corr = corr_assoc,
+        corr_vals = corr_vals,
+        corr_vals_tf = corr_vals_tf,
         marker_values = now
       )
     )
@@ -1070,13 +1220,13 @@ simulate_joinme <- function(
   eta_event_i <- as.numeric(W_event %*% beta_event)
 
   .sim_assoc_lp_from_components <- function(comp) {
-    assoc_coef_full[["cv_total"]] * comp$cv_total +
-      assoc_coef_full[["cv_mean"]] * comp$cv_mean +
-      assoc_coef_full[["cv_marker"]] * comp$cv_marker +
-      assoc_coef_full[["cs_total"]] * comp$cs_total +
-      assoc_coef_full[["cs_mean"]] * comp$cs_mean +
-      assoc_coef_full[["cs_marker"]] * comp$cs_marker +
-      assoc_coef_full[["vcov"]] * comp$vcov
+    assoc_coef_scalar[["cv_total"]] * comp$cv_total +
+      assoc_coef_scalar[["cv_mean"]] * comp$cv_mean +
+      assoc_coef_scalar[["cv_marker"]] * comp$cv_marker +
+      assoc_coef_scalar[["cs_total"]] * comp$cs_total +
+      assoc_coef_scalar[["cs_mean"]] * comp$cs_mean +
+      assoc_coef_scalar[["cs_marker"]] * comp$cs_marker +
+      comp$corr
   }
 
   .sim_time_key <- function(t) sprintf("%.12f", as.numeric(t))
@@ -1361,7 +1511,7 @@ simulate_joinme <- function(
     cs_total = function(i, t) assoc_components(i, t)$cs_total,
     cs_mean = function(i, t) assoc_components(i, t)$cs_mean,
     cs_marker = function(i, t) assoc_components(i, t)$cs_marker,
-    vcov = function(i, t) assoc_components(i, t)$vcov,
+    corr = function(i, t) assoc_components(i, t)$corr,
     assoc_components_raw = function(i, t) assoc_components(i, t)$raw,
     assoc_components = assoc_components,
     baseline_hazard = h0_fn,

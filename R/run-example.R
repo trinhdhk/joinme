@@ -26,7 +26,7 @@ run_joinme_example <- function() {
   fit <- joinme(
     formulaLong = formulaLong,
     formulaEvent = formulaEvent,
-    formulaVcov = ~1,
+    formulaCorr = ~1,
     dataLong = sim$dataLong,
     dataEvent = sim$dataEvent,
     draws = 500,
@@ -38,7 +38,7 @@ run_joinme_example <- function() {
     assoc = c("cv_total"),
     transforms = list(
       cv_total = list(type = "identity"),
-      vcov = list(type = "identity")
+      corr = list(type = "identity")
     ),
     formulaDist = list(sigma = sigma ~ 1 + time),
     priors = list(beta = list(scale = 2.5), alpha = list(scale = 1.0), lkj = 2),

@@ -47,39 +47,51 @@ component. From these components, `joinme` constructs:
   and rescaled to the original time units.
 - **CS_mean**: slope of the mean component.
 - **CS_marker**: slope of the marker component.
-- **VCOV**: a subject-specific variance summary of the marker-by-id covariance
+- **CORR**: a subject-specific variance summary of the marker-by-id covariance
   structure, constant across time.
 
 Each component can be included or excluded using the `assoc` argument. If
 `assoc` does not include a component, the corresponding coefficient is prior-only
 and does not enter the likelihood.
 
-The VCOV component requires marker-by-id random effects. If the marker block
-does not include an inner `( ... | id )` term, then `Q_idm = 0` and VCOV is not
+The CORR component requires marker-by-id random effects. If the marker block
+does not include an inner `( ... | id )` term, then `Q_idm = 0` and CORR is not
 available.
 
 # Marker-weighted CV and CS
 
 When multiple biomarkers are modeled, `joinme` constructs marker-average association
-components using weights $\omega_d$ (one per marker). For `cv_total` and
-`cv_marker`, transforms are applied at the marker level first and then averaged
-with weights. This matters whenever transforms are nonlinear.
+components using weights $\omega_d$ (one per marker). For marker-aggregated
+terms (`cv_total`, `cv_marker`, `cs_total`, `cs_marker`), transforms are applied
+at the marker level first and then averaged with weights. This matters whenever
+transforms are nonlinear.
 
 For example, with marker-specific total current values $CV_{id}(t)$ and transform
 $f_{cv}$:
 
 $$
-	ext{cv\_total}(t) = \frac{1}{D}\sum_{d=1}^{D} \omega_d\, f_{cv}\!\left(CV_{id}(t)\right),
+  ext{cv\_total}(t) = \frac{1}{D}\sum_{d=1}^{D} \omega_d\, f_{cv}\!\left(CV_{id}(t)\right),
 $$
 
 which differs from $f_{cv}(\frac{1}{D}\sum_d \omega_d CV_{id}(t))$ unless $f_{cv}$
 is linear.
 
+For slopes, let $CS_{id}(t)$ be a marker-specific slope feature and $f_{cs}$ the
+configured CS transform. Then
+
+$$
+  ext{cs\_total}(t) = \frac{1}{D}\sum_{d=1}^{D} \omega_d\, f_{cs}\!\left(CS_{id}(t)\right),
+$$
+
+and analogously for `cs_marker`. This is intentionally not equal to
+$f_{cs}(\frac{1}{D}\sum_d \omega_d CS_{id}(t))$ unless $f_{cs}$ is linear.
+
 In practice, provide fixed weights via `marker_weights`, or set
-`estimate_marker_weights = TRUE` to estimate them with shrinkage (Normal or Laplace
-depending on `shrinkage`). Internally, `joinme` uses signed additive perturbations
-around base weights and then rescales to unit RMS. This allows both positive and
-negative marker contributions while stabilizing global scale for identifiability.
+`estimate_marker_weights = TRUE` to estimate signed perturbations around base
+weights via `marker_weights + z_marker_weights` with
+`z_marker_weights ~ N(0, 1)`. These signed weights are used directly in
+marker-aggregated association terms. The simulator reports them in
+`truth$marker_weights`.
 
 # Association coefficients and naming
 
@@ -113,7 +125,7 @@ transforms <- list(
   cs_total = list(
     type = "identity"
   ),
-  vcov = list(
+  corr = list(
     type = "identity"
   )
 )
@@ -129,7 +141,7 @@ transforms <- list(
   cv_mean = list(type = "functional", expr = ~ exp(0.2 * x)),
   cv_marker = list(type = "functional", expr = ~ power(x, 2)),
   cs_total = list(type = "functional", expr = ~ sqrt(abs(x) + 1e-6)),
-  vcov = list(type = "functional", expr = ~ cbrt(x))
+  corr = list(type = "functional", expr = ~ cbrt(x))
 )
 ```
 
@@ -151,7 +163,7 @@ transforms <- list(
   cs_total = list(
     type = "identity"
   ),
-  vcov = list(
+  corr = list(
     type = "identity"
   )
 )
@@ -171,7 +183,7 @@ transforms <- list(
   cs_total = list(
     type = "identity"
   ),
-  vcov = list(
+  corr = list(
     type = "ispline_penalized",
     x = seq(-2, 2, length.out = 40),
     y = exp(seq(-2, 2, length.out = 40)),
@@ -197,7 +209,7 @@ transforms <- list(
   cs_total = list(
     type = "identity"
   ),
-  vcov = list(
+  corr = list(
     type = "pwlin",
     x = c(-2, -1, 0, 1, 2),
     y = c(0.2, 0.5, 1, 0.5, 0.2)
@@ -216,10 +228,10 @@ transforms <- list(
 graph TD
   CV[CV total] --> FCV[f_cv]
   CS[CS total] --> FCS[f_cs]
-  V[Vcov] --> FVCOV[f_vcov]
+  V[Corr] --> FCORR[f_corr]
   FCV --> ETA[eta assoc]
   FCS --> ETA
-  FVCOV --> ETA
+  FCORR --> ETA
 ```
 
 # Hierarchical Covariance Regression
@@ -245,6 +257,6 @@ fit <- joinme(
   formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
   dataEvent = sim$dataEvent,
   transforms = transforms,
-  assoc = c("cv_total", "vcov")
+  assoc = c("cv_total", "corr")
 )
 ```

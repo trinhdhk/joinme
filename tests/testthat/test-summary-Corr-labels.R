@@ -6,7 +6,7 @@ test_that("print.summary_JoinMeFit uses bespoke covariance labels", {
       assoc = NULL,
       distributional = NULL,
       distributional_regression = NULL,
-      vcov = list(
+      corr = list(
         id = data.frame(block = "id", row = 1L, col = 1L, Estimate = 1),
         marker = data.frame(block = "marker", row = 1L, col = 1L, Estimate = 2),
         marker_by_id_latent = data.frame(block = "id:marker", row = 1L, col = 1L, Estimate = 3)
@@ -45,7 +45,7 @@ test_that("print.summary_JoinMeFit prints survival process report only when avai
       assoc = NULL,
       distributional = NULL,
       distributional_regression = NULL,
-      vcov = NULL
+      corr = NULL
     ),
     diagnostics = NULL,
     metadata = list(family = "student_t", tmax = 1)
@@ -62,7 +62,7 @@ test_that("print.summary_JoinMeFit prints survival process report only when avai
       assoc = NULL,
       distributional = NULL,
       distributional_regression = NULL,
-      vcov = NULL
+      corr = NULL
     ),
     diagnostics = NULL,
     metadata = list(family = "student_t", tmax = 1)

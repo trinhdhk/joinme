@@ -309,7 +309,7 @@ suppressPackageStartupMessages({
 .build_dist_re_terms <- function(formula, data) {
   # Parse random-effect terms for distributional regression
   if (is.null(formula)) {
-    return(list(n_re = 0L, K = integer(0), G = integer(0), Z = list(), J = list(), terms = character(0)))
+    return(list(n_re = 0L, K = integer(0), G = integer(0), Z = list(), J = list(), W = list(), terms = character(0)))
   }
 
   if (.is_dist_scope(formula)) {
@@ -321,11 +321,12 @@ suppressPackageStartupMessages({
         G = c(base$G, add$G),
         Z = c(base$Z, add$Z),
         J = c(base$J, add$J),
+        W = c(base$W, add$W),
         terms = c(base$terms, add$terms)
       )
     }
 
-    out <- list(n_re = 0L, K = integer(0), G = integer(0), Z = list(), J = list(), terms = character(0))
+    out <- list(n_re = 0L, K = integer(0), G = integer(0), Z = list(), J = list(), W = list(), terms = character(0))
 
     if (!is.null(formula$default)) {
       out <- merge_re(out, .build_dist_re_terms(formula$default, data))
@@ -361,11 +362,12 @@ suppressPackageStartupMessages({
   f_exp <- reformulas::expandDoubleVerts(formula)
   bars <- reformulas::findbars(f_exp)
   if (length(bars) == 0) {
-    return(list(n_re = 0L, K = integer(0), G = integer(0), Z = list(), J = list(), terms = character(0)))
+    return(list(n_re = 0L, K = integer(0), G = integer(0), Z = list(), J = list(), W = list(), terms = character(0)))
   }
 
   Z_list <- list()
   J_list <- list()
+  W_list <- list()
   K_list <- integer(0)
   G_list <- integer(0)
   term_names <- character(0)
@@ -384,8 +386,16 @@ suppressPackageStartupMessages({
     rhs_formula <- stats::as.formula(paste0("~ ", paste(deparse(rhs_expr, width.cutoff = 500L), collapse = " ")))
     Z <- .mm(rhs_formula, data)
 
+    grp_info <- .parse_weighted_group_expr(
+      grp_expr = grp_expr,
+      data = data,
+      context = "formulaDist random-effects term"
+    )
+    grp_eval_expr <- grp_info$group_expr
+    obs_weights <- grp_info$weights
+
     grp_df <- stats::model.frame(
-      stats::as.formula(paste0("~ ", paste(deparse(grp_expr, width.cutoff = 500L), collapse = " "))),
+      stats::as.formula(paste0("~ ", paste(deparse(grp_eval_expr, width.cutoff = 500L), collapse = " "))),
       data = data,
       drop.unused.levels = TRUE
     )
@@ -396,9 +406,17 @@ suppressPackageStartupMessages({
     }
     grp <- factor(grp)
     J <- as.integer(grp)
+    W <- as.numeric(tapply(obs_weights, grp, mean))
+    if (length(W) != nlevels(grp) || any(!is.finite(W)) || any(W <= 0)) {
+      cli::cli_abort(c(
+        x = "Invalid group weights in distributional random-effects term.",
+        i = "Weights declared via {.code weighted(..., weights = ...)} must be finite and strictly positive within each grouping level."
+      ))
+    }
 
     Z_list[[length(Z_list) + 1L]] <- Z
     J_list[[length(J_list) + 1L]] <- J
+    W_list[[length(W_list) + 1L]] <- W
     K_list <- c(K_list, ncol(Z))
     G_list <- c(G_list, nlevels(grp))
     term_names <- c(term_names, paste0("(", paste(deparse(rhs_expr, width.cutoff = 500L), collapse = " "), "|", paste(deparse(grp_expr, width.cutoff = 500L), collapse = " "), ")"))
@@ -410,6 +428,7 @@ suppressPackageStartupMessages({
     G = G_list,
     Z = Z_list,
     J = J_list,
+    W = W_list,
     terms = term_names
   )
 }
@@ -427,7 +446,9 @@ suppressPackageStartupMessages({
       G_max = 0L,
       Z = list(),
       J = list(),
+      W = list(),
       J_mat = matrix(0L, nrow = 0, ncol = n_rows),
+      W_mat = matrix(1.0, nrow = 0, ncol = 0),
       terms = re_terms$terms
     ))
   }
@@ -446,7 +467,21 @@ suppressPackageStartupMessages({
     }
     Z
   })
+  W_padded <- lapply(seq_len(re_terms$n_re), function(i) {
+    w <- as.numeric(re_terms$W[[i]])
+    if (length(w) != re_terms$G[[i]] || any(!is.finite(w)) || any(w <= 0)) {
+      cli::cli_abort(c(
+        x = "Invalid group-weight vector in random-effects terms.",
+        i = "Each random-effects term must have one finite, strictly positive weight per group level."
+      ))
+    }
+    if (length(w) < G_max) {
+      w <- c(w, rep(1.0, G_max - length(w)))
+    }
+    w
+  })
   J_mat <- do.call(rbind, lapply(re_terms$J, function(j) as.integer(j)))
+  W_mat <- do.call(rbind, lapply(W_padded, as.numeric))
   list(
     n_re = re_terms$n_re,
     K = re_terms$K,
@@ -455,7 +490,9 @@ suppressPackageStartupMessages({
     G_max = G_max,
     Z = Z_padded,
     J = re_terms$J,
+    W = W_padded,
     J_mat = J_mat,
+    W_mat = W_mat,
     terms = re_terms$terms
   )
 }
@@ -471,7 +508,7 @@ suppressPackageStartupMessages({
     assoc_cs_total  = as.integer("cs_total" %in% assoc),
     assoc_cs_mean   = as.integer("cs_mean" %in% assoc),
     assoc_cs_marker = as.integer("cs_marker" %in% assoc),
-    assoc_vcov      = as.integer("vcov" %in% assoc)
+    assoc_corr      = as.integer("corr" %in% assoc)
   )
 }
 
@@ -482,7 +519,7 @@ suppressPackageStartupMessages({
 #'
 #' @keywords internal
 .validate_tf <- function(tf) {
-  nm <- c("cv_mean", "cv_marker", "cs_mean", "cs_marker", "vcov")
+  nm <- c("cv_mean", "cv_marker", "cs_mean", "cs_marker", "corr")
   tf_map <- c(
     identity = 0L,
     id = 0L,
@@ -513,11 +550,11 @@ suppressPackageStartupMessages({
       ))
     }
   }
-  bad <- c(tf$cv_marker, tf$cs_mean, tf$cs_marker, tf$vcov)
+  bad <- c(tf$cv_marker, tf$cs_mean, tf$cs_marker, tf$corr)
   if (any(bad %in% c(2L, 5L))) {
     cli::cli_abort(c(
       x = "log/sqrt transforms are restricted to cv_mean only.",
-      i = "Use identity or other transforms for cs_mean/cs_marker/vcov."
+      i = "Use identity or other transforms for cs_mean/cs_marker/corr."
     ))
   }
   tf
@@ -628,12 +665,77 @@ suppressPackageStartupMessages({
 #'
 #' @keywords internal
 .group_name_from_expr <- function(grp_expr) {
+  if (is.call(grp_expr) && identical(as.character(grp_expr[[1]]), "weighted")) {
+    if (length(grp_expr) < 2) {
+      cli::cli_abort(c(
+        x = "Invalid weighted grouping expression.",
+        i = "Use {.code weighted(group, weights = weight_column)}."
+      ))
+    }
+    return(.group_name_from_expr(grp_expr[[2]]))
+  }
   if (is.call(grp_expr) && as.character(grp_expr)[[1]] %in% c(":", "*")) {
     # Handle marker:id or marker*id patterns - extract first part
     return(deparse(grp_expr[[2]], width.cutoff = 500L)[1])
   }
   # Simple symbol or name
   as.character(grp_expr)[[1]]
+}
+
+#' Parse weighted grouping expressions used in random-effect terms
+#' @keywords internal
+.parse_weighted_group_expr <- function(grp_expr, data, context = "random-effects term") {
+  if (!(is.call(grp_expr) && identical(as.character(grp_expr[[1]]), "weighted"))) {
+    return(list(
+      group_expr = grp_expr,
+      is_weighted = FALSE,
+      weights = rep(1.0, nrow(data)),
+      weight_label = NULL
+    ))
+  }
+
+  if (length(grp_expr) < 2) {
+    cli::cli_abort(c(
+      x = "Invalid weighted grouping expression in {context}.",
+      i = "Use {.code weighted(group, weights = weight_column)}."
+    ))
+  }
+
+  args <- as.list(grp_expr)
+  arg_names <- names(args)
+  weight_pos <- which(arg_names == "weights")
+  if (length(weight_pos) != 1) {
+    cli::cli_abort(c(
+      x = "Invalid weighted grouping expression in {context}.",
+      i = "Provide exactly one {.code weights = <column>} argument."
+    ))
+  }
+
+  base_group_expr <- args[[2]]
+  weight_expr <- args[[weight_pos]]
+  weight_formula <- stats::as.formula(paste0("~ ", paste(deparse(weight_expr, width.cutoff = 500L), collapse = " ")))
+  weight_df <- stats::model.frame(weight_formula, data = data, na.action = stats::na.fail)
+  if (ncol(weight_df) != 1) {
+    cli::cli_abort(c(
+      x = "Invalid weight specification in weighted grouping expression.",
+      i = "Weight must evaluate to a single numeric column."
+    ))
+  }
+
+  weight_vec <- as.numeric(weight_df[[1]])
+  if (length(weight_vec) != nrow(data) || any(!is.finite(weight_vec)) || any(weight_vec <= 0)) {
+    cli::cli_abort(c(
+      x = "Invalid weights in weighted grouping expression.",
+      i = "Weights must be finite, strictly positive, and aligned with data rows."
+    ))
+  }
+
+  list(
+    group_expr = base_group_expr,
+    is_weighted = TRUE,
+    weights = weight_vec,
+    weight_label = paste(deparse(weight_expr, width.cutoff = 500L), collapse = " ")
+  )
 }
 
 #' Resolve independence flags from double-bar syntax
@@ -715,7 +817,7 @@ suppressPackageStartupMessages({
   f_exp <- reformulas::expandDoubleVerts(formulaLong)
   bars <- reformulas::findbars(f_exp)
   if (length(bars) == 0) {
-    return(list(mk_rhs_list = list(), idm_rhs_list = list(), marker_terms = list()))
+    return(list(mk_rhs_list = list(), idm_rhs_list = list(), idm_group_exprs = list(), marker_terms = list()))
   }
 
   expr_has_literal <- function(expr, value) {
@@ -734,11 +836,12 @@ suppressPackageStartupMessages({
   
   mk_idx <- which(grp == marker_var)
   if (length(mk_idx) == 0) {
-    return(list(mk_rhs_list = list(), idm_rhs_list = list(), marker_terms = list()))
+    return(list(mk_rhs_list = list(), idm_rhs_list = list(), idm_group_exprs = list(), marker_terms = list()))
   }
 
   mk_rhs_list <- list()
   idm_rhs_list <- list()
+  idm_group_exprs <- list()
   marker_terms <- list()
 
   for (j in mk_idx) {
@@ -751,10 +854,11 @@ suppressPackageStartupMessages({
 
     inner_bars <- reformulas::findbars(f_inner)
     if (length(inner_bars) > 0) {
-      inner_grp <- vapply(inner_bars, function(b) as.character(b[[3]]), character(1))
+      inner_grp <- vapply(inner_bars, function(b) .group_name_from_expr(b[[3]]), character(1))
       id_inner_idx <- which(inner_grp == id_var)
       if (length(id_inner_idx) > 0) {
         idm_rhs_list <- c(idm_rhs_list, .bar_terms_to_rhs_list(inner_bars[id_inner_idx]))
+        idm_group_exprs <- c(idm_group_exprs, lapply(inner_bars[id_inner_idx], function(b) b[[3]]))
       }
     }
 
@@ -773,7 +877,7 @@ suppressPackageStartupMessages({
     mk_rhs_list <- c(mk_rhs_list, list(f_mk))
   }
 
-  list(mk_rhs_list = mk_rhs_list, idm_rhs_list = idm_rhs_list, marker_terms = marker_terms)
+  list(mk_rhs_list = mk_rhs_list, idm_rhs_list = idm_rhs_list, idm_group_exprs = idm_group_exprs, marker_terms = marker_terms)
 }
 
 # ---- time-index metadata for internal scaling in Stan -----------------
@@ -1018,16 +1122,22 @@ suppressPackageStartupMessages({
   N <- sd$N %||% 0L
   sd$Z_sigma <- make_num_array(sd$Z_sigma, c(sd$n_re_sigma %||% 0L, N, sd$K_sigma_max %||% 0L))
   sd$J_sigma <- make_int_array(sd$J_sigma, c(sd$n_re_sigma %||% 0L, N))
+  sd$re_weight_sigma <- make_num_array(sd$re_weight_sigma, c(sd$n_re_sigma %||% 0L, sd$G_sigma_max %||% 0L))
   sd$Z_nu <- make_num_array(sd$Z_nu, c(sd$n_re_nu %||% 0L, N, sd$K_nu_max %||% 0L))
   sd$J_nu <- make_int_array(sd$J_nu, c(sd$n_re_nu %||% 0L, N))
+  sd$re_weight_nu <- make_num_array(sd$re_weight_nu, c(sd$n_re_nu %||% 0L, sd$G_nu_max %||% 0L))
   sd$Z_phi <- make_num_array(sd$Z_phi, c(sd$n_re_phi %||% 0L, N, sd$K_phi_max %||% 0L))
   sd$J_phi <- make_int_array(sd$J_phi, c(sd$n_re_phi %||% 0L, N))
+  sd$re_weight_phi <- make_num_array(sd$re_weight_phi, c(sd$n_re_phi %||% 0L, sd$G_phi_max %||% 0L))
   sd$Z_alpha <- make_num_array(sd$Z_alpha, c(sd$n_re_alpha %||% 0L, N, sd$K_alpha_max %||% 0L))
   sd$J_alpha <- make_int_array(sd$J_alpha, c(sd$n_re_alpha %||% 0L, N))
+  sd$re_weight_alpha <- make_num_array(sd$re_weight_alpha, c(sd$n_re_alpha %||% 0L, sd$G_alpha_max %||% 0L))
   sd$Z_phi_beta <- make_num_array(sd$Z_phi_beta, c(sd$n_re_phi_beta %||% 0L, N, sd$K_phi_beta_max %||% 0L))
   sd$J_phi_beta <- make_int_array(sd$J_phi_beta, c(sd$n_re_phi_beta %||% 0L, N))
+  sd$re_weight_phi_beta <- make_num_array(sd$re_weight_phi_beta, c(sd$n_re_phi_beta %||% 0L, sd$G_phi_beta_max %||% 0L))
   sd$Z_tau_sde <- make_num_array(sd$Z_tau_sde, c(sd$n_re_tau_sde %||% 0L, N, sd$K_tau_sde_max %||% 0L))
   sd$J_tau_sde <- make_int_array(sd$J_tau_sde, c(sd$n_re_tau_sde %||% 0L, N))
+  sd$re_weight_tau_sde <- make_num_array(sd$re_weight_tau_sde, c(sd$n_re_tau_sde %||% 0L, sd$G_tau_sde_max %||% 0L))
   sd
 }
 
@@ -1064,3 +1174,17 @@ suppressPackageStartupMessages({
   map <- c("gaussian", "student", "bernoulli", "binomial", "poisson", "negbin")
   if (code > 0 && code <= 6) map[code] else "unknown"
 }
+
+#' Safe with progress  helper
+#' @keywords internal
+.safe_progress <- function(show_progress = FALSE, expr) {
+  has_progressr <- requireNamespace("progressr", quietly = TRUE)
+  if (has_progressr && show_progress) {
+    call <- match.call()
+    call[[1]] <- quote(progressr::with_progress)
+    eval(call, parent.frame())
+  } else {
+    expr
+  }
+}
+

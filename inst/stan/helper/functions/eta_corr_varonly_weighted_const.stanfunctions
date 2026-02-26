@@ -1,0 +1,58 @@
+/**
+ * @file eta_corr_varonly_weighted_const.stanfunctions
+ * @brief Off-diagonal correlation extractor from subject-specific covariance factors.
+ *
+ * @details
+ * Given a lower-triangular Cholesky factor L_i, this helper reconstructs
+ * off-diagonal correlations Corr_{r,c} from Sigma_i = L_i * L_i'.
+ *
+ * IMPORTANT semantic choice:
+ * - This function returns RAW off-diagonal correlations only.
+ * - It does NOT apply association coefficients (a_corr).
+ * - It does NOT apply nonlinear transforms.
+ *
+ * That ordering is handled by callers as:
+ *   corr_terms_raw -> transform(corr_terms_raw) -> dot(a_corr, transformed_terms)
+ *
+ * This guarantees the model uses a_corr * transform(corr_raw), not
+ * transform(a_corr * corr_raw).
+ *
+ * @param L_i Subject-specific Cholesky factor (Q_idm x Q_idm).
+ * @return Vector of length Q_idm*(Q_idm-1)/2 in lower-triangular row-major order:
+ *   (2,1), (3,1), (3,2), ..., (Q,Q-1).
+ */
+vector eta_corr_varonly_weighted_const(matrix L_i) {
+  int Q = rows(L_i);
+  int M = (Q * (Q - 1)) %/% 2;
+  int m = 1;
+  vector[M] corr_terms;
+
+  // Enumerate off-diagonal correlations in lower-triangular row-major order.
+  for (r in 2 : Q) {
+    for (c in 1 : (r - 1)) {
+      real var_r = 0;   // variance of component r
+      real var_c = 0;   // variance of component c
+      real cov_rc = 0;  // covariance between r and c
+      real corr_rc;
+
+      // var_r = sum_k L[r,k]^2 for k <= r
+      for (k in 1 : r)
+        var_r += square(L_i[r, k]);
+      // var_c = sum_k L[c,k]^2 for k <= c
+      for (k in 1 : c)
+        var_c += square(L_i[c, k]);
+      // cov_rc = sum_k L[r,k] * L[c,k] for k <= c
+      for (k in 1 : c)
+        cov_rc += L_i[r, k] * L_i[c, k];
+
+      // Correlation with light numerical guard and clipping.
+      corr_rc = cov_rc / sqrt(var_r * var_c + 1e-12);
+      // corr_rc = fmax(-0.999999, fmin(0.999999, corr_rc));
+
+      corr_terms[m] = corr_rc;
+      m += 1;
+    }
+  }
+
+  return corr_terms;
+}

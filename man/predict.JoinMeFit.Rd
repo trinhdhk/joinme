@@ -20,8 +20,6 @@
   time_horizon = NULL,
   tmax = NULL,
   ci_levels = c(0.5, 0.95),
-  n_samples = 200,
-  n_times = 50,
   control = list(),
   seed = 123,
   ...
@@ -54,18 +52,19 @@ Options: "longitudinal" (future trajectory), "event" (conditional survival proba
 \item "subject_marker": Alias for "marginal_id".
 }}
 
-\item{scale}{Character. Longitudinal prediction scale:
+\item{scale}{Character vector. Longitudinal prediction scale(s):
 \itemize{
 \item "epred": expected response (inverse-link),
 \item "linpred": linear predictor,
 \item "predict": predictive draw (includes noise).
-}}
+}
+Defaults to all scales when not explicitly set.}
 
 \item{times}{Numeric vector of times at which to predict the longitudinal and survival trajectories.
 Can also be a named list of numeric vectors (one per subject id). If NULL, a grid
 from \code{time_start} to \code{time_start + time_horizon} is generated (and truncated to
 training support when needed). If fewer than 50 points are supplied for a subject,
-a warning is emitted when \code{n_times = 50}.}
+a warning is emitted when \code{control$n_times = 50}.}
 
 \item{time_start}{Numeric scalar or character. The conditioning time (last observation time).
 If numeric, a single value is reused for all subjects, or a named vector supplies
@@ -82,20 +81,20 @@ the maximum observed time in \code{newdataLong} for each subject.}
 \item{ci_levels}{Numeric vector of credible interval levels for plotting.
 Must be strictly between 0 and 1.}
 
-\item{n_samples}{Integer. Number of posterior parameter draws to extract from
-the fitted model before running dynamic prediction. Default 200.}
-
-\item{n_times}{Integer. Number of time points for the prediction grid when \code{times} is NULL. Default 50.}
-
 \item{control}{Named list for prediction configuration.
 \itemize{
 \item cmdstanr::model$sample() arguments (e.g., \code{chains}, \code{parallel_chains},
 \code{iter_warmup}, \code{iter_sampling}, \code{seed}, \code{refresh}, \code{adapt_delta}).
 Values override defaults except \code{data}.
 \item engine: "cmdstanr" or "rstan". Defaults to options(stan_preferred_engine).
+\item n_samples: integer; number of posterior parameter draws extracted from the
+fitted object before dynamic prediction. Default 200.
+\item n_times: integer; number of points in the prediction time grid when
+\code{times} is \code{NULL}. Default 50.
 \item n_pred_draws: integer; number of prediction draws produced by the dynpred
 object. This is independent of \code{n_samples} (posterior parameter draw
-extraction count). If omitted, defaults to the extracted posterior draw count.
+extraction count). If omitted, defaults to the extracted posterior draw
+count.
 \item threads_per_chain: integer; if > 1 uses \code{joinme_dynpred_threading.stan}.
 For engine = "rstan", threading uses options(stan.thread = threads_per_chain).
 \item grainsize: integer; reduce_sum grainsize for threaded prediction
@@ -115,11 +114,14 @@ A list with two components:
 \item{cumhaz}{A data.frame containing conditional cumulative hazards H(t|time_start). Columns: id, time, Cumhaz, Median, Est.Error, L95, U95.}
 \item{draws}{A list containing raw posterior draws (\code{longitudinal}, \code{longitudinal_fitted}, \code{survival}, \code{cumhaz}) and reconstructed subject-level random effects (\code{random_effects_id}, \code{random_effects_marker_id}, including marker-by-id covariance draws when id-dependent covariance is active).}
 
-A \code{JoinMeDynPred} object with \code{metadata$scale = "linpred"}.
+A \code{JoinMeDynPred} object with \code{metadata$scale = "linpred"} and
+\code{metadata$scales = "linpred"}.
 
-A \code{JoinMeDynPred} object with \code{metadata$scale = "epred"}
+A \code{JoinMeDynPred} object with \code{metadata$scale = "epred"} and
+\code{metadata$scales = "epred"}.
 
-A \code{JoinMeDynPred} object with \code{metadata$scale = "predict"}.
+A \code{JoinMeDynPred} object with \code{metadata$scale = "predict"} and
+\code{metadata$scales = "predict"}.
 }
 \description{
 Performs dynamic prediction for a new subject using a fitted \code{JoinMeFit} joint model.

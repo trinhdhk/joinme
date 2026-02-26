@@ -48,7 +48,11 @@ simulate_joinme(
 )
 }
 \arguments{
-\item{formulaLong}{Longitudinal formula (same role as in \code{joinme()}).}
+\item{formulaLong}{Longitudinal formula (same role as in \code{joinme()}).
+Grouping terms may use \verb{weighted(group, weights = <column>)} to mirror
+fitting syntax. The referenced weight column
+should be available in generated covariates (for example via
+\code{covariate_formulas}).}
 
 \item{formulaEvent}{Event/survival formula (same role as in \code{joinme()}).}
 
@@ -64,12 +68,12 @@ If no bracket is used (e.g. \code{sigma ~ 1 + time}), the formula applies to all
 rows where that parameter exists. If a bracket is used, it only applies to
 rows of that family and is estimated separately from other scopes.}
 
-\item{formulaAssoc}{Optional formula for association terms in hazard, e.g. \code{~ cv_total + vcov}.
+\item{formulaAssoc}{Optional formula for association terms in hazard, e.g. \code{~ cv_total + corr}.
 If provided, it overrides \code{assoc}.}
 
 \item{transforms}{Optional transform specifications for association terms.
 Supports the same structure as \code{joinme(..., transforms=...)} for
-\code{cv_total}, \code{cv_mean}, \code{cv_marker}, \code{cs_total}, \code{cs_mean}, \code{cs_marker}, \code{vcov}.
+\code{cv_total}, \code{cv_mean}, \code{cv_marker}, \code{cs_total}, \code{cs_mean}, \code{cs_marker}, \code{corr}.
 Simulation applies \code{cv_total} and \code{cv_marker} transforms at marker level before
 weighted averaging (aligned with fit/predict Stan semantics).
 Functional transforms support arithmetic and common nonlinear functions,
@@ -94,13 +98,19 @@ including \code{inv_logit}/\code{expit}/\code{sigmoid}, \code{exp}, \code{log}, 
 e.g. \code{list(x1 ~ rnorm(n_id), x2 ~ rt(n_id, df = 5))}.}
 
 \item{marker_weights}{Optional marker weights used in association aggregation.
-If \code{NULL}, equal weights are used. Internally rescaled to unit RMS and aggregated
-as weighted means divided by marker count.}
+If \code{NULL}, equal weights are used and aggregated
+as weighted means divided by marker count. Inputs are treated as direct signed
+weights used in association aggregation. Weights are reported as
+\code{truth$marker_weights}.}
 
 \item{assoc}{Association components (same names as fit): \code{cv_total}, \code{cv_mean},
-\code{cv_marker}, \code{cs_total}, \code{cs_mean}, \code{cs_marker}, \code{vcov}.}
+\code{cv_marker}, \code{cs_total}, \code{cs_mean}, \code{cs_marker}, \code{corr}.}
 
-\item{assoc_coefs}{Named coefficients for association terms in the hazard.}
+\item{assoc_coefs}{Association coefficients for hazard terms.
+Non-\code{corr} terms accept scalar values. The \code{corr} term accepts a vector of
+off-diagonal correlation coefficients ordered as \code{(2,1), (3,1), (3,2), ...}
+in lower-triangular row-major order of the marker-by-id random-effect
+covariance dimension.}
 
 \item{beta_long}{Fixed-effect coefficients for \code{formulaLong} fixed part. If NULL,
 coefficients are randomly generated and named by model-matrix columns.}

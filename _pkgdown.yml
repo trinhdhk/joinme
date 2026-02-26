@@ -57,7 +57,7 @@ reference:
   contents:
   - fixef.JoinMeFit
   - ranef.JoinMeFit
-  - vcov.JoinMeFit
+  - corr.JoinMeFit
 - title: Transforms
   contents:
   - parse_transform_expr

@@ -29,7 +29,7 @@ For Stan backends:
 # install.packages("rstan", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
 ```
 
-## Quick start: simulate → fit → predict → plot
+## Quick start: simulate â†’ fit â†’ predict â†’ plot
 
 ## Conceptual overview
 
@@ -51,7 +51,7 @@ The association terms implemented in `joinme` are:
 
 - Current value (CV) of the latent linear predictor.
 - Current slope (CS) of the latent linear predictor.
-- Variance association (VCOV) derived from the marker-by-subject
+- Variance association (CORR) derived from the marker-by-subject
   covariance structure.
 
 Each association term can be left on its original scale or transformed
@@ -157,12 +157,21 @@ head(sim$dataEvent)
 The longitudinal formula defines fixed effects and random effects. The survival
 formula defines baseline covariates in the hazard model.
 
+Formula-scoped weighting can be declared directly in grouping terms via
+`weighted(group, weights = <column>)`, including marker-level grouping declarations.
+
 ```{r intro-formulas}
 formulaLong <- y ~ 1 + time + x1 +
   (1 + time || id) +
   (0 + x1 + (1 + time || id) || marker)
 
 formulaEvent <- survival::Surv(time, event) ~ 1 + x1 + x2
+```
+
+```{r intro-weighted-formula, eval=FALSE}
+formulaLong_weighted <- y ~ 1 + time + x1 +
+  (1 + time | weighted(id, weights = id_w)) +
+  (0 + x1 + (1 + time | weighted(id, weights = id_w)) | weighted(marker, weights = marker_w))
 ```
 
 ### Step 4: Fit the joint model
@@ -215,19 +224,21 @@ pred <- rstantools::posterior_epred(
   newdataEvent = ndE,
   time_start = time_start,
   times = seq(time_start, time_start + 1, length.out = 20),
-  n_samples = 50,
-  control = list(n_pred_draws = 80),
+  control = list(n_samples = 50, n_pred_draws = 80),
   seed = 2026
 )
 
-# n_samples: extracted posterior parameter draws
+# control$n_samples: extracted posterior parameter draws
 # control$n_pred_draws: dynpred output draw count
+
+# use predict(..., scale = c("epred", "linpred", "predict"))
+# to return multiple longitudinal scales in one call (default = all scales)
 ```
 
 ### Step 7: Plot longitudinal and survival predictions
 
 ```{r intro-plot}
-plot(pred, which = c("longitudinal", "survival"), combined = TRUE)
+plot(pred, which = c("longitudinal", "survival"), scale = "epred", combined = TRUE)
 ```
 
 If `patchwork`/`cowplot` is unavailable, `combined = TRUE` falls back to the
@@ -241,8 +252,8 @@ diagnosis(fit)
 diagnosis(pred)
 ```
 
-`ranef(fit)` and `vcov(fit)` are nested by `formulaLong` and `formulaDist`.
-For prediction objects, `ranef(pred)` and `vcov(pred)` are available only when
+`ranef(fit)` and `corr(fit)` are nested by `formulaLong` and `formulaDist`.
+For prediction objects, `ranef(pred)` and `corr(pred)` are available only when
 marker covariance is configured to depend on id.
 
 ## Next steps
@@ -250,3 +261,4 @@ marker covariance is configured to depend on id.
 - See the modeling workflow in `joinme-workflow`.
 - Explore association structures in `joinme-associations`.
 - Review the statistical details in `joinme-model` and `joinme-theory`.
+

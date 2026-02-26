@@ -11,6 +11,17 @@ NULL
 # - S3 methods for JoinMeFit and summary output.
 # - Internal helpers for diagnostics and draw summaries.
 
+#' Extract covariance summaries
+#'
+#' Generic for extracting covariance summaries from joinme objects.
+#'
+#' @param object A supported joinme object.
+#' @param ... Additional arguments passed to methods.
+#' @export
+corr <- function(object, ...) {
+  UseMethod("corr")
+}
+
 # ---- internal helpers -----------------------------------------------------
 
 #' @keywords internal
@@ -504,14 +515,14 @@ print.JoinMeFit <- function(x, ...) {
 #' @param draws Number of draws to use for summaries.
 #' @param seed Random seed for subsetting draws.
 #' @param digits Number of digits to round summary values.
-#' @param include_vcov Logical; include covariance summaries.
+#' @param include_corr Logical; include covariance summaries.
 #' @param ... Unused.
 #'
 #' @return A `summary_JoinMeFit` object containing tables such as `fixef`,
 #'   `gamma_w`, `survival_process` (when applicable), `assoc`, and diagnostics.
 #' @export
 summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
-                           include_vcov = TRUE, ...) {
+                           include_corr = TRUE, ...) {
   assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
 
   fit <- object$fit
@@ -523,7 +534,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
                           msg = "draws must be NULL or a positive number.")
   assertthat::assert_that(is.numeric(digits) && digits >= 0, msg = "digits must be non-negative.")
 
-  cache_key <- paste0("summary_", draws, "_", digits, "_", include_vcov)
+  cache_key <- paste0("summary_", draws, "_", digits, "_", include_corr)
   # Cache by draw count + digits to avoid repeat summaries
   cached <- object$cache_get(cache_key)
   if (!is.null(cached)) return(cached)
@@ -585,7 +596,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
   }
 
   a_vars <- c("alpha_cv_total", "alpha_cv_mean", "alpha_cv_marker", "alpha_cs_total", "alpha_cs_mean", "alpha_cs_marker")
-  a_vars <- c(a_vars, grep("^alpha_vcov_var\\[", all_vars, value = TRUE))
+  a_vars <- c(a_vars, grep("^alpha_corr\\[", all_vars, value = TRUE))
   a_vars <- a_vars[a_vars %in% all_vars]
   active_vars <- c(
     if (isTRUE(sd$assoc_cv_total == 1)) "alpha_cv_total",
@@ -594,7 +605,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     if (isTRUE(sd$assoc_cs_total == 1)) "alpha_cs_total",
     if (isTRUE(sd$assoc_cs_mean == 1)) "alpha_cs_mean",
     if (isTRUE(sd$assoc_cs_marker == 1)) "alpha_cs_marker",
-    if (isTRUE(sd$assoc_vcov == 1)) grep("^alpha_vcov_var\\[", a_vars, value = TRUE)
+    if (isTRUE(sd$assoc_corr == 1)) grep("^alpha_corr\\[", a_vars, value = TRUE)
   )
   if (length(active_vars) > 0) {
     a_vars <- a_vars[a_vars %in% active_vars]
@@ -621,8 +632,14 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     s_a$Rhat <- round(s_a$Rhat, 3)
   }
 
-  # Marker-weight association summaries (when estimated)
-  if (sd$D > 0) {
+  # Marker-weight association summaries are shown only when marker-weighted
+  # association terms are active (cv_total/cv_marker/cs_total/cs_marker).
+  show_marker_weights <- isTRUE(sd$assoc_cv_total == 1) ||
+    isTRUE(sd$assoc_cv_marker == 1) ||
+    isTRUE(sd$assoc_cs_total == 1) ||
+    isTRUE(sd$assoc_cs_marker == 1)
+
+  if (sd$D > 0 && show_marker_weights) {
     mw_vars <- paste0("marker_weights_eff[", seq_len(sd$D), "]")
     mw_vars <- mw_vars[mw_vars %in% all_vars]
     if (length(mw_vars) > 0) {
@@ -711,19 +728,19 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
   }
 
   # Optional variance/covariance summaries (costly)
-  vcov_tables <- NULL
-  if (isTRUE(include_vcov)) {
-    vcov_tables <- list(
-      id = vcov(object, what = "id", draws = draws),
-      marker = if (sd$R_mk > 0) vcov(object, what = "marker", draws = draws) else NULL,
-      marker_by_id_latent = vcov(object, what = "marker_by_id_latent", draws = draws)
+  corr_tables <- NULL
+  if (isTRUE(include_corr)) {
+    corr_tables <- list(
+      id = corr(object, what = "id", draws = draws),
+      marker = if (sd$R_mk > 0) corr(object, what = "marker", draws = draws) else NULL,
+      marker_by_id_latent = corr(object, what = "marker_by_id_latent", draws = draws)
     )
   }
 
   transform_specs <- cfg$transforms_spec %||% object$call$transforms
   transform_formulas <- .transform_formulas_from_specs(transform_specs)
 
-  term_diag <- .term_diagnostics_from_tables(list(s_beta, s_g, s_a, s_d, s_dr, vcov_tables))
+  term_diag <- .term_diagnostics_from_tables(list(s_beta, s_g, s_a, s_d, s_dr, corr_tables))
   diag_table <- .build_common_diagnostics_table(
     draws = as.numeric(diag$draws %||% NA_real_),
     divergences = as.numeric(diag$divergences %||% NA_real_),
@@ -747,7 +764,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
       assoc = s_a,
       distributional = s_d,
       distributional_regression = s_dr,
-      vcov = vcov_tables
+      corr = corr_tables
     ),
     diagnostics = diag,
     metadata = list(
@@ -775,7 +792,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
 #' @param dataLong Optional updated longitudinal dataset.
 #' @param formulaEvent Optional updated survival formula (full or update form).
 #' @param dataEvent Optional updated event dataset.
-#' @param formulaVcov Optional updated covariance formula (full or update form).
+#' @param formulaCorr Optional updated covariance formula (full or update form).
 #' @param formulaDist Optional distributional regression formulas with parameter
 #'   names on the LHS (e.g., `sigma ~ 1 + time`).
 #' @param control Optional updated control list.
@@ -794,7 +811,7 @@ update.JoinMeFit <- function(
   dataLong = NULL,
   formulaEvent = NULL,
   dataEvent = NULL,
-  formulaVcov = NULL,
+  formulaCorr = NULL,
   formulaDist = NULL,
   control = NULL,
   draws = NULL,
@@ -856,7 +873,7 @@ update.JoinMeFit <- function(
 
   call_obj$formulaLong <- update_formula(object$formulaLong, formulaLong, "formulaLong")
   call_obj$formulaEvent <- update_formula(object$formulaEvent, formulaEvent, "formulaEvent")
-  call_obj$formulaVcov <- update_formula(object$formulaVcov, formulaVcov, "formulaVcov")
+  call_obj$formulaCorr <- update_formula(object$formulaCorr, formulaCorr, "formulaCorr")
   if (!is.null(formulaDist)) call_obj$formulaDist <- formulaDist
 
   if (!is.null(call_obj$formulaLong) && inherits(call_obj$formulaLong, "formula")) {
@@ -974,20 +991,20 @@ print.summary_JoinMeFit <- function(x, ...) {
     cat("---------------------------\n")
     print(x$tables$distributional_regression, row.names = FALSE)
   }
-  if (!is.null(x$tables$vcov)) {
+  if (!is.null(x$tables$corr)) {
     cat("\nCovariance summaries\n")
     cat("----------------------\n")
-    if (!is.null(x$tables$vcov$id)) {
+    if (!is.null(x$tables$corr$id)) {
       cat("id\n")
-      print(x$tables$vcov$id, row.names = FALSE)
+      print(x$tables$corr$id, row.names = FALSE)
     }
-    if (!is.null(x$tables$vcov$marker)) {
+    if (!is.null(x$tables$corr$marker)) {
       cat("\nmarker\n")
-      print(x$tables$vcov$marker, row.names = FALSE)
+      print(x$tables$corr$marker, row.names = FALSE)
     }
-    if (!is.null(x$tables$vcov$marker_by_id_latent)) {
+    if (!is.null(x$tables$corr$marker_by_id_latent)) {
       cat("\nid:marker\n")
-      print(x$tables$vcov$marker_by_id_latent, row.names = FALSE)
+      print(x$tables$corr$marker_by_id_latent, row.names = FALSE)
     }
   }
   invisible(x)
@@ -1030,8 +1047,13 @@ fixef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
   out$Q97.5 <- round(out$Q97.5, digits)
   out$Rhat <- round(out$Rhat, 3)
 
-  # Append marker-weight summaries as association-like terms
-  if (sd$D > 0) {
+  # Append marker-weight summaries only for marker-weighted association models
+  show_marker_weights <- isTRUE(sd$assoc_cv_total == 1) ||
+    isTRUE(sd$assoc_cv_marker == 1) ||
+    isTRUE(sd$assoc_cs_total == 1) ||
+    isTRUE(sd$assoc_cs_marker == 1)
+
+  if (sd$D > 0 && show_marker_weights) {
     mw_vars <- paste0("marker_weights_eff[", seq_len(sd$D), "]")
     mw_vars <- mw_vars[mw_vars %in% all_vars]
     if (length(mw_vars) > 0) {
@@ -1125,8 +1147,13 @@ ranef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
     marker_by_id_latent = summarize_block(zw_vars, "marker_by_id_latent")
   )
 
+  show_marker_weights <- isTRUE(sd$assoc_cv_total == 1) ||
+    isTRUE(sd$assoc_cv_marker == 1) ||
+    isTRUE(sd$assoc_cs_total == 1) ||
+    isTRUE(sd$assoc_cs_marker == 1)
+
   mw_vars <- vars[grepl("^marker_weights_eff\\[", vars)]
-  if (length(mw_vars) > 0) {
+  if (show_marker_weights && length(mw_vars) > 0) {
     mw <- summarize_block(mw_vars, "assoc_weight")
     if (!is.null(mw) && !is.null(sd$marker_levels)) {
       marker_terms <- sd$marker_levels
@@ -1135,7 +1162,7 @@ ranef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
       }
     }
     out_long$assoc_weight <- mw
-  } else if (isTRUE(as.logical(sd$estimate_marker_weights)) && !is.null(sd$marker_weights)) {
+  } else if (show_marker_weights && isTRUE(as.logical(sd$estimate_marker_weights)) && !is.null(sd$marker_weights)) {
     marker_terms <- sd$marker_levels %||% paste0("marker_", seq_len(sd$D))
     mw <- data.frame(
       term = paste0("weight: ", marker_terms),
@@ -1245,7 +1272,7 @@ ranef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
   out
 }
 
-# ---- vcov -----------------------------------------------------------------
+# ---- corr -----------------------------------------------------------------
 
 #' Extract covariance summaries
 #'
@@ -1260,7 +1287,7 @@ ranef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
 #'   block. Otherwise, a nested list with `formulaLong` and `formulaDist`
 #'   covariance summaries.
 #' @export
-vcov.JoinMeFit <- function(object, what = NULL, draws = NULL, ...) {
+corr.JoinMeFit <- function(object, what = NULL, draws = NULL, ...) {
   assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
   fit <- object$fit
   sd <- object$stan_data
@@ -1320,14 +1347,14 @@ vcov.JoinMeFit <- function(object, what = NULL, draws = NULL, ...) {
     if (what == "id") return(summarize_cov_matrix("tau_u", "Lcorr_u", sd$R_id, "id"))
     if (what == "marker") {
       if (sd$R_mk <= 0) {
-        cli::cli_abort("Marker vcov requested but R_mk = 0.")
+        cli::cli_abort("Marker corr requested but R_mk = 0.")
       }
       return(summarize_cov_matrix("tau_v", "Lcorr_v", sd$R_mk, "marker"))
     }
     return(summarize_cov_matrix("tau_w", "Lcorr_w", sd$Q_idm, "id:marker"))
   }
 
-  summarize_dist_vcov <- function(param_name) {
+  summarize_dist_corr <- function(param_name) {
     n_re <- as.integer(sd[[paste0("n_re_", param_name)]] %||% 0L)
     if (n_re <= 0L) return(NULL)
 
@@ -1388,12 +1415,12 @@ vcov.JoinMeFit <- function(object, what = NULL, draws = NULL, ...) {
       marker_by_id_latent = summarize_cov_matrix("tau_w", "Lcorr_w", sd$Q_idm, "id:marker")
     ),
     formulaDist = list(
-      sigma = summarize_dist_vcov("sigma"),
-      nu = summarize_dist_vcov("nu"),
-      phi = summarize_dist_vcov("phi"),
-      alpha = summarize_dist_vcov("alpha"),
-      phi_beta = summarize_dist_vcov("phi_beta"),
-      tau_sde = summarize_dist_vcov("tau_sde")
+      sigma = summarize_dist_corr("sigma"),
+      nu = summarize_dist_corr("nu"),
+      phi = summarize_dist_corr("phi"),
+      alpha = summarize_dist_corr("alpha"),
+      phi_beta = summarize_dist_corr("phi_beta"),
+      tau_sde = summarize_dist_corr("tau_sde")
     )
   )
   out$formulaLong <- out$formulaLong[!vapply(out$formulaLong, is.null, logical(1))]

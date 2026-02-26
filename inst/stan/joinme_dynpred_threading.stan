@@ -15,7 +15,7 @@
 
 functions {
   #include helper/functions/eta_fd.stanfunctions
-  #include helper/functions/eta_vcov_varonly_weighted_const.stanfunctions
+  #include helper/functions/eta_corr_varonly_weighted_const.stanfunctions
   #include helper/functions/cumhaz.stanfunctions
   #include helper/functions/functional_transform.stanfunctions
   #include helper/functions/basis_functions.stanfunctions
@@ -86,8 +86,8 @@ model {
     P_tau_sde,
     X_tau_sde_obs,
     /* Covariance regression inputs */
-    n_cov_vcov,
-    vec_cov_vcov,
+    n_cov_corr,
+    vec_cov_corr,
     /* Hazard baseline inputs */
     n_cov_hazard,
     vec_cov_hazard,
@@ -118,7 +118,7 @@ model {
     n_family_tau_sde,
     marker_to_tau_sde_family,
     flag_resid_dim,
-    vcov_diag_link,
+    corr_diag_link,
     use_tau_sde_fixed,
     tau_sde_fixed,
     num_unique_cov_entries,
@@ -141,10 +141,10 @@ model {
     Lcorr_marker_id,
     B_cross,
     /* Draw-specific covariance regression weights */
-    alpha_vcov_reg,
-    beta_vcov_reg_flat,
-    tau_vcov_reg,
-    lambda_vcov_reg,
+    alpha_corr_reg,
+    beta_corr_reg_flat,
+    tau_corr_reg,
+    lambda_corr_reg,
     /* Draw-specific survival parameters */
     K_event,
     log_h0_intercept,
@@ -164,7 +164,7 @@ model {
     coeff_assoc_cs_mean,
     coeff_assoc_cv_marker,
     coeff_assoc_cs_marker,
-    coeff_assoc_vcov_var,
+    coeff_assoc_corr,
     K_ord,
     cutpoints_ord,
     /* Association toggles */
@@ -174,11 +174,11 @@ model {
     flag_assoc_cv_marker,
     flag_assoc_cs_mean,
     flag_assoc_cs_marker,
-    flag_assoc_vcov,
+    flag_assoc_corr,
     /* Transform modes (per association channel) */
     tf_mode_cv_tot,
     tf_mode_cs_tot,
-    tf_mode_vcov,
+    tf_mode_corr,
     tf_mode_cv_mean,
     tf_mode_cv_marker,
     tf_mode_cs_mean,
@@ -194,11 +194,11 @@ model {
     knots_cs,
     coeff_cs,
     spline_degree_cs,
-    functional_ops_vcov,
-    const_data_vcov,
-    knots_vcov,
-    coeff_vcov,
-    spline_degree_vcov,
+    functional_ops_corr,
+    const_data_corr,
+    knots_corr,
+    coeff_corr,
+    spline_degree_corr,
     functional_ops_cv_mean,
     const_data_cv_mean,
     knots_cv_mean,
@@ -234,3 +234,4 @@ model {
 generated quantities {
   #include helper/generated_quantities/dynpred_outputs.stan
 }
+

@@ -24,6 +24,7 @@
 *.html
 *.pdf
 
+
 # Editor/IDE
 .vscode/
 /.Rproj.user/
@@ -43,6 +44,7 @@ renv.lock
 *.log
 *.aux
 *.out
+*.tmp*
 
 # Quarto / knitr / vignette caches and outputs
 _quarto_out/

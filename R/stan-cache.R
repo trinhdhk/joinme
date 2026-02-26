@@ -307,9 +307,40 @@ NULL
 #'
 #' @keywords internal
 .get_rstan_model <- function(stan_file) {
-  # Use precompiled model objects loaded by rstantools
-  mod <- gsub('.stan$', '', basename(stan_file))
-  stanmodels[[mod]]
+  # Compile from current Stan source to avoid stale precompiled module/data-schema mismatches.
+  if (!file.exists(stan_file)) {
+    cli::cli_abort(c(
+      x = "Stan file not found: {stan_file}",
+      i = "Check the model path passed to {.fn .get_rstan_model}."
+    ))
+  }
+
+  if (!exists(".joinme_rstan_model_cache", envir = .GlobalEnv, inherits = FALSE)) {
+    assign(".joinme_rstan_model_cache", new.env(parent = emptyenv()), envir = .GlobalEnv)
+  }
+  cache_env <- get(".joinme_rstan_model_cache", envir = .GlobalEnv, inherits = FALSE)
+
+  file_info <- file.info(stan_file)
+  cache_key <- paste0(normalizePath(stan_file, winslash = "/", mustWork = TRUE), "::", file_info$mtime)
+  if (exists(cache_key, envir = cache_env, inherits = FALSE)) {
+    return(get(cache_key, envir = cache_env, inherits = FALSE))
+  }
+
+  model_name <- tools::file_path_sans_ext(basename(stan_file))
+  stanc_ret <- rstan::stanc(
+    file = stan_file,
+    model_name = model_name,
+    allow_undefined = TRUE,
+    verbose = FALSE
+  )
+  mod <- rstan::stan_model(
+    stanc_ret = stanc_ret,
+    auto_write = FALSE,
+    verbose = FALSE
+  )
+
+  assign(cache_key, mod, envir = cache_env)
+  mod
 }
 
 #' Precompile CmdStanR models
@@ -320,11 +351,11 @@ NULL
 #' waiting for the first call with engine = "cmdstanr".
 #'
 #' @param force_recompile Logical; recompile even if cached.
-#'
+#' @param cleanup Logical; whether to clean up old cached executables before compiling.
 #' @return Invisibly returns a named list of compiled CmdStanR models.
 #'
 #' @export
-precompile_cmdstanr_models <- function(force_recompile = TRUE) {
+precompile_cmdstanr_models <- function(force_recompile = TRUE, cleanup = TRUE) {
   # Precompile packaged Stan models into the cache
   # Validate inputs with assertthat, then provide structured cli errors.
   assertthat::assert_that(
@@ -358,7 +389,12 @@ precompile_cmdstanr_models <- function(force_recompile = TRUE) {
 
   # Clean-up old cached executables that match the naming pattern to prevent stale models. We can be aggressive here since the cache key includes file hashes, so old executables won't be reused anyway. This ensures that if the source files change, we won't accidentally use an old cached executable that doesn't match the new source.
   cache_dir <- .stan_cache_dir()
-  unlink(list.files(cache_dir, pattern = "joinme-", full.names = TRUE), force = TRUE)
+  if (cleanup) {
+    old_exes <- list.files(cache_dir, pattern = "^joinme_.*\\.(exe)?$", full.names = TRUE)
+    if (length(old_exes) > 0) {
+      unlink(old_exes, force = TRUE)
+    }
+  }
   
   # Compile all models, enabling threading if requested.
   models <- lapply(stan_files, function(sf) {

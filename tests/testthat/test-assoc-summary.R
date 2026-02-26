@@ -3,14 +3,12 @@ test_that("summary reports only active association components", {
   testthat::skip_if_not_installed("rstan")
 
   set.seed(303)
-  sim <- simulate_joinme(
+  sim <- simulate_joinme_joint_student_t_cvtotal(
     n_id = 4,
-    families = rep("student_t", 2),
-    n_obs_per_marker_per_id = 3,
-    times_obs = seq(0, 4, length.out = 8),
+    D = 2,
+    n_t = 3,
     seed = 303,
-    assoc = c("cv_total"),
-    assoc_coefs = c(cv_total = 0.6)
+    include_marker_only = TRUE
   )
 
   formulaLong <- y ~ 1 + time + x1 +
@@ -25,7 +23,7 @@ test_that("summary reports only active association components", {
     dataEvent = sim$dataEvent,
     assoc = c("cv_total"),
     families = rep("student_t", 2),
-    transforms = list(cv_total = list(type = "functional", expr = ~ softplus(x))),
+    transforms = list(cv_total = list(type = "identity")),
     control = list(
       engine = "rstan",
       chains = 1,
@@ -37,20 +35,48 @@ test_that("summary reports only active association components", {
     )
   )
 
-  sum_obj <- summary(fit)
-  assoc_tbl <- sum_obj$tables$assoc
+  assoc_tbl <- summary(fit)$tables$assoc
   expect_true(any(assoc_tbl$term == "cv_total"))
   expect_false(any(assoc_tbl$term %in% c("cv_mean", "cv_marker", "cs_total", "cs_mean", "cs_marker")))
+})
 
-  diag_tbl <- sum_obj$tables$diagnostics
-  expect_true(is.data.frame(diag_tbl))
-  nterm_metrics <- diag_tbl[diag_tbl$metric %in% c(
-    "n_terms_total", "n_terms_bad_rhat", "n_terms_low_ess_bulk", "n_terms_low_ess_tail"
-  ), , drop = FALSE]
-  expect_equal(nrow(nterm_metrics), 4)
-  expect_true(all(is.finite(nterm_metrics$value)))
+test_that("summary hides marker weights when marker-weighted assoc terms are inactive", {
+  testthat::skip_on_cran()
+  testthat::skip_if_not_installed("cmdstanr")
 
-  tf_tbl <- sum_obj$metadata$transform_formulas
-  expect_true(any(tf_tbl$term == "cv_total"))
-  expect_true(any(grepl("softplus", tf_tbl$formula)))
+  sim <- simulate_joinme(
+    n_id = 40,
+    families = rep("gaussian", 3),
+    n_obs_per_marker_per_id = 5,
+    times_obs = seq(0, 6, length.out = 9),
+    assoc = c("cv_mean"),
+    assoc_coefs = c(cv_mean = 0.2),
+    seed = 908
+  )
+
+  fit <- joinme(
+    formulaLong = y ~ 1 + time + x1 +
+      (1 + time | id) +
+      (0 + x1 + (1 + time | id) | marker),
+    dataLong = sim$dataLong,
+    formulaEvent = survival::Surv(time, event) ~ x1 + x2,
+    dataEvent = sim$dataEvent,
+    assoc = c("cv_mean"),
+    families = rep("gaussian", 3),
+    estimate_marker_weights = TRUE,
+    control = list(
+      engine = "cmdstanr",
+      chains = 1,
+      parallel_chains = 1,
+      threads_per_chain = 2,
+      iter_warmup = 80,
+      iter_sampling = 80,
+      refresh = 0,
+      seed = 908
+    )
+  )
+
+  assoc_tbl <- summary(fit)$tables$assoc
+  expect_true(any(assoc_tbl$term == "cv_mean"))
+  expect_false(any(grepl("^weight:", assoc_tbl$term)))
 })

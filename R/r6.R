@@ -8,7 +8,7 @@
 #' R6 classes used to hold joinme fit and prediction results with mutable state.
 #' 
 #' **JoinMeFit**: holds fitted model, Stan data, and formulas.
-#' Public fields: fit, stan_data, formulaLong, formulaEvent, formulaVcov, config, call, tmax,
+#' Public fields: fit, stan_data, formulaLong, formulaEvent, formulaCorr, config, call, tmax,
 #' dataLong, dataEvent.
 #' Methods: initialize, cache_get, cache_set.
 #'
@@ -40,19 +40,19 @@ JoinMeFit <- R6::R6Class(
     stan_data = NULL,
     formulaLong = NULL,
     formulaEvent = NULL,
-    formulaVcov = NULL,
+    formulaCorr = NULL,
     config = NULL,
     call = NULL,
     tmax = NULL,
     dataLong = NULL,
     dataEvent = NULL,
-    initialize = function(fit, stan_data, formulaLong, formulaEvent, formulaVcov, config, call, tmax, dataLong, dataEvent) {
+    initialize = function(fit, stan_data, formulaLong, formulaEvent, formulaCorr, config, call, tmax, dataLong, dataEvent) {
       # Store core fit objects and metadata for downstream methods
       self$fit <- fit
       self$stan_data <- stan_data
       self$formulaLong <- formulaLong
       self$formulaEvent <- formulaEvent
-      self$formulaVcov <- formulaVcov
+      self$formulaCorr <- formulaCorr
       self$config <- config
       self$call <- call
       self$tmax <- tmax

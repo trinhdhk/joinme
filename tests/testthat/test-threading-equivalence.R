@@ -44,11 +44,11 @@ test_that("threaded and non-threaded Stan paths stay aligned", {
     dataLong = sim$dataLong,
     formulaEvent = formulaEvent,
     dataEvent = sim$dataEvent,
-    formulaVcov = ~1,
+    formulaCorr = ~1,
     assoc = "cv_total",
     transforms = list(
       cv_total = list(type = "identity"),
-      vcov = list(type = "identity")
+      corr = list(type = "identity")
     ),
     basehaz = "bs",
     n_knots = 3,
@@ -63,11 +63,11 @@ test_that("threaded and non-threaded Stan paths stay aligned", {
     dataLong = sim$dataLong,
     formulaEvent = formulaEvent,
     dataEvent = sim$dataEvent,
-    formulaVcov = ~1,
+    formulaCorr = ~1,
     assoc = "cv_total",
     transforms = list(
       cv_total = list(type = "identity"),
-      vcov = list(type = "identity")
+      corr = list(type = "identity")
     ),
     basehaz = "bs",
     n_knots = 3,
@@ -112,20 +112,16 @@ test_that("threaded and non-threaded Stan paths stay aligned", {
     fit_single,
     sim$dataLong,
     sim$dataEvent,
-    n_samples = 30,
-    n_times = length(time_grid),
     times = time_grid,
-    control = utils::modifyList(pred_ctrl_base, list(threads_per_chain = 1L, grainsize = 1L))
+    control = utils::modifyList(pred_ctrl_base, list(n_samples = 30, n_times = length(time_grid), threads_per_chain = 1L, grainsize = 1L))
   )
 
   pred_thread <- predict(
     fit_thread,
     sim$dataLong,
     sim$dataEvent,
-    n_samples = 30,
-    n_times = length(time_grid),
     times = time_grid,
-    control = utils::modifyList(pred_ctrl_base, list(threads_per_chain = 2L, grainsize = 1L))
+    control = utils::modifyList(pred_ctrl_base, list(n_samples = 30, n_times = length(time_grid), threads_per_chain = 2L, grainsize = 1L))
   )
 
   surv_single <- pred_single$predictions$survival

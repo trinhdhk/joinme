@@ -47,8 +47,8 @@
   matrix[n_obs_pred, P_tau_sde] X_tau_sde_pred;  // tau_sde design pred
 
   /* Covariance regression covariates */
-  int<lower=1> n_cov_vcov;                        // covariate count for vcov
-  vector[n_cov_vcov] vec_cov_vcov;                // covariate vector (subject-level)
+  int<lower=1> n_cov_corr;                        // covariate count for corr
+  vector[n_cov_corr] vec_cov_corr;                // covariate vector (subject-level)
 
   /* Hazard covariates */
   int<lower=0> n_cov_hazard;                      // hazard covariate count
@@ -106,7 +106,7 @@
   int<lower=0> n_family_tau_sde;
   array[n_marker_types] int<lower=0, upper=n_family_tau_sde> marker_to_tau_sde_family;
   int<lower=0, upper=1> flag_resid_dim;                      // sigma dimension flag
-  int<lower=0, upper=1> vcov_diag_link;                      // 0 softplus, 1 exp
+  int<lower=0, upper=1> corr_diag_link;                      // 0 softplus, 1 exp
   int<lower=0, upper=1> use_tau_sde_fixed;                   // 1 use fixed tau
   real<lower=0, upper=1> tau_sde_fixed;                      // fixed tau value
 
@@ -120,10 +120,10 @@
   array[n_draws] matrix[n_random_marker_id, n_random_marker] B_cross; // cross-corr map
 
   int<lower=0> num_unique_cov_entries;         // unique elements in L_i
-  array[n_draws] vector[num_unique_cov_entries] alpha_vcov_reg; // intercepts
-  array[n_draws] vector[num_unique_cov_entries * n_cov_vcov] beta_vcov_reg_flat; // flattened slopes
-  array[n_draws] real tau_vcov_reg;            // scale for latent vcov effect
-  array[n_draws] vector[num_unique_cov_entries] lambda_vcov_reg; // loadings
+  array[n_draws] vector[num_unique_cov_entries] alpha_corr_reg; // intercepts
+  array[n_draws] vector[num_unique_cov_entries * n_cov_corr] beta_corr_reg_flat; // flattened slopes
+  array[n_draws] real tau_corr_reg;            // scale for latent corr effect
+  array[n_draws] vector[num_unique_cov_entries] lambda_corr_reg; // loadings
 
   int<lower=1> K_event;                        // number of competing risks
   array[n_draws, K_event] real log_h0_intercept; // baseline hazard intercepts
@@ -154,7 +154,7 @@
   array[n_draws] real coeff_assoc_cs_mean;      // association coeffs: mean CS
   array[n_draws] real coeff_assoc_cv_marker;    // association coeffs: marker CV
   array[n_draws] real coeff_assoc_cs_marker;    // association coeffs: marker CS
-  array[n_draws] vector[n_random_marker_id] coeff_assoc_vcov_var; // vcov coeffs
+  array[n_draws] vector[n_random_marker_id] coeff_assoc_corr; // corr coeffs
 
   int<lower=0, upper=1> flag_assoc_cv_total;    // include total CV association
   int<lower=0, upper=1> flag_assoc_cv_mean;     // include mean CV association
@@ -162,11 +162,11 @@
   int<lower=0, upper=1> flag_assoc_cs_total;    // include total CS association
   int<lower=0, upper=1> flag_assoc_cs_mean;     // include mean CS association
   int<lower=0, upper=1> flag_assoc_cs_marker;   // include marker CS association
-  int<lower=0, upper=1> flag_assoc_vcov;        // include vcov association
+  int<lower=0, upper=1> flag_assoc_corr;        // include corr association
 
   int<lower=0, upper=3> tf_mode_cv_tot;        // transform mode: total CV
   int<lower=0, upper=3> tf_mode_cs_tot;        // transform mode: total CS
-  int<lower=0, upper=3> tf_mode_vcov;          // transform mode: vcov
+  int<lower=0, upper=3> tf_mode_corr;          // transform mode: corr
   int<lower=0, upper=3> tf_mode_cv_mean;       // transform mode: mean CV
   int<lower=0, upper=3> tf_mode_cv_marker;     // transform mode: marker CV
   int<lower=0, upper=3> tf_mode_cs_mean;       // transform mode: mean CS
@@ -182,10 +182,10 @@
   int<lower=0> n_const_cs;                     // constants for total CS opcodes
   vector[n_const_cs] const_data_cs;            // constants for total CS opcodes
 
-  int<lower=0> n_functional_ops_vcov;          // op count for vcov
-  array[n_functional_ops_vcov] int<lower=0, upper=25> functional_ops_vcov; // opcode stream
-  int<lower=0> n_const_vcov;                   // constants for vcov opcodes
-  vector[n_const_vcov] const_data_vcov;        // constants for vcov opcodes
+  int<lower=0> n_functional_ops_corr;          // op count for corr
+  array[n_functional_ops_corr] int<lower=0, upper=25> functional_ops_corr; // opcode stream
+  int<lower=0> n_const_corr;                   // constants for corr opcodes
+  vector[n_const_corr] const_data_corr;        // constants for corr opcodes
 
   int<lower=0> n_knots_cv;                     // knots for total CV spline
   vector[n_knots_cv] knots_cv;                 // knot locations
@@ -199,11 +199,11 @@
   vector[n_coeff_cs] coeff_cs;                 // coefficients for total CS spline
   int<lower=1, upper=5> spline_degree_cs;      // spline degree for total CS
 
-  int<lower=0> n_knots_vcov;                   // knots for vcov spline
-  vector[n_knots_vcov] knots_vcov;             // knot locations
-  int<lower=0> n_coeff_vcov;                   // coeff count for vcov spline
-  vector[n_coeff_vcov] coeff_vcov;             // coefficients for vcov spline
-  int<lower=1, upper=5> spline_degree_vcov;    // spline degree for vcov
+  int<lower=0> n_knots_corr;                   // knots for corr spline
+  vector[n_knots_corr] knots_corr;             // knot locations
+  int<lower=0> n_coeff_corr;                   // coeff count for corr spline
+  vector[n_coeff_corr] coeff_corr;             // coefficients for corr spline
+  int<lower=1, upper=5> spline_degree_corr;    // spline degree for corr
 
   int<lower=0> n_functional_ops_cv_mean;        // op count for mean CV
   array[n_functional_ops_cv_mean] int<lower=0, upper=25> functional_ops_cv_mean; // opcode stream
@@ -248,3 +248,4 @@
   int<lower=0> n_coeff_cs_marker;               // coeff count for marker CS spline
   vector[n_coeff_cs_marker] coeff_cs_marker;    // coefficients for marker CS spline
   int<lower=1, upper=5> spline_degree_cs_marker; // spline degree for marker CS
+

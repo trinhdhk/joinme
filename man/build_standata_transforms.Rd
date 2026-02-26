@@ -8,7 +8,7 @@ build_standata_transforms(transform_list = NULL, default_mode = 0)
 }
 \arguments{
 \item{transform_list}{List with elements cv_total, cs_total, cv_mean, cs_mean,
-cv_marker, cs_marker, vcov, each specifying a transformation. See details.}
+cv_marker, cs_marker, corr, each specifying a transformation. See details.}
 
 \item{default_mode}{Default transformation mode if not specified.}
 }
@@ -31,7 +31,7 @@ Transform can be specified in three modes:
 }
 
 Each transformation term (CV_total, CS_total, CV_mean, CS_mean, CV_marker,
-CS_marker, vcov) can have its own independent specification, enabling
+CS_marker, corr) can have its own independent specification, enabling
 flexibility in model building.
 }
 \details{
@@ -55,4 +55,3 @@ Each element of transform_list should be a list with:
 Use \code{build_standata_transforms()} to construct the data list entries,
 and \code{validate_transforms()} to verify consistency before sampling.
 }
-

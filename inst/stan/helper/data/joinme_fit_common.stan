@@ -4,9 +4,10 @@
   array[N] int<lower=1, upper=n_id> id; // subject index for each row
   array[N] int<lower=1> marker;  // marker index per row (1..D)
   int<lower=1> D;                // total number of markers
-  vector[D] marker_weights;      // base signed weights for marker-averaged CV/CS terms (RMS-normalized in standata)
+  vector<lower=0>[n_id] subject_weights; // subject-level weights for longitudinal/survival likelihood
+  vector[D] marker_weights;      // base signed weights for marker-averaged CV/CS terms
   int<lower=0, upper=1> estimate_marker_weights; // 1 enables signed shrinkage perturbations around base weights
-  real<lower=0> marker_weight_scale; // prior scale for weight shrinkage
+  int<lower=0, upper=1> use_marker_weight_assoc; // 1 when marker-weighted assoc terms are active
 
   /* Outcomes by family type */
   vector[N] y_real;              // continuous outcomes (gaussian, student_t, beta, skew families)
@@ -43,6 +44,7 @@
   int<lower=0> G_sigma_max;            // max groups across sigma RE terms
   array[n_re_sigma] matrix[N, K_sigma_max] Z_sigma; // random-effect design matrices
   array[n_re_sigma, N] int<lower=1> J_sigma;        // group index per row
+  array[n_re_sigma] vector<lower=0>[G_sigma_max] re_weight_sigma; // group weights for sigma RE priors
 
   int<lower=0> P_nu;                   // fixed-effect columns for nu regression
   matrix[N, P_nu] X_nu;                // fixed-effect design for nu
@@ -53,6 +55,7 @@
   int<lower=0> G_nu_max;               // max groups across nu RE terms
   array[n_re_nu] matrix[N, K_nu_max] Z_nu; // random-effect designs
   array[n_re_nu, N] int<lower=1> J_nu;      // group index per row
+  array[n_re_nu] vector<lower=0>[G_nu_max] re_weight_nu; // group weights for nu RE priors
 
   int<lower=0> P_phi;                  // fixed-effect columns for phi regression
   matrix[N, P_phi] X_phi;              // fixed-effect design for phi
@@ -63,6 +66,7 @@
   int<lower=0> G_phi_max;              // max groups across phi RE terms
   array[n_re_phi] matrix[N, K_phi_max] Z_phi; // random-effect designs
   array[n_re_phi, N] int<lower=1> J_phi;      // group index per row
+  array[n_re_phi] vector<lower=0>[G_phi_max] re_weight_phi; // group weights for phi RE priors
 
   int<lower=0> P_alpha;                // fixed-effect columns for alpha (skew) regression
   matrix[N, P_alpha] X_alpha;          // fixed-effect design for alpha
@@ -73,6 +77,7 @@
   int<lower=0> G_alpha_max;            // max groups across alpha RE terms
   array[n_re_alpha] matrix[N, K_alpha_max] Z_alpha; // random-effect designs
   array[n_re_alpha, N] int<lower=1> J_alpha;        // group index per row
+  array[n_re_alpha] vector<lower=0>[G_alpha_max] re_weight_alpha; // group weights for alpha RE priors
 
   // Beta precision (phi_beta) regression designs
   int<lower=0> P_phi_beta;             // fixed-effect columns for beta precision
@@ -84,6 +89,7 @@
   int<lower=0> G_phi_beta_max;         // max groups across phi_beta RE terms
   array[n_re_phi_beta] matrix[N, K_phi_beta_max] Z_phi_beta; // random-effect designs
   array[n_re_phi_beta, N] int<lower=1> J_phi_beta;           // group index per row
+  array[n_re_phi_beta] vector<lower=0>[G_phi_beta_max] re_weight_phi_beta; // group weights for phi_beta RE priors
 
   // Skew-double-exponential skew (tau_sde) regression designs
   int<lower=0> P_tau_sde;              // fixed-effect columns for tau_sde regression
@@ -95,6 +101,7 @@
   int<lower=0> G_tau_sde_max;          // max groups across tau_sde RE terms
   array[n_re_tau_sde] matrix[N, K_tau_sde_max] Z_tau_sde; // random-effect designs
   array[n_re_tau_sde, N] int<lower=1> J_tau_sde;          // group index per row
+  array[n_re_tau_sde] vector<lower=0>[G_tau_sde_max] re_weight_tau_sde; // group weights for tau_sde RE priors
 
   /* Fixed effects design */
   int<lower=1> P;                // columns in fixed-effect design
@@ -103,10 +110,14 @@
   /* Random effects designs */
   int<lower=1> R_id;             // number of id-level random effects
   matrix[N, R_id] Z_id_obs;      // id-level random-effect design
+  vector<lower=0>[n_id] re_weight_id; // group weights for id random-effects priors
   int<lower=0> R_mk;             // number of marker-only random effects
   matrix[N, R_mk] Z_mk_obs;      // marker-only random-effect design
+  vector<lower=0>[D] re_weight_marker; // group weights for marker random-effects priors
   int<lower=0> Q_idm;            // number of marker-by-id random effects
   matrix[N, Q_idm] Z_idm_obs;    // marker-by-id random-effect design
+  vector<lower=0>[n_id] re_weight_idm; // group weights for marker-by-id latent RE priors
+  vector<lower=0>[n_id] re_weight_L;   // group weights for covariance latent priors
 
   /* Residual SD option for continuous families */
   int<lower=0, upper=1> flag_resid_dim; // 1 -> sigma_marker[d], 0 -> sigma_y
@@ -117,7 +128,7 @@
   int<lower=0, upper=1> indep_marker_byid_latent_re;
   int<lower=0, upper=1> indep_idmarker_cov;
   int<lower=0, upper=1> allow_marker_crosscorr; // 1 allow cross via B_cross
-  int<lower=0, upper=1> vcov_diag_link;         // 0 softplus, 1 exp for vcov diag
+  int<lower=0, upper=1> corr_diag_link;         // 0 softplus, 1 exp for corr diag
   int<lower=0, upper=1> use_tau_sde_fixed;      // 1 use fixed tau for SDE
   real<lower=0, upper=1> tau_sde_fixed;         // fixed tau value when enabled
 
@@ -174,7 +185,7 @@
   int<lower=0, upper=1> assoc_cs_total;   // include total current slope term
   int<lower=0, upper=1> assoc_cs_mean;    // include mean current slope term
   int<lower=0, upper=1> assoc_cs_marker;  // include marker current slope term
-  int<lower=0, upper=1> assoc_vcov;       // include vcov association term
+  int<lower=0, upper=1> assoc_corr;       // include corr association term
 
   /* Prior scales */
   vector[P] beta_scale;        // per-coefficient scale for fixed effects
@@ -198,7 +209,7 @@
   /* Transform configuration */
   int<lower=0, upper=3> tf_mode_cv_tot;     // transform mode for total CV
   int<lower=0, upper=3> tf_mode_cs_tot;     // transform mode for total CS
-  int<lower=0, upper=3> tf_mode_vcov;       // transform mode for vcov term
+  int<lower=0, upper=3> tf_mode_corr;       // transform mode for corr term
   int<lower=0, upper=3> tf_mode_cv_mean;    // transform mode for mean CV
   int<lower=0, upper=3> tf_mode_cv_marker;  // transform mode for marker CV
   int<lower=0, upper=3> tf_mode_cs_mean;    // transform mode for mean CS
@@ -215,10 +226,10 @@
   int<lower=0> n_const_cs;                  // constants used by CS opcodes
   vector[n_const_cs] const_data_cs;         // constants used by CS opcodes
 
-  int<lower=0> n_functional_ops_vcov;       // op count for vcov
-  array[n_functional_ops_vcov] int<lower=0, upper=25> functional_ops_vcov; // opcode stream
-  int<lower=0> n_const_vcov;                // constants used by vcov opcodes
-  vector[n_const_vcov] const_data_vcov;     // constants used by vcov opcodes
+  int<lower=0> n_functional_ops_corr;       // op count for corr
+  array[n_functional_ops_corr] int<lower=0, upper=25> functional_ops_corr; // opcode stream
+  int<lower=0> n_const_corr;                // constants used by corr opcodes
+  vector[n_const_corr] const_data_corr;     // constants used by corr opcodes
 
   int<lower=0> n_functional_ops_cv_mean;    // op count for mean CV
   array[n_functional_ops_cv_mean] int<lower=0, upper=25> functional_ops_cv_mean; // opcode stream
@@ -253,11 +264,11 @@
   vector[n_coeff_cs] coeff_cs;    // coefficients for total CS spline
   int<lower=1, upper=5> spline_degree_cs; // spline degree for total CS
 
-  int<lower=0> n_knots_vcov;      // knot count for vcov spline
-  vector[n_knots_vcov] knots_vcov; // knot locations for vcov spline
-  int<lower=0> n_coeff_vcov;      // coefficient count for vcov spline
-  vector[n_coeff_vcov] coeff_vcov; // coefficients for vcov spline
-  int<lower=1, upper=5> spline_degree_vcov; // spline degree for vcov
+  int<lower=0> n_knots_corr;      // knot count for corr spline
+  vector[n_knots_corr] knots_corr; // knot locations for corr spline
+  int<lower=0> n_coeff_corr;      // coefficient count for corr spline
+  vector[n_coeff_corr] coeff_corr; // coefficients for corr spline
+  int<lower=1, upper=5> spline_degree_corr; // spline degree for corr
 
   int<lower=0> n_knots_cv_mean;   // knot count for mean CV spline
   vector[n_knots_cv_mean] knots_cv_mean; // knot locations for mean CV spline

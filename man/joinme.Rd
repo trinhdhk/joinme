@@ -9,7 +9,7 @@ joinme(
   dataLong,
   formulaEvent,
   dataEvent,
-  formulaVcov = ~1,
+  formulaCorr = ~1,
   formulaDist = NULL,
   control = list(),
   draws = NULL,
@@ -23,7 +23,9 @@ joinme(
 \item{formulaLong}{Longitudinal formula defining fixed effects, id-level effects,
 and the marker block. The marker block may optionally include an inner
 \code{( ... | id )} term for marker-by-id random effects. When omitted,
-marker-by-id effects are disabled (Q_idm = 0).}
+marker-by-id effects are disabled (Q_idm = 0). Grouping terms may use
+\verb{weighted(group, weights = <column>)} to declare
+formula-scoped subject/group weights.}
 
 \item{dataLong}{Long-format longitudinal data with columns for id, marker, time,
 outcome, and covariates referenced in \code{formulaLong}.}
@@ -33,9 +35,9 @@ outcome, and covariates referenced in \code{formulaLong}.}
 \item{dataEvent}{One row per id event data with event time, event indicator, and
 covariates referenced in \code{formulaEvent}.}
 
-\item{formulaVcov}{Covariance regression formula for id-specific marker-by-id effects.
+\item{formulaCorr}{Covariance regression formula for id-specific marker-by-id effects.
 If the marker block omits the inner \code{( ... | id )}, marker-by-id effects are
-absent and \code{vcov} associations are not allowed.}
+absent and \code{corr} associations are not allowed.}
 
 \item{formulaDist}{Optional list of formulas for distributional regression.
 Supported LHS parameters are:
@@ -67,7 +69,8 @@ estimated jointly with separate coefficients.
 }
 
 Random-effects terms with \code{|} are supported, but nested random-effects formulas
-are not.}
+are not. Grouping factors in random-effects terms may use
+\verb{weighted(group, weights = <column>)}.}
 
 \item{control}{Named list containing sampling configuration.
 \itemize{
@@ -78,7 +81,7 @@ iter_warmup, iter_sampling, seed, refresh, adapt_delta, max_treedepth).
 For engine = "rstan", threading uses options(stan.thread = threads_per_chain).
 \item grainsize: integer; reduce_sum grainsize for threading (default max(1, min(n_cores, ceiling(n_id/(4\emph{threads_per_chain}chains))))).
 \item force_recompile: logical; recompile the Stan model if needed.
-\item vcov_diag_link: "softplus" or "exp" for covariance regression diagonals.
+\item corr_diag_link: "softplus" or "exp" for covariance regression diagonals.
 \item tau_sde_fixed: optional fixed tau in (0,1) for skew-double-exponential.
 }}
 
@@ -88,7 +91,7 @@ For engine = "rstan", threading uses options(stan.thread = threads_per_chain).
 of family names aligned to marker order.}
 
 \item{transforms}{Transformation specifications for association terms
-(cv_total, cs_total, vcov). Each entry is a list with a \code{type} and fields
+(cv_total, cs_total, corr). Each entry is a list with a \code{type} and fields
 required by that type.}
 
 \item{priors}{Named list for priors: list(beta = ..., alpha = ..., lkj = ...).}
@@ -104,7 +107,7 @@ scaling metadata.
 }
 \details{
 Transformations are provided through a single \code{transforms} argument.
-Each element (cv_total, cs_total, vcov) is defined as a list specifying a type
+Each element (cv_total, cs_total, corr) is defined as a list specifying a type
 and type-specific fields (see \code{build_standata_transforms()} for details).
 
 Distributional regression can be specified in two equivalent forms:
@@ -119,8 +122,21 @@ are rescaled within Stan so fixed effects remain interpretable on the original s
 Marker weights (see \code{joinme_standata()}) are used to form marker-average summaries
 for both current value (CV) and current slope (CS) association components. When
 \code{estimate_marker_weights = TRUE}, signed perturbations are estimated around base
-weights with Normal or Laplace shrinkage (depending on \code{shrinkage}) and then
-RMS-stabilized to keep global scale identifiable.
+weights using \code{marker_weights + z_marker_weights} with
+\code{z_marker_weights ~ N(0, 1)}, and the resulting signed weights are used
+directly in marker-aggregated association channels.
+
+Formula-scoped subject weighting is supported in random-effect grouping terms via
+\verb{weighted(group, weights = <column>)}. For example:
+\itemize{
+\item \code{(1 + time | weighted(id, weights = id_w))}
+\item \code{(0 + x1 + (1 + time | weighted(id, weights = id_w)) | weighted(marker, weights = marker_w))}
+\item \code{sigma ~ 1 + (1 | weighted(id, weights = id_w))}
+}
+
+Weighted grouping affects latent random-effect priors for the referenced grouping
+factor and applies subject-level likelihood weighting for the longitudinal and
+survival contributions. Weight columns must be finite and strictly positive.
 
 Association coefficients are denoted with the \code{alpha_} prefix to match joint-model
 conventions and to avoid confusion with the linear predictor eta used throughout
@@ -136,7 +152,7 @@ The typical workflow is:
 }
 
 Example:
-\code{list(cv_total = list(type = "functional", expr = ~ log1p(x)), cs_total = list(type = "identity"), vcov = list(type = "pwlin", x = c(-2, 0, 2), y = c(0.2, 1, 0.2)))}
+\code{list(cv_total = list(type = "functional", expr = ~ log1p(x)), cs_total = list(type = "identity"), corr = list(type = "pwlin", x = c(-2, 0, 2), y = c(0.2, 1, 0.2)))}
 
 Additional arguments are forwarded to \code{joinme_standata()} (e.g., \code{assoc},
 \code{basehaz}, \code{basehaz_degree}, \code{n_knots}, \code{time_var}, and \code{shrinkage}). Use

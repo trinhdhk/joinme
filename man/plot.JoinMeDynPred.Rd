@@ -9,6 +9,7 @@
   which = c("cumhaz", "longitudinal", "survival"),
   subject = NULL,
   trajectory_type = c("id_marker", "marker_pop", "overall_pop", "all_types"),
+  scale = NULL,
   smooth_trajectory = TRUE,
   smooth_method = c("loess", "spline"),
   smooth_span = 0.3,
@@ -40,6 +41,11 @@ plots all subjects in separate panels or returns a list.}
 \item{trajectory_type}{Character. Which trajectory to show:
 "id_marker" (default), "marker_pop" (marker-level average),
 "overall_pop" (overall mean), or "all_types" for all three.}
+
+\item{scale}{Optional longitudinal prediction scale to plot. Must match
+available scales in the prediction object ("epred", "linpred", "predict").
+If NULL, defaults to "epred" when available, otherwise the first
+available scale.}
 
 \item{smooth_trajectory}{Logical. Whether to smooth trajectories with splines
 (default TRUE). Only applicable if sufficient observations.}
@@ -107,7 +113,7 @@ conditional survival curves.
 \details{
 \strong{Longitudinal Plots:}
 \itemize{
-\item The longitudinal scale is inferred from the prediction object.
+\item The longitudinal scale is selected via \code{scale} (or inferred when NULL).
 \item On \"predict\" scale: observed values are shown for times in interval
 \verb{[0, time_start]} and predictions are drawn for \verb{[time_start, time_horizon]}.
 \item On \"linpred\" or \"epred\" scale: predictions are shown for \verb{[0, time_horizon]},

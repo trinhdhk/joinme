@@ -16,6 +16,10 @@
 #' @param trajectory_type Character. Which trajectory to show:
 #'   "id_marker" (default), "marker_pop" (marker-level average),
 #'   "overall_pop" (overall mean), or "all_types" for all three.
+#' @param scale Optional longitudinal prediction scale to plot. Must match
+#'   available scales in the prediction object ("epred", "linpred", "predict").
+#'   If NULL, defaults to "epred" when available, otherwise the first
+#'   available scale.
 #' @param smooth_trajectory Logical. Whether to smooth trajectories with splines
 #'   (default TRUE). Only applicable if sufficient observations.
 #' @param smooth_method Character. Smoothing method: "loess" or "spline".
@@ -49,7 +53,7 @@
 #'
 #' @details
 #' **Longitudinal Plots:**
-#' - The longitudinal scale is inferred from the prediction object.
+#' - The longitudinal scale is selected via `.arg scale` (or inferred when NULL).
 #' - On \"predict\" scale: observed values are shown for times in interval
 #'   `[0, time_start]` and predictions are drawn for `[time_start, time_horizon]`.
 #' - On \"linpred\" or \"epred\" scale: predictions are shown for `[0, time_horizon]`,
@@ -84,6 +88,7 @@ plot.JoinMeDynPred <- function(
     which = c("cumhaz", "longitudinal", "survival"),
     subject = NULL,
     trajectory_type = c("id_marker", "marker_pop", "overall_pop", "all_types"),
+    scale = NULL,
     smooth_trajectory = TRUE,
     smooth_method = c("loess", "spline"),
     smooth_span = 0.3,
@@ -127,6 +132,13 @@ plot.JoinMeDynPred <- function(
 
     ci_levels <- .validate_ci_levels_plot(ci_levels, x$metadata$ci_levels %||% NULL)
 
+    available_scales <- .available_longitudinal_scales(x)
+    if (!is.null(scale)) {
+        scale <- match.arg(scale, choices = available_scales)
+    } else if (length(available_scales) > 0) {
+        scale <- if ("epred" %in% available_scales) "epred" else available_scales[1]
+    }
+
     # Identify subjects
     # - allow explicit subject list or infer from prediction summaries
     ids <- if (!is.null(subject)) subject else {
@@ -165,6 +177,7 @@ plot.JoinMeDynPred <- function(
             for (traj_src in trajectory_sources) {
                 p_long <- .plot_longitudinal_single(
                     x, id, traj_src,
+                    scale_long = scale,
                     smooth_trajectory, smooth_method, smooth_span,
                     ci_levels, ci_type, observed_first,
                     facet_by, facet_scales,
@@ -263,6 +276,7 @@ plot.JoinMeDynPred <- function(
 # ============================================================================
 .plot_longitudinal_single <- function(
     x, id, trajectory_type = "id_marker",
+    scale_long,
     smooth_trajectory, smooth_method, smooth_span,
     ci_levels, ci_type, observed_first,
     facet_by, facet_scales,
@@ -297,7 +311,14 @@ plot.JoinMeDynPred <- function(
         quant_df <- x$quantiles$longitudinal
     }
     
+    if (!is.null(scale_long) && !is.null(quant_df) && "scale" %in% names(quant_df)) {
+        quant_df <- quant_df[quant_df$scale == scale_long, , drop = FALSE]
+    }
+
     if (is.null(quant_df)) quant_df <- x$predictions$longitudinal
+    if (!is.null(scale_long) && !is.null(quant_df) && "scale" %in% names(quant_df)) {
+        quant_df <- quant_df[quant_df$scale == scale_long, , drop = FALSE]
+    }
     if (is.null(quant_df)) {
         cli::cli_warn(c(
             x = "No quantile or prediction data available for subject {id} ({trajectory_type}).",
@@ -322,7 +343,9 @@ plot.JoinMeDynPred <- function(
         ))
         return(NULL)
     }
-    scale_long <- x$metadata$scale %||% "epred"
+    if (is.null(scale_long)) {
+        scale_long <- x$metadata$scale %||% "epred"
+    }
     if (!scale_long %in% c("epred", "linpred", "predict")) scale_long <- "epred"
 
     # Get observed data
@@ -615,6 +638,26 @@ plot.JoinMeDynPred <- function(
         theme_fn()
 
     p
+}
+
+.available_longitudinal_scales <- function(x) {
+    scales <- x$metadata$scales %||% x$metadata$scale
+    if (is.null(scales) && !is.null(x$quantiles$longitudinal) && "scale" %in% names(x$quantiles$longitudinal)) {
+        scales <- unique(as.character(stats::na.omit(x$quantiles$longitudinal$scale)))
+    }
+    if (is.null(scales) && !is.null(x$predictions$longitudinal) && "scale" %in% names(x$predictions$longitudinal)) {
+        scales <- unique(as.character(stats::na.omit(x$predictions$longitudinal$scale)))
+    }
+    scales <- unique(as.character(scales %||% "epred"))
+    valid <- c("epred", "linpred", "predict")
+    scales <- intersect(scales, valid)
+    if (length(scales) == 0) {
+        cli::cli_abort(c(
+            x = "No valid longitudinal prediction scales are available in this object.",
+            i = "Run {.fn predict} with {.arg process = 'longitudinal'} and a valid {.arg scale}."
+        ))
+    }
+    scales
 }
 
 # ============================================================================

@@ -12,7 +12,7 @@
 ##'   - Mode 3: Piecewise-linear (user-defined interpolation)
 ##'
 ##' Each transformation term (CV_total, CS_total, CV_mean, CS_mean, CV_marker,
-##' CS_marker, vcov) can have its own independent specification, enabling
+##' CS_marker, corr) can have its own independent specification, enabling
 ##' flexibility in model building.
 ##'
 ##' @section Usage:
@@ -27,7 +27,7 @@ build_standata_transforms <- function(
   default_mode = 0  # 0 = identity
 ) {
   ##' @param transform_list List with elements cv_total, cs_total, cv_mean, cs_mean,
-  ##'   cv_marker, cs_marker, vcov, each specifying a transformation. See details.
+  ##'   cv_marker, cs_marker, corr, each specifying a transformation. See details.
   ##' @param default_mode Default transformation mode if not specified.
   ##'
   ##' @details
@@ -54,7 +54,7 @@ build_standata_transforms <- function(
     cs_mean = list(mode_suffix = "cs_mean", short_suffix = "cs_mean"),
     cv_marker = list(mode_suffix = "cv_marker", short_suffix = "cv_marker"),
     cs_marker = list(mode_suffix = "cs_marker", short_suffix = "cs_marker"),
-    vcov = list(mode_suffix = "vcov", short_suffix = "vcov")
+    corr = list(mode_suffix = "corr", short_suffix = "corr")
   )
   
   # Default empty specs for all terms (identity transformation)
@@ -131,10 +131,10 @@ build_standata_transforms <- function(
     cs_mean = list(mode_suffix = "cs_mean", short_suffix = "cs_mean"),
     cv_marker = list(mode_suffix = "cv_marker", short_suffix = "cv_marker"),
     cs_marker = list(mode_suffix = "cs_marker", short_suffix = "cs_marker"),
-    vcov = list(mode_suffix = "vcov", short_suffix = "vcov"),
+    corr = list(mode_suffix = "corr", short_suffix = "corr"),
     cli::cli_abort(c(
       x = "Unknown transform term: {term_name}.",
-      i = "Use cv_total, cs_total, cv_mean, cs_mean, cv_marker, cs_marker, or vcov."
+      i = "Use cv_total, cs_total, cv_mean, cs_mean, cv_marker, cs_marker, or corr."
     ))
   )
 }
@@ -155,7 +155,7 @@ validate_transforms <- function(standata) {
     cs_mean = list(mode_suffix = "cs_mean", short_suffix = "cs_mean"),
     cv_marker = list(mode_suffix = "cv_marker", short_suffix = "cv_marker"),
     cs_marker = list(mode_suffix = "cs_marker", short_suffix = "cs_marker"),
-    vcov = list(mode_suffix = "vcov", short_suffix = "vcov")
+    corr = list(mode_suffix = "corr", short_suffix = "corr")
   )
   for (term_name in names(term_map)) {
     mode_suffix <- term_map[[term_name]]$mode_suffix
@@ -223,7 +223,7 @@ validate_transforms <- function(standata) {
 ##' )
 ##'
 ##' # Example 3: I-spline (monotonic)
-##' spec_vcov <- list(
+##' spec_corr <- list(
 ##'   type = "ispline",
 ##'   knots = c(-1, 0, 1),
 ##'   coeff = c(0, 0.5, 1, 1.2, 1.5),
@@ -231,7 +231,7 @@ validate_transforms <- function(standata) {
 ##' )
 ##'
 ##' # Example 4: Penalized monotone I-spline (fit in R)
-##' spec_vcov_pen <- list(
+##' spec_corr_pen <- list(
 ##'   type = "ispline_penalized",
 ##'   x = seq(-2, 2, length.out = 50),
 ##'   y = exp(seq(-2, 2, length.out = 50)),
@@ -244,7 +244,7 @@ validate_transforms <- function(standata) {
 ##' transforms <- list(
 ##'   cv_total = spec_cv,
 ##'   cs_total = spec_cs,
-##'   vcov = spec_vcov
+##'   corr = spec_corr
 ##' )
 ##' standata_tf <- build_standata_transforms(transforms)
 example_transform_spec <- function() {
@@ -444,6 +444,6 @@ default_identity_transforms <- function() {
   list(
     cv_tot = list(type = "identity"),
     cs_tot = list(type = "identity"),
-    vcov = list(type = "identity")
+    corr = list(type = "identity")
   )
 }

@@ -6,6 +6,37 @@ test_that("prediction draw count resolves independently from posterior extractio
 })
 
 
+test_that("prediction scale normalization supports multi-scale selection", {
+  expect_equal(.normalize_prediction_scales("epred"), "epred")
+  expect_equal(
+    .normalize_prediction_scales(c("predict", "epred", "predict")),
+    c("predict", "epred")
+  )
+  expect_error(.normalize_prediction_scales("bad_scale"), "should be one of")
+})
+
+
+test_that("prediction draw variable extraction keeps only requested scales", {
+  standata_subject <- list(n_random_marker = 1L, n_random_marker_id = 0L)
+
+  vars_epred <- .prediction_draw_variables("epred", standata_subject)
+  expect_true("y_pred_epred" %in% vars_epred)
+  expect_false("y_pred_linpred" %in% vars_epred)
+  expect_false("y_pred" %in% vars_epred)
+  expect_true("y_fit_epred" %in% vars_epred)
+  expect_false("y_fit_linpred" %in% vars_epred)
+
+  vars_predict <- .prediction_draw_variables("predict", standata_subject)
+  expect_true("y_pred" %in% vars_predict)
+  expect_false("y_fit_epred" %in% vars_predict)
+  expect_false("y_fit_linpred" %in% vars_predict)
+
+  vars_multi <- .prediction_draw_variables(c("linpred", "predict"), list(n_random_marker = 0L, n_random_marker_id = 1L))
+  expect_true(all(c("y_pred_linpred", "y_pred", "y_fit_linpred", "z_w_lat", "z_L") %in% vars_multi))
+  expect_false("y_fit_epred" %in% vars_multi)
+})
+
+
 test_that("prediction draw index supports downsample and upsample", {
   idx_down <- .prediction_draw_index(n_available = 10, n_target = 4, seed = 99)
   expect_length(idx_down, 4)
@@ -23,7 +54,7 @@ test_that("draw-dependent containers are re-indexed to prediction draw count", {
     beta_fixed = matrix(seq_len(20), nrow = 10, ncol = 2),
     tau_id = matrix(seq_len(30), nrow = 10, ncol = 3),
     Lcorr_id = array(seq_len(40), dim = c(10, 2, 2)),
-    tau_vcov_reg = seq_len(10),
+    tau_corr_reg = seq_len(10),
     bs_gamma_c = array(seq_len(30), dim = c(10, 1, 3))
   )
 
@@ -33,9 +64,9 @@ test_that("draw-dependent containers are re-indexed to prediction draw count", {
   expect_equal(nrow(out$beta_fixed), length(idx))
   expect_equal(nrow(out$tau_id), length(idx))
   expect_equal(dim(out$Lcorr_id)[1], length(idx))
-  expect_equal(length(out$tau_vcov_reg), length(idx))
+  expect_equal(length(out$tau_corr_reg), length(idx))
   expect_equal(dim(out$bs_gamma_c)[1], length(idx))
 
   expect_equal(out$beta_fixed[, 1], draws$beta_fixed[idx, 1])
-  expect_equal(out$tau_vcov_reg, draws$tau_vcov_reg[idx])
+  expect_equal(out$tau_corr_reg, draws$tau_corr_reg[idx])
 })

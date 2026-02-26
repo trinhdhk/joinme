@@ -12,7 +12,7 @@
 #'
 #' @details
 #' Transformations are provided through a single `transforms` argument.
-#' Each element (cv_total, cs_total, vcov) is defined as a list specifying a type
+#' Each element (cv_total, cs_total, corr) is defined as a list specifying a type
 #' and type-specific fields (see `build_standata_transforms()` for details).
 #'
 #' Distributional regression can be specified in two equivalent forms:
@@ -25,8 +25,19 @@
 #' Marker weights (see `joinme_standata()`) are used to form marker-average summaries
 #' for both current value (CV) and current slope (CS) association components. When
 #' `estimate_marker_weights = TRUE`, signed perturbations are estimated around base
-#' weights with Normal or Laplace shrinkage (depending on `shrinkage`) and then
-#' RMS-stabilized to keep global scale identifiable.
+#' weights using `marker_weights + z_marker_weights` with
+#' `z_marker_weights ~ N(0, 1)`, and the resulting signed weights are used
+#' directly in marker-aggregated association channels.
+#'
+#' Formula-scoped subject weighting is supported in random-effect grouping terms via
+#' `weighted(group, weights = <column>)`. For example:
+#' - `(1 + time | weighted(id, weights = id_w))`
+#' - `(0 + x1 + (1 + time | weighted(id, weights = id_w)) | weighted(marker, weights = marker_w))`
+#' - `sigma ~ 1 + (1 | weighted(id, weights = id_w))`
+#'
+#' Weighted grouping affects latent random-effect priors for the referenced grouping
+#' factor and applies subject-level likelihood weighting for the longitudinal and
+#' survival contributions. Weight columns must be finite and strictly positive.
 #'
 #' Association coefficients are denoted with the `alpha_` prefix to match joint-model
 #' conventions and to avoid confusion with the linear predictor eta used throughout
@@ -42,7 +53,7 @@
 #' Example:
 #' `list(cv_total = list(type = "functional", expr = ~ log1p(x)),
 #'      cs_total = list(type = "identity"),
-#'      vcov = list(type = "pwlin", x = c(-2, 0, 2), y = c(0.2, 1, 0.2)))`
+#'      corr = list(type = "pwlin", x = c(-2, 0, 2), y = c(0.2, 1, 0.2)))`
 #'
 #' Additional arguments are forwarded to `joinme_standata()` (e.g., `assoc`,
 #' `basehaz`, `basehaz_degree`, `n_knots`, `time_var`, and `shrinkage`). Use
@@ -51,15 +62,17 @@
 #' @param formulaLong Longitudinal formula defining fixed effects, id-level effects,
 #'   and the marker block. The marker block may optionally include an inner
 #'   `( ... | id )` term for marker-by-id random effects. When omitted,
-#'   marker-by-id effects are disabled (Q_idm = 0).
+#'   marker-by-id effects are disabled (Q_idm = 0). Grouping terms may use
+#'   `weighted(group, weights = <column>)` to declare
+#'   formula-scoped subject/group weights.
 #' @param dataLong Long-format longitudinal data with columns for id, marker, time,
 #'   outcome, and covariates referenced in `formulaLong`.
 #' @param formulaEvent Survival formula for baseline covariates and event model.
 #' @param dataEvent One row per id event data with event time, event indicator, and
 #'   covariates referenced in `formulaEvent`.
-#' @param formulaVcov Covariance regression formula for id-specific marker-by-id effects.
+#' @param formulaCorr Covariance regression formula for id-specific marker-by-id effects.
 #'   If the marker block omits the inner `( ... | id )`, marker-by-id effects are
-#'   absent and `vcov` associations are not allowed.
+#'   absent and `corr` associations are not allowed.
 #' @param formulaDist Optional list of formulas for distributional regression.
 #'   Supported LHS parameters are:
 #'   - `sigma`
@@ -84,7 +97,8 @@
 #'     estimated jointly with separate coefficients.
 #'
 #'   Random-effects terms with `|` are supported, but nested random-effects formulas
-#'   are not.
+#'   are not. Grouping factors in random-effects terms may use
+#'   `weighted(group, weights = <column>)`.
 #' @param control Named list containing sampling configuration.
 #'   - cmdstanr::model$sample() arguments (e.g., chains, parallel_chains,
 #'     iter_warmup, iter_sampling, seed, refresh, adapt_delta, max_treedepth).
@@ -93,13 +107,13 @@
 #'     For engine = "rstan", threading uses options(stan.thread = threads_per_chain).
 #'   - grainsize: integer; reduce_sum grainsize for threading (default max(1, min(n_cores, ceiling(n_id/(4*threads_per_chain*chains))))).
 #'   - force_recompile: logical; recompile the Stan model if needed.
-#'   - vcov_diag_link: "softplus" or "exp" for covariance regression diagonals.
+#'   - corr_diag_link: "softplus" or "exp" for covariance regression diagonals.
 #'   - tau_sde_fixed: optional fixed tau in (0,1) for skew-double-exponential.
 #' @param draws Optional number of posterior draws used for summaries (not sampling).
 #' @param families Marker-specific family specification (optional). Can be a vector
 #'   of family names aligned to marker order.
 #' @param transforms Transformation specifications for association terms
-#'   (cv_total, cs_total, vcov). Each entry is a list with a `type` and fields
+#'   (cv_total, cs_total, corr). Each entry is a list with a `type` and fields
 #'   required by that type.
 #' @param priors Named list for priors: list(beta = ..., alpha = ..., lkj = ...).
 #' @param ... Additional args passed to joinme_standata().
@@ -127,7 +141,7 @@ joinme <- function(
   dataLong,
   formulaEvent,
   dataEvent,
-  formulaVcov = ~1,
+  formulaCorr = ~1,
   formulaDist = NULL,
   control = list(),
   draws = NULL,
@@ -158,21 +172,21 @@ joinme <- function(
 
   # Workflow: build standata -> resolve threading -> choose engine -> fit -> wrap
   # - sd: prepared Stan data list with all dimensions and transforms
-  vcov_diag_link <- control$vcov_diag_link %||% "softplus"
+  corr_diag_link <- control$corr_diag_link %||% "softplus"
   tau_sde_fixed <- control$tau_sde_fixed %||% NULL
   sd <- joinme_standata(
     formulaLong = formulaLong,
     dataLong = dataLong,
     formulaEvent = formulaEvent,
     dataEvent = dataEvent,
-    formulaVcov = formulaVcov,
+    formulaCorr = formulaCorr,
     formulaDist = formulaDist,
     families = families,
     transforms = transforms,
     beta_prior = priors$beta,
     alpha_prior = priors$alpha,
     lkj_prior = priors$lkj,
-    vcov_diag_link = vcov_diag_link,
+    corr_diag_link = corr_diag_link,
     tau_sde_fixed = tau_sde_fixed,
     ...
   )
@@ -304,7 +318,7 @@ joinme <- function(
     "beta_scale",
     "const_data_cv",
     "const_data_cs",
-    "const_data_vcov"
+    "const_data_corr"
   ))
 
   has_nonstan_metadata <- function(x) {
@@ -401,7 +415,7 @@ joinme <- function(
       cs_total = sd$assoc_cs_total,
       cs_mean = sd$assoc_cs_mean,
       cs_marker = sd$assoc_cs_marker,
-      vcov = sd$assoc_vcov
+      corr = sd$assoc_corr
     ),
     transforms = list(
       tf_mode_cv_tot = sd$tf_mode_cv_tot,
@@ -410,7 +424,7 @@ joinme <- function(
       tf_mode_cs_mean = sd$tf_mode_cs_mean,
       tf_mode_cv_marker = sd$tf_mode_cv_marker,
       tf_mode_cs_marker = sd$tf_mode_cs_marker,
-      tf_mode_vcov = sd$tf_mode_vcov
+      tf_mode_corr = sd$tf_mode_corr
     ),
     transforms_spec = transforms,
     dist = list(
@@ -441,7 +455,7 @@ joinme <- function(
     n_knots = sd$n_knots,
     basehaz_degree = sd$basehaz_degree,
     K_event = sd$K_event,
-    vcov_diag_link = sd$vcov_diag_link,
+    corr_diag_link = sd$corr_diag_link,
     use_tau_sde_fixed = sd$use_tau_sde_fixed,
     tau_sde_fixed = sd$tau_sde_fixed
   )
@@ -452,7 +466,7 @@ joinme <- function(
     stan_data = sd,
     formulaLong = formulaLong,
     formulaEvent = formulaEvent,
-    formulaVcov = formulaVcov,
+    formulaCorr = formulaCorr,
     config = cfg,
     call = match.call(),
     tmax = sd$tmax,

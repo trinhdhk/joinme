@@ -32,15 +32,16 @@ NULL
 #'   - "marginal_id": Average across markers for each subject (subject-specific average).
 #'   - "marker_subject": Alias for "marginal_marker".
 #'   - "subject_marker": Alias for "marginal_id".
-#' @param scale Character. Longitudinal prediction scale:
+#' @param scale Character vector. Longitudinal prediction scale(s):
 #'   - "epred": expected response (inverse-link),
 #'   - "linpred": linear predictor,
 #'   - "predict": predictive draw (includes noise).
+#'   Defaults to all scales when not explicitly set.
 #' @param times Numeric vector of times at which to predict the longitudinal and survival trajectories.
 #' Can also be a named list of numeric vectors (one per subject id). If NULL, a grid
 #' from `time_start` to `time_start + time_horizon` is generated (and truncated to
 #' training support when needed). If fewer than 50 points are supplied for a subject,
-#' a warning is emitted when `n_times = 50`.
+#' a warning is emitted when `control$n_times = 50`.
 #' @param time_start Numeric scalar or character. The conditioning time (last observation time).
 #' If numeric, a single value is reused for all subjects, or a named vector supplies
 #' subject-specific values. If character, it is interpreted as a column name in
@@ -52,14 +53,15 @@ NULL
 #' Must be strictly between 0 and 1.
 #' @param tmax Numeric scalar. The maximum time used for scaling during model fitting.
 #' **CRITICAL**: If this is not provided and cannot be inferred from the object, predictions will be on the wrong time scale.
-#' @param n_samples Integer. Number of posterior parameter draws to extract from
-#'   the fitted model before running dynamic prediction. Default 200.
-#' @param n_times Integer. Number of time points for the prediction grid when `times` is NULL. Default 50.
 #' @param control Named list for prediction configuration.
 #'   - cmdstanr::model$sample() arguments (e.g., `chains`, `parallel_chains`,
 #'     `iter_warmup`, `iter_sampling`, `seed`, `refresh`, `adapt_delta`).
 #'     Values override defaults except `data`.
 #'   - engine: "cmdstanr" or "rstan". Defaults to options(stan_preferred_engine).
+#'   - n_samples: integer; number of posterior parameter draws extracted from the
+#'     fitted object before dynamic prediction. Default 200.
+#'   - n_times: integer; number of points in the prediction time grid when
+#'     `times` is `NULL`. Default 50.
 #'   - n_pred_draws: integer; number of prediction draws produced by the dynpred
 #'     object. This is independent of `n_samples` (posterior parameter draw
 #'     extraction count). If omitted, defaults to the extracted posterior draw
@@ -102,8 +104,6 @@ predict.JoinMeFit <- function(object,
                            time_horizon = NULL,
                            tmax = NULL,
                            ci_levels = c(0.5, 0.95),
-                           n_samples = 200,
-                           n_times = 50,
                            control = list(),
                            seed = 123,
                            ...) {
@@ -119,7 +119,7 @@ predict.JoinMeFit <- function(object,
                         marker_subject = "marginal_marker",
                         subject_marker = "marginal_id",
                         pred_type)
-    scale <- match.arg(scale)
+    scale <- .normalize_prediction_scales(scale)
 
     ci_levels <- .validate_ci_levels(ci_levels)
     quantile_probs <- .quantile_probs_from_ci(ci_levels)
@@ -209,6 +209,48 @@ predict.JoinMeFit <- function(object,
             i = "Prediction always supplies subject-specific Stan data."
         ))
         control$data <- NULL
+    }
+
+    dots <- list(...)
+    if ("n_samples" %in% names(dots)) {
+        if (is.null(control$n_samples)) {
+            control$n_samples <- dots$n_samples
+        }
+    }
+    if ("n_times" %in% names(dots)) {
+        if (is.null(control$n_times)) {
+            control$n_times <- dots$n_times
+        }
+    }
+
+    n_samples <- control$n_samples %||% 200L
+    if (!is.numeric(n_samples) || length(n_samples) != 1 || !is.finite(n_samples)) {
+        cli::cli_abort(c(
+            "x" = "{.arg control$n_samples} must be a single finite numeric value.",
+            "i" = "Use a positive integer, e.g. {.code control = list(n_samples = 200)}."
+        ))
+    }
+    n_samples <- as.integer(n_samples)
+    if (n_samples < 1L) {
+        cli::cli_abort(c(
+            "x" = "{.arg control$n_samples} must be >= 1.",
+            "i" = "Use a positive integer for posterior draw extraction."
+        ))
+    }
+
+    n_times <- control$n_times %||% 50L
+    if (!is.numeric(n_times) || length(n_times) != 1 || !is.finite(n_times)) {
+        cli::cli_abort(c(
+            "x" = "{.arg control$n_times} must be a single finite numeric value.",
+            "i" = "Use a positive integer, e.g. {.code control = list(n_times = 50)}."
+        ))
+    }
+    n_times <- as.integer(n_times)
+    if (n_times < 1L) {
+        cli::cli_abort(c(
+            "x" = "{.arg control$n_times} must be >= 1.",
+            "i" = "Use a positive integer for prediction grid size."
+        ))
     }
 
     threads_per_chain <- control$threads_per_chain %||%
@@ -327,11 +369,11 @@ predict.JoinMeFit <- function(object,
         # reduce_sum in dynpred parallelizes over posterior draws, not subjects.
         # Tune default grainsize using number of draws to avoid overly tiny slices
         # and to keep work balanced across threads/chains.
-        n_draws_pred <- n_pred_draws
+        n_pred_draws_local <- n_pred_draws
         n_chains <- control$chains %||% 1L
         denom <- 4L * as.integer(threads_per_chain) * as.integer(n_chains)
         denom <- max(1L, denom)
-        grainsize <- max(1L, as.integer(ceiling(n_draws_pred / denom)))
+        grainsize <- max(1L, as.integer(ceiling(n_pred_draws_local / denom)))
         grainsize <- min(as.integer(n_cores), grainsize)
     }
     if (!is.numeric(grainsize) || length(grainsize) != 1) {
@@ -355,7 +397,9 @@ predict.JoinMeFit <- function(object,
         "threads",
         "mc.cores",
         "grainsize",
-        "n_pred_draws"
+        "n_pred_draws",
+        "n_samples",
+        "n_times"
     ))]
     results_long <- list()
     results_surv <- list()
@@ -377,8 +421,8 @@ predict.JoinMeFit <- function(object,
     marker_var <- eval(object$call$marker_var) %||% "marker"
 
     time_start_by_id <- numeric(0)
-   
-    if (control$progress %||% TRUE) {
+    show_progress <- control$progress %||% TRUE
+    if (show_progress) {
         has_progressr <- requireNamespace("progressr", quietly = TRUE)
     
         if (has_progressr) {
@@ -388,291 +432,327 @@ predict.JoinMeFit <- function(object,
             pb <- utils::txtProgressBar(min = 0, max = length(ids), style = 3, width = 60)
         }
     }
-    marker_vcov_depends_on_id <- .marker_vcov_depends_on_id(object, newdataEvent)
+    marker_corr_depends_on_id <- .marker_corr_depends_on_id(object, newdataEvent)
 
-    for (id in ids) {
-        if (control$progress %||% TRUE && has_progressr) {
-            this_id <- as.character(id)
-            pb(amount = 0, message = sprintf("Subject %s", this_id))
-        }
-        dE <- newdataEvent[newdataEvent[[id_var]] == id, , drop = FALSE]
-        dL <- newdataLong[newdataLong[[id_var]] == id, , drop = FALSE]
-
-        if (nrow(dL) == 0) {
-            cli::cli_warn("No longitudinal data for ID {id}.")
-            next
-        }
-
-        # T_cond
-        # - conditioning time is last observed time by default
-        if (!is.null(time_start_col)) {
-            t_cond <- dE[[time_start_col]][1]
-        } else if (!is.null(time_start_map)) {
-            t_cond <- time_start_map[[as.character(id)]]
-        } else if (!is.null(time_start)) {
-            t_cond <- time_start
-        } else {
-            t_cond <- max(dL[[time_var]], na.rm = TRUE)
-        }
-        if (!is.finite(t_cond)) {
-            cli::cli_abort(c(
-                x = "Conditioning time is not finite for subject {id}.",
-                i = "Check {.arg time_start} or the time column in {.code newdataLong}."
-            ))
-        }
-        time_start_by_id[as.character(id)] <- t_cond
-
-        # Grids
-        # - longitudinal and survival grids can differ in density
-        t_grid <- numeric(0)
-        if ("longitudinal" %in% process) {
-            t_grid <- .resolve_time_grid(
-                times,
-                id,
-                t_cond,
-                tmax_val,
-                time_horizon_val,
-                default_n = n_times,
-                min_points = 50,
-                kind = "longitudinal"
-            )
-        }
-
-        t_surv_grid <- numeric(0)
-        if ("event" %in% process) {
-            t_surv_grid <- .resolve_time_grid(
-                times,
-                id,
-                t_cond,
-                tmax_val,
-                time_horizon_val,
-                default_n = n_times,
-                min_points = 50,
-                kind = "survival"
-            )
-        }
-
-        # SD Prep
-        # - assemble subject-specific data list for Stan
-        grainsize_data <- if (threads_per_chain > 1) grainsize else NULL
-        sd_pred <- .prepare_subject_standata(
-            dE, dL, object, tmax_val, knots, col_means,
-            t_cond, t_grid, t_surv_grid,
-            forms, draws_list, grainsize_data,
-            degree = meta$degree
-        )
-        # Ensure time index arrays are preserved for cmdstanr JSON (avoid auto-unbox)
-        sd_pred <- .coerce_rstan_time_indices(sd_pred)
-        sd_pred <- .coerce_rstan_dist_arrays(sd_pred)
-        sd_pred <- .coerce_rstan_vectors(sd_pred, c(
-            "vec_cov_vcov",
-            "const_data_cv",
-            "const_data_cs",
-            "const_data_vcov"
-        ))
-        if (is.null(sd_pred$n_draws) || length(sd_pred$n_draws) != 1) {
-            sd_pred$n_draws <- as.integer(n_pred_draws)
-        }
-        if (length(required_data) > 0) {
-            missing <- setdiff(required_data, names(sd_pred))
-            if (length(missing) > 0) {
-                cli::cli_abort(c(
-                    x = "Prediction Stan data missing required fields: {paste(missing, collapse = ', ')}.",
-                    i = "Check prediction standata construction and Stan data block."
-                ))
+    .safe_progress(show_progress = show_progress, { 
+        for (id in ids) {
+            if (show_progress && has_progressr) {
+                this_id <- as.character(id)
+                pb(amount = 0, message = sprintf("Subject %s", this_id))
             }
-        }
-        if (!is.null(allowed_data) && length(allowed_data) > 0) {
-            keep_data <- union(allowed_data, required_data)
-            sd_pred <- sd_pred[names(sd_pred) %in% keep_data]
-        }
+            dE <- newdataEvent[newdataEvent[[id_var]] == id, , drop = FALSE]
+            dL <- newdataLong[newdataLong[[id_var]] == id, , drop = FALSE]
 
-        # Run Stan
-        # - 1 chain, 1 post-warmup iteration, draws taken from input arrays
-        sample_args <- list(
-            chains = 1,
-            iter_warmup = 100,
-            iter_sampling = 1, # Single pass over n_samples array
-            fixed_param = FALSE,
-            refresh = 0,
-            show_messages = FALSE,
-            seed = seed,
-            adapt_delta = 0.8
-        )
-        sample_args <- utils::modifyList(sample_args, sample_control)
-        if (threads_per_chain > 1) sample_args$threads_per_chain <- threads_per_chain
-        sample_args$data <- sd_pred
-        sample_args <- sample_args[!vapply(sample_args, is.null, logical(1))]
-        if (engine == "cmdstanr") {
-            allowed <- names(formals(mod$sample))
-            sample_args <- sample_args[names(sample_args) %in% allowed]
-            fit_pred <- do.call(mod$sample, sample_args)
-        } else {
-            control_list <- list()
-            if (!is.null(sample_args$adapt_delta)) control_list$adapt_delta <- sample_args$adapt_delta
-            if (!is.null(sample_args$max_treedepth)) control_list$max_treedepth <- sample_args$max_treedepth
-            iter_warmup <- sample_args$iter_warmup
-            iter_sampling <- sample_args$iter_sampling
-            iter_total <- iter_warmup + iter_sampling
-            rstan_args <- list(
-                object = mod,
-                data = sample_args$data,
-                chains = sample_args$chains %||% 1,
-                iter = iter_total,
-                warmup = iter_warmup,
-                seed = sample_args$seed,
-                refresh = sample_args$refresh,
-                cores = min(sample_args$chains %||% 1, parallel::detectCores(logical = FALSE) %||% 1)
-            )
-            if (isTRUE(sample_args$fixed_param)) {
-                rstan_args$algorithm <- "Fixed_param"
-            }
-            if (length(control_list) > 0) rstan_args$control <- control_list
-            fit_pred <- do.call(rstan::sampling, rstan_args)
-        }
-        pred_sampler_diag_list[[as.character(id)]] <- .joinme_sampler_diagnostics(fit_pred)
-
-        long_var <- switch(scale,
-               linpred = "y_pred_linpred",
-               epred = "y_pred_epred",
-               predict = "y_pred",
-               "y_pred_epred")
-        draw_variables <- c(long_var, "surv_prob", "cumhaz_cond", "y_fit_linpred", "y_fit_epred", "z_u")
-        if (as.integer(sd_pred$n_random_marker %||% 0L) > 0L) {
-            draw_variables <- c(draw_variables, "z_v")
-        }
-        if (as.integer(sd_pred$n_random_marker_id %||% 0L) > 0L) {
-            draw_variables <- c(draw_variables, "z_w_lat", "z_L")
-        }
-        draws_mat <- suppressMessages(
-            .get_draws_matrix(
-                fit_pred,
-                variables = draw_variables
-            )
-        )
-
-        u_id_draws <- .reconstruct_subject_u_id_draws(
-            draws_matrix = draws_mat,
-            standata_subject = sd_pred,
-            n_draws_target = n_pred_draws
-        )
-        if (!is.null(u_id_draws)) {
-            draws_re_id_list[[as.character(id)]] <- list(
-                matrix = u_id_draws,
-                terms = object$stan_data$zid_cols %||% paste0("u_id[", seq_len(ncol(u_id_draws)), "]")
-            )
-        }
-
-        marker_id_draws <- .reconstruct_subject_marker_id_draws(
-            draws_matrix = draws_mat,
-            standata_subject = sd_pred,
-            n_draws_target = n_pred_draws,
-            marker_levels = object$stan_data$marker_levels
-        )
-        if (!is.null(marker_id_draws)) {
-            draws_re_marker_id_list[[as.character(id)]] <- marker_id_draws
-        }
-
-        if (nrow(dL) > 0) {
-            # Align marker levels to fitted model ordering
-            marker_levels <- object$stan_data$marker_levels %||% levels(dL[[marker_var]]) %||% sort(unique(dL[[marker_var]]))
-            marker_values_obs <- as.character(dL[[marker_var]])
-            unknown_markers <- setdiff(unique(marker_values_obs), marker_levels)
-            if (length(unknown_markers) > 0) {
-                cli::cli_abort(c(
-                    x = "Found marker level(s) in {.arg newdataLong} not seen during fitting: {.val {paste(unknown_markers, collapse = ', ')}}.",
-                    i = "Use only training marker levels: {.val {paste(marker_levels, collapse = ', ')}}."
-                ))
-            }
-            marker_int_obs <- match(marker_values_obs, marker_levels)
-            if (any(is.na(marker_int_obs))) {
-                cli::cli_abort(c(
-                    x = "Markers in newdataLong don't match fitted model levels.",
-                    i = "Ensure marker levels match the fitted model."
-                ))
+            if (nrow(dL) == 0) {
+                cli::cli_warn("No longitudinal data for ID {id}.")
+                next
             }
 
-            fit_lin_mat <- .extract_matrix_from_stan(draws_mat, "y_fit_linpred", nrow(dL), n_pred_draws)
-            fit_epred_mat <- .extract_matrix_from_stan(draws_mat, "y_fit_epred", nrow(dL), n_pred_draws)
-
-            draws_long_fit[[as.character(id)]] <- list(
-                linpred = fit_lin_mat,
-                epred = fit_epred_mat,
-                time = dL[[time_var]],
-                marker_idx = marker_int_obs
-            )
-
-            fit_lin_sum <- .summarize_pred_long(fit_lin_mat, dL[[time_var]], marker_int_obs, marker_levels, id)
-            fit_lin_sum$scale <- "linpred"
-            fit_epred_sum <- .summarize_pred_long(fit_epred_mat, dL[[time_var]], marker_int_obs, marker_levels, id)
-            fit_epred_sum$scale <- "epred"
-            results_long_fit[[as.character(id)]] <- rbind(fit_lin_sum, fit_epred_sum)
-
-            fit_lin_quant <- .compute_quantiles_long(
-                fit_lin_mat, dL[[time_var]], marker_int_obs, marker_levels, id, probs = quantile_probs
-            )
-            fit_lin_quant$scale <- "linpred"
-            fit_epred_quant <- .compute_quantiles_long(
-                fit_epred_mat, dL[[time_var]], marker_int_obs, marker_levels, id, probs = quantile_probs
-            )
-            fit_epred_quant$scale <- "epred"
-            quantiles_long_fit[[as.character(id)]] <- rbind(fit_lin_quant, fit_epred_quant)
-        }
-
-        if (length(t_grid) > 0) {
-            # Extract predictions for all (time, marker) combinations
-            n_obs_pred_total <- nrow(sd_pred$mat_fixed_pred)  # This is n_time_points * n_markers
-            n_markers_actual <- length(unique(dL[[marker_var]]))
-            long_mat <- .extract_matrix_from_stan(draws_mat, long_var, n_obs_pred_total, n_pred_draws)
-
-            draws_long_list[[as.character(id)]] <- list(
-                matrix = long_mat,
-                marker_idx = sd_pred$idx_marker_pred,
-                time = rep(t_grid, n_markers_actual)  # Repeat time grid for each marker
-            )
-
-            marker_levels <- object$stan_data$marker_levels %||% levels(dL[[marker_var]]) %||% sort(unique(dL[[marker_var]]))
-            results_long[[as.character(id)]] <- .summarize_pred_long(long_mat, rep(t_grid, n_markers_actual), sd_pred$idx_marker_pred, marker_levels, id)
-            
-            # Also compute rich quantiles for plotting
-            quantiles_long_list[[as.character(id)]] <- .compute_quantiles_long(
-                long_mat, rep(t_grid, n_markers_actual), sd_pred$idx_marker_pred,
-                marker_levels, id, probs = quantile_probs
-            )
-        }
-        if (length(t_surv_grid) > 0) {
-            surv_mat <- .extract_matrix_from_stan(draws_mat, "surv_prob", length(t_surv_grid), n_pred_draws)
-            cumhaz_mat <- .extract_matrix_from_stan(draws_mat, "cumhaz_cond", length(t_surv_grid), n_pred_draws)
-
-            draws_surv_list[[as.character(id)]] <- list(
-                matrix = surv_mat,
-                time = t_surv_grid
-            )
-            draws_cumhaz_list[[as.character(id)]] <- list(
-                matrix = cumhaz_mat,
-                time = t_surv_grid
-            )
-
-            results_surv[[as.character(id)]] <- .summarize_pred_surv(surv_mat, t_surv_grid, id)
-            results_cumhaz[[as.character(id)]] <- .summarize_pred_cumhaz(cumhaz_mat, t_surv_grid, id)
-            
-            # Also compute rich quantiles for plotting
-            quantiles_surv_list[[as.character(id)]] <- .compute_quantiles_surv(
-                surv_mat, t_surv_grid, id, probs = quantile_probs
-            )
-            quantiles_cumhaz_list[[as.character(id)]] <- .compute_quantiles_surv(
-                cumhaz_mat, t_surv_grid, id, probs = quantile_probs
-            )
-        }
-
-        if (control$progress %||% TRUE) {
-            if (has_progressr) {
-                pb()
+            # T_cond
+            # - conditioning time is last observed time by default
+            if (!is.null(time_start_col)) {
+                t_cond <- dE[[time_start_col]][1]
+            } else if (!is.null(time_start_map)) {
+                t_cond <- time_start_map[[as.character(id)]]
+            } else if (!is.null(time_start)) {
+                t_cond <- time_start
             } else {
-                utils::setTxtProgressBar(pb, which(ids == id))
+                t_cond <- max(dL[[time_var]], na.rm = TRUE)
+            }
+            if (!is.finite(t_cond)) {
+                cli::cli_abort(c(
+                    x = "Conditioning time is not finite for subject {id}.",
+                    i = "Check {.arg time_start} or the time column in {.code newdataLong}."
+                ))
+            }
+            time_start_by_id[as.character(id)] <- t_cond
+
+            # Grids
+            # - longitudinal and survival grids can differ in density
+            t_grid <- numeric(0)
+            if ("longitudinal" %in% process) {
+                t_grid <- .resolve_time_grid(
+                    times,
+                    id,
+                    t_cond,
+                    tmax_val,
+                    time_horizon_val,
+                    default_n = n_times,
+                    min_points = 50,
+                    kind = "longitudinal"
+                )
+            }
+
+            t_surv_grid <- numeric(0)
+            if ("event" %in% process) {
+                t_surv_grid <- .resolve_time_grid(
+                    times,
+                    id,
+                    t_cond,
+                    tmax_val,
+                    time_horizon_val,
+                    default_n = n_times,
+                    min_points = 50,
+                    kind = "survival"
+                )
+            }
+
+            # SD Prep
+            # - assemble subject-specific data list for Stan
+            grainsize_data <- if (threads_per_chain > 1) grainsize else NULL
+            sd_pred <- .prepare_subject_standata(
+                dE, dL, object, tmax_val, knots, col_means,
+                t_cond, t_grid, t_surv_grid,
+                forms, draws_list, grainsize_data,
+                degree = meta$degree
+            )
+            # Ensure time index arrays are preserved for cmdstanr JSON (avoid auto-unbox)
+            sd_pred <- .coerce_rstan_time_indices(sd_pred)
+            sd_pred <- .coerce_rstan_dist_arrays(sd_pred)
+            sd_pred <- .coerce_rstan_vectors(sd_pred, c(
+                "vec_cov_corr",
+                "const_data_cv",
+                "const_data_cs",
+                "const_data_corr"
+            ))
+            if (is.null(sd_pred$n_draws) || length(sd_pred$n_draws) != 1) {
+                sd_pred$n_draws <- as.integer(n_pred_draws)
+            }
+            if (length(required_data) > 0) {
+                missing <- setdiff(required_data, names(sd_pred))
+                if (length(missing) > 0) {
+                    cli::cli_abort(c(
+                        x = "Prediction Stan data missing required fields: {paste(missing, collapse = ', ')}.",
+                        i = "Check prediction standata construction and Stan data block."
+                    ))
+                }
+            }
+            if (!is.null(allowed_data) && length(allowed_data) > 0) {
+                keep_data <- union(allowed_data, required_data)
+                sd_pred <- sd_pred[names(sd_pred) %in% keep_data]
+            }
+
+            # Run Stan
+            # - 1 chain, 1 post-warmup iteration, draws taken from input arrays
+            sample_args <- list(
+                chains = 1,
+                iter_warmup = 100,
+                iter_sampling = 1, # Single pass over n_samples array
+                fixed_param = FALSE,
+                refresh = 0,
+                show_messages = FALSE,
+                seed = seed,
+                adapt_delta = 0.8
+            )
+            sample_args <- utils::modifyList(sample_args, sample_control)
+            if (threads_per_chain > 1) sample_args$threads_per_chain <- threads_per_chain
+            sample_args$data <- sd_pred
+            sample_args <- sample_args[!vapply(sample_args, is.null, logical(1))]
+            if (engine == "cmdstanr") {
+                allowed <- names(formals(mod$sample))
+                sample_args <- sample_args[names(sample_args) %in% allowed]
+                fit_pred <- do.call(mod$sample, sample_args)
+            } else {
+                control_list <- list()
+                if (!is.null(sample_args$adapt_delta)) control_list$adapt_delta <- sample_args$adapt_delta
+                if (!is.null(sample_args$max_treedepth)) control_list$max_treedepth <- sample_args$max_treedepth
+                iter_warmup <- sample_args$iter_warmup
+                iter_sampling <- sample_args$iter_sampling
+                iter_total <- iter_warmup + iter_sampling
+                rstan_args <- list(
+                    object = mod,
+                    data = sample_args$data,
+                    chains = sample_args$chains %||% 1,
+                    iter = iter_total,
+                    warmup = iter_warmup,
+                    seed = sample_args$seed,
+                    refresh = sample_args$refresh,
+                    cores = min(sample_args$chains %||% 1, parallel::detectCores(logical = FALSE) %||% 1)
+                )
+                if (isTRUE(sample_args$fixed_param)) {
+                    rstan_args$algorithm <- "Fixed_param"
+                }
+                if (length(control_list) > 0) rstan_args$control <- control_list
+                fit_pred <- do.call(rstan::sampling, rstan_args)
+            }
+            pred_sampler_diag_list[[as.character(id)]] <- .joinme_sampler_diagnostics(fit_pred)
+
+            draw_variables <- .prediction_draw_variables(scale, sd_pred)
+            draws_mat <- suppressMessages(
+                .get_draws_matrix(
+                    fit_pred,
+                    variables = draw_variables
+                )
+            )
+
+            u_id_draws <- .reconstruct_subject_u_id_draws(
+                draws_matrix = draws_mat,
+                standata_subject = sd_pred,
+                n_draws_target = n_pred_draws
+            )
+            if (!is.null(u_id_draws)) {
+                draws_re_id_list[[as.character(id)]] <- list(
+                    matrix = u_id_draws,
+                    terms = object$stan_data$zid_cols %||% paste0("u_id[", seq_len(ncol(u_id_draws)), "]")
+                )
+            }
+
+            marker_id_draws <- .reconstruct_subject_marker_id_draws(
+                draws_matrix = draws_mat,
+                standata_subject = sd_pred,
+                n_draws_target = n_pred_draws,
+                marker_levels = object$stan_data$marker_levels
+            )
+            if (!is.null(marker_id_draws)) {
+                draws_re_marker_id_list[[as.character(id)]] <- marker_id_draws
+            }
+
+            if (nrow(dL) > 0) {
+                # Align marker levels to fitted model ordering
+                marker_levels <- object$stan_data$marker_levels %||% levels(dL[[marker_var]]) %||% sort(unique(dL[[marker_var]]))
+                marker_values_obs <- as.character(dL[[marker_var]])
+                unknown_markers <- setdiff(unique(marker_values_obs), marker_levels)
+                if (length(unknown_markers) > 0) {
+                    cli::cli_abort(c(
+                        x = "Found marker level(s) in {.arg newdataLong} not seen during fitting: {.val {paste(unknown_markers, collapse = ', ')}}.",
+                        i = "Use only training marker levels: {.val {paste(marker_levels, collapse = ', ')}}."
+                    ))
+                }
+                marker_int_obs <- match(marker_values_obs, marker_levels)
+                if (any(is.na(marker_int_obs))) {
+                    cli::cli_abort(c(
+                        x = "Markers in newdataLong don't match fitted model levels.",
+                        i = "Ensure marker levels match the fitted model."
+                    ))
+                }
+
+                fitted_scales <- intersect(c("linpred", "epred"), scale)
+                fit_draws_for_id <- list(time = dL[[time_var]], marker_idx = marker_int_obs)
+                fit_sum_rows <- list()
+                fit_quant_rows <- list()
+
+                if ("linpred" %in% fitted_scales) {
+                    fit_lin_mat <- .extract_matrix_from_stan(draws_mat, "y_fit_linpred", nrow(dL), n_pred_draws)
+                    fit_draws_for_id$linpred <- fit_lin_mat
+
+                    fit_lin_sum <- .summarize_pred_long(fit_lin_mat, dL[[time_var]], marker_int_obs, marker_levels, id)
+                    fit_lin_sum$scale <- "linpred"
+                    fit_sum_rows[[length(fit_sum_rows) + 1L]] <- fit_lin_sum
+
+                    fit_lin_quant <- .compute_quantiles_long(
+                        fit_lin_mat, dL[[time_var]], marker_int_obs, marker_levels, id, probs = quantile_probs
+                    )
+                    fit_lin_quant$scale <- "linpred"
+                    fit_quant_rows[[length(fit_quant_rows) + 1L]] <- fit_lin_quant
+                }
+
+                if ("epred" %in% fitted_scales) {
+                    fit_epred_mat <- .extract_matrix_from_stan(draws_mat, "y_fit_epred", nrow(dL), n_pred_draws)
+                    fit_draws_for_id$epred <- fit_epred_mat
+
+                    fit_epred_sum <- .summarize_pred_long(fit_epred_mat, dL[[time_var]], marker_int_obs, marker_levels, id)
+                    fit_epred_sum$scale <- "epred"
+                    fit_sum_rows[[length(fit_sum_rows) + 1L]] <- fit_epred_sum
+
+                    fit_epred_quant <- .compute_quantiles_long(
+                        fit_epred_mat, dL[[time_var]], marker_int_obs, marker_levels, id, probs = quantile_probs
+                    )
+                    fit_epred_quant$scale <- "epred"
+                    fit_quant_rows[[length(fit_quant_rows) + 1L]] <- fit_epred_quant
+                }
+
+                if (length(fit_draws_for_id) > 2L) {
+                    draws_long_fit[[as.character(id)]] <- fit_draws_for_id
+                }
+                if (length(fit_sum_rows) > 0) {
+                    results_long_fit[[as.character(id)]] <- do.call(rbind, fit_sum_rows)
+                }
+                if (length(fit_quant_rows) > 0) {
+                    quantiles_long_fit[[as.character(id)]] <- do.call(rbind, fit_quant_rows)
+                }
+            }
+
+            if (length(t_grid) > 0) {
+                # Extract predictions for all (time, marker) combinations
+                n_obs_pred_total <- nrow(sd_pred$mat_fixed_pred)  # This is n_time_points * n_markers
+                n_markers_actual <- length(unique(dL[[marker_var]]))
+                marker_levels <- object$stan_data$marker_levels %||% levels(dL[[marker_var]]) %||% sort(unique(dL[[marker_var]]))
+                time_rep <- rep(t_grid, n_markers_actual)
+
+                scale_var_map <- c(
+                    epred = "y_pred_epred",
+                    linpred = "y_pred_linpred",
+                    predict = "y_pred"
+                )
+
+                per_id_draws <- list()
+                per_id_results <- list()
+                per_id_quantiles <- list()
+                for (scale_i in scale) {
+                    long_var <- unname(scale_var_map[scale_i])
+                    long_mat <- .extract_matrix_from_stan(draws_mat, long_var, n_obs_pred_total, n_pred_draws)
+
+                    per_id_draws[[scale_i]] <- list(
+                        matrix = long_mat,
+                        marker_idx = sd_pred$idx_marker_pred,
+                        time = time_rep,
+                        scale = scale_i
+                    )
+
+                    long_sum <- .summarize_pred_long(long_mat, time_rep, sd_pred$idx_marker_pred, marker_levels, id)
+                    long_sum$scale <- scale_i
+                    per_id_results[[length(per_id_results) + 1L]] <- long_sum
+
+                    long_quant <- .compute_quantiles_long(
+                        long_mat, time_rep, sd_pred$idx_marker_pred,
+                        marker_levels, id, probs = quantile_probs
+                    )
+                    long_quant$scale <- scale_i
+                    per_id_quantiles[[length(per_id_quantiles) + 1L]] <- long_quant
+                }
+
+                if (length(scale) == 1L) {
+                    draws_long_list[[as.character(id)]] <- per_id_draws[[1L]]
+                } else {
+                    draws_long_list[[as.character(id)]] <- per_id_draws
+                }
+                results_long[[as.character(id)]] <- do.call(rbind, per_id_results)
+                quantiles_long_list[[as.character(id)]] <- do.call(rbind, per_id_quantiles)
+            }
+            if (length(t_surv_grid) > 0) {
+                surv_mat <- .extract_matrix_from_stan(draws_mat, "surv_prob", length(t_surv_grid), n_pred_draws)
+                cumhaz_mat <- .extract_matrix_from_stan(draws_mat, "cumhaz_cond", length(t_surv_grid), n_pred_draws)
+
+                draws_surv_list[[as.character(id)]] <- list(
+                    matrix = surv_mat,
+                    time = t_surv_grid
+                )
+                draws_cumhaz_list[[as.character(id)]] <- list(
+                    matrix = cumhaz_mat,
+                    time = t_surv_grid
+                )
+
+                results_surv[[as.character(id)]] <- .summarize_pred_surv(surv_mat, t_surv_grid, id)
+                results_cumhaz[[as.character(id)]] <- .summarize_pred_cumhaz(cumhaz_mat, t_surv_grid, id)
+                
+                # Also compute rich quantiles for plotting
+                quantiles_surv_list[[as.character(id)]] <- .compute_quantiles_surv(
+                    surv_mat, t_surv_grid, id, probs = quantile_probs
+                )
+                quantiles_cumhaz_list[[as.character(id)]] <- .compute_quantiles_surv(
+                    cumhaz_mat, t_surv_grid, id, probs = quantile_probs
+                )
+            }
+
+            if (control$progress %||% TRUE) {
+                if (has_progressr) {
+                    pb()
+                } else {
+                    utils::setTxtProgressBar(pb, which(ids == id))
+                }
             }
         }
-    }
+    })
 
     # Compute population-level trajectories (average over subjects, keeping marker)
     quantiles_long_marker_pop <- NULL
@@ -692,7 +772,7 @@ predict.JoinMeFit <- function(object,
             if (pred_type == "marginal_marker") {
                 # Average across subjects for each marker-time combination
                 results_long_aggregated <- results_long_combined |>
-                    dplyr::group_by(time, marker) |>
+                    dplyr::group_by(scale, time, marker) |>
                     dplyr::summarise(
                         Estimate = mean(Estimate, na.rm = TRUE),
                         Median = mean(Median, na.rm = TRUE),
@@ -705,7 +785,7 @@ predict.JoinMeFit <- function(object,
             } else if (pred_type == "marginal_id") {
                 # Average across markers for each subject-time combination
                 results_long_aggregated <- results_long_combined |>
-                    dplyr::group_by(id, time) |>
+                    dplyr::group_by(scale, id, time) |>
                     dplyr::summarise(
                         Estimate = mean(Estimate, na.rm = TRUE),
                         Median = mean(Median, na.rm = TRUE),
@@ -720,7 +800,7 @@ predict.JoinMeFit <- function(object,
         
         # Group by time and marker, average quantiles across subjects
         quantiles_long_marker_pop <- all_marker_preds |>
-            dplyr::group_by(time, marker) |>
+            dplyr::group_by(scale, time, marker) |>
             dplyr::summarise(
                 dplyr::across(dplyr::all_of(q_cols), ~ mean(.x, na.rm = TRUE)),
                 mean = mean(mean, na.rm = TRUE),
@@ -731,7 +811,7 @@ predict.JoinMeFit <- function(object,
         
         # Overall population trajectory (average across subjects and markers)
         quantiles_long_overall_pop <- all_marker_preds |>
-            dplyr::group_by(time) |>
+            dplyr::group_by(scale, time) |>
             dplyr::summarise(
                 dplyr::across(dplyr::all_of(q_cols), ~ mean(.x, na.rm = TRUE)),
                 mean = mean(mean, na.rm = TRUE),
@@ -756,11 +836,12 @@ predict.JoinMeFit <- function(object,
         n_posterior_draws = n_samples_extracted,
         n_pred_draws = n_pred_draws,
         n_subjects = length(ids),
-        marker_vcov_depends_on_id = marker_vcov_depends_on_id,
+        marker_corr_depends_on_id = marker_corr_depends_on_id,
         sampler_diagnostics = .aggregate_sampler_diagnostics(pred_sampler_diag_list),
         pred_type = pred_type,
-        scale = scale,
-        fitted_scales = c("linpred", "epred"),
+        scale = if (length(scale) == 1L) scale else scale[1],
+        scales = scale,
+        fitted_scales = intersect(c("linpred", "epred"), scale),
         ci_levels = ci_levels,
         quantile_levels = quantile_probs,
         time_max = tmax_val,
@@ -835,6 +916,37 @@ predict.JoinMeFit <- function(object,
     n_pred_draws
 }
 
+.normalize_prediction_scales <- function(scale) {
+    allowed_scales <- c("epred", "linpred", "predict")
+    if (is.null(scale)) {
+        return(allowed_scales)
+    }
+    unique(match.arg(scale, choices = allowed_scales, several.ok = TRUE))
+}
+
+.prediction_draw_variables <- function(scale, standata_subject) {
+    scale_var_map <- c(
+        epred = "y_pred_epred",
+        linpred = "y_pred_linpred",
+        predict = "y_pred"
+    )
+    fit_var_map <- c(
+        epred = "y_fit_epred",
+        linpred = "y_fit_linpred"
+    )
+    long_vars <- unname(scale_var_map[scale])
+    fitted_vars <- unname(fit_var_map[intersect(scale, names(fit_var_map))])
+
+    draw_variables <- unique(c(long_vars, "surv_prob", "cumhaz_cond", fitted_vars, "z_u"))
+    if (as.integer(standata_subject$n_random_marker %||% 0L) > 0L) {
+        draw_variables <- c(draw_variables, "z_v")
+    }
+    if (as.integer(standata_subject$n_random_marker_id %||% 0L) > 0L) {
+        draw_variables <- c(draw_variables, "z_w_lat", "z_L")
+    }
+    unique(draw_variables)
+}
+
 # Build draw re-index map from extracted posterior draws to prediction draws.
 .prediction_draw_index <- function(n_available, n_target, seed) {
     n_available <- as.integer(n_available)
@@ -893,7 +1005,8 @@ predict.JoinMeFit <- function(object,
 #' @param ... Additional arguments passed to [predict].
 #' 
 #' @importFrom rstantools posterior_linpred
-#' @return A `JoinMeDynPred` object with `metadata$scale = "linpred"`.
+#' @return A `JoinMeDynPred` object with `metadata$scale = "linpred"` and
+#'   `metadata$scales = "linpred"`.
 #'
 #' @export
 posterior_linpred.JoinMeFit <- function(object, ...) {
@@ -914,7 +1027,8 @@ posterior_linpred.JoinMeFit <- function(object, ...) {
 #' @param ... Additional arguments passed to [predict].
 #'
 #' @importFrom rstantools posterior_epred
-#' @return A `JoinMeDynPred` object with `metadata$scale = "epred"`
+#' @return A `JoinMeDynPred` object with `metadata$scale = "epred"` and
+#'   `metadata$scales = "epred"`.
 #' @export
 posterior_epred.JoinMeFit <- function(object, ...) {
     call_ <- match.call()
@@ -934,7 +1048,8 @@ posterior_epred.JoinMeFit <- function(object, ...) {
 #' @param ... Additional arguments passed to [predict].
 #'
 #' @importFrom rstantools posterior_predict
-#' @return A `JoinMeDynPred` object with `metadata$scale = "predict"`.
+#' @return A `JoinMeDynPred` object with `metadata$scale = "predict"` and
+#'   `metadata$scales = "predict"`.
 #' @export
 posterior_predict.JoinMeFit <- function(object, ...) {
     call_ <- match.call()
@@ -1086,7 +1201,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     list(
         formulaLong = object$formulaLong,
         formulaEvent = object$formulaEvent,
-        formulaVcov = object$formulaVcov,
+        formulaCorr = object$formulaCorr,
         formulaDist = call_dist %||% object$config$dist$dist_formulas
     )
 }
@@ -1102,10 +1217,10 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     dmat <- suppressMessages(posterior::as_draws_matrix(d))
 
     sd <- object$stan_data
-    if (isTRUE(sd$assoc_vcov) && sd$Q_idm < 1) {
+    if (isTRUE(sd$assoc_corr) && sd$Q_idm < 1) {
         cli::cli_abort(c(
-            x = "Association {.arg vcov} requires marker-by-id random effects (Q_idm > 0).",
-            i = "Refit with an inner ( ... | id ) term inside the marker block, or drop {.arg vcov} from {.arg assoc}."
+            x = "Association {.arg corr} requires marker-by-id random effects (Q_idm > 0).",
+            i = "Refit with an inner ( ... | id ) term inside the marker block, or drop {.arg corr} from {.arg assoc}."
         ))
     }
     n <- nrow(dmat)
@@ -1178,13 +1293,13 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     M_cov <- if (sd$Q_idm > 0) sd$Q_idm * (sd$Q_idm + 1) / 2 else 0
     if (sd$indep_idmarker_cov == 1) M_cov <- if (sd$Q_idm > 0) sd$Q_idm else 0
 
-    beta_vcov_reg_flat <- array(0, dim = c(n, M_cov * sd$K_cov))
+    beta_corr_reg_flat <- array(0, dim = c(n, M_cov * sd$K_cov))
     if (M_cov > 0) {
         for (m in 1:M_cov) {
             for (k in 1:sd$K_cov) {
                 nm <- paste0("beta_L[", m, ",", k, "]")
                 idx <- (m - 1) * sd$K_cov + k
-                if (nm %in% colnames(dmat)) beta_vcov_reg_flat[, idx] <- dmat[, nm]
+                if (nm %in% colnames(dmat)) beta_corr_reg_flat[, idx] <- dmat[, nm]
             }
         }
     }
@@ -1272,6 +1387,21 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         matrix(0, n, n_family_tau_sde)
     }
 
+    corr_coef_vars <- grep("^alpha_corr\\[", colnames(dmat), value = TRUE)
+    if (length(corr_coef_vars) > 0) {
+        corr_idx <- as.integer(sub("^alpha_corr\\[(\\d+)\\]$", "\\1", corr_coef_vars))
+        corr_coef_vars <- corr_coef_vars[order(corr_idx)]
+    }
+    corr_coef_raw <- if (length(corr_coef_vars) > 0) get_mat(corr_coef_vars) else matrix(0, n, 0)
+    corr_coef_padded <- if (sd$Q_idm > 0) {
+        out <- matrix(0, nrow = n, ncol = sd$Q_idm)
+        n_copy <- min(ncol(corr_coef_raw), sd$Q_idm)
+        if (n_copy > 0) out[, seq_len(n_copy)] <- corr_coef_raw[, seq_len(n_copy), drop = FALSE]
+        out
+    } else {
+        matrix(0, n, 0)
+    }
+
     list(
         n_samples = n,
         beta_fixed = beta_fixed,
@@ -1309,10 +1439,10 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         } else {
             matrix(0, n, 0)
         },
-        alpha_vcov_reg = if (M_cov > 0) get_mat(paste0("alpha_L[", 1:M_cov, "]")) else matrix(0, n, 0),
-        beta_vcov_reg_flat = beta_vcov_reg_flat,
-        tau_vcov_reg = get_col("tau_L"),
-        lambda_vcov_reg = if (M_cov > 0) get_mat(paste0("lambda_L[", 1:M_cov, "]")) else matrix(0, n, 0),
+        alpha_corr_reg = if (M_cov > 0) get_mat(paste0("alpha_L[", 1:M_cov, "]")) else matrix(0, n, 0),
+        beta_corr_reg_flat = beta_corr_reg_flat,
+        tau_corr_reg = get_col("tau_L"),
+        lambda_corr_reg = if (M_cov > 0) get_mat(paste0("lambda_L[", 1:M_cov, "]")) else matrix(0, n, 0),
         log_h0_intercept = log_h0_intercept,
         bs_gamma_c = bs_gamma_c,
         gamma_hazard = gamma_hazard,
@@ -1329,7 +1459,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         coeff_assoc_cs_mean = get_col("alpha_cs_mean"),
         coeff_assoc_cv_marker = get_col("alpha_cv_marker"),
         coeff_assoc_cs_marker = get_col("alpha_cs_marker"),
-        coeff_assoc_vcov_var = if (sd$Q_idm > 0) get_mat(paste0("alpha_vcov_var[", 1:sd$Q_idm, "]")) else matrix(0, n, 0),
+        coeff_assoc_corr = corr_coef_padded,
         cutpoints_ord = if (!is.null(sd$K_ord) && sd$K_ord > 1 && "cutpoints_ord[1]" %in% colnames(dmat)) {
             get_mat(paste0("cutpoints_ord[", 1:(sd$K_ord - 1), "]"))
         } else {
@@ -1354,7 +1484,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     fixed_rhs <- stats::update(f_fix, . ~ .)
     fixed_rhs[[2]] <- NULL
 
-    grp <- vapply(bars, function(b) as.character(b[[3]]), character(1))
+    grp <- vapply(bars, function(b) .group_name_from_expr(b[[3]]), character(1))
     id_rhs_list <- .bar_terms_to_rhs_list(bars[which(grp == id_var)])
     nested <- .extract_nested_marker_terms(forms$formulaLong, marker_var, id_var)
 
@@ -1401,10 +1531,10 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     fe_rhs[[2]] <- NULL
     vec_cov_hazard <- .mm(fe_rhs, dE)
 
-    fv_rhs <- stats::update(forms$formulaVcov, . ~ .)
+    fv_rhs <- stats::update(forms$formulaCorr, . ~ .)
     fv_rhs[[2]] <- NULL
-    vec_cov_vcov <- .mm(fv_rhs, dE)
-    if (ncol(vec_cov_vcov) == 1 && colnames(vec_cov_vcov)[1] == "(Intercept)" && sd$K_cov == 1) vec_cov_vcov <- matrix(0, 1, 1)
+    vec_cov_corr <- .mm(fv_rhs, dE)
+    if (ncol(vec_cov_corr) == 1 && colnames(vec_cov_corr)[1] == "(Intercept)" && sd$K_cov == 1) vec_cov_corr <- matrix(0, 1, 1)
 
     gk <- .gk15_nodes()
     u_cond <- 0.5 * T_cond_scaled * (gk + 1)
@@ -1612,16 +1742,14 @@ posterior_predict.JoinMeFit <- function(object, ...) {
             if (all(abs(marker_weights) < 1e-12)) {
                 marker_weights <- rep(1, length(marker_levels))
             }
-            # Keep predict-path scale aligned with Stan fit-path convention.
-            marker_weights <- marker_weights / sqrt(mean(marker_weights^2))
         }
     }
 
     marker_weights_draws <- draws_list$marker_weights_draws
-    n_draws_pred <- nrow(draws_list$beta_fixed)
-    if (is.null(marker_weights_draws) || nrow(marker_weights_draws) != n_draws_pred) {
-        marker_weights_draws <- matrix(rep(marker_weights, each = n_draws_pred),
-                                        nrow = n_draws_pred, byrow = TRUE)
+    n_pred_draws <- nrow(draws_list$beta_fixed)
+    if (is.null(marker_weights_draws) || nrow(marker_weights_draws) != n_pred_draws) {
+        marker_weights_draws <- matrix(rep(marker_weights, each = n_pred_draws),
+                                        nrow = n_pred_draws, byrow = TRUE)
     }
 
     dL[[marker_var]] <- factor(dL[[marker_var]], levels = marker_levels)
@@ -1678,7 +1806,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     marker_to_tau_sde_family_out <- .default_marker_family_map(sd$marker_to_tau_sde_family, n_family_tau_sde_out)
 
     out <- list(
-        n_draws = n_draws_pred,
+        n_draws = n_pred_draws,
         n_obs_long = nrow(dL), idx_marker_obs = marker_int, n_marker_types = sd$D,
         marker_weights = as.numeric(marker_weights),
         marker_weights_draws = marker_weights_draws,
@@ -1687,7 +1815,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         trials_obs = as.integer(trials_obs),
         n_fixed_effects = sd$P, n_random_id = sd$R_id, n_random_marker = sd$R_mk, n_random_marker_id = sd$Q_idm,
         mat_fixed_obs = mat_fixed_obs, mat_id_obs = mat_id_obs, mat_marker_obs = mat_marker_obs, mat_marker_id_obs = mat_marker_id_obs,
-        n_cov_vcov = sd$K_cov, vec_cov_vcov = as.vector(vec_cov_vcov),
+        n_cov_corr = sd$K_cov, vec_cov_corr = as.vector(vec_cov_corr),
         n_cov_hazard = sd$p_w, vec_cov_hazard = as.vector(vec_cov_hazard),
         n_basehaz_basis = sd$Kbs, time_condition = T_cond_scaled,
         mat_basis_gk_cond = mat_basis_gk_cond,
@@ -1724,8 +1852,8 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         tau_marker = draws_list$tau_marker, Lcorr_marker = draws_list$Lcorr_marker, B_cross = draws_list$B_cross,
         tau_marker_id = draws_list$tau_marker_id, Lcorr_marker_id = draws_list$Lcorr_marker_id,
         num_unique_cov_entries = M_cov_val,
-        alpha_vcov_reg = draws_list$alpha_vcov_reg, beta_vcov_reg_flat = draws_list$beta_vcov_reg_flat,
-        tau_vcov_reg = draws_list$tau_vcov_reg, lambda_vcov_reg = draws_list$lambda_vcov_reg,
+        alpha_corr_reg = draws_list$alpha_corr_reg, beta_corr_reg_flat = draws_list$beta_corr_reg_flat,
+        tau_corr_reg = draws_list$tau_corr_reg, lambda_corr_reg = draws_list$lambda_corr_reg,
         K_event = sd$K_event %||% 1L,
         log_h0_intercept = draws_list$log_h0_intercept, bs_gamma_c = draws_list$bs_gamma_c, gamma_hazard = draws_list$gamma_hazard,
         beta_sigma = draws_list$beta_sigma,
@@ -1754,34 +1882,34 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         n_family_tau_sde = n_family_tau_sde_out,
         marker_to_tau_sde_family = marker_to_tau_sde_family_out,
         flag_resid_dim = sd$flag_resid_dim,
-        vcov_diag_link = sd$vcov_diag_link,
+        corr_diag_link = sd$corr_diag_link,
         use_tau_sde_fixed = sd$use_tau_sde_fixed,
         tau_sde_fixed = sd$tau_sde_fixed,
         coeff_assoc_cv_total = draws_list$coeff_assoc_cv_total, coeff_assoc_cs_total = draws_list$coeff_assoc_cs_total,
         coeff_assoc_cv_mean = draws_list$coeff_assoc_cv_mean, coeff_assoc_cs_mean = draws_list$coeff_assoc_cs_mean,
         coeff_assoc_cv_marker = draws_list$coeff_assoc_cv_marker, coeff_assoc_cs_marker = draws_list$coeff_assoc_cs_marker,
-        coeff_assoc_vcov_var = draws_list$coeff_assoc_vcov_var,
+        coeff_assoc_corr = draws_list$coeff_assoc_corr,
         K_ord = sd$K_ord %||% 2L,
         cutpoints_ord = draws_list$cutpoints_ord,
         flag_assoc_cv_total = sd$assoc_cv_total, flag_assoc_cv_mean = sd$assoc_cv_mean, flag_assoc_cv_marker = sd$assoc_cv_marker,
         flag_assoc_cs_total = sd$assoc_cs_total, flag_assoc_cs_mean = sd$assoc_cs_mean, flag_assoc_cs_marker = sd$assoc_cs_marker,
-        flag_assoc_vcov = sd$assoc_vcov,
+        flag_assoc_corr = sd$assoc_corr,
         tf_mode_cv_tot = sd$tf_mode_cv_tot, tf_mode_cs_tot = sd$tf_mode_cs_tot,
         tf_mode_cv_mean = sd$tf_mode_cv_mean, tf_mode_cv_marker = sd$tf_mode_cv_marker,
         tf_mode_cs_mean = sd$tf_mode_cs_mean, tf_mode_cs_marker = sd$tf_mode_cs_marker,
-        tf_mode_vcov = sd$tf_mode_vcov,
+        tf_mode_corr = sd$tf_mode_corr,
         n_functional_ops_cv = sd$n_functional_ops_cv, functional_ops_cv = sd$functional_ops_cv,
         n_const_cv = sd$n_const_cv, const_data_cv = sd$const_data_cv,
         n_functional_ops_cs = sd$n_functional_ops_cs, functional_ops_cs = sd$functional_ops_cs,
         n_const_cs = sd$n_const_cs, const_data_cs = sd$const_data_cs,
-        n_functional_ops_vcov = sd$n_functional_ops_vcov, functional_ops_vcov = sd$functional_ops_vcov,
-        n_const_vcov = sd$n_const_vcov, const_data_vcov = sd$const_data_vcov,
+        n_functional_ops_corr = sd$n_functional_ops_corr, functional_ops_corr = sd$functional_ops_corr,
+        n_const_corr = sd$n_const_corr, const_data_corr = sd$const_data_corr,
         n_knots_cv = sd$n_knots_cv, knots_cv = sd$knots_cv,
         n_coeff_cv = sd$n_coeff_cv, coeff_cv = sd$coeff_cv, spline_degree_cv = sd$spline_degree_cv,
         n_knots_cs = sd$n_knots_cs, knots_cs = sd$knots_cs,
         n_coeff_cs = sd$n_coeff_cs, coeff_cs = sd$coeff_cs, spline_degree_cs = sd$spline_degree_cs,
-        n_knots_vcov = sd$n_knots_vcov, knots_vcov = sd$knots_vcov,
-        n_coeff_vcov = sd$n_coeff_vcov, coeff_vcov = sd$coeff_vcov, spline_degree_vcov = sd$spline_degree_vcov,
+        n_knots_corr = sd$n_knots_corr, knots_corr = sd$knots_corr,
+        n_coeff_corr = sd$n_coeff_corr, coeff_corr = sd$coeff_corr, spline_degree_corr = sd$spline_degree_corr,
         n_functional_ops_cv_mean = sd$n_functional_ops_cv_mean, functional_ops_cv_mean = sd$functional_ops_cv_mean,
         n_const_cv_mean = sd$n_const_cv_mean, const_data_cv_mean = sd$const_data_cv_mean,
         n_knots_cv_mean = sd$n_knots_cv_mean, knots_cv_mean = sd$knots_cv_mean,
@@ -1964,17 +2092,17 @@ posterior_predict.JoinMeFit <- function(object, ...) {
 
     tau_marker_id_draws <- standata_subject$tau_marker_id
     lcorr_marker_id_draws <- standata_subject$Lcorr_marker_id
-    tau_vcov_reg <- as.numeric(standata_subject$tau_vcov_reg %||% numeric(0))
-    alpha_vcov_reg <- standata_subject$alpha_vcov_reg
-    beta_vcov_reg_flat <- standata_subject$beta_vcov_reg_flat
-    lambda_vcov_reg <- standata_subject$lambda_vcov_reg
-    vec_cov_vcov <- as.numeric(standata_subject$vec_cov_vcov %||% numeric(0))
+    tau_corr_reg <- as.numeric(standata_subject$tau_corr_reg %||% numeric(0))
+    alpha_corr_reg <- standata_subject$alpha_corr_reg
+    beta_corr_reg_flat <- standata_subject$beta_corr_reg_flat
+    lambda_corr_reg <- standata_subject$lambda_corr_reg
+    vec_cov_corr <- as.numeric(standata_subject$vec_cov_corr %||% numeric(0))
     idx_row_cov <- as.integer(standata_subject$idx_row_cov %||% integer(0))
     idx_col_cov <- as.integer(standata_subject$idx_col_cov %||% integer(0))
 
     if (is.null(tau_marker_id_draws) || is.null(lcorr_marker_id_draws) ||
-        is.null(alpha_vcov_reg) || is.null(beta_vcov_reg_flat) || is.null(lambda_vcov_reg) ||
-        length(tau_vcov_reg) == 0 || length(idx_row_cov) == 0 || length(idx_col_cov) == 0) {
+        is.null(alpha_corr_reg) || is.null(beta_corr_reg_flat) || is.null(lambda_corr_reg) ||
+        length(tau_corr_reg) == 0 || length(idx_row_cov) == 0 || length(idx_col_cov) == 0) {
         return(NULL)
     }
 
@@ -2002,7 +2130,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     marker_id_terms <- standata_subject$zidm_cols %||% paste0("w_idm[", seq_len(n_random_marker_id), "]")
 
     out_matrix <- matrix(NA_real_, nrow = n_draws_target, ncol = n_marker_types * n_random_marker_id)
-    out_vcov <- array(NA_real_, dim = c(n_draws_target, n_random_marker_id, n_random_marker_id))
+    out_corr <- array(NA_real_, dim = c(n_draws_target, n_random_marker_id, n_random_marker_id))
     col_names <- unlist(lapply(marker_labels, function(marker_name) {
         paste0(marker_name, "::", marker_id_terms)
     }), use.names = FALSE)
@@ -2034,21 +2162,21 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         l_i <- matrix(0.0, nrow = n_random_marker_id, ncol = n_random_marker_id)
         z_l_draw <- as.numeric(get_draw_scalar(paste0("z_L[", draw_index, "]"), draw_index))
         if (!is.finite(z_l_draw)) z_l_draw <- 0
-        u_lk <- as.numeric(tau_vcov_reg[draw_index] %||% 0) * z_l_draw
+        u_lk <- as.numeric(tau_corr_reg[draw_index] %||% 0) * z_l_draw
 
         for (m in seq_len(m_cov)) {
             r_ <- idx_row_cov[m]
             c_ <- idx_col_cov[m]
-            b_slice_start <- (m - 1L) * length(vec_cov_vcov) + 1L
-            b_slice_end <- m * length(vec_cov_vcov)
-            b_vec <- if (length(vec_cov_vcov) > 0) {
-                as.numeric(beta_vcov_reg_flat[draw_index, b_slice_start:b_slice_end])
+            b_slice_start <- (m - 1L) * length(vec_cov_corr) + 1L
+            b_slice_end <- m * length(vec_cov_corr)
+            b_vec <- if (length(vec_cov_corr) > 0) {
+                as.numeric(beta_corr_reg_flat[draw_index, b_slice_start:b_slice_end])
             } else {
                 numeric(0)
             }
-            lp <- as.numeric(alpha_vcov_reg[draw_index, m]) +
-                if (length(vec_cov_vcov) > 0) sum(b_vec * vec_cov_vcov) else 0 +
-                as.numeric(lambda_vcov_reg[draw_index, m]) * u_lk
+            lp <- as.numeric(alpha_corr_reg[draw_index, m]) +
+                if (length(vec_cov_corr) > 0) sum(b_vec * vec_cov_corr) else 0 +
+                as.numeric(lambda_corr_reg[draw_index, m]) * u_lk
             l_i[r_, c_] <- if (r_ == c_) log1p(exp(lp)) else lp
         }
 
@@ -2093,19 +2221,19 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         }
 
         out_matrix[draw_index, ] <- draw_values
-        out_vcov[draw_index, , ] <- l_i %*% t(l_i)
+        out_corr[draw_index, , ] <- l_i %*% t(l_i)
     }
 
     list(
         matrix = out_matrix,
-        vcov = out_vcov,
+        corr = out_corr,
         markers = marker_labels,
         terms = marker_id_terms,
         n_random_marker_id = n_random_marker_id
     )
 }
 
-.marker_vcov_depends_on_id <- function(object, newdataEvent = NULL) {
+.marker_corr_depends_on_id <- function(object, newdataEvent = NULL) {
     sd <- object$stan_data
     q_idm <- as.integer(sd$Q_idm %||% 0L)
     if (is.null(sd) || q_idm <= 0L) {
@@ -2114,7 +2242,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
 
     # If marker-by-id random-effects are present in the fitted model,
     # prediction-time marker covariance varies by subject through L_i.
-    # This is the primary availability condition for ranef/vcov extraction.
+    # This is the primary availability condition for ranef/corr extraction.
     TRUE
 }
 
@@ -2175,7 +2303,7 @@ summary.JoinMeDynPred <- function(object, ...) {
             n_surv_subjects,
             n_cumhaz_rows,
             n_cumhaz_subjects,
-            object$metadata$scale %||% NA_character_,
+            if (!is.null(object$metadata$scales)) paste(object$metadata$scales, collapse = ",") else object$metadata$scale %||% NA_character_,
             object$n_samples %||% object$metadata$n_samples %||% NA_real_
         ),
         stringsAsFactors = FALSE
@@ -2224,10 +2352,10 @@ summary.JoinMeDynPred <- function(object, ...) {
         random_effects_id_table <- do.call(rbind, random_effect_rows)
     }
 
-    marker_vcov_depends_on_id <- isTRUE(object$metadata$marker_vcov_depends_on_id)
+    marker_corr_depends_on_id <- isTRUE(object$metadata$marker_corr_depends_on_id)
 
     random_effects_marker_id_table <- NULL
-    if (marker_vcov_depends_on_id && !is.null(object$draws$random_effects_marker_id) && length(object$draws$random_effects_marker_id) > 0) {
+    if (marker_corr_depends_on_id && !is.null(object$draws$random_effects_marker_id) && length(object$draws$random_effects_marker_id) > 0) {
         marker_id_rows <- lapply(names(object$draws$random_effects_marker_id), function(subject_id) {
             subject_effects <- object$draws$random_effects_marker_id[[subject_id]]
             w_idm_matrix <- subject_effects$matrix
@@ -2267,19 +2395,19 @@ summary.JoinMeDynPred <- function(object, ...) {
         }
     }
 
-    vcov_marker_id_table <- NULL
-    if (marker_vcov_depends_on_id && !is.null(object$draws$random_effects_marker_id) && length(object$draws$random_effects_marker_id) > 0) {
-        vcov_rows <- lapply(names(object$draws$random_effects_marker_id), function(subject_id) {
+    corr_marker_id_table <- NULL
+    if (marker_corr_depends_on_id && !is.null(object$draws$random_effects_marker_id) && length(object$draws$random_effects_marker_id) > 0) {
+        corr_rows <- lapply(names(object$draws$random_effects_marker_id), function(subject_id) {
             subject_effects <- object$draws$random_effects_marker_id[[subject_id]]
-            vcov_draws <- subject_effects$vcov
-            if (is.null(vcov_draws) || length(dim(vcov_draws)) != 3) return(NULL)
+            corr_draws <- subject_effects$corr
+            if (is.null(corr_draws) || length(dim(corr_draws)) != 3) return(NULL)
 
-            terms <- as.character(subject_effects$terms %||% paste0("w_idm[", seq_len(dim(vcov_draws)[2]), "]"))
-            q_dim <- dim(vcov_draws)[2]
+            terms <- as.character(subject_effects$terms %||% paste0("w_idm[", seq_len(dim(corr_draws)[2]), "]"))
+            q_dim <- dim(corr_draws)[2]
 
             per_cell <- lapply(seq_len(q_dim), function(r_idx) {
                 lapply(seq_len(q_dim), function(c_idx) {
-                    draw_summary <- .summarize_draw_vector_with_diagnostics(vcov_draws[, r_idx, c_idx])
+                    draw_summary <- .summarize_draw_vector_with_diagnostics(corr_draws[, r_idx, c_idx])
                     cbind(
                         id = subject_id,
                         row = terms[r_idx],
@@ -2291,9 +2419,9 @@ summary.JoinMeDynPred <- function(object, ...) {
             })
             do.call(rbind, unlist(per_cell, recursive = FALSE))
         })
-        vcov_rows <- Filter(Negate(is.null), vcov_rows)
-        if (length(vcov_rows) > 0) {
-            vcov_marker_id_table <- do.call(rbind, vcov_rows)
+        corr_rows <- Filter(Negate(is.null), corr_rows)
+        if (length(corr_rows) > 0) {
+            corr_marker_id_table <- do.call(rbind, corr_rows)
         }
     }
 
@@ -2339,7 +2467,7 @@ summary.JoinMeDynPred <- function(object, ...) {
         median_survival_time = median_survival_table,
         random_effects_id = random_effects_id_table,
         random_effects_marker_id = random_effects_marker_id_table,
-        vcov_marker_id = vcov_marker_id_table
+        corr_marker_id = corr_marker_id_table
     )
 
     summary_obj <- SummaryJoinMeDynPred$new(tables = tables, metadata = object$metadata)
@@ -2363,10 +2491,10 @@ summary.JoinMeDynPred <- function(object, ...) {
 ranef.JoinMeDynPred <- function(object, ...) {
     assertthat::assert_that(inherits(object, "JoinMeDynPred"), msg = "Object must be a JoinMeDynPred instance.")
 
-    if (!isTRUE(object$metadata$marker_vcov_depends_on_id)) {
+    if (!isTRUE(object$metadata$marker_corr_depends_on_id)) {
         cli::cli_abort(c(
             x = "Predicted marker-by-id random effects are only available when marker covariance depends on id.",
-            i = "Refit with subject-dependent covariance structure in {.arg formulaVcov} and marker-by-id random effects (Q_idm > 0)."
+            i = "Refit with subject-dependent covariance structure in {.arg formulaCorr} and marker-by-id random effects (Q_idm > 0)."
         ))
     }
 
@@ -2390,20 +2518,20 @@ ranef.JoinMeDynPred <- function(object, ...) {
 #'
 #' @return A named list containing covariance summary tables.
 #' @export
-vcov.JoinMeDynPred <- function(object, ...) {
+corr.JoinMeDynPred <- function(object, ...) {
     assertthat::assert_that(inherits(object, "JoinMeDynPred"), msg = "Object must be a JoinMeDynPred instance.")
 
-    if (!isTRUE(object$metadata$marker_vcov_depends_on_id)) {
+    if (!isTRUE(object$metadata$marker_corr_depends_on_id)) {
         cli::cli_abort(c(
             x = "Predicted marker-by-id covariance is only available when marker covariance depends on id.",
-            i = "Refit with subject-dependent covariance structure in {.arg formulaVcov} and marker-by-id random effects (Q_idm > 0)."
+            i = "Refit with subject-dependent covariance structure in {.arg formulaCorr} and marker-by-id random effects (Q_idm > 0)."
         ))
     }
 
     sum_obj <- summary(object)
     list(
         formulaLong = list(
-            marker_by_id = sum_obj$tables$vcov_marker_id
+            marker_by_id = sum_obj$tables$corr_marker_id
         )
     )
 }
@@ -2427,8 +2555,13 @@ print.JoinMeDynPred <- function(x, ...) {
     if (!is.null(x$metadata$pred_type)) {
         cat("Prediction type: ", x$metadata$pred_type, "\n", sep = "")
     }
-    if (!is.null(x$metadata$scale)) {
-        cat("Scale: ", x$metadata$scale, "\n", sep = "")
+    scales <- x$metadata$scales %||% x$metadata$scale
+    if (!is.null(scales)) {
+        if (length(scales) > 1L) {
+            cat("Scales: ", paste(scales, collapse = ", "), "\n", sep = "")
+        } else {
+            cat("Scale: ", scales, "\n", sep = "")
+        }
     }
     if (!is.null(x$metadata$n_subjects)) {
         cat("Subjects: ", x$metadata$n_subjects, "\n", sep = "")
@@ -2473,10 +2606,10 @@ print.summary_JoinMeDynPred <- function(x, ...) {
         cat("-------------------------------------\n")
         print(x$tables$random_effects_marker_id, row.names = FALSE)
     }
-    if (!is.null(x$tables$vcov_marker_id)) {
+    if (!is.null(x$tables$corr_marker_id)) {
         cat("\nPredicted marker-by-id covariance\n")
         cat("----------------------------------\n")
-        print(x$tables$vcov_marker_id, row.names = FALSE)
+        print(x$tables$corr_marker_id, row.names = FALSE)
     }
     invisible(x)
 }

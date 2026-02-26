@@ -9,7 +9,7 @@ joinme_standata(
   dataLong,
   formulaEvent,
   dataEvent,
-  formulaVcov = ~1,
+  formulaCorr = ~1,
   formulaDist = NULL,
   id_var = "id",
   marker_var = "marker",
@@ -31,14 +31,13 @@ joinme_standata(
   shrinkage = 2L,
   marker_weights = NULL,
   estimate_marker_weights = TRUE,
-  marker_weight_scale = 1,
   flag_resid_dim = 0L,
   basehaz = c("bs", "ns", "formula"),
   n_knots = 5L,
   basehaz_degree = 3L,
   basehaz_formula = ~1 + time,
   tau_spline = 0.4,
-  vcov_diag_link = c("softplus", "exp"),
+  corr_diag_link = c("softplus", "exp"),
   tau_sde_fixed = NULL,
   seed = NULL
 )
@@ -48,7 +47,9 @@ joinme_standata(
 and the marker block. The marker block may optionally include an inner
 \code{( ... | id )} term for marker-by-id random effects. When the inner term is
 omitted, marker-by-id random effects are disabled (Q_idm = 0). Use \code{||} to
-enforce diagonal random-effect covariance (e.g., \code{(1 + time || id)}).}
+enforce diagonal random-effect covariance (e.g., \code{(1 + time || id)}). Grouping
+terms may use \verb{weighted(group, weights = <column>)}
+to define formula-scoped positive subject/group weights.}
 
 \item{dataLong}{Long-format longitudinal data with columns for id, marker, time,
 outcome, and covariates referenced in \code{formulaLong}.}
@@ -58,9 +59,9 @@ outcome, and covariates referenced in \code{formulaLong}.}
 \item{dataEvent}{One row per id event data with event time, event indicator, and
 covariates referenced in \code{formulaEvent}.}
 
-\item{formulaVcov}{Covariance regression formula for id-specific marker-by-id effects.
+\item{formulaCorr}{Covariance regression formula for id-specific marker-by-id effects.
 If the marker block omits the inner \code{( ... | id )}, then marker-by-id effects
-are absent and \code{vcov} associations are not allowed.}
+are absent and \code{corr} associations are not allowed.}
 
 \item{formulaDist}{Optional list of formulas for distributional regression. Two
 forms are supported:
@@ -68,6 +69,8 @@ forms are supported:
 \item Named list with RHS-only formulas, e.g. \code{list(sigma = ~ 1 + time)}.
 \item Unnamed list with LHS parameter names, e.g. \code{list(sigma ~ 1 + time)}.
 Random-effects terms with \code{|} are supported; nested random-effects formulas are not.
+Grouping factors in distributional random-effects terms may also use
+\verb{weighted(group, weights = <column>)}.
 }}
 
 \item{id_var}{Column name for subject id in both longitudinal and event data.}
@@ -91,13 +94,13 @@ Random-effects terms with \code{|} are supported; nested random-effects formulas
 \item{eps_fd}{Positive finite-difference step for association derivatives.}
 
 \item{assoc}{Character vector specifying association components
-(e.g., "cv_mean", "cs_total", "vcov").}
+(e.g., "cv_mean", "cs_total", "corr").}
 
 \item{families}{Optional marker-specific family names. If NULL, all markers
 use Gaussian responses.}
 
 \item{transforms}{Optional list specifying transformations for association terms.
-Each element (cv_total, cs_total, vcov) is a list with a \code{type} and fields
+Each element (cv_total, cs_total, corr) is a list with a \code{type} and fields
 required by that type (see \code{build_standata_transforms()}).}
 
 \item{beta_prior}{Prior specification for longitudinal fixed effects.}
@@ -112,17 +115,14 @@ required by that type (see \code{build_standata_transforms()}).}
 
 \item{marker_weights}{Optional numeric vector of length D giving base weights
 for marker-specific association components. These weights are applied to both
-current value (CV) and current slope (CS) marker summaries. Weights may be
-positive or negative. Internally, base weights are rescaled to unit RMS
-(\code{sqrt(mean(w^2)) = 1}) for numerical stability and better identifiability.
-When NULL, equal base weights are used.}
+current value (CV) and current slope (CS) marker summaries as signed
+aggregation weights. Inputs are used directly. When NULL, equal base weights
+are used.}
 
 \item{estimate_marker_weights}{Logical; if TRUE, estimate marker weights via a
-signed additive perturbation around base weights. The effective weights are
-RMS-stabilized so composition can change while overall scale remains stable.
-Latent perturbations follow Normal or Laplace priors depending on \code{shrinkage}.}
-
-\item{marker_weight_scale}{Non-negative prior scale for marker-weight shrinkage.}
+signed additive perturbation around base weights,
+\eqn{marker\_weights + z\_marker\_weights}, with
+\code{z_marker_weights ~ N(0, 1)}.}
 
 \item{flag_resid_dim}{Integer flag to include residual dimension checks.}
 
@@ -136,7 +136,7 @@ Latent perturbations follow Normal or Laplace priors depending on \code{shrinkag
 
 \item{tau_spline}{Prior scale for spline coefficients (penalized spline).}
 
-\item{vcov_diag_link}{Link for covariance regression diagonals: "softplus" or "exp".}
+\item{corr_diag_link}{Link for covariance regression diagonals: "softplus" or "exp".}
 
 \item{tau_sde_fixed}{Optional fixed tau for skew-double-exponential (0 < tau < 1).}
 
@@ -164,7 +164,7 @@ This builder performs three key steps:
 \enumerate{
 \item Constructs fixed-effect and random-effect design matrices on a scaled time axis.
 \item Creates distributional regression matrices (including optional random effects).
-\item Assembles spline bases and Gauss–Kronrod nodes for survival integration.
+\item Assembles spline bases and Gaussâ€“Kronrod nodes for survival integration.
 }
 
 Time is scaled internally as \code{t_scaled = t/t_max} for numerical stability; indices

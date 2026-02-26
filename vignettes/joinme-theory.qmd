@@ -39,7 +39,7 @@ process is expressed through a layered random-effects decomposition that separat
 subject-level signals, marker-level deviations, and marker-by-subject departures.
 The survival component links risk to summaries of the longitudinal trajectories,
 most notably the current value (CV), current slope (CS), and a variance summary
-of the marker-by-subject covariance structure (VCOV). Association summaries can be
+of the marker-by-subject covariance structure (CORR). Association summaries can be
 transformed by user-defined monotone splines, piecewise linear rules, or functional
 bytecode expressions. Estimation is performed with Hamiltonian Monte Carlo in Stan,
 and the main likelihood is evaluated with reduce_sum for within-chain parallelism.
@@ -120,7 +120,7 @@ A unique feature of `joinme` is the ability to model the covariance structure of
 $$
 \Sigma_{w, i} = \text{diag}(\boldsymbol{\tau}_i) \, \Omega \, \text{diag}(\boldsymbol{\tau}_i)
 $$
-where $\log(\boldsymbol{\tau}_i) = \mathbf{X}_{cov, i} \boldsymbol{\beta}_{\tau}$. This allows, for example, the variability in biomarker trajectories to differ between treatment groups or with baseline age (`formulaVcov`).
+where $\log(\boldsymbol{\tau}_i) = \mathbf{X}_{cov, i} \boldsymbol{\beta}_{\tau}$. This allows, for example, the variability in biomarker trajectories to differ between treatment groups or with baseline age (`formulaCorr`).
 
 In the Stan implementation, the subject-specific covariance matrix is built from
 its Cholesky factor $L_i$. Each unique lower-triangular element of $L_i$ is
@@ -137,7 +137,7 @@ $$
 L_i[r,r] = \log(1 + \exp(\ell_{im}))\;\text{or}\;\exp(\ell_{im}), \qquad L_i[r,c] = \ell_{im} \; (r > c).
 $$
 
-Use `control$vcov_diag_link` to select `"softplus"` (default) or `"exp"`.
+Use `control$corr_diag_link` to select `"softplus"` (default) or `"exp"`.
 
 This construction allows both covariate-driven heterogeneity and subject-level
 latent variability in the marker-by-subject covariance structure.
@@ -168,7 +168,7 @@ history using a small set of interpretable features:
   at time $t$.
 - **Current slope (CS)**: the derivative of the latent longitudinal linear
   predictor at time $t$.
-- **Variance association (VCOV)**: a subject-specific, time-constant summary of
+- **Variance association (CORR)**: a subject-specific, time-constant summary of
   the marker-by-subject covariance structure.
 
 In implementation, CV and CS are evaluated at 15 Gauss-Kronrod nodes on the
@@ -185,14 +185,16 @@ $$
 \frac{d}{dt}\eta_{i}^{(mk)}(t) = \frac{1}{D}\sum_{d=1}^{D} \omega_d \frac{d}{dt}\eta_{id}^{(mk)}(t).
 $$
 
-These enter the hazard through the marker-specific association terms (for
-example, `cv_marker`, `cs_marker`) after any configured transformation.
+These enter the hazard through marker-specific association terms (for example,
+`cv_marker`, `cs_marker`) with transform-before-averaging semantics for
+marker-aggregated terms.
 
 To make the weighting explicit, let $\mathbf{v}_d$ denote marker-level random
 effects and $\mathbf{w}_{id}$ denote marker-by-subject random effects. The
 marker-weighted summaries are formed as weighted means across markers with
-weights $\omega_d$ that satisfy $\sum_d \omega_d = 1$. In the Stan implementation,
-the corresponding weighted means are computed as
+weights $\omega_d$. In the Stan implementation, signed marker weights are used
+directly for aggregation (or estimated as additive perturbations around base
+weights), and the corresponding weighted means are computed as
 
 $$
 \bar{\mathbf{v}} = \sum_{d=1}^D \omega_d \mathbf{v}_d, \qquad
@@ -202,17 +204,20 @@ $$
 These weighted means are then inserted into the marker components of the
 current value and slope calculations.
 
-### Shrinkage on marker contributions
+### Priors on marker contributions
 
-Marker weights and marker-side association coefficients are regularized to avoid overfitting when $D$ is large. `joinme` uses a shrinkage family controlled by `shrinkage`:
+Marker weights and CV/CS association coefficients are regularized to avoid
+overfitting when $D$ is large.
 
-- **Normal shrinkage (default)**: latent weight perturbations and marker-side association coefficients follow Normal priors.
-- **Laplace shrinkage**: the same quantities follow Laplace (double-exponential) priors.
+- **Marker weights**: when estimated, `joinme` uses latent additive perturbations
+  $\,\omega = \omega^{(0)} + z_w$ with $z_w \sim \mathcal{N}(0, I)$, and these
+  signed weights are used directly in marker-aggregated association terms.
+- **CV/CS total and marker coefficients**: non-centered normal parameterization,
+  e.g. $\alpha_{cv,total} = z_{cv,total}\,\sigma_{cv,total}$ with
+  $z_{cv,total} \sim \mathcal{N}(0,1)$ and $\sigma_{cv,total} > 0$.
 
-This applies to the marker-weight perturbations and to the marker-specific
-association coefficients for CV and CS. Marker weights are signed and are modeled
-as additive perturbations around base weights, then RMS-stabilized to keep global
-weight magnitude identifiable while allowing positive and negative marker effects.
+This keeps marker effects signed (positive or negative) while improving sampling
+geometry for hierarchical association parameters.
 
 Crucially, `joinme` supports non-linear transformations of these terms via the
 `transforms` argument. Available transformation modes include identity, a
@@ -225,7 +230,7 @@ and their slope counterparts. The transformed summaries take the form
 $$
 	ilde{\text{CV}}_\text{tot}(t) = g_{\text{CV,tot}}(\text{CV}_\text{tot}(t)), \quad
 	ilde{\text{CS}}_\text{tot}(t) = g_{\text{CS,tot}}(\text{CS}_\text{tot}(t)), \quad
-	ilde{\text{VCOV}} = g_{\text{VCOV}}(\text{VCOV}).
+	ilde{\text{CORR}} = g_{\text{CORR}}(\text{CORR}).
 $$
 
 Each $g(\cdot)$ is determined by the transformation mode and its inputs
@@ -257,13 +262,12 @@ Default priors are weakly informative and aligned with the Stan implementation:
   longitudinal and survival covariates use Student-$t$ priors with 6 degrees of
   freedom, centered at 0, with user-specified or default scales. The heavier
   tails stabilize inference while keeping weak regularization.
-- **Association coefficients**: baseline association effects use standard normal
-  priors. Marker-side coefficients can be regularized using Normal or Laplace
-  shrinkage, controlled by `shrinkage`, to avoid overfitting when many markers
-  contribute to the association.
-- **Marker weights**: when estimated, marker-weight perturbations share the same
-  shrinkage family (Normal or Laplace) to encourage sparsity or mild pooling in
-  the weighted mean contribution.
+- **Association coefficients**: CV/CS total and marker coefficients use
+  non-centered normal priors; mean-side terms use standard normal priors.
+- **Marker weights**: when estimated, marker-weight perturbations use
+  standard normal priors in additive latent form around user-supplied base
+  weights, and the resulting signed weights are used directly in
+  marker-aggregated association terms.
 - **Random-effect scales**: subject, marker, and marker-by-subject standard
   deviations use half-normal priors on the original scale for weakly informative
   positivity constraints.

@@ -31,7 +31,7 @@ test_that("summary.JoinMeDynPred reports rich subject-level outputs", {
     dataLong = sim$dataLong,
     formulaEvent = formulaEvent,
     dataEvent = sim$dataEvent,
-    formulaVcov = ~ x1,
+    formulaCorr = ~ x1,
     assoc = c("cv_total"),
     families = rep("gaussian", 2),
     transforms = list(cv_total = list(type = "identity")),
@@ -56,9 +56,9 @@ test_that("summary.JoinMeDynPred reports rich subject-level outputs", {
         newdataLong = ndL,
         newdataEvent = ndE,
         time_start = max(ndL$time),
-        n_samples = 20,
-        n_times = 50,
         control = list(
+          n_samples = 20,
+          n_times = 50,
           engine = "cmdstanr",
           chains = 1,
           iter_warmup = 50,
@@ -78,7 +78,7 @@ test_that("summary.JoinMeDynPred reports rich subject-level outputs", {
   sum_pred <- summary(pred)
   expect_s3_class(sum_pred, "summary_JoinMeDynPred")
 
-  expect_true(all(c("diagnostics", "overview", "median_survival_time", "random_effects_id", "random_effects_marker_id", "vcov_marker_id") %in% names(sum_pred$tables)))
+  expect_true(all(c("diagnostics", "overview", "median_survival_time", "random_effects_id", "random_effects_marker_id", "corr_marker_id") %in% names(sum_pred$tables)))
 
   expect_true(all(c("metric", "value") %in% names(sum_pred$tables$overview)))
 
@@ -92,7 +92,7 @@ test_that("summary.JoinMeDynPred reports rich subject-level outputs", {
     names(sum_pred$tables$random_effects_marker_id)))
 
   expect_true(all(c("id", "row", "col", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail") %in%
-    names(sum_pred$tables$vcov_marker_id)))
+    names(sum_pred$tables$corr_marker_id)))
 
   expect_true(all(c("metric", "value") %in% names(sum_pred$tables$diagnostics)))
 
@@ -123,7 +123,7 @@ test_that("summary.JoinMeDynPred diagnostics are populated from term and sampler
       random_effects_marker_id = list(
         "1" = list(
           matrix = matrix(c(0.3, 0.4), ncol = 1, dimnames = list(NULL, "m1::w1")),
-          vcov = array(c(1.0, 1.1), dim = c(2, 1, 1)),
+          corr = array(c(1.0, 1.1), dim = c(2, 1, 1)),
           terms = "w1"
         )
       ),
@@ -135,7 +135,7 @@ test_that("summary.JoinMeDynPred diagnostics are populated from term and sampler
     metadata = list(
       scale = "epred",
       n_samples = 2,
-      marker_vcov_depends_on_id = TRUE,
+      marker_corr_depends_on_id = TRUE,
       sampler_diagnostics = list(
         draws = 2,
         divergences = 0,

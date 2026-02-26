@@ -52,9 +52,9 @@ pred <- posterior_predict(
   newdataLong = ndL3,
   newdataEvent = ndE3,
   time_start = "time_start",
-  n_samples = 50,
-  n_times = 50,
   control = list(
+    n_samples = 50,
+    n_times = 50,
     chains = 2,
     parallel_chains = 2,
     iter_warmup = 80,

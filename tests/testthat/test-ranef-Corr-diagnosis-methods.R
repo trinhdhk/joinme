@@ -1,4 +1,4 @@
-test_that("ranef/vcov.JoinMeDynPred require id-dependent marker covariance", {
+test_that("ranef/corr.JoinMeDynPred require id-dependent marker covariance", {
   pred_ok <- joinme::JoinMeDynPred$new(
     predictions = list(),
     quantiles = list(),
@@ -7,7 +7,7 @@ test_that("ranef/vcov.JoinMeDynPred require id-dependent marker covariance", {
         "1" = list(
           matrix = matrix(c(0.1, 0.2, 0.3, 0.4), nrow = 2, byrow = TRUE,
                           dimnames = list(NULL, c("mk1::w1", "mk1::w2"))),
-          vcov = array(c(
+          corr = array(c(
             1.0, 0.1,
             0.1, 0.8,
             1.1, 0.2,
@@ -20,14 +20,14 @@ test_that("ranef/vcov.JoinMeDynPred require id-dependent marker covariance", {
       )
     ),
     data = list(),
-    metadata = list(marker_vcov_depends_on_id = TRUE, n_samples = 2),
+    metadata = list(marker_corr_depends_on_id = TRUE, n_samples = 2),
     call = NULL,
     tmax = 1,
     n_samples = 2
   )
 
   re_ok <- ranef(pred_ok)
-  vc_ok <- vcov(pred_ok)
+  vc_ok <- corr(pred_ok)
   expect_true(is.data.frame(re_ok$formulaLong$marker_by_id))
   expect_true(is.data.frame(vc_ok$formulaLong$marker_by_id))
   expect_true(all(c("id", "row", "col", "Estimate") %in% names(vc_ok$formulaLong$marker_by_id)))
@@ -37,25 +37,25 @@ test_that("ranef/vcov.JoinMeDynPred require id-dependent marker covariance", {
     quantiles = list(),
     draws = list(random_effects_marker_id = list()),
     data = list(),
-    metadata = list(marker_vcov_depends_on_id = FALSE),
+    metadata = list(marker_corr_depends_on_id = FALSE),
     call = NULL,
     tmax = 1,
     n_samples = 2
   )
 
   expect_error(ranef(pred_bad), "depends on id")
-  expect_error(vcov(pred_bad), "depends on id")
+  expect_error(corr(pred_bad), "depends on id")
 })
 
-test_that("marker_vcov_depends_on_id follows fitted Q_idm", {
+test_that("marker_corr_depends_on_id follows fitted Q_idm", {
   fit_like_with_qidm <- list(stan_data = list(Q_idm = 2L))
   fit_like_without_qidm <- list(stan_data = list(Q_idm = 0L))
 
-  expect_true(joinme:::.marker_vcov_depends_on_id(fit_like_with_qidm))
-  expect_false(joinme:::.marker_vcov_depends_on_id(fit_like_without_qidm))
+  expect_true(joinme:::.marker_corr_depends_on_id(fit_like_with_qidm))
+  expect_false(joinme:::.marker_corr_depends_on_id(fit_like_without_qidm))
 })
 
-test_that("vcov.JoinMeDynPred works when Q_idm > 0 without formulaVcov terms", {
+test_that("corr.JoinMeDynPred works when Q_idm > 0 without formulaCorr terms", {
   skip_on_cran()
   skip_if_not_installed("cmdstanr")
 
@@ -112,9 +112,9 @@ test_that("vcov.JoinMeDynPred works when Q_idm > 0 without formulaVcov terms", {
         newdataLong = ndL,
         newdataEvent = ndE,
         time_start = max(ndL$time),
-        n_samples = 20,
-        n_times = 50,
         control = list(
+          n_samples = 20,
+          n_times = 50,
           engine = "cmdstanr",
           chains = 1,
           iter_warmup = 50,
@@ -131,13 +131,13 @@ test_that("vcov.JoinMeDynPred works when Q_idm > 0 without formulaVcov terms", {
     skip(paste("Prediction sampler failed:", conditionMessage(pred)))
   }
 
-  expect_true(isTRUE(pred$metadata$marker_vcov_depends_on_id))
-  expect_no_error(vcov(pred))
-  vc <- vcov(pred)
+  expect_true(isTRUE(pred$metadata$marker_corr_depends_on_id))
+  expect_no_error(corr(pred))
+  vc <- corr(pred)
   expect_true(is.data.frame(vc$formulaLong$marker_by_id))
 })
 
-test_that("ranef/vcov.JoinMeFit include formulaDist random-effects blocks", {
+test_that("ranef/corr.JoinMeFit include formulaDist random-effects blocks", {
   skip_on_cran()
   skip_if_not_installed("rstan")
 
@@ -174,7 +174,7 @@ test_that("ranef/vcov.JoinMeFit include formulaDist random-effects blocks", {
   )
 
   re <- ranef(fit, draws = 20)
-  vc <- vcov(fit, draws = 20)
+  vc <- corr(fit, draws = 20)
   dg <- diagnosis(fit)
 
   expect_true(is.list(re$formulaLong))

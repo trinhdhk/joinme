@@ -170,9 +170,9 @@ test_that("joinme fits and predicts with family-scoped formulaDist", {
     newdataLong = ndL,
     newdataEvent = ndE,
     time_start = max(ndL$time),
-    n_samples = 10,
-    n_times = 50,
     control = list(
+      n_samples = 10,
+      n_times = 50,
       engine = "cmdstanr",
       chains = 1,
       iter_warmup = 20,

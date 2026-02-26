@@ -29,13 +29,17 @@ Additional implementation details that are central to the interpretation:
 
 - Marker-weighted contributions are formed as weighted means across markers,
   using either fixed weights or shrinkage-estimated weights.
-- The VCOV association depends on an id-level latent effect that drives a
+- The CORR association depends on an id-level latent effect that drives a
   covariance regression, producing subject-specific Cholesky factors.
-- Non-linear transforms are applied to CV, CS, and VCOV before they enter the
+- Non-linear transforms are applied to CV, CS, and CORR before they enter the
   hazard, using identity, functional opcodes, monotone I-splines, or piecewise
   linear rules.
 - Random-effects independence follows lme4-style `||` syntax in `formulaLong`,
   mapping to diagonal covariance structures for id, marker, and nested marker-by-id blocks.
+- Formula-scoped random-effects weighting is supported via
+  `weighted(group, weights = <column>)` for both id
+  and marker grouping terms; these weights flow into latent RE priors,
+  and subject-level weights also scale longitudinal/survival likelihood contributions.
 - Prediction plots distinguish fitted history from forecast intervals and display
   user-selected credible bands for longitudinal, survival, and cumulative hazard trajectories.
 - Competing risks are supported through event-type indexing; the overall survival
@@ -48,10 +52,10 @@ fit and prediction objects:
 
 - `diagnosis()` returns a common diagnostics table schema for both
   `JoinMeFit` and `JoinMeDynPred`.
-- `ranef()` and `vcov()` on `JoinMeFit` return nested structures organized by
+- `ranef()` and `corr()` on `JoinMeFit` return nested structures organized by
   `formulaLong` and `formulaDist` (including family-scoped distributional
   random-effect blocks).
-- `ranef()` and `vcov()` on `JoinMeDynPred` are enabled only when marker
+- `ranef()` and `corr()` on `JoinMeDynPred` are enabled only when marker
   covariance depends on id; they return per-id marker-by-id random effects and
   per-id predicted covariance summaries.
 
@@ -76,7 +80,7 @@ flowchart TD
     subgraph Data["Data Layer"]
         LongData[("Longitudinal Data<br/>N observations<br/>D markers<br/>n_id subjects")]
         EventData[("Survival Data<br/>n_id subjects<br/>K_event risks")]
-        Covariates[("Covariates<br/>Fixed effects<br/>Hazard covariates<br/>Vcov covariates")]
+        Covariates[("Covariates<br/>Fixed effects<br/>Hazard covariates<br/>Corr covariates")]
     end
     
     subgraph Model["Model Layer"]
@@ -87,15 +91,15 @@ flowchart TD
     
     subgraph Parameters["Parameter Space"]
         direction LR
-        FixedEffects["β: Fixed Effects"]
+        FixedEffects["Î²: Fixed Effects"]
         RandomEffects["u, v, w: Random Effects"]
-        Hazard["γ, h0: Hazard Parameters"]
-        Association["α: Association Weights"]
+        Hazard["Î³, h0: Hazard Parameters"]
+        Association["Î±: Association Weights"]
     end
     
     subgraph Likelihood["Likelihood Functions"]
-        LongLik["Longitudinal Likelihood<br/>P(Y|RE, β)"]
-        SurvLik[" Survival Likelihood<br/>P(T, δ|RE, γ, h0, α)"]
+        LongLik["Longitudinal Likelihood<br/>P(Y|RE, Î²)"]
+        SurvLik[" Survival Likelihood<br/>P(T, Î´|RE, Î³, h0, Î±)"]
     end
     
    subgraph Helpers["Helper Functions"]
@@ -153,11 +157,11 @@ graph LR
     end
     
     subgraph Params["Parameters"]
-        Beta["β: Fixed effects<br/>(scaled)"]
+        Beta["Î²: Fixed effects<br/>(scaled)"]
         RE["u_id: ID REs<br/>v_marker: Marker REs<br/>w_idscaled: Interaction REs"]
-        Scales["τ: RE scales<br/>Lcorr: Correlations"]
-        Gamma["γ: Hazard params<br/>h0: Baseline hazard"]
-        Alpha["α: Association<br/>coefficients"]
+        Scales["Ï„: RE scales<br/>Lcorr: Correlations"]
+        Gamma["Î³: Hazard params<br/>h0: Baseline hazard"]
+        Alpha["Î±: Association<br/>coefficients"]
     end
     
     subgraph Likelihood["Model Block"]
@@ -166,7 +170,7 @@ graph LR
     end
     
     subgraph SubjectLik["Subject i Likelihood"]
-        LongLoop["For each obs n ∈ [id_start[i], id_end[i]]:<br/>Compute η = Xβ + Zu + Zv + Zw<br/>Accumulate log p(y[n] | η, family)"]
+        LongLoop["For each obs n âˆˆ [id_start[i], id_end[i]]:<br/>Compute Î· = XÎ² + Zu + Zv + Zw<br/>Accumulate log p(y[n] | Î·, family)"]
         SurvCalc["Compute association features:<br/>CV, CS at GK nodes & event time<br/>Transform via functional ops<br/>Compute log h(t) & cumulative hazard"]
     end
     
@@ -191,11 +195,11 @@ graph LR
 ```plaintext
 FOR each MCMC iteration:
   1. Sample parameters from priors
-  2. Compute scaled fixed effects: β_scaled = β / tmax^{idx_time_*}
+  2. Compute scaled fixed effects: Î²_scaled = Î² / tmax^{idx_time_*}
   3. Call reduce_sum(partial_joinme, id_seq, grainsize, ...)
-     ├─ Splits subjects into chunks of size grainsize
-     ├─ Processes each chunk in parallel (if threading enabled)
-     └─ Returns total log-likelihood
+     â”œâ”€ Splits subjects into chunks of size grainsize
+     â”œâ”€ Processes each chunk in parallel (if threading enabled)
+     â””â”€ Returns total log-likelihood
   4. Add log-likelihood to target
 END FOR
 ```
@@ -218,35 +222,35 @@ FUNCTION partial_joinme(id_seq, start, end, ... [all data & parameters]):
       d = marker[n]  // Marker type for this observation
       
       // 1. Compute linear predictor (location parameter)
-      η_long = X_obs[n]'β_scaled             // Fixed effects
+      Î·_long = X_obs[n]'Î²_scaled             // Fixed effects
              + Z_id_obs[n]'u_id[i]           // ID-specific RE
              + Z_mk_obs[n]'v_marker[d]       // Marker-specific RE
-             + Z_idm_obs[n]'w_idscaled[i,d]  // ID×Marker interaction RE
+             + Z_idm_obs[n]'w_idscaled[i,d]  // IDÃ—Marker interaction RE
       
       // 2. Compute distributional parameters if needed
-      //    (e.g., σ for Gaussian, ν for Student-t, φ for NegBinom, etc.)
+      //    (e.g., Ïƒ for Gaussian, Î½ for Student-t, Ï† for NegBinom, etc.)
       //    These may have their own regression structures (X_sigma, etc.)
       
       // 3. Accumulate log-density based on family
       SWITCH family_long[d]:
         CASE Gaussian:
-          σ = exp(X_sigma[n]'β_sigma) OR sigma_marker[d] OR sigma_y
-          lp += log N(y_real[n] | η_long, σ)
+          Ïƒ = exp(X_sigma[n]'Î²_sigma) OR sigma_marker[d] OR sigma_y
+          lp += log N(y_real[n] | Î·_long, Ïƒ)
           
         CASE Student_t:
-          σ = ... (as above)
-          ν = 2 + exp(X_nu[n]'β_nu) OR nu_marker[d]
-          lp += log t_ν(y_real[n] | η_long, σ)
+          Ïƒ = ... (as above)
+          Î½ = 2 + exp(X_nu[n]'Î²_nu) OR nu_marker[d]
+          lp += log t_Î½(y_real[n] | Î·_long, Ïƒ)
           
         CASE Bernoulli:
-          lp += log Bernoulli(y_int[n] | logit^{-1}(η_long))
+          lp += log Bernoulli(y_int[n] | logit^{-1}(Î·_long))
           
         CASE Poisson:
-          lp += log Poisson(y_int[n] | exp(η_long))
+          lp += log Poisson(y_int[n] | exp(Î·_long))
           
         CASE NegBinom:
-          φ = exp(X_phi[n]'β_phi) OR phi_nb_marker[d]
-          lp += log NegBinom(y_int[n] | exp(η_long), φ)
+          Ï† = exp(X_phi[n]'Î²_phi) OR phi_nb_marker[d]
+          lp += log NegBinom(y_int[n] | exp(Î·_long), Ï†)
           
         ... [other families: beta, ordinal, skew_normal, etc.]
       END SWITCH
@@ -261,8 +265,8 @@ FUNCTION partial_joinme(id_seq, start, end, ... [all data & parameters]):
     
     FOR j = 1 TO 15:  // For each GK node
       // a. Compute current value (CV) components
-      cvm_now[j] = X_gk_now[i][j]'β_scaled + Z_id_gk_now[i][j]'u_id[i]  // Mean component
-      cvm_fwd[j] = X_gk_fwd[i][j]'β_scaled + Z_id_gk_fwd[i][j]'u_id[i]
+      cvm_now[j] = X_gk_now[i][j]'Î²_scaled + Z_id_gk_now[i][j]'u_id[i]  // Mean component
+      cvm_fwd[j] = X_gk_fwd[i][j]'Î²_scaled + Z_id_gk_fwd[i][j]'u_id[i]
 
       // b. Compute marker-level totals first (per marker d)
       FOR each marker d:
@@ -281,38 +285,41 @@ FUNCTION partial_joinme(id_seq, start, end, ... [all data & parameters]):
     //    L_i is built by covariance regression with id-level latent effect u_L[i]
     //    lp_m = alpha_L[m] + beta_L[m]'Xcov[i] + lambda_L[m] * u_L[i]
     //    L_i[r,c] = log1p_exp(lp_m) if r == c, else lp_m
-    vcov_raw = weighted_log_variances(L_i[i], a_vcov_var)
+    corr_terms_raw = offdiag_correlations(L_i[i])
     
     // 4. Transform marker-level quantities and then aggregate with weights
     FOR j = 1 TO 15:
-      cv_total_tf[j] = (1/D) * Σ_d ω_d * apply_transform(cvtot_now[d,j], tf_mode_cv_tot, ops_cv, coeff_cv, ...)
-      cv_marker_tf[j] = (1/D) * Σ_d ω_d * apply_transform(cvmkr_now[d,j], tf_mode_cv_marker, ...)
+      cv_total_tf[j] = (1/D) * Î£_d Ï‰_d * apply_transform(cvtot_now[d,j], tf_mode_cv_tot, ops_cv, coeff_cv, ...)
+      cv_marker_tf[j] = (1/D) * Î£_d Ï‰_d * apply_transform(cvmkr_now[d,j], tf_mode_cv_marker, ...)
 
-      cs_total_tf[j] = (1/D) * Σ_d ω_d * (
-        apply_transform(cvtot_fwd[d,j], tf_mode_cv_tot, ops_cv, coeff_cv, ...)
-        - apply_transform(cvtot_now[d,j], tf_mode_cv_tot, ops_cv, coeff_cv, ...)
-      ) / (eps_fd * tmax)
+      cs_total_tf[j] = (1/D) * Î£_d Ï‰_d * apply_transform(
+        (cvtot_fwd[d,j] - cvtot_now[d,j]) / (eps_fd * tmax),
+        tf_mode_cs_tot,
+        ...
+      )
 
-      cs_marker_tf[j] = (1/D) * Σ_d ω_d * (
-        apply_transform(cvmkr_fwd[d,j], tf_mode_cv_marker, ...)
-        - apply_transform(cvmkr_now[d,j], tf_mode_cv_marker, ...)
-      ) / (eps_fd * tmax)
+      cs_marker_tf[j] = (1/D) * Î£_d Ï‰_d * apply_transform(
+        (cvmkr_fwd[d,j] - cvmkr_now[d,j]) / (eps_fd * tmax),
+        tf_mode_cs_marker,
+        ...
+      )
     END FOR
 
     // 5. Apply nonlinear transformations to non-marker-aggregated features
     cv_mean_tf  = apply_transform(cvm_now, tf_mode_cv_mean, ...)
     cs_mean_tf  = apply_transform(csm_raw, tf_mode_cs_mean, ...)
-    vcov_tf     = apply_transform(vcov_raw, tf_mode_vcov, ...)
+    corr_tf_terms = apply_transform(corr_terms_raw, tf_mode_corr, ...)
+    corr_assoc    = dot(a_corr, corr_tf_terms)
     
     // 6. Combine transformed features into survival predictor at GK nodes
     FOR j = 1 TO 15:
-      η_assoc_nodes[j] = α_cv_total * cv_total_tf[j]
-                       + α_cv_mean * cv_mean_tf[j]
-                       + α_cv_marker * cv_marker_tf[j]
-               + α_cs_total * cs_total_tf[j]
-                       + α_cs_mean * cs_mean_tf[j]
-                       + α_cs_marker * cs_marker_tf[j]
-                       + vcov_tf[j]
+      Î·_assoc_nodes[j] = Î±_cv_total * cv_total_tf[j]
+                       + Î±_cv_mean * cv_mean_tf[j]
+                       + Î±_cv_marker * cv_marker_tf[j]
+               + Î±_cs_total * cs_total_tf[j]
+                       + Î±_cs_mean * cs_mean_tf[j]
+                       + Î±_cs_marker * cs_marker_tf[j]
+                       + corr_tf[j]
     END FOR
 
     // 7. Competing risks handling
@@ -327,29 +334,29 @@ FUNCTION partial_joinme(id_seq, start, end, ... [all data & parameters]):
       log_h0_S = log_h0_intercept[k_ev] + Bs_event_c[i]'bs_gamma_c[k_ev]
       
       // Hazard covariate effects
-      η_w_S = W[i]'γ_w[k_ev]
+      Î·_w_S = W[i]'Î³_w[k_ev]
       
       // Association feature at event time (same steps as GK nodes)
-      [Compute cv_*, cs_*, vcov_* at S_event[i]]
-      [Transform and aggregate into η_assoc_S]
+      [Compute cv_*, cs_*, corr_* at S_event[i]]
+      [Transform and aggregate into Î·_assoc_S]
       
       // Add log-hazard contribution
-      lp += log_h0_S + η_w_S + η_assoc_S
+      lp += log_h0_S + Î·_w_S + Î·_assoc_S
     END IF
     
     // 8. Compute cumulative hazard via Gauss-Kronrod quadrature
-    //    Λ(t) = ∫₀ᵗ Σₖ hₖ(s) ds ≈ weighted sum over GK nodes
+    //    Î›(t) = âˆ«â‚€áµ— Î£â‚– hâ‚–(s) ds â‰ˆ weighted sum over GK nodes
     
     FOR j = 1 TO 15:
       // Total hazard at node j across all K_event competing risks
-      log_h_total[j] = log Σₖ exp(log_h0[k] + Bs_gk_c[i][j]'bs_gamma_c[k] + η_w + η_assoc_nodes[j])
+      log_h_total[j] = log Î£â‚– exp(log_h0[k] + Bs_gk_c[i][j]'bs_gamma_c[k] + Î·_w + Î·_assoc_nodes[j])
     END FOR
     
     // Apply Gauss-Kronrod formula with weights w[j]
-    Λ_i = cumhaz(S_event[i], log_h_total, zeros(15))
+    Î›_i = cumhaz(S_event[i], log_h_total, zeros(15))
     
-    // 9. Add survival contribution: log S(t) = -Λ(t)
-    lp += -Λ_i
+    // 9. Add survival contribution: log S(t) = -Î›(t)
+    lp += -Î›_i
     
   END FOR  // End subject loop
   
@@ -385,7 +392,7 @@ $\bar{w}[i]$ is the weighted average of $w$ across markers (for "total" associat
 - Computed via finite differences: 
 $$ CS(t) \approx \frac{CV(t + \varepsilon) - CV(t)}{\varepsilon} $$
 
-**Covariance (VCOV)**:
+**Covariance (CORR)**:
 - Weighted log-variances from Cholesky factor $L_i$.
 - Captures uncertainty in subject-specific predictions.
 
@@ -416,13 +423,13 @@ where $f()$ is learned via splines.
 ## Conceptual Overview
 
 Given:
-- Posterior samples {θ^(k)} from fitted model
+- Posterior samples {Î¸^(k)} from fitted model
 - New subject with observed history y_obs, times t_obs
 - Conditioning time T_cond (usually max(t_obs))
 
 Goal:
-- Predict future longitudinal values y_future | y_obs, θ
-- Predict survival probability S(t | T_cond, y_obs, θ)
+- Predict future longitudinal values y_future | y_obs, Î¸
+- Predict survival probability S(t | T_cond, y_obs, Î¸)
 
 Competing risks note:
 When K_event > 1, the prediction returns the overall survival probability that
@@ -433,8 +440,8 @@ Strategy:
 1. Extract posterior parameter draws from the fitted object (`n_samples`).
 2. Re-index extracted draws to prediction draw count (`control$n_pred_draws`).
 3. For each prediction draw k:
-   a. Sample subject-specific random effects u, v, w | y_obs, θ^(k)
-   b. Compute longitudinal and survival predictions given u, v, w
+   a. Sample subject-specific random effects u, v, w | y_obs, Î¸^(k)
+  b. Compute requested longitudinal scale(s) and survival predictions given u, v, w
 4. Within each indexed output `[..., k, n]`, average over dynpred posterior rows
   to marginalize latent augmentation noise.
 5. Aggregate over draw index k to obtain marginal estimates and intervals.
@@ -449,7 +456,7 @@ Implementation note:
 %%| fig-width: 100%
 graph TB
     subgraph Input["Inputs"]
-        PostDraws["Posterior Draws<br/>β^(k), τ^(k), γ^(k), α^(k)<br/>k = 1...n_draws"]
+        PostDraws["Posterior Draws<br/>Î²^(k), Ï„^(k), Î³^(k), Î±^(k)<br/>k = 1...n_draws"]
         NewSub["New Subject Data<br/>y_obs, X_obs, Z_obs<br/>Observed history"]
         PredGrid["Prediction Grids<br/>t_future (longitudinal)<br/>t_surv (survival)"]
     end
@@ -460,10 +467,10 @@ graph TB
     end
     
     subgraph DrawK["For Draw k"]
-        SampleRE["Sample Random Effects<br/>u ~ N(0,I), v ~ N(0,I), w_lat ~ N(0,I)<br/>Transform: u ← L_u·z_u, etc."]
+        SampleRE["Sample Random Effects<br/>u ~ N(0,I), v ~ N(0,I), w_lat ~ N(0,I)<br/>Transform: u â† L_uÂ·z_u, etc."]
         BuildCov["Build Subject Cholesky L_i<br/>from covariance regression"]
-        LongCond["Longitudinal Conditioning<br/>log p(y_obs | u,v,w, θ^(k))"]
-        SurvCond["Survival Conditioning<br/>log S(T_cond | u,v,w, θ^(k))"]
+        LongCond["Longitudinal Conditioning<br/>log p(y_obs | u,v,w, Î¸^(k))"]
+        SurvCond["Survival Conditioning<br/>log S(T_cond | u,v,w, Î¸^(k))"]
     end
     
     subgraph GenQuant["Generated Quantities"]
@@ -508,8 +515,8 @@ FUNCTION partial_draw(draw_ids_slice, start, end, ... [data & posterior draws]):
     // 1. SAMPLE RANDOM EFFECTS FROM STANDARD NORMAL
     // -------------------
     z_u[k]      ~ N(0, I_{R_id})            // ID-level standard normal
-    z_v[k,d]    ~ N(0, I_{R_mk})  ∀d        // Marker-level standard normal
-    z_w_lat[k,d] ~ N(0, I_{Q_idm}) ∀d       // Latent ID×marker standard normal
+    z_v[k,d]    ~ N(0, I_{R_mk})  âˆ€d        // Marker-level standard normal
+    z_w_lat[k,d] ~ N(0, I_{Q_idm}) âˆ€d       // Latent IDÃ—marker standard normal
     z_L[k]      ~ N(0, 1)                   // Latent covariance regression
     
     lp += log p(z_u, z_v, z_w_lat, z_L)  // Standard normal densities
@@ -518,9 +525,9 @@ FUNCTION partial_draw(draw_ids_slice, start, end, ... [data & posterior draws]):
     // 2. TRANSFORM TO ACTUAL RANDOM EFFECTS
     // -------------------
     // Build Cholesky factors from draw k parameters
-    L_u = diag(τ_id^(k)) * Lcorr_id^(k)
-    L_v = diag(τ_marker^(k)) * Lcorr_marker^(k)
-    L_w = diag(τ_marker_id^(k)) * Lcorr_marker_id^(k)
+    L_u = diag(Ï„_id^(k)) * Lcorr_id^(k)
+    L_v = diag(Ï„_marker^(k)) * Lcorr_marker^(k)
+    L_w = diag(Ï„_marker_id^(k)) * Lcorr_marker_id^(k)
     
     // Transform standard normals to correlated REs
     u_id = L_u * z_u[k]
@@ -529,7 +536,7 @@ FUNCTION partial_draw(draw_ids_slice, start, end, ... [data & posterior draws]):
       v_marker[d] = L_v * z_v[k, d]
     END FOR
     
-    // For subject×marker interaction, allow cross-marker correlation
+    // For subjectÃ—marker interaction, allow cross-marker correlation
     FOR each marker d:
       cross = B_cross^(k) * v_marker[d]  (if cross-correlation enabled)
       z_w[d] = cross + L_w * z_w_lat[k, d]
@@ -539,15 +546,15 @@ FUNCTION partial_draw(draw_ids_slice, start, end, ... [data & posterior draws]):
     // 3. BUILD SUBJECT-SPECIFIC COVARIANCE VIA REGRESSION
     // -------------------
     // Latent random intercept for covariance
-    u_Lk = τ_vcov_reg^(k) * z_L[k]
+    u_Lk = Ï„_corr_reg^(k) * z_L[k]
     
     // Build Cholesky factor L_i for this subject
-    L_i = matrix(Q_idm × Q_idm, 0)
+    L_i = matrix(Q_idm Ã— Q_idm, 0)
     FOR each unique entry (r,c) in lower triangle:
       // Regression on covariance covariates
-      lin_pred = α_vcov_reg^(k)[r,c]
-               + vec_cov_vcov' * β_vcov_reg^(k)[r,c]
-               + λ_vcov_reg^(k)[r,c] * u_Lk
+      lin_pred = Î±_corr_reg^(k)[r,c]
+               + vec_cov_corr' * Î²_corr_reg^(k)[r,c]
+               + Î»_corr_reg^(k)[r,c] * u_Lk
       
       IF r == c:  // Diagonal (log scale with softplus)
         L_i[r,c] = log(1 + exp(lin_pred))
@@ -556,24 +563,24 @@ FUNCTION partial_draw(draw_ids_slice, start, end, ... [data & posterior draws]):
       END IF
     END FOR
     
-    // Transform latent REs to actual subject×marker REs
+    // Transform latent REs to actual subjectÃ—marker REs
     FOR each marker d:
       w_idscaled[d] = L_i * z_w[d]
     END FOR
 
     // 3b. Marker-weighted means for association summaries
-    //     weights ω_d are draw-specific when marker weights are estimated
-    vbar = Σ_d ω_d v_marker[d]
-    wbar = Σ_d ω_d w_idscaled[d]
+    //     weights Ï‰_d are draw-specific when marker weights are estimated
+    vbar = Î£_d Ï‰_d v_marker[d]
+    wbar = Î£_d Ï‰_d w_idscaled[d]
     
     // -------------------
-    // 4. LONGITUDINAL CONDITIONING: log p(y_obs | u, v, w, θ^(k))
+    // 4. LONGITUDINAL CONDITIONING: log p(y_obs | u, v, w, Î¸^(k))
     // -------------------
     FOR each observed longitudinal obs n:
       d = idx_marker_obs[n]
       
       // Linear predictor
-      η = mat_fixed_obs[n]' * β_fixed^(k)
+      Î· = mat_fixed_obs[n]' * Î²_fixed^(k)
         + mat_id_obs[n]' * u_id
         + mat_marker_obs[n]' * v_marker[d]
         + mat_marker_id_obs[n]' * w_idscaled[d]
@@ -581,8 +588,8 @@ FUNCTION partial_draw(draw_ids_slice, start, end, ... [data & posterior draws]):
       // Likelihood based on family (same logic as joinme_fit)
       SWITCH family_long[d]:
         CASE Gaussian:
-          σ = ... (from β_sigma^(k) or σ_marker^(k))
-          lp += log N(y_real[n] | η, σ)
+          Ïƒ = ... (from Î²_sigma^(k) or Ïƒ_marker^(k))
+          lp += log N(y_real[n] | Î·, Ïƒ)
         ... [other families]
       END SWITCH
     END FOR
@@ -596,8 +603,8 @@ FUNCTION partial_draw(draw_ids_slice, start, end, ... [data & posterior draws]):
     marker_weights_k = marker_weights_draws[k, :]
 
     FOR j = 1 TO 15:  // GK nodes in [0, T_cond]
-      cvm[j] = mat_fixed_gk_cond[j]' * β_fixed^(k) + mat_id_gk_cond[j]' * u_id
-      cvm_f[j] = mat_fixed_gk_cond_fwd[j]' * β_fixed^(k) + mat_id_gk_cond_fwd[j]' * u_id
+      cvm[j] = mat_fixed_gk_cond[j]' * Î²_fixed^(k) + mat_id_gk_cond[j]' * u_id
+      cvm_f[j] = mat_fixed_gk_cond_fwd[j]' * Î²_fixed^(k) + mat_id_gk_cond_fwd[j]' * u_id
 
       FOR each marker d:
         cvk[d,j] = mat_marker_gk_cond[j,d]' * v_marker[d] + mat_marker_id_gk_cond[j,d]' * w_idscaled[d]
@@ -609,15 +616,15 @@ FUNCTION partial_draw(draw_ids_slice, start, end, ... [data & posterior draws]):
 
     // Compute slopes with transform-before-averaging for marker-aggregated terms
     csm_raw = eta_fd(cvm, cvm_f, eps_finite_diff)
-    vcov_raw = weighted_log_variances(L_i, coeff_assoc_vcov_var^(k))
+    corr_raw = weighted_log_variances(L_i, coeff_assoc_corr^(k))
 
     FOR j = 1 TO 15:
-      cv_total_tf[j] = (1/D) * Σ_d marker_weights_k[d] * apply_transform(cvtot[d,j], tf_mode_cv_total, ...)
-      cv_marker_tf[j] = (1/D) * Σ_d marker_weights_k[d] * apply_transform(cvk[d,j], tf_mode_cv_marker, ...)
-      cs_total_tf[j] = (1/D) * Σ_d marker_weights_k[d] *
-        (apply_transform(cvtot_f[d,j], tf_mode_cv_total, ...) - apply_transform(cvtot[d,j], tf_mode_cv_total, ...)) / eps_finite_diff
-      cs_marker_tf[j] = (1/D) * Σ_d marker_weights_k[d] *
-        (apply_transform(cvk_f[d,j], tf_mode_cv_marker, ...) - apply_transform(cvk[d,j], tf_mode_cv_marker, ...)) / eps_finite_diff
+      cv_total_tf[j] = (1/D) * Î£_d marker_weights_k[d] * apply_transform(cvtot[d,j], tf_mode_cv_total, ...)
+      cv_marker_tf[j] = (1/D) * Î£_d marker_weights_k[d] * apply_transform(cvk[d,j], tf_mode_cv_marker, ...)
+      cs_total_tf[j] = (1/D) * Î£_d marker_weights_k[d] *
+        apply_transform((cvtot_f[d,j] - cvtot[d,j]) / eps_finite_diff, tf_mode_cs_total, ...)
+      cs_marker_tf[j] = (1/D) * Î£_d marker_weights_k[d] *
+        apply_transform((cvk_f[d,j] - cvk[d,j]) / eps_finite_diff, tf_mode_cs_marker, ...)
     END FOR
 
     // Apply remaining transformations
@@ -626,25 +633,25 @@ FUNCTION partial_draw(draw_ids_slice, start, end, ... [data & posterior draws]):
     ... [other transforms]
     
     // Aggregate association
-    η_assoc_nodes = α_cv_total^(k) * cv_total_tf
-                  + α_cv_mean^(k) * cv_mean_tf
+    Î·_assoc_nodes = Î±_cv_total^(k) * cv_total_tf
+                  + Î±_cv_mean^(k) * cv_mean_tf
                   + ... [other terms]
     
     // -------------------
-    // 6. SURVIVAL CONDITIONING: log S(T_cond | u, v, w, θ^(k))
+    // 6. SURVIVAL CONDITIONING: log S(T_cond | u, v, w, Î¸^(k))
     // -------------------
     FOR j = 1 TO 15:
       // Total hazard at node j
-      log_h_total[j] = log Σₖ exp(log_h0^(k)[k] + mat_basis_gk_cond[j]' * bs_gamma_c^(k)[k]
-                                  + vec_cov_hazard' * γ_hazard^(k)[k]
-                                  + η_assoc_nodes[j])
+      log_h_total[j] = log Î£â‚– exp(log_h0^(k)[k] + mat_basis_gk_cond[j]' * bs_gamma_c^(k)[k]
+                                  + vec_cov_hazard' * Î³_hazard^(k)[k]
+                                  + Î·_assoc_nodes[j])
     END FOR
     
     // Cumulative hazard up to T_cond
-    Λ_cond = cumhaz(time_condition, log_h_total, zeros(15))
+    Î›_cond = cumhaz(time_condition, log_h_total, zeros(15))
     
     // Add survival contribution
-    lp += -Λ_cond
+    lp += -Î›_cond
     
   END FOR  // End draw loop
   
@@ -660,13 +667,13 @@ Once random effects are sampled conditional on observed data, the `generated qua
    ```plaintext
    FOR each future time t_fut:
      FOR each marker d:
-       η_fut[d, t_fut] = X_fut[t_fut]'β + Z_id_fut[t_fut]'u + Z_mk_fut[t_fut]'v[d] + Z_idm_fut[t_fut]'w[d]
+       Î·_fut[d, t_fut] = X_fut[t_fut]'Î² + Z_id_fut[t_fut]'u + Z_mk_fut[t_fut]'v[d] + Z_idm_fut[t_fut]'w[d]
        
        // Expectation (epred scale)
-       y_pred_mean[d, t_fut] = inv_link(η_fut, family[d])
+       y_pred_mean[d, t_fut] = inv_link(Î·_fut, family[d])
        
        // Predictive draw (with residual noise)
-       y_pred[d, t_fut] ~ distribution(η_fut, family[d])
+       y_pred[d, t_fut] ~ distribution(Î·_fut, family[d])
      END FOR
    END FOR
    ```
@@ -675,10 +682,10 @@ Once random effects are sampled conditional on observed data, the `generated qua
    ```plaintext
    FOR each future time t_surv > T_cond:
      // Compute cumulative hazard from T_cond to t_surv
-     Λ_future = cumhaz_from_to(T_cond, t_surv, log_h_total, ...)
+     Î›_future = cumhaz_from_to(T_cond, t_surv, log_h_total, ...)
      
      // Conditional survival
-     S(t_surv | T_cond) = exp(-Λ_future)
+     S(t_surv | T_cond) = exp(-Î›_future)
    END FOR
    ```
 
@@ -731,17 +738,17 @@ Using weights $\omega = [0.0229, 0.0631, \dots]$:
 3. Scale result:
    $$ \Lambda(S) = \frac{S}{2} \cdot \exp(\max(z)) \cdot \text{acc} $$
 
-## `eta_vcov_varonly_weighted_const(K, L_i, a_vcov_var)`: Variance Association
+## `eta_corr_varonly_weighted_const(K, L_i, a_corr)`: Variance Association
 
 **Purpose**: Compute weighted log-variances from a Cholesky decomposition, used as an association feature.
 
 **Algorithm Setup**:
 - $K$: number of evaluations
 - $L_i$: $Q \times Q$ Cholesky factor ($\Sigma_i = L_i L_i'$)
-- $a_{vcov}$: $Q$-vector of association weights
+- $a_{corr}$: $Q$-vector of association weights
 
 **Computation**:
-$$ s = \sum_{q=1}^Q a_{vcov}[q] \cdot \log\left( \sum_{k=1}^q L_i[q,k]^2 \right) $$
+$$ s = \sum_{q=1}^Q a_{corr}[q] \cdot \log\left( \sum_{k=1}^q L_i[q,k]^2 \right) $$
 Returns a constant vector of length $K$.
 
 ## `apply_transform_*()`: Flexible Nonlinear Transformations
@@ -782,12 +789,12 @@ For example `PUSH_X, PUSH_1, ADD, LOG` computes $\log(x+1)$.
 target += reduce_sum(partial_joinme, id_seq, grainsize, ...)
 
 grainsize: Number of subjects per parallel chunk
-- grainsize = n_id → serial execution (single chunk)
-- grainsize = ceil(n_id / n_threads) → parallel execution
+- grainsize = n_id â†’ serial execution (single chunk)
+- grainsize = ceil(n_id / n_threads) â†’ parallel execution
 
 Threading model:
 - Each chunk processed independently
-- No shared mutable state → thread-safe
+- No shared mutable state â†’ thread-safe
 - Results summed after all chunks complete
 ```
 
@@ -861,7 +868,7 @@ All times scaled to $[0, 1]$ via division by $t_{max}$:
 3. **Prior-data conflict**: Priors incompatible with likelihood
 
 **Remedies**:
-- Increase `adapt_delta` (e.g., 0.95 or 0.99) → smaller step sizes
+- Increase `adapt_delta` (e.g., 0.95 or 0.99) â†’ smaller step sizes
 - Reparameterize: Use non-centered parameterization for REs if not already
 - Tighten priors on poorly identified parameters
 - Simplify model: Remove weak associations or unnecessary REs
@@ -871,7 +878,7 @@ All times scaled to $[0, 1]$ via division by $t_{max}$:
 **Symptom**: `log_prob = -inf` or `nan`.
 
 **Causes**:
-1. **Distributional parameter out of bounds**: e.g., σ ≤ 0, ν ≤ 0 for Student-t
+1. **Distributional parameter out of bounds**: e.g., Ïƒ â‰¤ 0, Î½ â‰¤ 0 for Student-t
 2. **Incorrect data encoding**: Integer outcomes for continuous family, or vice versa
 3. **Transformation domain violation**: log of negative, sqrt of negative
 
@@ -887,7 +894,7 @@ All times scaled to $[0, 1]$ via division by $t_{max}$:
 **Causes**:
 1. **Large n_id or N**: More subjects/observations = more computation
 2. **Complex associations**: Many transformations, high-dimensional REs
-3. **Inefficient grainsize**: Too small → overhead dominates
+3. **Inefficient grainsize**: Too small â†’ overhead dominates
 
 **Remedies**:
 - Reduce `n_draws` for testing
@@ -925,7 +932,7 @@ $$ L_i[r,c] = \eta_{r,c} $$
 **Enables**:
 - Covariance structure varying with subject covariates.
 - Individual-specific uncertainty in longitudinal predictions ($u_L$).
-- Richer association with survival (via vcov feature).
+- Richer association with survival (via corr feature).
 
 **Shrinkage**:
 - Normal priors on $\beta[r,c]$ with scale 0.3 
@@ -933,8 +940,8 @@ $$ L_i[r,c] = \eta_{r,c} $$
 
 ## Marker Weighting
 
-Marker-aggregated association features (`cv_total`, `cv_marker`, and derived
-finite-difference slopes) use **transform-before-averaging** semantics:
+Marker-aggregated association features (`cv_total`, `cv_marker`, `cs_total`,
+`cs_marker`) use **transform-before-averaging** semantics:
 
 $$ A_i(t) = \frac{1}{D}\sum_d \omega_d\, f\!\left(m_{id}(t)\right). $$
 
@@ -942,13 +949,16 @@ With identity transforms, this reduces to weighted averaging of marker-level
 random-effects contributions.
 
 **Weights** $\omega_d$:
-- Fixed: User-specified (e.g., equal weights $1/D$).
-- Estimated: Signed additive perturbation of base weights with RMS stabilization,
-  i.e., $\omega \propto \omega^{(0)} + \tau_w z$ with unit RMS after scaling.
--- Reflects relative importance of each marker for survival after shrinkage (Park & Casella 2008).
+- Fixed: User-specified latent weights (e.g., equal latent initialization).
+- Estimated: Latent additive perturbation of base weights,
+  i.e., $\omega^{lat} = \omega^{(0)} + z$ with shrinkage prior on $z$.
+- Aggregation weights: $\omega = \omega^{lat}$ used directly as signed
+  weights in association aggregation.
+- Reflects relative marker contribution to survival after shrinkage.
 
 **Interpretation**:
-- High $\omega_d$ $\to$ marker $d$ strongly associated with event.
+- High positive $\omega_d$ $\to$ marker $d$ strongly increases association with
+  event, while negative $\omega_d$ indicates an opposing contribution.
 
 
 ## Competing Risks
@@ -981,12 +991,12 @@ $$ \log(\sigma[n]) = X_{\sigma}[n] \beta_{\sigma} + Z_{\sigma}[n] b_{\sigma} $$
 
 
 **Families Supporting Distributional Regression**:
-- Gaussian: σ (scale)
-- Student-t: σ, ν (scale, df)
-- Negative binomial: φ (dispersion)
-- Beta: φ (precision)
-- Skew-normal: σ, α (scale, skewness)
-- Skew-double-exponential: σ, τ (scale, skewness)
+- Gaussian: Ïƒ (scale)
+- Student-t: Ïƒ, Î½ (scale, df)
+- Negative binomial: Ï† (dispersion)
+- Beta: Ï† (precision)
+- Skew-normal: Ïƒ, Î± (scale, skewness)
+- Skew-double-exponential: Ïƒ, Ï„ (scale, skewness)
 
 # Practical Workflow
 
@@ -1028,9 +1038,8 @@ pred <- predict(
   newdataLong = new_long,
   newdataEvent = new_event,
   time_start = 5,  # Condition on data up to t=5
-  times = seq(5, 10, length.out = 50),  # Predict t ∈ [5, 10]
-  n_samples = 200,
-  control = list(n_pred_draws = 400)
+  times = seq(5, 10, length.out = 50),  # Predict t âˆˆ [5, 10]
+  control = list(n_samples = 200, n_pred_draws = 400)
 )
 
 plot(pred, type = "survival")
@@ -1085,15 +1094,17 @@ The association module is the most complex component and requires hierarchical s
 ### Association Coefficients ($\alpha$)
 The total association is often a sum of a mean term, a marker-specific deviation, and interactions.
 - **Base Effect ($\alpha_{mean}$)**: Normal($0, 1$). Weakly informative.
-- **Marker-Specific Deviations ($\alpha_{marker}$)**: 
-  - **Normal Shrinkage**: $\alpha_d \sim \mathcal{N}(0, \tau_{shrink})$. Equivalent to Ridge regression ($L_2$ penalty). Encourages all markers to share strength.
-  - **Laplace Shrinkage**: $\alpha_d \sim \text{Laplace}(0, \tau_{shrink})$. Equivalent to Lasso regression ($L_1$ penalty). Encourages sparsity, effectively selecting relevant markers that drive the risk.
+- **CV/CS total + marker effects**:
+  - Non-centered form: $\alpha_d = z_d\,\sigma_d$.
+  - Latent: $z_d \sim \mathcal{N}(0, 1)$.
+  - Scale: $\sigma_d > 0$ with weakly informative half-normal prior.
 - **Rationale**: In joint models with many biomarkers, it is a priori unlikely that all markers contribute equally to the risk. Shrinkage priors automatically attenuate noise markers, improving out-of-sample prediction performance.
 
 ### Marker Weights ($\omega_d$)
-When estimating a composite score (e.g., weighted sum of current values), weights are modeled as signed perturbations around base weights and then RMS-stabilized.
-- **Prior**: Normal or Laplace shrinkage on perturbations $z_d$ (controlled by `shrinkage`), scaled by $\tau_{marker\_weights}$ (Park & Casella 2008).
-- **Rationale**: Allows protective and harmful marker contributions (negative/positive weights) while controlling global scale non-identifiability with identity transforms.
+When estimating a composite score (e.g., weighted sum of current values), weights are modeled as signed perturbations around base weights.
+- **Prior**: Standard normal perturbations $z_d \sim \mathcal{N}(0,1)$ in
+  $\omega_d = \omega_d^{(0)} + z_d$.
+- **Rationale**: Allows protective and harmful marker contributions (negative/positive weights) while regularizing perturbations in high dimensions.
 
 ### Nonlinear Transformations
 When `type = "ispline_penalized"`, the association function $f(x)$ is modeled via Monotone I-splines.
@@ -1101,7 +1112,7 @@ When `type = "ispline_penalized"`, the association function $f(x)$ is modeled vi
 - **Constraint**: Coefficients must be positive to ensure monotonicity.
 - **Rationale**: Nonlinear associations (e.g., risk increases only after a threshold) are powerful but prone to overfitting in sparse data regions. The penalty forces the function toward linearity in the absence of strong evidence for curvature.
 
-### Covariance Regression (VCOV)
+### Covariance Regression (CORR)
 - **Latent Effect ($u_L$)**: Normal(0, $\tau_L$).
 - **Coefficients**: Normal priors on regression terms linking baseline covariates to the log-volatility.
 - **Rationale**: This structure allows the variability of the biomarkers (and their correlation) to itself be a predictor of survival (e.g., highly labile blood pressure predicts stroke), regularized by the hierarchical structure of the latent variable.
@@ -1116,4 +1127,4 @@ When `type = "ispline_penalized"`, the association function $f(x)$ is modeled vi
 **Document Version**: 1.0  
 **Last Updated**: {{< meta date >}}  
 **Package**: JoinME  
-**Stan Version**: ≥ 2.32
+**Stan Version**: â‰¥ 2.32

@@ -4,7 +4,7 @@
 \alias{summary.JoinMeFit}
 \title{Summarize a joinme object}
 \usage{
-\method{summary}{JoinMeFit}(object, draws = NULL, seed = 1, digits = 3, include_vcov = TRUE, ...)
+\method{summary}{JoinMeFit}(object, draws = NULL, seed = 1, digits = 3, include_corr = TRUE, ...)
 }
 \arguments{
 \item{object}{A joinme fit object.}
@@ -15,13 +15,17 @@
 
 \item{digits}{Number of digits to round summary values.}
 
-\item{include_vcov}{Logical; include covariance summaries.}
+\item{include_corr}{Logical; include covariance summaries.}
 
 \item{...}{Unused.}
 }
 \value{
-A summary_JoinMeFit object.
+A \code{summary_JoinMeFit} object containing tables such as \code{fixef},
+\code{gamma_w}, \code{survival_process} (when applicable), \code{assoc}, and diagnostics.
 }
 \description{
-Summarize a joinme object
+Builds posterior summaries for the longitudinal process, survival process,
+association terms, and optional covariance blocks. For survival, the summary
+now includes a dedicated \code{survival_process} report whenever the event model
+contains non-intercept covariates beyond association features.
 }

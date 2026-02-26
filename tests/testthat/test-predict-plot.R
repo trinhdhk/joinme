@@ -47,12 +47,57 @@ test_that("predict accepts time_start column and plot returns ribbons", {
     newdataEvent = ndE,
     time_start = "time_start",
     times = seq(0, max(sim$dataLong$time) + 1, length.out = 30),
-    n_samples = 20,
+    control = list(n_samples = 20),
     seed = 2027
   )
 
   expect_true(inherits(pred, "JoinMeDynPred"))
   expect_true(all(names(pred$metadata$conditioning_time_by_id) %in% as.character(ndE$id)))
+  expect_error(
+    plot(pred, which = "longitudinal", scale = "predict"),
+    "should be|must be one of"
+  )
+
+  toy_quant <- data.frame(
+    id = "1",
+    time = rep(c(0, 1), times = 2),
+    marker = "m1",
+    marker_idx = 1L,
+    scale = rep(c("epred", "predict"), each = 2),
+    mean = c(1.0, 1.2, 0.9, 1.1),
+    sd = c(0.1, 0.1, 0.2, 0.2),
+    q2.5 = c(0.8, 1.0, 0.5, 0.7),
+    q25 = c(0.9, 1.1, 0.7, 0.9),
+    q50 = c(1.0, 1.2, 0.9, 1.1),
+    q75 = c(1.1, 1.3, 1.1, 1.3),
+    q97.5 = c(1.2, 1.4, 1.3, 1.5)
+  )
+  pred_multi <- JoinMeDynPred$new(
+    predictions = list(longitudinal = toy_quant),
+    quantiles = list(longitudinal = toy_quant, longitudinal_fitted = NULL),
+    draws = list(longitudinal = list()),
+    data = list(longitudinal = data.frame(id = "1", time = c(0, 1), marker = "m1", y = c(1.0, 1.1))),
+    metadata = list(
+      scales = c("epred", "predict"),
+      scale = "epred",
+      id_var = "id",
+      time_var = "time",
+      marker_var = "marker",
+      response_var = "y",
+      conditioning_time = 0.5,
+      ci_levels = c(0.5, 0.95)
+    ),
+    call = quote(predict(fit)),
+    tmax = 1,
+    n_samples = 10
+  )
+
+  p_long_predict <- plot(pred_multi, which = "longitudinal", scale = "predict")
+  expect_true(inherits(p_long_predict, "ggplot") || is.list(p_long_predict))
+  expect_error(
+    plot(pred_multi, which = "longitudinal", scale = "linpred"),
+    "should be|must be one of"
+  )
 
   p_surv <- plot(pred, which = "survival", ci_type = "ribbon")
   expect_true(inherits(p_surv, "ggplot") || is.list(p_surv))

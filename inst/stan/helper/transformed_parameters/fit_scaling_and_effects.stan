@@ -95,7 +95,7 @@
       real lp = alpha_L[m] + dot_product(beta_L[m], to_vector(Xcov[i]'))
             + lambda_L[m] * u_L[i]; // linear predictor for L_i element
       if (r == c) {
-        Li[r, c] = (vcov_diag_link == 1) ? exp(lp) : log1p_exp(lp);
+        Li[r, c] = (corr_diag_link == 1) ? exp(lp) : log1p_exp(lp);
       } else {
         Li[r, c] = lp;
       }
@@ -109,29 +109,23 @@
     for (d in 1 : D)
       w_idscaled[i, d] = L_i[i] * z_w[i, d];
   
-  /* -------------------- marker weights (signed, RMS-stabilized) */
+  /* -------------------- marker weights (signed) */
   // Goal:
   // - Allow positive and negative marker contributions.
-  // - Avoid global-scale non-identifiability between marker weights and association coefficients,
-  //   especially under identity transforms.
+  // - Keep perturbation model simple and directly interpretable.
   // Rule:
-  // - Start from signed base weights (provided from standata, already RMS-normalized).
-  // - If estimation is enabled, add a signed perturbation tau * z.
-  // - Re-scale to unit RMS so only relative marker composition (not global magnitude)
-  //   is learned from the perturbation.
+  // - Start from signed base weights (provided from standata).
+  // - If estimation is enabled, add a signed standard-normal perturbation z.
+  // - Use the resulting signed weights directly for association aggregation.
   vector[D] marker_weights_eff; // effective signed marker weights
   {
-    vector[D] raw_w;
-    real rms_w;
-
-    if (estimate_marker_weights == 1) {
-      raw_w = marker_weights + tau_marker_weights * z_marker_weights;
+    vector[D] w_raw;
+    if (estimate_marker_weights == 1 && use_marker_weight_assoc == 1) {
+      w_raw = marker_weights + z_marker_weights;
     } else {
-      raw_w = marker_weights;
+      w_raw = marker_weights;
     }
-
-    rms_w = sqrt(dot_self(raw_w) / D + 1e-12);
-    marker_weights_eff = raw_w / rms_w;
+    marker_weights_eff = w_raw;
   }
 
   /* -------------------- marker averages for survival association (unweighted mean across markers) */
@@ -163,10 +157,17 @@
     wbar_i[i] = L_i[i] * zbar[i];
   
   /* -------------------- Effective association coefficients (flags applied) */
+  real alpha_cv_total = z_alpha_cv_total * sd_alpha_cv_total;
+  real alpha_cs_total = z_alpha_cs_total * sd_alpha_cs_total;
+  real alpha_cv_mean = z_alpha_cv_mean * sd_alpha_cv_mean;
+  real alpha_cs_mean = z_alpha_cs_mean * sd_alpha_cs_mean;
+  real alpha_cv_marker = z_alpha_cv_marker * sd_alpha_cv_marker;
+  real alpha_cs_marker = z_alpha_cs_marker * sd_alpha_cs_marker;
+
   real a_cv_total = assoc_cv_total * alpha_cv_total; // total CV coefficient
   real a_cs_total = assoc_cs_total * alpha_cs_total; // total CS coefficient
   real a_cv_mean = assoc_cv_mean * alpha_cv_mean;    // mean CV coefficient
   real a_cv_marker = assoc_cv_marker * alpha_cv_marker; // marker CV coefficient
   real a_cs_mean = assoc_cs_mean * alpha_cs_mean;    // mean CS coefficient
   real a_cs_marker = assoc_cs_marker * alpha_cs_marker; // marker CS coefficient
-  vector[Q_idm] a_vcov_var = assoc_vcov * alpha_vcov_var; // vcov coefficients
+  vector[M_corr] a_corr = assoc_corr * alpha_corr; // corr correlation coefficients

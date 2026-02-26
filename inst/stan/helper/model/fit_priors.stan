@@ -46,41 +46,47 @@
   /* Distributional random-effect scales + latent draws */
   for (j in 1 : n_re_sigma) { // sigma RE terms
     tau_sigma[j][1:K_sigma[j]] ~ std_normal();
-    to_vector(z_sigma[j][1:G_sigma[j], 1:K_sigma[j]]) ~ std_normal();
+    for (g in 1 : G_sigma[j])
+      target += re_weight_sigma[j][g] * std_normal_lpdf(to_vector(z_sigma[j][g, 1:K_sigma[j]]));
   }
   for (j in 1 : n_re_nu) { // nu RE terms
     tau_nu[j][1:K_nu[j]] ~ std_normal();
-    to_vector(z_nu[j][1:G_nu[j], 1:K_nu[j]]) ~ std_normal();
+    for (g in 1 : G_nu[j])
+      target += re_weight_nu[j][g] * std_normal_lpdf(to_vector(z_nu[j][g, 1:K_nu[j]]));
   }
   for (j in 1 : n_re_phi) { // phi RE terms
     tau_phi[j][1:K_phi[j]] ~ std_normal();
-    to_vector(z_phi[j][1:G_phi[j], 1:K_phi[j]]) ~ std_normal();
+    for (g in 1 : G_phi[j])
+      target += re_weight_phi[j][g] * std_normal_lpdf(to_vector(z_phi[j][g, 1:K_phi[j]]));
   }
   for (j in 1 : n_re_alpha) { // alpha RE terms
     tau_alpha[j][1:K_alpha[j]] ~ std_normal();
-    to_vector(z_alpha[j][1:G_alpha[j], 1:K_alpha[j]]) ~ std_normal();
+    for (g in 1 : G_alpha[j])
+      target += re_weight_alpha[j][g] * std_normal_lpdf(to_vector(z_alpha[j][g, 1:K_alpha[j]]));
   }
   for (j in 1 : n_re_phi_beta) { // phi_beta RE terms
     tau_phi_beta[j][1:K_phi_beta[j]] ~ std_normal();
-    to_vector(z_phi_beta[j][1:G_phi_beta[j], 1:K_phi_beta[j]]) ~ std_normal();
+    for (g in 1 : G_phi_beta[j])
+      target += re_weight_phi_beta[j][g] * std_normal_lpdf(to_vector(z_phi_beta[j][g, 1:K_phi_beta[j]]));
   }
   for (j in 1 : n_re_tau_sde) { // tau_sde RE terms
     tau_tau_sde[j][1:K_tau_sde[j]] ~ std_normal();
-    to_vector(z_tau_sde[j][1:G_tau_sde[j], 1:K_tau_sde[j]]) ~ std_normal();
+    for (g in 1 : G_tau_sde[j])
+      target += re_weight_tau_sde[j][g] * std_normal_lpdf(to_vector(z_tau_sde[j][g, 1:K_tau_sde[j]]));
   }
   
   /* ID-level random effects (tau_u is ORIGINAL scale; internal scaling in transformed parameters) */
   tau_u ~ normal(0, 0.5);
   Lcorr_u ~ lkj_corr_cholesky(lkj_eta);
-  for (i in 1 : n_id) 
-    z_u[i] ~ std_normal();
+  for (i in 1 : n_id)
+    target += re_weight_id[i] * std_normal_lpdf(z_u[i]);
   
   /* Marker-only random effects (if present) */
   if (R_mk > 0) {
     tau_v ~ normal(0, 0.5);
     Lcorr_v ~ lkj_corr_cholesky(lkj_eta);
-    for (d in 1 : D) 
-      z_v[d] ~ std_normal();
+    for (d in 1 : D)
+      target += re_weight_marker[d] * std_normal_lpdf(z_v[d]);
     to_vector(B_cross) ~ normal(0, 0.2);
   }
   
@@ -90,18 +96,19 @@
     Lcorr_w ~ lkj_corr_cholesky(lkj_eta);
     for (i in 1 : n_id)
       for (d in 1 : D)
-        z_w_lat[i, d] ~ std_normal();
+        target += re_weight_idm[i] * std_normal_lpdf(z_w_lat[i, d]);
   }
   
   /* Covariance regression priors */
   {
-    real vcov_lp_scale = (vcov_diag_link == 1) ? 0.2 : 0.3;
-    alpha_L ~ normal(0, vcov_lp_scale);
+    real corr_lp_scale = (corr_diag_link == 1) ? 0.2 : 0.3;
+    alpha_L ~ normal(0, corr_lp_scale);
     for (m in 1 : M_cov) 
-      beta_L[m] ~ normal(0, vcov_lp_scale);
-    tau_L ~ normal(0, vcov_lp_scale);
-    lambda_L ~ normal(0, vcov_lp_scale);
-    z_L ~ std_normal();
+      beta_L[m] ~ normal(0, corr_lp_scale);
+    tau_L ~ normal(0, corr_lp_scale);
+    lambda_L ~ normal(0, corr_lp_scale);
+    for (i in 1 : n_id)
+      target += re_weight_L[i] * std_normal_lpdf(z_L[i]);
   }
   
   /* Baseline hazard priors (per event type) */
@@ -125,29 +132,36 @@
   tau_sde_family ~ beta(2, 2);
   cutpoints_ord ~ normal(0, 2);
   
-  /* Association priors (mean-side) */
-  alpha_cv_total ~ std_normal();
-  alpha_cs_total ~ std_normal();
-  alpha_cv_mean ~ std_normal();
-  alpha_cs_mean ~ std_normal();
+  /* Association priors */
+ 
+  sd_alpha_cv_total ~ normal(0, 0.5);
+  sd_alpha_cs_total ~ normal(0, 0.5);
+  sd_alpha_cv_mean ~ normal(0, 0.5);
+  sd_alpha_cs_mean ~ normal(0, 0.5);
+  sd_alpha_cv_marker ~ normal(0, 0.5);
+  sd_alpha_cs_marker ~ normal(0, 0.5);
+  s_corr ~ normal(0, 0.5);
   
-  /* Marker-side shrinkage scales */
-
-  /* Marker-weight shrinkage priors */
-  tau_marker_weights ~ exponential(marker_weight_scale);
-  s_cv_marker ~ normal(0, 0.2);
-  s_cs_marker ~ normal(0, 0.2);
-  s_vcov ~ normal(0, 0.2);
   
-  /* Shrinkage family switch for marker weights, marker-side alphas, and vcov weights */
+  /* Shrinkage family switch for corr weights */
   if (shrinkage == 1) {
-    z_marker_weights ~ double_exponential(0, 1);
-    alpha_cv_marker ~ double_exponential(0, s_cv_marker);
-    alpha_cs_marker ~ double_exponential(0, s_cs_marker);
-    alpha_vcov_var ~ double_exponential(0, s_vcov);
-  } else {
-    z_marker_weights ~ std_normal();
-    alpha_cv_marker ~ normal(0, s_cv_marker);
-    alpha_cs_marker ~ normal(0, s_cs_marker);
-    alpha_vcov_var ~ normal(0, s_vcov);
+    alpha_corr ~ double_exponential(0, 1);
+    z_alpha_cv_total ~ double_exponential(0, 1);
+    z_alpha_cs_total ~ double_exponential(0, 1);
+    z_alpha_cv_mean ~ double_exponential(0, 1);
+    z_alpha_cs_mean ~ double_exponential(0, 1);
+    z_alpha_cv_marker ~ double_exponential(0, 1);
+    z_alpha_cs_marker ~ double_exponential(0, 1);
+    if (estimate_marker_weights == 1 && use_marker_weight_assoc == 1)
+      z_marker_weights ~ double_exponential(0, 1);
+  } else if (shrinkage == 2) {
+    alpha_corr ~ std_normal();
+    z_alpha_cv_total ~ std_normal();
+    z_alpha_cs_total ~ std_normal();
+    z_alpha_cv_mean ~ std_normal();
+    z_alpha_cs_mean ~ std_normal();
+    z_alpha_cv_marker ~ std_normal();
+    z_alpha_cs_marker ~ std_normal();
+    if (estimate_marker_weights == 1 && use_marker_weight_assoc == 1)
+      z_marker_weights ~ std_normal();
   }

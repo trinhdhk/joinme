@@ -94,6 +94,9 @@ sim <- simulate_joinme(
   assoc_coefs = c(cv_total = 0.5)
 )
 
+# When estimating marker weights, compare against sim$truth$marker_weights
+# because signed marker weights are used directly in Stan.
+
 dataLong <- sim$dataLong
 dataEvent <- sim$dataEvent
 
@@ -146,7 +149,7 @@ data so that the likelihood remains deterministic and reproducible.
 
 ## 3.1 Marker-only random effects (no inner id term)
 
-In some studies, you may want **marker-level random effects only**, without subject-specific marker deviations. This is now supported by omitting the inner `( ... | id )` term inside the marker block. In this configuration, marker-by-id random effects are disabled (`Q_idm = 0`), and associations that require those effects (notably `vcov`) are not permitted.
+In some studies, you may want **marker-level random effects only**, without subject-specific marker deviations. This is now supported by omitting the inner `( ... | id )` term inside the marker block. In this configuration, marker-by-id random effects are disabled (`Q_idm = 0`), and associations that require those effects (notably `corr`) are not permitted.
 
 ```{r marker-only-example, eval=FALSE}
 # Marker-only random effects: no inner ( ... | id )
@@ -154,7 +157,7 @@ formulaLong_marker_only <- y ~ time + x1 +
   (1 + time || id) +
   (0 + x1 || marker)
 
-# Note: assoc = c("vcov") is not allowed when Q_idm = 0
+# Note: assoc = c("corr") is not allowed when Q_idm = 0
 ```
 
 ```{r priors}

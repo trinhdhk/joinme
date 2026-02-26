@@ -24,7 +24,6 @@ test_that("association summaries include marker weights when estimated", {
     families = rep("student_t", 2),
     transforms = list(cv_total = list(type = "identity")),
     estimate_marker_weights = TRUE,
-    marker_weight_scale = 0.5,
     control = list(
       engine = "rstan",
       chains = 1,

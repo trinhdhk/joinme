@@ -50,9 +50,9 @@
  *      Compute separately for mean (csm) and marker (csk) components
  *      Time-rescale by dividing by tmax (since time scaled to [0,1] internally)
  *
- *   d. **Variance-Covariance Association (vcov)**:
- *      vcov = sum_q a_vcov_var[q] * log(Var[w_i[q]])
- *      where Var[w_i[q]] = sum_{k=1}^q L_i[q,k]^2  (from Cholesky: Sigma_i = L_i*L_i')
+ *   d. **Variance-Covariance Association (corr)**:
+ *      corr = sum_{r>c} a_corr[m(r,c)] * Corr_i[r,c]
+ *      where Corr_i[r,c] is computed from Sigma_i = L_i*L_i'
  *      This is constant across time for a given subject
  *
  *   e. **Aggregate Total Features**:
@@ -60,7 +60,7 @@
  *      cs_total = csm + csk  (full current slope)
  *
  * ### STEP 3: NONLINEAR TRANSFORMATIONS OF ASSOCIATION FEATURES
- *   Each association type (cv_total, cv_mean, cv_marker, cs_total, cs_mean, cs_marker, vcov)
+ *   Each association type (cv_total, cv_mean, cv_marker, cs_total, cs_mean, cs_marker, corr)
  *   can be transformed flexibly before entering the survival predictor:
  *
  *   Transformation modes (tf_mode):
@@ -233,7 +233,7 @@
  * @param Z_idm_event_now Random effect design matrix at event times (idm, current).
  * @param Z_idm_event_fwd Random effect design matrix at event times (idm, forward).
  * @param vbar Mean of random effects (global).
- * @param marker_weights_eff Effective signed marker weights.
+ * @param marker_weights_eff Signed marker weights used in marker-aggregated association channels.
  * @param L_i Cholesky factors for random effects.
  * @param a_cv_total Association weight (Total Current Value).
  * @param a_cs_total Association weight (Total Current Slope).
@@ -241,10 +241,10 @@
  * @param a_cv_marker Association weight (Marker Current Value).
  * @param a_cs_mean Association weight (Mean Current Slope).
  * @param a_cs_marker Association weight (Marker Current Slope).
- * @param a_vcov_var Association weights for variance components.
+ * @param a_corr Association weights for variance components.
  * @param tf_mode_cv_tot Transformation mode (CV Total).
  * @param tf_mode_cs_tot Transformation mode (CS Total).
- * @param tf_mode_vcov Transformation mode (VCOV).
+ * @param tf_mode_corr Transformation mode (CORR).
  * @param tf_mode_cv_mean Transformation mode (CV Mean).
  * @param tf_mode_cv_marker Transformation mode (CV Marker).
  * @param tf_mode_cs_mean Transformation mode (CS Mean).
@@ -259,11 +259,11 @@
  * @param knots_cs Spline knots (CS).
  * @param coeff_cs Spline coefficients (CS).
  * @param spline_degree_cs Spline degree (CS).
- * @param functional_ops_vcov Functional operations (VCOV).
- * @param const_data_vcov Constant data (VCOV).
- * @param knots_vcov Spline knots (VCOV).
- * @param coeff_vcov Spline coefficients (VCOV).
- * @param spline_degree_vcov Spline degree (VCOV).
+ * @param functional_ops_corr Functional operations (CORR).
+ * @param const_data_corr Constant data (CORR).
+ * @param knots_corr Spline knots (CORR).
+ * @param coeff_corr Spline coefficients (CORR).
+ * @param spline_degree_corr Spline degree (CORR).
  * @param functional_ops_cv_mean Functional operations (CV Mean).
  * @param const_data_cv_mean Constant data (CV Mean).
  * @param knots_cv_mean Spline knots (CV Mean).
@@ -403,6 +403,7 @@ real partial_joinme(
     array[] matrix Bs_gk_c,
     vector S_event,
     array[] int d_event,
+    vector subject_weights,
     int K_event,
     array[] int event_type,
     real eps_fd,
@@ -431,10 +432,10 @@ real partial_joinme(
     real a_cv_marker,
     real a_cs_mean,
     real a_cs_marker,
-    vector a_vcov_var,
+    vector a_corr,
     int tf_mode_cv_tot,
     int tf_mode_cs_tot,
-    int tf_mode_vcov,
+    int tf_mode_corr,
     int tf_mode_cv_mean,
     int tf_mode_cv_marker,
     int tf_mode_cs_mean,
@@ -449,11 +450,11 @@ real partial_joinme(
     vector knots_cs,
     vector coeff_cs,
     int spline_degree_cs,
-    array[] int functional_ops_vcov,
-    vector const_data_vcov,
-    vector knots_vcov,
-    vector coeff_vcov,
-    int spline_degree_vcov,
+    array[] int functional_ops_corr,
+    vector const_data_corr,
+    vector knots_corr,
+    vector coeff_corr,
+    int spline_degree_corr,
     array[] int functional_ops_cv_mean,
     vector const_data_cv_mean,
     vector knots_cv_mean,
@@ -486,6 +487,8 @@ real partial_joinme(
   for (ii in start : end) {
     int idx_local = ii - start + 1;  // Local index within slice
     int i = id_seq[idx_local];       // Global subject index
+    real subj_w = subject_weights[i];
+    real lp_i = 0;
 
     // Cached weighted average of subject-by-marker REs (used in survival submodel)
     vector[Q_idm] wbar_i_i = wbar_i[i];
@@ -555,7 +558,7 @@ real partial_joinme(
              : sigma_family[marker_to_sigma_family[d]];
         // sig: residual scale
         
-        lp += normal_lpdf(y_real[n] | eta_long, sig);
+        lp_i += normal_lpdf(y_real[n] | eta_long, sig);
         
       // FAMILY 2: STUDENT-T
       // p(y | eta, sigma, nu) = Student_t(y | nu, eta, sigma)
@@ -592,25 +595,25 @@ real partial_joinme(
         real nu = (P_nu > 0 || n_re_nu > 0) ? (2 + exp(eta_nu)) : nu_family[marker_to_nu_family[d]];
         // nu: degrees of freedom
         
-        lp += student_t_lpdf(y_real[n] | nu, eta_long, sig);
+        lp_i += student_t_lpdf(y_real[n] | nu, eta_long, sig);
         
       // FAMILY 3: BERNOULLI (BINARY LOGISTIC)
       // p(y = 1 | eta) = logit^-1(eta) = 1 / (1 + exp(-eta))
       // For binary outcomes (y in {0, 1})
       } else if (family_long[d] == 3) {
-        lp += bernoulli_logit_lpmf(y_int[n] | eta_long);
+        lp_i += bernoulli_logit_lpmf(y_int[n] | eta_long);
         
       // FAMILY 4: BINOMIAL (BINOMIAL LOGISTIC)
       // p(y | N, eta) = Binomial(y | N, p), where p = logit^-1(eta)
       // For count outcomes with known number of trials N
       } else if (family_long[d] == 4) {
-        lp += binomial_logit_lpmf(y_int[n] | trials[n], eta_long);
+        lp_i += binomial_logit_lpmf(y_int[n] | trials[n], eta_long);
         
       // FAMILY 5: POISSON
       // p(y | eta) = Poisson(y | mu), where mu = exp(eta)
       // For count data (y in {0, 1, 2, ...})
       } else if (family_long[d] == 5) {
-        lp += poisson_log_lpmf(y_int[n] | eta_long);
+        lp_i += poisson_log_lpmf(y_int[n] | eta_long);
         
       // FAMILY 6: NEGATIVE BINOMIAL
       // p(y | eta, phi) = NegBinom(y | mu, phi), where mu = exp(eta)
@@ -630,7 +633,7 @@ real partial_joinme(
         real phi = (P_phi > 0 || n_re_phi > 0) ? exp(eta_phi) : phi_family[marker_to_phi_family[d]];
         // phi: negbin dispersion
         
-        lp += neg_binomial_2_log_lpmf(y_int[n] | eta_long, phi);
+        lp_i += neg_binomial_2_log_lpmf(y_int[n] | eta_long, phi);
         
       // FAMILY 7: SKEW-NORMAL
       // p(y | eta, sigma, alpha) = SkewNormal(y | eta, sigma, alpha)
@@ -665,7 +668,7 @@ real partial_joinme(
         real alpha = (P_alpha > 0 || n_re_alpha > 0) ? eta_alpha : alpha_family[marker_to_alpha_family[d]];
         // alpha: skewness
         
-        lp += skew_normal_lpdf(y_real[n] | eta_long, sig, alpha);
+        lp_i += skew_normal_lpdf(y_real[n] | eta_long, sig, alpha);
         
       // FAMILY 8: SKEW-DOUBLE-EXPONENTIAL (ASYMMETRIC LAPLACE)
       // p(y | eta, sigma, tau) = SkewDE(y | eta, sigma, tau)
@@ -686,7 +689,7 @@ real partial_joinme(
              ? exp(eta_sigma)
              : sigma_family[marker_to_sigma_family[d]];
         // sig: residual scale
-        lp += double_exponential_lpdf(y_real[n] | eta_long, sig);
+        lp_i += double_exponential_lpdf(y_real[n] | eta_long, sig);
       } else if (family_long[d] == 9) {
         real eta_sigma = 0; // log-sigma linear predictor
         if (P_sigma > 0) eta_sigma += dot_product(X_sigma[n], beta_sigma);
@@ -721,7 +724,7 @@ real partial_joinme(
         }
         // tau_sde: asymmetry parameter in (0,1)
         
-        lp += skew_double_exponential_lpdf(y_real[n] | eta_long, sig, tau_sde);
+        lp_i += skew_double_exponential_lpdf(y_real[n] | eta_long, sig, tau_sde);
         
       // FAMILY 10: BETA REGRESSION
       // p(y | eta, phi) = Beta(y | a, b), where y in (0, 1)
@@ -750,7 +753,7 @@ real partial_joinme(
         real shape1 = fmax(mu * phi_beta, 1e-6); // beta shape1
         real shape2 = fmax((1 - mu) * phi_beta, 1e-6); // beta shape2
         
-        lp += beta_lpdf(y_real[n] | shape1, shape2);
+        lp_i += beta_lpdf(y_real[n] | shape1, shape2);
         
       // FAMILY 11: ORDERED LOGISTIC (ORDINAL OUTCOMES)
       // p(y = k | eta, c) for k in {1, 2, ..., K_ord}
@@ -758,7 +761,7 @@ real partial_joinme(
       // P(y <= k) = logit^-1(c_k - eta),  P(y = k) = P(y <= k) - P(y <= k-1)
       // Used for ordinal outcomes (e.g., severity: mild/moderate/severe)
       } else {
-        lp += ordered_logistic_lpmf(y_int[n] | eta_long, cutpoints_ord);
+        lp_i += ordered_logistic_lpmf(y_int[n] | eta_long, cutpoints_ord);
       }
     } // End longitudinal observations loop for subject i
 
@@ -779,6 +782,12 @@ real partial_joinme(
     vector[15] cvk_now;  // Current Value - Marker component at node j
     vector[15] cvk_fwd;  // Forward value
 
+    // Algorithm detail for marker-aggregated channels at each GK node j:
+    //   1) Reconstruct marker-specific CV components for each marker d.
+    //   2) Compute marker-specific slopes with finite differences.
+    //   3) Apply transforms per marker for CV/CS total+marker channels.
+    //   4) Aggregate transformed marker channels using signed marker weights.
+    //   5) Normalize by D_mkrs to keep the aggregation scale stable across D.
     for (j in 1 : 15) {
       // CURRENT VALUE - MEAN COMPONENT
       // cvm(t) = X(t)*beta + Z_id(t)*u_i
@@ -811,20 +820,20 @@ real partial_joinme(
     // Captures rate of change of longitudinal trajectory at time t
     // Time rescaling: divide by tmax (since time internally scaled to [0,1])
     vector[15] csm_raw = eta_fd(cvm_now, cvm_fwd, eps_fd) / tmax; // mean slope
-    vector[15] csk_raw = eta_fd(cvk_now, cvk_fwd, eps_fd) / tmax; // marker slope
+    vector[15] csk_raw; // marker slope (weighted across markers)
 
     // STEP 2.3: Compute variance-covariance association feature
-    // VCOV feature: weighted sum of log-variances from ID-by-marker covariance
-    // vcov = sum_q a_vcov_var[q] * log(Var[w_i[q]])
-    // where Var[w_i[q]] = sum_{k=1}^q L_i[q,k]^2  (from Cholesky: Sigma_i = L_i*L_i')
-    // This captures uncertainty in subject-specific predictions
-    // Note: This is CONSTANT across time for subject i (RE variance doesn't vary)
-    vector[15] vcov_raw = eta_vcov_varonly_weighted_const(15, L_i[i], a_vcov_var);
+    // CORR feature pipeline:
+    // 1) extract raw off-diagonal correlations from Sigma_i,
+    // 2) apply corr transform term-wise,
+    // 3) apply association weights a_corr after transform.
+    // This enforces: a_corr * transform(corr_raw), not transform(a_corr * corr_raw).
+    int M_corr_local = num_elements(a_corr);
+    vector[M_corr_local] corr_terms_raw = eta_corr_varonly_weighted_const(L_i[i]);
 
     // STEP 2.4: Aggregate total association features
     // Combine mean and marker components for "total" associations
     vector[15] cv_tot = cvm_now + cvk_now;  // Total current value
-    vector[15] cs_tot = csm_raw + csk_raw;  // Total current slope
 
     // STEP 2.5: Apply nonlinear transformations
     // Each association feature can be transformed flexibly before entering hazard
@@ -841,14 +850,25 @@ real partial_joinme(
                                                      functional_ops_cv_mean, const_data_cv_mean, 
                                                      knots_cv_mean, coeff_cv_mean, spline_degree_cv_mean);
     vector[15] cv_marker_tf;
+    vector[15] cs_tot_tf;
+    vector[15] cs_marker_tf;
     for (j in 1 : 15) {
       real acc_cv_tot_tf = 0;
       real acc_cv_marker_tf = 0;
+      real acc_csk_raw = 0;
+      real acc_cs_tot_tf = 0;
+      real acc_cs_marker_tf = 0;
       for (d in 1 : D_mkrs) {
+        // Marker-d reconstruction (current and forward) so slope channels are
+        // always formed at marker resolution before transformation.
         real mk_part_now_d = 0;
-        if (R_mk > 0)
+        real mk_part_fwd_d = 0;
+        if (R_mk > 0) {
           mk_part_now_d = dot_product(Z_mk_gk_now[i][j], v_marker[d]);
+          mk_part_fwd_d = dot_product(Z_mk_gk_fwd[i][j], v_marker[d]);
+        }
         real cvk_now_d = mk_part_now_d + dot_product(Z_idm_gk_now[i][j], w_idscaled[i, d]);
+        real cvk_fwd_d = mk_part_fwd_d + dot_product(Z_idm_gk_fwd[i][j], w_idscaled[i, d]);
         real cv_tot_now_d = cvm_now[j] + cvk_now_d;
 
         acc_cv_tot_tf += marker_weights_eff[d]
@@ -859,26 +879,44 @@ real partial_joinme(
           * apply_transform_scalar(cvk_now_d, tf_mode_cv_marker,
                                    functional_ops_cv_marker, const_data_cv_marker,
                                    knots_cv_marker, coeff_cv_marker, spline_degree_cv_marker);
+        {
+          // Marker-level slope channels:
+          //   csk_raw_d    = marker-only slope
+          //   cs_tot_raw_d = mean slope + marker slope
+          // Both are transformed at marker level and then aggregated.
+          real csk_raw_d = ((cvk_fwd_d - cvk_now_d) / eps_fd) / tmax;
+          real cs_tot_raw_d = csm_raw[j] + csk_raw_d;
+
+          acc_csk_raw += marker_weights_eff[d] * csk_raw_d;
+          acc_cs_tot_tf += marker_weights_eff[d]
+            * apply_transform_scalar(cs_tot_raw_d, tf_mode_cs_tot,
+                                     functional_ops_cs, const_data_cs,
+                                     knots_cs, coeff_cs, spline_degree_cs);
+          acc_cs_marker_tf += marker_weights_eff[d]
+            * apply_transform_scalar(csk_raw_d, tf_mode_cs_marker,
+                                     functional_ops_cs_marker, const_data_cs_marker,
+                                     knots_cs_marker, coeff_cs_marker, spline_degree_cs_marker);
+        }
       }
+      // Final normalized marker-aggregated channels at GK node j.
       cv_tot_tf[j] = acc_cv_tot_tf / D_mkrs;
       cv_marker_tf[j] = acc_cv_marker_tf / D_mkrs;
+      csk_raw[j] = acc_csk_raw / D_mkrs;
+      cs_tot_tf[j] = acc_cs_tot_tf / D_mkrs;
+      cs_marker_tf[j] = acc_cs_marker_tf / D_mkrs;
     }
 
     // Transform CS features
-    vector[15] cs_tot_tf = apply_transform_vector(cs_tot, tf_mode_cs_tot, 
-                                                    functional_ops_cs, const_data_cs, 
-                                                    knots_cs, coeff_cs, spline_degree_cs);
     vector[15] cs_mean_tf = apply_transform_vector(csm_raw, tf_mode_cs_mean, 
                                                      functional_ops_cs_mean, const_data_cs_mean, 
                                                      knots_cs_mean, coeff_cs_mean, spline_degree_cs_mean);
-    vector[15] cs_marker_tf = apply_transform_vector(csk_raw, tf_mode_cs_marker, 
-                                                       functional_ops_cs_marker, const_data_cs_marker, 
-                                                       knots_cs_marker, coeff_cs_marker, spline_degree_cs_marker);
 
-    // Transform VCOV feature
-    vector[15] vcov_tf = apply_transform_vector(vcov_raw, tf_mode_vcov, 
-                                                  functional_ops_vcov, const_data_vcov, 
-                                                  knots_vcov, coeff_vcov, spline_degree_vcov);
+    // Transform CORR terms and apply a_corr after transform.
+    vector[M_corr_local] corr_terms_tf = apply_transform_vector(corr_terms_raw, tf_mode_corr,
+                                    functional_ops_corr, const_data_corr,
+                                    knots_corr, coeff_corr, spline_degree_corr);
+    real corr_assoc_scalar = dot_product(a_corr, corr_terms_tf);
+    vector[15] corr_assoc = rep_vector(corr_assoc_scalar, 15);
 
     // STEP 2.6: Combine into survival predictor at GK nodes
     // eta_assoc(t) = sum(coefficient * transformed_association_feature)
@@ -895,7 +933,7 @@ real partial_joinme(
                      + a_cs_total * cs_tot_tf
                      + a_cs_mean * cs_mean_tf
                      + a_cs_marker * cs_marker_tf
-                     + vcov_tf;
+                     + corr_assoc;
     // eta_assoc_nodes: association predictor at GK nodes
 
 
@@ -941,20 +979,13 @@ real partial_joinme(
 
       // Current slopes at event time (finite difference)
       real csm_S_raw = ((cvm_S_fwd - cvm_S) / eps_fd) / tmax; // mean slope at event
-      real csk_S_raw = ((cvk_S_fwd - cvk_S) / eps_fd) / tmax; // marker slope at event
+      real csk_S_raw = 0; // marker slope at event (weighted across markers)
 
-      // VCOV at event time (same as GK nodes, but compute directly for clarity)
-      real vcov_S_raw = 0; // variance feature at event time
-      for (q in 1 : Q_idm) {
-        real var_q = 0;
-        for (k in 1 : q)
-          var_q += square(L_i[i][q, k]);
-        vcov_S_raw += a_vcov_var[q] * log(var_q);
-      }
+      // CORR at event time equals the same transformed-and-weighted constant.
+      real corr_S_assoc = corr_assoc_scalar;
 
       // Aggregate totals
       real cv_S_tot = cvm_S + cvk_S; // total CV at event
-      real cs_S_tot = csm_S_raw + csk_S_raw; // total CS at event
 
       // Association features at event time
       real cv_S_tot_tf = 0;
@@ -962,11 +993,18 @@ real partial_joinme(
                                                    functional_ops_cv_mean, const_data_cv_mean, 
                                                    knots_cv_mean, coeff_cv_mean, spline_degree_cv_mean);
       real cv_S_marker_tf = 0;
+      real cs_S_tot_tf = 0;
+      real cs_S_marker_tf = 0;
+      // Event-time counterpart of the same marker-resolved transform pipeline.
       for (d in 1 : D_mkrs) {
         real mk_part_S_d = 0;
-        if (R_mk > 0)
+        real mk_part_S_fwd_d = 0;
+        if (R_mk > 0) {
           mk_part_S_d = dot_product(Z_mk_event_now[i], v_marker[d]);
+          mk_part_S_fwd_d = dot_product(Z_mk_event_fwd[i], v_marker[d]);
+        }
         real cvk_S_d = mk_part_S_d + dot_product(Z_idm_event_now[i], w_idscaled[i, d]);
+        real cvk_S_fwd_d = mk_part_S_fwd_d + dot_product(Z_idm_event_fwd[i], w_idscaled[i, d]);
         real cv_S_tot_d = cvm_S + cvk_S_d;
 
         cv_S_tot_tf += marker_weights_eff[d]
@@ -977,23 +1015,31 @@ real partial_joinme(
           * apply_transform_scalar(cvk_S_d, tf_mode_cv_marker,
                                    functional_ops_cv_marker, const_data_cv_marker,
                                    knots_cv_marker, coeff_cv_marker, spline_degree_cv_marker);
+        {
+          // Event-time marker-level slope channels used by CS associations.
+          real csk_S_raw_d = ((cvk_S_fwd_d - cvk_S_d) / eps_fd) / tmax;
+          real cs_S_tot_raw_d = csm_S_raw + csk_S_raw_d;
+
+          csk_S_raw += marker_weights_eff[d] * csk_S_raw_d;
+          cs_S_tot_tf += marker_weights_eff[d]
+            * apply_transform_scalar(cs_S_tot_raw_d, tf_mode_cs_tot,
+                                     functional_ops_cs, const_data_cs,
+                                     knots_cs, coeff_cs, spline_degree_cs);
+          cs_S_marker_tf += marker_weights_eff[d]
+            * apply_transform_scalar(csk_S_raw_d, tf_mode_cs_marker,
+                                     functional_ops_cs_marker, const_data_cs_marker,
+                                     knots_cs_marker, coeff_cs_marker, spline_degree_cs_marker);
+        }
       }
       cv_S_tot_tf /= D_mkrs;
       cv_S_marker_tf /= D_mkrs;
+      csk_S_raw /= D_mkrs;
+      cs_S_tot_tf /= D_mkrs;
+      cs_S_marker_tf /= D_mkrs;
 
-      real cs_S_tot_tf = apply_transform_scalar(cs_S_tot, tf_mode_cs_tot, 
-                                                  functional_ops_cs, const_data_cs, 
-                                                  knots_cs, coeff_cs, spline_degree_cs);
       real cs_S_mean_tf = apply_transform_scalar(csm_S_raw, tf_mode_cs_mean, 
                                                    functional_ops_cs_mean, const_data_cs_mean, 
                                                    knots_cs_mean, coeff_cs_mean, spline_degree_cs_mean);
-      real cs_S_marker_tf = apply_transform_scalar(csk_S_raw, tf_mode_cs_marker, 
-                                                     functional_ops_cs_marker, const_data_cs_marker, 
-                                                     knots_cs_marker, coeff_cs_marker, spline_degree_cs_marker);
-
-      real vcov_S_tf = apply_transform_scalar(vcov_S_raw, tf_mode_vcov, 
-                                                functional_ops_vcov, const_data_vcov, 
-                                                knots_vcov, coeff_vcov, spline_degree_vcov);
 
       // Combine into association predictor
       real eta_assoc_S = a_cv_total * cv_S_tot_tf
@@ -1002,12 +1048,12 @@ real partial_joinme(
                    + a_cs_total * cs_S_tot_tf
                    + a_cs_mean * cs_S_mean_tf
                    + a_cs_marker * cs_S_marker_tf
-                   + vcov_S_tf;
+                   + corr_S_assoc;
       // eta_assoc_S: association predictor at event time
       
 
       // log h0(S_i) = log_h0_intercept[k_ev] + Bs_event_c[i]' * bs_gamma_c[k_ev]
-      lp += log_h0_S + eta_w_ev + eta_assoc_S;
+      lp_i += log_h0_S + eta_w_ev + eta_assoc_S;
     }
 
 
@@ -1061,7 +1107,8 @@ real partial_joinme(
     //   - zeros: no additional eta (already included)
     //
 
-    lp += -cumhaz(S_event[i], log_h_total, rep_vector(0.0, 15));
+    lp_i += -cumhaz(S_event[i], log_h_total, rep_vector(0.0, 15));
+    lp += subj_w * lp_i;
     
   } // End subject loop
 

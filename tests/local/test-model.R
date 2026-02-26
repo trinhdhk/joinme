@@ -2,18 +2,19 @@ devtools::load_all()
 library(dplyr)
 
 sim <- simulate_joinme(
-  n_id = 100,
-  formulaDist = list(
-    sigma ~ 1 + (1 | marker)
-  ),
-  families = c(rep("student_t", 3), rep("gaussian", 3), rep("poisson", 2)),
+  n_id = 120,
+  # formulaDist = list(
+  #   sigma ~ 1 + (1 | marker)
+  # ),
+  families = c(rep("gaussian", 5)),
   n_obs_per_marker_per_id = 6,
   times_obs = seq(0, 6, length.out = 10),
   beta_long = c(0.5, -1, 1),
-  seed = 12,
-  assoc = c("cv_total", "vcov"),
-  transforms = list(cv_total = list(type = "functional", expr =  ~ expit(x))),
-  assoc_coefs = c(cv_total = -0.25, vcov = c(0.1, -0.5, 0.1))
+  seed = 112,
+  marker_weights = c(0.5, 1, -0.5, 0.75, 1),
+  assoc = c("cv_mean"),
+  # transforms = list(cv_mean = list(type = "functional", expr =  ~ expit(x))),
+  assoc_coefs = c(cv_mean = 0.25)
 )
 
 formulaLong <- y ~ 1 +
@@ -21,28 +22,30 @@ formulaLong <- y ~ 1 +
   x1 +
   (1 + time | id) +
   (0 + x1 + (1 + time | id) | marker)
-formulaEvent <- survival::Surv(time, event) ~ 1 + x1 + x2
+formulaEvent <- survival::Surv(time, event) ~ x1 + x2
 
 fit <- joinme(
   formulaLong = formulaLong,
   dataLong = sim$dataLong,
   formulaEvent = formulaEvent,
-  formulaDist = list(
-    sigma ~ 1 + (1 | marker)
-   ),
+  # formulaDist = list(
+  #   sigma ~ 1 + (1 | marker)
+  #  ),
   dataEvent = sim$dataEvent,
-  assoc = c("cv_total"),
-  families = c(rep("student_t", 3), rep("gaussian", 3), rep("poisson", 2)),
-  transforms = list(cv_total = list(type = "identity")),
+  assoc = c("cv_mean"),
+  families = c(rep("gaussian", 5)),
+  # transforms = list(cv_mean = list(type = "functional", expr =  ~ expit(x))),
+  # estimate_marker_weights = FALSE,
+  # marker_weights = sim$truth$marker_weights,
   estimate_marker_weights = TRUE,
-  marker_weight_scale = 1,
+  # marker_weight_scale = 1,
   control = list(
     threads_per_chain = 6,
     parallel_chains = 2,
-    iter_warmup = 200,
-    iter_sampling = 1000,
+    iter_warmup = 300,
+    iter_sampling = 1200,
     refresh = 200,
-    adapt_delta = 0.75,
+    adapt_delta = 0.85,
     max_treedepth = 12,
     seed = 421
   )
@@ -66,10 +69,10 @@ pred <- posterior_predict(
   newdataEvent = ndE |> filter(id%in% c(5, 6, 7, 8)),
   time_start = "time_start",
   # times = seq(0, max(sim$dataLong$time) + 1, length.out = 20),
-  n_samples = 50,
-  n_times = 50,
   time_horizon = 10,
   control = list(
+    n_samples = 50,
+    n_times = 50,
     chains = 2, parallel_chains =2,
     iter_warmup = 200,
     iter_sampling = 800,

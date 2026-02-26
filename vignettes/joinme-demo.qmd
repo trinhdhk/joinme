@@ -69,9 +69,9 @@ Accepted specifications include:
 
 We simulate a multi-marker longitudinal dataset with a survival process linked through **current value (CV)**. The simulator also returns truth values for fixed effects and survival coefficients.
 
-For marker-aggregated terms (`cv_total`, `cv_marker`), both simulation and Stan
-fit/prediction apply transforms at marker level before weighted averaging. This
-keeps nonlinear association terms consistent end-to-end.
+For marker-aggregated terms (`cv_total`, `cv_marker`, `cs_total`, `cs_marker`),
+both simulation and Stan fit/prediction apply transforms at marker level before
+weighted averaging. This keeps nonlinear association terms consistent end-to-end.
 
 ```{r scenario-a-sim}
 sim <- simulate_joinme(
@@ -83,14 +83,21 @@ sim <- simulate_joinme(
   assoc = c("cv_total"),
   assoc_coefs = c(cv_total = 0.6)
 )
+
+# When estimating marker weights, compare against sim$truth$marker_weights
+# because signed marker weights are used directly in Stan.
 ```
 
 ## Model specification and fit
 
 We start with identity transforms and a conservative sampling configuration to
 keep runtime manageable. The nested marker block `( ... | marker )` supports an
-inner `( ... | id )` term; this enables marker-by-id effects and the VCOV
+inner `( ... | id )` term; this enables marker-by-id effects and the CORR
 association.
+
+Subject/group-weighted declarations can be made per grouping term with
+`weighted(group, weights = <column>)`, e.g.
+`(0 + x1 + (1 + time | weighted(id, weights = id_w)) | weighted(marker, weights = marker_w))`.
 
 ```{r scenario-a-fit}
 formulaLong <- y ~ 1 + time + x1 +
@@ -206,8 +213,8 @@ pred_fit <- rstantools::posterior_epred(
   newdataEvent = sim$dataEvent,
   time_start = max(sim$dataLong$time),
   times = seq(0, max(sim$dataLong$time) + 1, length.out = 60),
-  n_samples = 100,
   control = list(
+    n_samples = 100,
     iter_sampling = 500,
     iter_warmup = 400,
     chains = 3,
@@ -253,8 +260,8 @@ pred_ep <- rstantools::posterior_epred(
   newdataEvent = ndE,
   time_start = time_start,
   times = times,
-  n_samples = 200,
   control = list(
+    n_samples = 200,
     n_pred_draws = 400,
     iter_sampling = 500,
     iter_warmup = 400,
@@ -267,10 +274,15 @@ plot(pred_ep, which = "longitudinal")
 plot(pred_ep, which = "survival")
 ```
 
+`predict()` now accepts `scale` as a character vector. If omitted, all
+longitudinal scales are produced: `c("epred", "linpred", "predict")`.
+Use `plot(..., scale = "epred")` (or another available scale) to choose which
+trajectory scale to visualize.
+
 Dynamic prediction is conditional on observed history up to `time_start` and (by construction) survival up to that landmark; the survival plot corresponds to $\Pr(T > t \mid T > T_{start}, \mathcal{H}(T_{start}))$.
 
-`n_samples` controls how many posterior parameter draws are extracted from the
-fitted model, while `control$n_pred_draws` controls how many draws are produced
+`control$n_samples` controls how many posterior parameter draws are extracted
+from the fitted model, while `control$n_pred_draws` controls how many draws are produced
 in the dynpred output object. This decoupling allows lightweight posterior
 extraction with a larger prediction Monte Carlo layer when needed.
 
@@ -285,8 +297,8 @@ pred_ep_horizon <- rstantools::posterior_epred(
   time_start = time_start,
   times = NULL,
   time_horizon = 2,
-  n_samples = 100,
   control = list(
+    n_samples = 100,
     n_pred_draws = 150,
     iter_sampling = 200,
     iter_warmup = 200,
@@ -310,12 +322,12 @@ diagnosis(fit)
 diagnosis(pred_ep)
 ```
 
-For fitted models, `ranef()` and `vcov()` are nested by `formulaLong` and
+For fitted models, `ranef()` and `corr()` are nested by `formulaLong` and
 `formulaDist`:
 
-```{r scenario-a-ranef-vcov-fit}
+```{r scenario-a-ranef-corr-fit}
 re_fit <- ranef(fit)
-vc_fit <- vcov(fit)
+vc_fit <- corr(fit)
 
 # Examples
 re_fit$formulaLong$id
@@ -325,10 +337,10 @@ vc_fit$formulaLong$id
 For dynamic prediction, marker-by-id random effects and covariance are exposed
 only when marker covariance depends on id:
 
-```{r scenario-a-ranef-vcov-pred}
-if (isTRUE(pred_ep$metadata$marker_vcov_depends_on_id)) {
+```{r scenario-a-ranef-corr-pred}
+if (isTRUE(pred_ep$metadata$marker_corr_depends_on_id)) {
   ranef(pred_ep)
-  vcov(pred_ep)
+  corr(pred_ep)
 }
 ```
 
@@ -475,8 +487,8 @@ pred_comp <- predict(
   process = "event",
   time_start = time_start_comp,
   times = times_comp,
-  n_samples = 100,
   control = list(
+    n_samples = 100,
     engine = "cmdstanr",
     chains = 1,
     iter_warmup = 0,
@@ -617,8 +629,8 @@ pred_thread <- rstantools::posterior_epred(
   newdataEvent = ndE_thread,
   time_start = max(ndL_thread$time),
   times = seq(0, max(ndL_thread$time) + 2, length.out = 60),
-  n_samples = 100,
   control = list(
+    n_samples = 100,
     threads_per_chain = 2,
     chains = 1,
     iter_warmup = 100,

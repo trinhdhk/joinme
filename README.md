@@ -11,6 +11,10 @@ estimation, and includes helpers for data preparation, model diagnostics (ELPD,
 LOO, WAIC), simulation utilities and plotting. See the vignettes and reference
 for worked examples and API details.
 
+For marker-aggregated association terms (`cv_total`, `cv_marker`, `cs_total`,
+`cs_marker`), transforms are applied at marker level before weighted averaging
+in simulation, fitting, and prediction.
+
 ## Family-shared distributional parameters
 
 When you fit mixed longitudinal families, `joinme` now uses **family-shared**
@@ -104,6 +108,9 @@ sim <- simulate_joinme(
   assoc_coefs = c(cv_total = 0.6)
 )
 
+# Note: when estimating marker weights, compare to sim$truth$marker_weights
+# because signed marker weights are used directly in Stan.
+
 formulaLong <- y ~ 1 + time + x1 +
   (1 + time | id) +
   (0 + x1 + (1 + time | id) | marker)
@@ -134,7 +141,7 @@ diagnosis(fit)
 
 # Random effects / covariance (nested by formula block)
 re_fit <- ranef(fit)
-vc_fit <- vcov(fit)
+vc_fit <- corr(fit)
 # Example accessors:
 # re_fit$formulaLong$id
 # re_fit$formulaDist$sigma$allFamilies
@@ -151,7 +158,7 @@ pred <- posterior_epred(
   newdataEvent = ndE,
   time_start = time_start,
   times = seq(time_start, time_start + 1, length.out = 20),
-  n_samples = 50,
+  control = list(n_samples = 50),
   seed = 69
 )
 
@@ -160,9 +167,9 @@ summary(pred)
 diagnosis(pred)
 
 # Available only when marker covariance depends on id
-if (isTRUE(pred$metadata$marker_vcov_depends_on_id)) {
+if (isTRUE(pred$metadata$marker_corr_depends_on_id)) {
   re_pred <- ranef(pred)
-  vc_pred <- vcov(pred)
+  vc_pred <- corr(pred)
 }
 
 # Plot longitudinal and survival predictions

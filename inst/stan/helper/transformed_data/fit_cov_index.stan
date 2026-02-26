@@ -8,6 +8,9 @@
 int M_cov = (indep_idmarker_cov == 1) ? Q_idm
             : ((Q_idm * (Q_idm + 1)) %/% 2);
 
+/* number of off-diagonal correlation association features */
+int M_corr = (Q_idm >= 2) ? ((Q_idm * (Q_idm - 1)) %/% 2) : 0;
+
 /* mapping m -> (r,c) in the lower triangle of L_i */
 array[M_cov] int r_idx; // row index for element m
 array[M_cov] int c_idx; // column index for element m

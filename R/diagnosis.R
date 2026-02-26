@@ -265,7 +265,7 @@ pp_check.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, 
 	pred <- posterior_epred(object,
 				newdataLong = newdataLong,
 				newdataEvent = newdataEvent,
-				n_samples = n_samples,
+				control = list(n_samples = n_samples),
 				seed = seed,
 				...)
 
@@ -519,7 +519,7 @@ concordance.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NUL
 		process = "event",
 		times = times_map,
 		time_start = time_start_map,
-		n_samples = n_samples,
+		control = list(n_samples = n_samples),
 		seed = seed,
 		...
 	)

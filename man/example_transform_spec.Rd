@@ -25,7 +25,7 @@ spec_cs <- list(
 )
 
 # Example 3: I-spline (monotonic)
-spec_vcov <- list(
+spec_corr <- list(
   type = "ispline",
   knots = c(-1, 0, 1),
   coeff = c(0, 0.5, 1, 1.2, 1.5),
@@ -33,7 +33,7 @@ spec_vcov <- list(
 )
 
 # Example 4: Penalized monotone I-spline (fit in R)
-spec_vcov_pen <- list(
+spec_corr_pen <- list(
   type = "ispline_penalized",
   x = seq(-2, 2, length.out = 50),
   y = exp(seq(-2, 2, length.out = 50)),
@@ -46,7 +46,7 @@ spec_vcov_pen <- list(
 transforms <- list(
   cv_total = spec_cv,
   cs_total = spec_cs,
-  vcov = spec_vcov
+  corr = spec_corr
 )
 standata_tf <- build_standata_transforms(transforms)
 }

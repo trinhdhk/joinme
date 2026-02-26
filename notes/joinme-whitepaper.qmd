@@ -65,6 +65,13 @@ This structure imposes a sparse correlation matrix, significantly reducing the n
 
 Random-effects independence is specified using lme4-style `||` syntax in `formulaLong` (e.g., `(1 + time || id)`), which enforces diagonal covariance structures for the corresponding blocks.
 
+Formula-scoped weighting can be declared directly on grouping terms using
+`weighted(group, weights = <column>)` (for example,
+`(1 + time | weighted(id, weights = id_w))` or
+`(... | weighted(marker, weights = marker_w))`). These weights enter latent
+random-effects priors; when used on subject-level groupings they also scale
+subject contributions in the longitudinal and survival likelihood.
+
 Prediction plots separate fitted history from forecast intervals and surface multiple credible bands for longitudinal, survival, and cumulative hazard outputs.
 
 Model diagnostics and extraction methods follow a consistent interface across
@@ -72,10 +79,10 @@ fitted and predicted objects:
 
 - `diagnosis(fit)` and `diagnosis(pred)` return the same diagnostics schema
   (`metric`, `value`) to simplify downstream monitoring.
-- `ranef(fit)` and `vcov(fit)` return nested outputs grouped by
+- `ranef(fit)` and `corr(fit)` return nested outputs grouped by
   `formulaLong` and `formulaDist`, with family-scoped blocks for
   distributional random effects.
-- `ranef(pred)` and `vcov(pred)` expose marker-by-id predicted random effects
+- `ranef(pred)` and `corr(pred)` expose marker-by-id predicted random effects
   and covariance only when marker covariance is subject-dependent.
 
 ## 2.2. Family-Scoped Distributional Regression
@@ -99,7 +106,7 @@ family.
 
 The hazard function for the $k$-th competing risk is modeled as:
 
-$$ \lambda_k(t | \mathcal{H}_i(t)) = h_{0k}(t) \exp\left( \mathbf{γ}_k^\top \mathbf{W}_i + \sum_{q=1}^Q f_q(\mathcal{A}_{iq}(t), \alpha_{kq}) \right) $$
+$$ \lambda_k(t | \mathcal{H}_i(t)) = h_{0k}(t) \exp\left( \mathbf{Î³}_k^\top \mathbf{W}_i + \sum_{q=1}^Q f_q(\mathcal{A}_{iq}(t), \alpha_{kq}) \right) $$
 
 where:
 *   $h_{0k}(t)$: Baseline hazard, modeled flexibly using B-splines.
@@ -121,7 +128,7 @@ We compute three fundamental features from the reconstructed trajectories:
     $$ CV(t) = \eta_{id}(t) $$
 2.  **Current Slope (CS)**: The rate of change, approximated by finite differences for stability and support of non-differentiable trajectories (e.g., Brownian motion components).
     $$ CS(t) \approx \frac{\eta_{id}(t+\epsilon) - \eta_{id}(t)}{\epsilon} $$
-3.  **Variance (VCOV)**: A measure of subject-specific volatility, derived from the covariance regression term (detailed in Section 5).
+3.  **Variance (CORR)**: A measure of subject-specific volatility, derived from the covariance regression term (detailed in Section 5).
 
 ## 3.2. Transformations
 
@@ -130,9 +137,9 @@ Raw biomarkers often affect survival nonlinearly (e.g., only extremely high valu
 *   **Functional Opcodes**: A stack-based evaluator allows users to specify compositions like $\log(1 + \exp(x))$ or $\sqrt{\max(0, x)}$ which are evaluated inside the Stan leapfrog integrator.
 *   **Monotone I-Splines**: For data-driven shapes, we use Integrated Splines (I-splines) with non-negative coefficients, ensuring the association is monotonic but nonlinear.
 
-For marker-aggregated current-value terms (`cv_total`, `cv_marker`), `joinme`
-uses transform-before-averaging semantics. Let $m_{id}(t)$ be a marker-level
-feature and $f(\cdot)$ the configured transform:
+For marker-aggregated association terms (`cv_total`, `cv_marker`, `cs_total`,
+`cs_marker`), `joinme` uses transform-before-averaging semantics. Let
+$m_{id}(t)$ be a marker-level feature and $f(\cdot)$ the configured transform:
 
 $$
 A_i(t) = \frac{1}{D}\sum_{d=1}^{D} \omega_d f\!\left(m_{id}(t)\right).
@@ -155,19 +162,19 @@ This allows the model to "select" relevant biomarkers automatically.
 
 ### Marker Weights
 
-When marker-weighted summaries are used, `joinme` estimates signed weights via additive perturbations around base weights. Let $\omega^{(0)}$ be the base weights and $z_d$ be shrinkage perturbations. Define
+When marker-weighted summaries are used, `joinme` estimates latent signed
+weights via additive perturbations around base weights. Let
+$\omega^{(0)}$ be the base latent weights and $z_d$ be shrinkage perturbations.
+Define
 
 $$
-	ilde\omega_d = \omega^{(0)}_d + \tau_w z_d,
+\omega_d^{lat} = \omega^{(0)}_d + z_d,
 $$
 
-and then stabilize global scale with
-
-$$
-\omega_d = \frac{\tilde\omega_d}{\sqrt{\frac{1}{D}\sum_{j=1}^{D}\tilde\omega_j^2}}.
-$$
-
-with $z_d$ drawn from Normal or Laplace shrinkage (controlled by `shrinkage`) (Park & Casella 2008). This allows both positive and negative marker contributions while regularizing composition and controlling non-identifiable global weight scale.
+with $z_d \sim \mathcal{N}(0,1)$, and map to effective association weights via
+and use the resulting signed weights directly in marker-aggregated association
+terms. This allows both positive and negative effects while regularizing latent
+perturbations.
 
 ## 4.2. Regularizing Smoothness
 For B-spline baseline hazards and penalized I-spline associations, we impose a second-order random walk prior on coefficients $\gamma$:
@@ -206,12 +213,13 @@ We estimate:
 $$ \pi_j(u | T_{cond}) = P(T_j \ge u | T_j > T_{cond}, \mathcal{Y}_j, \mathcal{D}_{train}) $$
 
 **Algorithm**:
-1.  Extract posterior parameter draws from the fitted model (`n_samples`).
+1.  Extract posterior parameter draws from the fitted model (`control$n_samples`).
 2.  Re-index to a prediction draw count (`control$n_pred_draws`) used by the
   dynpred object.
 3.  For each prediction draw, sample random effects
   $\mathbf{b}_j^{(m)} \sim p(\mathbf{b} | \mathcal{Y}_j, \theta^{(m)})$.
-4.  Compute trajectory $\eta_j(t)$ and hazard $\lambda_j(t)$ for $t > T_{cond}$.
+4.  Compute requested longitudinal scales (default all of `epred`, `linpred`,
+  `predict`) and hazard $\lambda_j(t)$ for $t > T_{cond}$.
 5.  Integrate hazard to get survival $S(t)$ and average over prediction draws.
 
 Under competing risks, this procedure yields the **overall event-free survival** probability.
