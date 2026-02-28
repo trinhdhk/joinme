@@ -2,7 +2,7 @@ devtools::load_all()
 library(dplyr)
 
 sim <- simulate_joinme(
-  n_id = 120,
+  n_id = 200,
   # formulaDist = list(
   #   sigma ~ 1 + (1 | marker)
   # ),
@@ -35,9 +35,9 @@ fit <- joinme(
   assoc = c("cv_mean"),
   families = c(rep("gaussian", 5)),
   # transforms = list(cv_mean = list(type = "functional", expr =  ~ expit(x))),
-  # estimate_marker_weights = FALSE,
+  # fixed_marker_weights = TRUE,
   # marker_weights = sim$truth$marker_weights,
-  estimate_marker_weights = TRUE,
+  fixed_marker_weights = FALSE,
   # marker_weight_scale = 1,
   control = list(
     threads_per_chain = 6,

@@ -58,7 +58,9 @@ Options: "longitudinal" (future trajectory), "event" (conditional survival proba
 \item "linpred": linear predictor,
 \item "predict": predictive draw (includes noise).
 }
-Defaults to all scales when not explicitly set.}
+Defaults to all scales when not explicitly set.
+For \code{epred}/\code{predict}, family-specific inverse-links configured in
+\code{families} via \code{jm_family(...)} are respected.}
 
 \item{times}{Numeric vector of times at which to predict the longitudinal and survival trajectories.
 Can also be a named list of numeric vectors (one per subject id). If NULL, a grid
@@ -99,6 +101,10 @@ count.
 For engine = "rstan", threading uses options(stan.thread = threads_per_chain).
 \item grainsize: integer; reduce_sum grainsize for threaded prediction
 (default max(1, ceiling(n_id/(4*threads_per_chain)))).
+\item quadrature_nodes: optional positive integer target for total quadrature
+points during dynamic prediction. Allowed values are exactly \code{7}, \code{15},
+\code{31}, \code{41}, \code{51}, and \code{61}. Only the node count is passed to
+Stan; GK nodes/weights are fixed in the Stan code.
 \item progress: logical; show sampling progress bar (default TRUE).
 }}
 

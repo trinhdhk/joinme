@@ -51,6 +51,7 @@
 ##'   \item{23}{ATANH: Pop a; push atanh(a)}
 ##'   \item{24}{SOFTPLUS: Pop a; push log1p_exp(a)}
 ##'   \item{25}{CBRT: Pop a; push cbrt(a)}
+##'   \item{26}{PROBIT: Pop a; push Phi(a)}
 ##' }
 ##'
 ##' @examples
@@ -229,6 +230,7 @@ parse_transform_expr <- function(expr) {
     softplus = 24L,
     log1p_exp = 24L,
     cbrt = 25L,
+    probit = 26L,
     NULL
   )
   if (!is.null(func_opcode)) {
@@ -254,7 +256,7 @@ parse_transform_expr <- function(expr) {
   
   cli::cli_abort(c(
     x = "Unsupported function in transform expression: {op}.",
-    i = "Supported functions: log, exp, sqrt, inv_logit, logit, sigmoid, expit, softplus, log1p_exp, cbrt, power, rec, sin, cos, tan, abs, sinh, cosh, tanh, asinh, acosh, atanh."
+    i = "Supported functions: log, exp, sqrt, inv_logit, logit, probit, sigmoid, expit, softplus, log1p_exp, cbrt, power, rec, sin, cos, tan, abs, sinh, cosh, tanh, asinh, acosh, atanh."
   ))
 }
 
@@ -278,7 +280,7 @@ verify_opcodes <- function(opcodes, const_data) {
         stop("Functional opcodes reference more constants than provided")
       }
       stack_height <- stack_height + 1
-    } else if (op %in% c(6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25)) {
+    } else if (op %in% c(6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26)) {
       # Unary operations
       if (stack_height < 1) stop("Stack underflow: unary operation")
     } else if (op %in% c(2, 3, 4, 5, 12)) {

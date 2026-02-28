@@ -152,8 +152,8 @@
     z_alpha_cs_mean ~ double_exponential(0, 1);
     z_alpha_cv_marker ~ double_exponential(0, 1);
     z_alpha_cs_marker ~ double_exponential(0, 1);
-    if (estimate_marker_weights == 1 && use_marker_weight_assoc == 1)
-      z_marker_weights ~ double_exponential(0, 1);
+    // if (estimate_marker_weights == 1 && use_marker_weight_assoc == 1)
+    z_marker_weights ~ double_exponential(0, 1);
   } else if (shrinkage == 2) {
     alpha_corr ~ std_normal();
     z_alpha_cv_total ~ std_normal();
@@ -162,6 +162,6 @@
     z_alpha_cs_mean ~ std_normal();
     z_alpha_cv_marker ~ std_normal();
     z_alpha_cs_marker ~ std_normal();
-    if (estimate_marker_weights == 1 && use_marker_weight_assoc == 1)
-      z_marker_weights ~ std_normal();
+    // if (estimate_marker_weights == 1 && use_marker_weight_assoc == 1)
+    z_marker_weights ~ std_normal();
   }

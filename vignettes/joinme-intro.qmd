@@ -140,13 +140,20 @@ containing both longitudinal and survival information.
 ```{r intro-simulate}
 sim <- simulate_joinme(
   n_id = 10,
-  families = rep("student_t", 2),
+  families = list(
+    jm_family("student_t"),
+    jm_family("student_t", inv_link = ~ inv_logit(x / 2))
+  ),
   n_obs_per_marker_per_id = 4,
   times_obs = seq(0, 5, length.out = 8),
+  quadrature_nodes = 31,
   seed = 2026,
   assoc = c("cv_total"),
   assoc_coefs = c(cv_total = 0.6)
 )
+
+# Gauss-Kronrod nodes/weights are fixed in Stan; `quadrature_nodes` selects
+# the node count used to build the design matrices in R.
 
 head(sim$dataLong)
 head(sim$dataEvent)
@@ -261,4 +268,3 @@ marker covariance is configured to depend on id.
 - See the modeling workflow in `joinme-workflow`.
 - Explore association structures in `joinme-associations`.
 - Review the statistical details in `joinme-model` and `joinme-theory`.
-

@@ -26,7 +26,7 @@ fit <- joinme(
   assoc = c("cv_total"),
   families = c(rep("student_t", 3), "gaussian"),
   transforms = list(cv_total = list(type = "identity")),
-  estimate_marker_weights = TRUE,
+  fixed_marker_weights = FALSE,
   marker_weight_scale = 1,
   control = list(
     threads_per_chain = 2,

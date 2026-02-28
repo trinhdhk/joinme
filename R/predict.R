@@ -37,6 +37,8 @@ NULL
 #'   - "linpred": linear predictor,
 #'   - "predict": predictive draw (includes noise).
 #'   Defaults to all scales when not explicitly set.
+#'   For `epred`/`predict`, family-specific inverse-links configured in
+#'   `families` (via `jm_family(...)`) are respected.
 #' @param times Numeric vector of times at which to predict the longitudinal and survival trajectories.
 #' Can also be a named list of numeric vectors (one per subject id). If NULL, a grid
 #' from `time_start` to `time_start + time_horizon` is generated (and truncated to
@@ -70,6 +72,10 @@ NULL
 #'     For engine = "rstan", threading uses options(stan.thread = threads_per_chain).
 #'   - grainsize: integer; reduce_sum grainsize for threaded prediction
 #'     (default max(1, ceiling(n_id/(4*threads_per_chain)))).
+#'   - quadrature_nodes: optional positive integer target for total quadrature
+#'     points during dynamic prediction. Allowed values are exactly `7`, `15`,
+#'     `31`, `41`, `51`, and `61`. Only the node count is passed to Stan; GK
+#'     nodes/weights are fixed in the Stan code.
 #'   - progress: logical; show sampling progress bar (default TRUE).
 #' @param seed Integer. Random seed for reproducibility of random effect sampling.
 #' @importFrom stats predict median sd quantile na.omit optim terms
@@ -142,6 +148,7 @@ predict.JoinMeFit <- function(object,
 
     # 2. Parse Formulas
     forms <- .parse_formulas(object)
+    sd <- object$stan_data
 
     # 3. Identify Subjects
     id_var <- eval(object$call$id_var) %||% "id"
@@ -504,6 +511,7 @@ predict.JoinMeFit <- function(object,
                 dE, dL, object, tmax_val, knots, col_means,
                 t_cond, t_grid, t_surv_grid,
                 forms, draws_list, grainsize_data,
+                control = control,
                 degree = meta$degree
             )
             # Ensure time index arrays are preserved for cmdstanr JSON (avoid auto-unbox)
@@ -837,6 +845,11 @@ predict.JoinMeFit <- function(object,
         n_pred_draws = n_pred_draws,
         n_subjects = length(ids),
         marker_corr_depends_on_id = marker_corr_depends_on_id,
+        family_links = if (!is.null(sd$link_names)) {
+            ifelse(is.na(sd$link_names), "custom", sd$link_names)
+        } else {
+            vapply(sd$link_long %||% integer(0), .link_name_from_code, character(1))
+        },
         sampler_diagnostics = .aggregate_sampler_diagnostics(pred_sampler_diag_list),
         pred_type = pred_type,
         scale = if (length(scale) == 1L) scale else scale[1],
@@ -974,10 +987,15 @@ predict.JoinMeFit <- function(object,
 .subset_draws_for_prediction <- function(draws_list, draw_index) {
     reindex_first_dim <- function(x, idx) {
         if (is.null(x)) return(NULL)
-        if (is.matrix(x)) return(x[idx, , drop = FALSE])
+        if (is.matrix(x)) {
+            if (nrow(x) == 0L) return(x)
+            return(x[idx, , drop = FALSE])
+        }
         if (is.array(x)) {
             dims <- dim(x)
             if (length(dims) < 1L) return(x)
+            if (is.na(dims[1]) || dims[1] == 0L) return(x)
+            if (length(dims) > 1L && any(dims[-1L] == 0L)) return(x)
             subs <- c(list(idx), rep(list(TRUE), length(dims) - 1L), list(drop = FALSE))
             return(do.call(`[`, c(list(x), subs)))
         }
@@ -1326,13 +1344,19 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         }
     }
 
+    .inv_logit_signed <- function(w) {
+        w <- as.numeric(w)
+        2 * stats::plogis(w) - 1
+    }
+
     marker_weights_draws <- NULL
     if (all(paste0("marker_weights_eff[", 1:sd$D, "]") %in% colnames(dmat))) {
         marker_weights_draws <- get_mat(paste0("marker_weights_eff[", 1:sd$D, "]"))
     } else if (all(paste0("marker_weights[", 1:sd$D, "]") %in% colnames(dmat))) {
         marker_weights_draws <- get_mat(paste0("marker_weights[", 1:sd$D, "]"))
     } else if (!is.null(sd$marker_weights)) {
-        marker_weights_draws <- matrix(rep(as.numeric(sd$marker_weights), each = n), nrow = n, byrow = TRUE)
+        base_weights <- as.numeric(sd$marker_weights)
+        marker_weights_draws <- matrix(rep(.inv_logit_signed(base_weights), each = n), nrow = n, byrow = TRUE)
     }
 
     n_family_sigma <- as.integer(sd$n_family_sigma %||% if ((sd$flag_resid_dim %||% 1L) == 0L) 1L else sd$D)
@@ -1393,9 +1417,10 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         corr_coef_vars <- corr_coef_vars[order(corr_idx)]
     }
     corr_coef_raw <- if (length(corr_coef_vars) > 0) get_mat(corr_coef_vars) else matrix(0, n, 0)
-    corr_coef_padded <- if (sd$Q_idm > 0) {
-        out <- matrix(0, nrow = n, ncol = sd$Q_idm)
-        n_copy <- min(ncol(corr_coef_raw), sd$Q_idm)
+    M_corr_assoc <- if (sd$Q_idm > 1) sd$Q_idm * (sd$Q_idm - 1) / 2 else 0
+    corr_coef_padded <- if (M_corr_assoc > 0) {
+        out <- matrix(0, nrow = n, ncol = M_corr_assoc)
+        n_copy <- min(ncol(corr_coef_raw), M_corr_assoc)
         if (n_copy > 0) out[, seq_len(n_copy)] <- corr_coef_raw[, seq_len(n_copy), drop = FALSE]
         out
     } else {
@@ -1468,7 +1493,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     )
 }
 
-.prepare_subject_standata <- function(dE, dL, object, tmax, knots, col_means, t_cond, t_grid, t_surv_grid, forms, draws_list, grainsize = NULL, degree = NULL) {
+.prepare_subject_standata <- function(dE, dL, object, tmax, knots, col_means, t_cond, t_grid, t_surv_grid, forms, draws_list, grainsize = NULL, control = NULL, degree = NULL) {
     id_var <- eval(object$call$id_var) %||% "id"
     time_var <- eval(object$call$time_var) %||% "time"
     marker_var <- eval(object$call$marker_var) %||% "marker"
@@ -1527,37 +1552,41 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     dist_phi_beta_obs <- .build_dist_matrix(dist_formulas$phi_beta, dL, family_by_row = family_by_row_obs)
     dist_tau_sde_obs <- .build_dist_matrix(dist_formulas$tau_sde, dL, family_by_row = family_by_row_obs)
 
-    fe_rhs <- stats::update(forms$formulaEvent, . ~ .)
-    fe_rhs[[2]] <- NULL
-    vec_cov_hazard <- .mm(fe_rhs, dE)
+    vec_cov_hazard <- .mm_event(forms$formulaEvent, dE)
 
     fv_rhs <- stats::update(forms$formulaCorr, . ~ .)
     fv_rhs[[2]] <- NULL
     vec_cov_corr <- .mm(fv_rhs, dE)
     if (ncol(vec_cov_corr) == 1 && colnames(vec_cov_corr)[1] == "(Intercept)" && sd$K_cov == 1) vec_cov_corr <- matrix(0, 1, 1)
 
-    gk <- .gk15_nodes()
-    u_cond <- 0.5 * T_cond_scaled * (gk + 1)
+    quadrature_nodes <- control$quadrature_nodes %||% sd$quadrature_nodes %||% sd$n_gk %||% NULL
+    quadrature_nodes_input <- quadrature_nodes %||% 15L
+    quad_req <- .resolve_gk_request(nodes = quadrature_nodes_input)
+    quad <- .gk_single_panel(rule = quad_req$rule)
+    n_gk <- as.integer(quad$n_gk)
+    gk_nodes <- quad$nodes
+
+    u_cond <- T_cond_scaled * gk_nodes
     u_cond_fwd <- u_cond + sd$eps_fd
 
     .eval_on_times <- function(rhs_l, times) {
         if (length(rhs_l) == 0) {
-            return(matrix(0, 15, 0))
+            return(matrix(0, n_gk, 0))
         }
-        dd <- dE[rep(1, 15), , drop = FALSE]
+        dd <- dE[rep(1, n_gk), , drop = FALSE]
         dd[[time_var]] <- times
         do.call(cbind, lapply(rhs_l, function(rhs) .mm(rhs, dd)))
     }
 
     mat_fixed_gk_cond <- .eval_on_times(list(fixed_rhs), u_cond)
-    mat_id_gk_cond <- if (length(id_rhs_list) > 0) .eval_on_times(id_rhs_list, u_cond) else matrix(0, 15, sd$R_id)
-    mat_marker_gk_cond <- if (length(nested$mk_rhs_list) > 0) .eval_on_times(nested$mk_rhs_list, u_cond) else matrix(0, 15, sd$R_mk)
-    mat_marker_id_gk_cond <- if (length(nested$idm_rhs_list) > 0) .eval_on_times(nested$idm_rhs_list, u_cond) else matrix(0, 15, sd$Q_idm)
+    mat_id_gk_cond <- if (length(id_rhs_list) > 0) .eval_on_times(id_rhs_list, u_cond) else matrix(0, n_gk, sd$R_id)
+    mat_marker_gk_cond <- if (length(nested$mk_rhs_list) > 0) .eval_on_times(nested$mk_rhs_list, u_cond) else matrix(0, n_gk, sd$R_mk)
+    mat_marker_id_gk_cond <- if (length(nested$idm_rhs_list) > 0) .eval_on_times(nested$idm_rhs_list, u_cond) else matrix(0, n_gk, sd$Q_idm)
 
     mat_fixed_gk_cond_fwd <- .eval_on_times(list(fixed_rhs), u_cond_fwd)
-    mat_id_gk_cond_fwd <- if (length(id_rhs_list) > 0) .eval_on_times(id_rhs_list, u_cond_fwd) else matrix(0, 15, sd$R_id)
-    mat_marker_gk_cond_fwd <- if (length(nested$mk_rhs_list) > 0) .eval_on_times(nested$mk_rhs_list, u_cond_fwd) else matrix(0, 15, sd$R_mk)
-    mat_marker_id_gk_cond_fwd <- if (length(nested$idm_rhs_list) > 0) .eval_on_times(nested$idm_rhs_list, u_cond_fwd) else matrix(0, 15, sd$Q_idm)
+    mat_id_gk_cond_fwd <- if (length(id_rhs_list) > 0) .eval_on_times(id_rhs_list, u_cond_fwd) else matrix(0, n_gk, sd$R_id)
+    mat_marker_gk_cond_fwd <- if (length(nested$mk_rhs_list) > 0) .eval_on_times(nested$mk_rhs_list, u_cond_fwd) else matrix(0, n_gk, sd$R_mk)
+    mat_marker_id_gk_cond_fwd <- if (length(nested$idm_rhs_list) > 0) .eval_on_times(nested$idm_rhs_list, u_cond_fwd) else matrix(0, n_gk, sd$Q_idm)
 
     if (!is.null(object$config$Bs_obj)) {
         bs_basis <- as.matrix(predict(object$config$Bs_obj, newx = u_cond))
@@ -1662,11 +1691,11 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     }
 
     n_times_surv <- length(t_surv_grid)
-    mat_basis_gk_surv <- array(0, dim = c(n_times_surv, 15, sd$Kbs))
-    mat_fixed_gk_surv <- array(0, dim = c(n_times_surv, 15, sd$P))
-    mat_id_gk_surv <- array(0, dim = c(n_times_surv, 15, sd$R_id))
-    mat_marker_gk_surv <- array(0, dim = c(n_times_surv, 15, sd$R_mk))
-    mat_marker_id_gk_surv <- array(0, dim = c(n_times_surv, 15, sd$Q_idm))
+    mat_basis_gk_surv <- array(0, dim = c(n_times_surv, n_gk, sd$Kbs))
+    mat_fixed_gk_surv <- array(0, dim = c(n_times_surv, n_gk, sd$P))
+    mat_id_gk_surv <- array(0, dim = c(n_times_surv, n_gk, sd$R_id))
+    mat_marker_gk_surv <- array(0, dim = c(n_times_surv, n_gk, sd$R_mk))
+    mat_marker_id_gk_surv <- array(0, dim = c(n_times_surv, n_gk, sd$Q_idm))
     mat_fixed_gk_surv_fwd <- mat_fixed_gk_surv
     mat_id_gk_surv_fwd <- mat_id_gk_surv
     mat_marker_gk_surv_fwd <- mat_marker_gk_surv
@@ -1675,7 +1704,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     if (n_times_surv > 0) {
         for (s in 1:n_times_surv) {
             ts <- t_surv_grid[s] / tmax
-            us <- 0.5 * ts * (gk + 1)
+            us <- ts * gk_nodes
             us_f <- us + sd$eps_fd
 
             if (!is.null(object$config$Bs_obj)) {
@@ -1686,14 +1715,14 @@ posterior_predict.JoinMeFit <- function(object, ...) {
             }
             mat_basis_gk_surv[s, , ] <- sweep(bs, 2, col_means, "-")
             mat_fixed_gk_surv[s, , ] <- .eval_on_times(list(fixed_rhs), us)
-            mat_id_gk_surv[s, , ] <- if (length(id_rhs_list) > 0) .eval_on_times(id_rhs_list, us) else matrix(0, 15, sd$R_id)
-            mat_marker_gk_surv[s, , ] <- if (length(nested$mk_rhs_list) > 0) .eval_on_times(nested$mk_rhs_list, us) else matrix(0, 15, sd$R_mk)
-            mat_marker_id_gk_surv[s, , ] <- if (length(nested$idm_rhs_list) > 0) .eval_on_times(nested$idm_rhs_list, us) else matrix(0, 15, sd$Q_idm)
+            mat_id_gk_surv[s, , ] <- if (length(id_rhs_list) > 0) .eval_on_times(id_rhs_list, us) else matrix(0, n_gk, sd$R_id)
+            mat_marker_gk_surv[s, , ] <- if (length(nested$mk_rhs_list) > 0) .eval_on_times(nested$mk_rhs_list, us) else matrix(0, n_gk, sd$R_mk)
+            mat_marker_id_gk_surv[s, , ] <- if (length(nested$idm_rhs_list) > 0) .eval_on_times(nested$idm_rhs_list, us) else matrix(0, n_gk, sd$Q_idm)
 
             mat_fixed_gk_surv_fwd[s, , ] <- .eval_on_times(list(fixed_rhs), us_f)
-            mat_id_gk_surv_fwd[s, , ] <- if (length(id_rhs_list) > 0) .eval_on_times(id_rhs_list, us_f) else matrix(0, 15, sd$R_id)
-            mat_marker_gk_surv_fwd[s, , ] <- if (length(nested$mk_rhs_list) > 0) .eval_on_times(nested$mk_rhs_list, us_f) else matrix(0, 15, sd$R_mk)
-            mat_marker_id_gk_surv_fwd[s, , ] <- if (length(nested$idm_rhs_list) > 0) .eval_on_times(nested$idm_rhs_list, us_f) else matrix(0, 15, sd$Q_idm)
+            mat_id_gk_surv_fwd[s, , ] <- if (length(id_rhs_list) > 0) .eval_on_times(id_rhs_list, us_f) else matrix(0, n_gk, sd$R_id)
+            mat_marker_gk_surv_fwd[s, , ] <- if (length(nested$mk_rhs_list) > 0) .eval_on_times(nested$mk_rhs_list, us_f) else matrix(0, n_gk, sd$R_mk)
+            mat_marker_id_gk_surv_fwd[s, , ] <- if (length(nested$idm_rhs_list) > 0) .eval_on_times(nested$idm_rhs_list, us_f) else matrix(0, n_gk, sd$Q_idm)
         }
     }
 
@@ -1729,6 +1758,11 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     }
 
     # Marker weights (use fitted weights when available)
+    .inv_logit_signed <- function(w) {
+        w <- as.numeric(w)
+        2 * stats::plogis(w) - 1
+    }
+
     marker_weights <- object$stan_data$marker_weights
     if (is.null(marker_weights)) {
         marker_weights <- rep(1, length(marker_levels))
@@ -1738,17 +1772,14 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         }
         if (length(marker_weights) != length(marker_levels) || any(!is.finite(marker_weights))) {
             marker_weights <- rep(1, length(marker_levels))
-        } else {
-            if (all(abs(marker_weights) < 1e-12)) {
-                marker_weights <- rep(1, length(marker_levels))
-            }
         }
     }
+    marker_weights_eff <- .inv_logit_signed(marker_weights)
 
     marker_weights_draws <- draws_list$marker_weights_draws
     n_pred_draws <- nrow(draws_list$beta_fixed)
     if (is.null(marker_weights_draws) || nrow(marker_weights_draws) != n_pred_draws) {
-        marker_weights_draws <- matrix(rep(marker_weights, each = n_pred_draws),
+        marker_weights_draws <- matrix(rep(marker_weights_eff, each = n_pred_draws),
                                         nrow = n_pred_draws, byrow = TRUE)
     }
 
@@ -1808,7 +1839,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     out <- list(
         n_draws = n_pred_draws,
         n_obs_long = nrow(dL), idx_marker_obs = marker_int, n_marker_types = sd$D,
-        marker_weights = as.numeric(marker_weights),
+        marker_weights = as.numeric(marker_weights_eff),
         marker_weights_draws = marker_weights_draws,
         y_real = as.numeric(dL[[y_var]]),
         y_int = as.integer(dL[[y_var]]),
@@ -1818,6 +1849,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         n_cov_corr = sd$K_cov, vec_cov_corr = as.vector(vec_cov_corr),
         n_cov_hazard = sd$p_w, vec_cov_hazard = as.vector(vec_cov_hazard),
         n_basehaz_basis = sd$Kbs, time_condition = T_cond_scaled,
+        n_gk = as.integer(n_gk),
         mat_basis_gk_cond = mat_basis_gk_cond,
         mat_fixed_gk_cond = mat_fixed_gk_cond, mat_id_gk_cond = mat_id_gk_cond, mat_marker_gk_cond = mat_marker_gk_cond, mat_marker_id_gk_cond = mat_marker_id_gk_cond,
         mat_fixed_gk_cond_fwd = mat_fixed_gk_cond_fwd, mat_id_gk_cond_fwd = mat_id_gk_cond_fwd, mat_marker_gk_cond_fwd = mat_marker_gk_cond_fwd, mat_marker_id_gk_cond_fwd = mat_marker_id_gk_cond_fwd,
@@ -1869,6 +1901,13 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         phi_beta_family = draws_list$phi_beta_family,
         tau_sde_family = draws_list$tau_sde_family,
         family_long = sd$family_long,
+        link_long = sd$link_long,
+        max_inv_link_ops = sd$max_inv_link_ops,
+        inv_link_n_ops = sd$inv_link_n_ops,
+        inv_link_ops = sd$inv_link_ops,
+        max_inv_link_const = sd$max_inv_link_const,
+        inv_link_n_const = sd$inv_link_n_const,
+        inv_link_const = sd$inv_link_const,
         n_family_sigma = n_family_sigma_out,
         marker_to_sigma_family = marker_to_sigma_family_out,
         n_family_nu = n_family_nu_out,

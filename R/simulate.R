@@ -75,10 +75,10 @@ weibull_h0 <- function(shape = 1.4, scale = 6.0) {
 #' @param R_id Dimension of id-level basis.
 #' @param R_mk Dimension of marker-only basis.
 #' @param beta Fixed effects (Intercept, time, x1) on original scale.
-#' @param gamma_w Hazard covariates (Intercept, x1, x2).
+#' @param gamma_w Hazard covariates (e.g. x1, x2).
 #' @param alpha_cv_total Association coefficient for CV_total.
 #' @param h0 Baseline hazard function h0(t).
-#' @param t_admin Administrative censoring time.
+#' @param time_cens Administrative censoring time.
 #' @param nu Student-t df.
 #' @param sigma_y Student-t scale.
 #' @param sigma_fun Optional function to generate observation-level scales.
@@ -101,10 +101,10 @@ simulate_joinme_joint_student_t_cvtotal <- function(
   R_id = 2,
   R_mk = 1,
   beta = c("(Intercept)" = 1.0, "time" = 0.5, "x1" = 0.4),
-  gamma_w = c("(Intercept)" = 0.0, "x1" = 0.3, "x2" = -0.2),
+  gamma_w = c("x1" = 0.3, "x2" = -0.2),
   alpha_cv_total = 0.6,
   h0 = weibull_h0(shape = 1.4, scale = 6.0),
-  t_admin = 8.0,
+  time_cens = 8.0,
   nu = 5,
   sigma_y = 0.4,
   sigma_fun = NULL,
@@ -117,6 +117,7 @@ simulate_joinme_joint_student_t_cvtotal <- function(
   # Workflow: simulate covariates -> random effects -> longitudinal -> survival
   # - matches Stan semantics for CV_total association
   set.seed(seed)
+  # Step: configure optional parallel execution for simulation.
 
   dist_formulas <- .normalize_formula_dist(formulaDist)
   .validate_dist_formula_scopes(dist_formulas, "student_t")
@@ -196,7 +197,7 @@ simulate_joinme_joint_student_t_cvtotal <- function(
   id_row <- function(t) if (R_id == 1) c(1) else c(1, t)
   mk_row <- function(i, t) if (!include_marker_only || R_mk <= 0) numeric(0) else c(dataEvent$x1[i])
   idm_row <- function(t) if (Q_idm == 1) c(1) else c(1, t)
-  haz_row <- function(i) c("(Intercept)" = 1, x1 = dataEvent$x1[i], x2 = dataEvent$x2[i])
+  haz_row <- function(i) c(x1 = dataEvent$x1[i], x2 = dataEvent$x2[i])
 
   # CV components (vectorized over t)
   cv_mean_i <- function(i, t) {
@@ -250,11 +251,11 @@ simulate_joinme_joint_student_t_cvtotal <- function(
       expand = root_control$expand, max_expand = root_control$max_expand
     )
     if (is.null(br)) {
-      return(list(time = t_admin, event = 0L, bracketing_failed = TRUE, U = U))
+      return(list(time = time_cens, event = 0L, bracketing_failed = TRUE, U = U))
     }
     T <- uniroot(f, lower = br$lower, upper = br$upper)$root
-    if (T > t_admin) {
-      list(time = t_admin, event = 0L, bracketing_failed = FALSE, U = U)
+    if (T > time_cens) {
+      list(time = time_cens, event = 0L, bracketing_failed = FALSE, U = U)
     } else {
       list(time = T, event = 1L, bracketing_failed = FALSE, U = U)
     }
@@ -269,7 +270,7 @@ simulate_joinme_joint_student_t_cvtotal <- function(
   marker_levels <- paste0("m", seq_len(D))
   dataLong <- do.call(rbind, lapply(seq_len(n_id), function(i) {
     do.call(rbind, lapply(seq_len(D), function(d) {
-      t_max_i <- min(dataEvent$time[i], t_admin)
+      t_max_i <- min(dataEvent$time[i], time_cens)
       t_obs <- sort(runif(n_t, 0, max(1e-8, t_max_i)))
       df <- data.frame(
         id = i,
@@ -399,12 +400,15 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   Functional transforms support arithmetic and common nonlinear functions,
 #'   including `inv_logit`/`expit`/`sigmoid`, `exp`, `log`, `sqrt`, `power`,
 #'   `cbrt`, `softplus`/`log1p_exp`, trigonometric and hyperbolic functions.
-#' @param marker_weights Optional marker weights used in association aggregation.
+#' @param marker_weights Optional base marker weights used as prior offsets for
+#'   association aggregation. Effective weights are computed as
+#'   `2 * inv_logit(w_raw) - 1` and used for marker-averaged CV/CS terms.
 #'   If `NULL`, equal weights are used and aggregated
 #'   as weighted means divided by marker count. Inputs are treated as direct
 #'   signed weights used in association aggregation.
 #' @param n_id Number of subjects.
 #' @param families Marker-specific family names.
+#'   Use `jm_family()` entries to supply custom `link`/`inv_link` expressions.
 #' @param marker_levels Optional marker names; defaults to `m1`, `m2`, ...
 #' @param n_obs_per_marker_per_id Target number of observations per (id, marker).
 #' @param times_obs Optional candidate observation time grid.
@@ -421,7 +425,8 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   covariance dimension.
 #' @param beta_long Fixed-effect coefficients for `formulaLong` fixed part. If NULL,
 #'   coefficients are randomly generated and named by model-matrix columns.
-#' @param beta_event Survival baseline-covariate coefficients for `formulaEvent` RHS.
+#' @param beta_event Survival baseline-covariate coefficients for non-intercept
+#'   terms in `formulaEvent` RHS.
 #'   If NULL, coefficients are randomly generated.
 #' @param dist_coefs Named list of vectors for distributional regressions (`sigma`, `nu`,
 #'   `phi`, `alpha`, `phi_beta`, `tau_sde`).
@@ -436,10 +441,15 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   e.g. `~ 1 + time + I(time^2)`.
 #' @param beta_basehaz Optional coefficients for `formulaBasehaz` (aligned by
 #'   model-matrix column names). If NULL, coefficients are generated.
-#' @param t_admin Administrative censoring horizon.
+#' @param time_cens Administrative censoring horizon.
 #' @param eps_cs Finite-difference step for slope-type associations (`cs_*`).
 #' @param integration_control Control list passed to `integrate()`.
 #' @param root_control Root finding control for inverse-CDF sampling.
+#' @param quadrature_nodes Optional Gauss-Kronrod node count for simulation-side
+#'   survival integration. Allowed values: 7, 15, 31, 41, 51, 61.
+#' @param n_workers Number of workers to use when `use_mirai = TRUE`.
+#' @param use_mirai Logical; when TRUE and `n_workers > 1`, use `mirai` for
+#'   parallel simulation if available.
 #' @param id_var,marker_var,time_var,y_var,event_time_var,event_var Column names aligned
 #'   with `joinme_standata()` defaults.
 #'
@@ -449,7 +459,12 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #' \dontrun{
 #' sim <- simulate_joinme(
 #'   n_id = 30,
-#'   families = c("gaussian", "student_t", "skew_normal"),
+#'   families = list(
+#'     jm_family("gaussian"),
+#'     jm_family("student_t", inv_link = ~ inv_logit(x / 2)),
+#'     jm_family("skew_normal")
+#'   ),
+#'   quadrature_nodes = 31,
 #'   formulaDist = list(
 #'     sigma[family=gaussian] ~ 1 + x1,
 #'     sigma[family=student_t] ~ 1 + time,
@@ -463,7 +478,7 @@ simulate_joinme <- function(
   formulaLong = y ~ 1 + time + x1 +
     (1 + time | id) +
     (0 + x1 + (1 + time | id) | marker),
-  formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
+  formulaEvent = survival::Surv(time, event) ~ x1 + x2,
   formulaDist = NULL,
   formulaAssoc = NULL,
   transforms = NULL,
@@ -506,10 +521,13 @@ simulate_joinme <- function(
   baseline_hazard = list(type = "weibull", shape = 1.4, scale = 6.0),
   formulaBasehaz = NULL,
   beta_basehaz = NULL,
-  t_admin = 8.0,
+  time_cens = 8.0,
   eps_cs = 1e-3,
   integration_control = list(rel.tol = 1e-6, subdivisions = 2000L, stop.on.error = TRUE),
   root_control = list(t_init = 1.0, t_max = 50.0, expand = 1.7, max_expand = 60L),
+  quadrature_nodes = 15L,
+  n_workers = 1L,
+  use_mirai = TRUE,
   id_var = "id",
   marker_var = "marker",
   time_var = "time",
@@ -524,6 +542,32 @@ simulate_joinme <- function(
   # 4) Simulate event times by inverse transform using hazard linked to assoc terms.
   # 5) Simulate observation times, generate responses by family, and return truth.
   set.seed(seed)
+  n_workers <- as.integer(n_workers)
+  if (!is.finite(n_workers) || n_workers < 1L) n_workers <- 1L
+  use_mirai <- isTRUE(use_mirai) && n_workers > 1L
+  if (use_mirai && !requireNamespace("mirai", quietly = TRUE)) {
+    cli::cli_warn("Package {.pkg mirai} not installed; falling back to serial simulation.")
+    use_mirai <- FALSE
+  }
+  if (use_mirai) {
+    mirai::daemons(n_workers)
+    on.exit(mirai::daemons(0L), add = TRUE)
+  }
+
+  #' @keywords internal
+  #' @param x Vector of inputs to process.
+  #' @param fun Function to apply.
+  #' @param ... Additional arguments passed to fun.
+  #' @return List of results.
+  .sim_parallel_lapply <- function(x, fun, ...) {
+    # Parallel map with mirai; falls back to serial when mirai is disabled.
+    if (!use_mirai) return(lapply(x, fun, ...))
+    args <- list(...)
+    jobs <- lapply(x, function(xi) mirai::mirai({
+      do.call(fun, c(list(xi), args))
+    }, fun = fun, xi = xi, args = args))
+    lapply(jobs, mirai::collect_mirai)
+  }
 
   .sim_align_coef <- function(col_names, user_coef = NULL, sd_default = 0.4, intercept_default = 0.0) {
     if (length(col_names) == 0) return(numeric(0))
@@ -536,7 +580,10 @@ simulate_joinme <- function(
     out <- rep(0, length(col_names))
     names(out) <- col_names
     if (!is.null(names(user_coef))) {
-      out[names(user_coef)] <- as.numeric(user_coef)
+      keep <- intersect(names(user_coef), col_names)
+      if (length(keep) > 0) {
+        out[keep] <- as.numeric(user_coef[keep])
+      }
     } else {
       out[seq_len(min(length(out), length(user_coef)))] <- as.numeric(user_coef)[seq_len(min(length(out), length(user_coef)))]
     }
@@ -623,6 +670,145 @@ simulate_joinme <- function(
   .sim_get_family_param <- function(fam_name, param_name, fallback) {
     val <- family_params[[fam_name]][[param_name]]
     if (is.null(val)) fallback else val
+  }
+
+  #' @keywords internal
+  #' @param x Scalar input to transform.
+  #' @param opcodes Integer opcode sequence.
+  #' @param const_data Numeric constants referenced by opcodes.
+  #' @return Transformed scalar.
+  .sim_eval_bytecode_scalar <- function(x, opcodes, const_data) {
+    # Evaluate transform bytecode on a scalar x (matches Stan opcode order).
+    ops <- as.integer(opcodes %||% integer(0))
+    const_data <- as.numeric(const_data %||% numeric(0))
+    if (length(ops) == 0L) return(x)
+
+    stack <- numeric(0)
+    const_idx <- 1L
+    for (op in ops) {
+      if (op == 0L) {
+        stack <- c(stack, x)
+      } else if (op == 1L) {
+        stack <- c(stack, const_data[const_idx])
+        const_idx <- const_idx + 1L
+      } else if (op == 2L) {
+        b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
+        stack <- c(stack[-c(length(stack) - 1L, length(stack))], a + b)
+      } else if (op == 3L) {
+        b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
+        stack <- c(stack[-c(length(stack) - 1L, length(stack))], a - b)
+      } else if (op == 4L) {
+        b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
+        stack <- c(stack[-c(length(stack) - 1L, length(stack))], a * b)
+      } else if (op == 5L) {
+        b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
+        stack <- c(stack[-c(length(stack) - 1L, length(stack))], a / b)
+      } else if (op == 6L) {
+        a <- stack[length(stack)]
+        stack[length(stack)] <- log(a)
+      } else if (op == 7L) {
+        a <- stack[length(stack)]
+        stack[length(stack)] <- exp(a)
+      } else if (op == 8L) {
+        a <- stack[length(stack)]
+        stack[length(stack)] <- sqrt(a)
+      } else if (op == 9L) {
+        a <- stack[length(stack)]
+        stack[length(stack)] <- stats::plogis(a)
+      } else if (op == 10L) {
+        a <- stack[length(stack)]
+        stack[length(stack)] <- stats::qlogis(a)
+      } else if (op == 11L) {
+        a <- stack[length(stack)]
+        stack[length(stack)] <- 1 / a
+      } else if (op == 12L) {
+        b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
+        stack <- c(stack[-c(length(stack) - 1L, length(stack))], a^b)
+      } else if (op == 13L) {
+        a <- stack[length(stack)]
+        stack[length(stack)] <- sin(a)
+      } else if (op == 14L) {
+        a <- stack[length(stack)]
+        stack[length(stack)] <- cos(a)
+      } else if (op == 15L) {
+        a <- stack[length(stack)]
+        stack[length(stack)] <- tan(a)
+      } else if (op == 16L) {
+        a <- stack[length(stack)]
+        stack[length(stack)] <- abs(a)
+      } else if (op == 17L) {
+        a <- stack[length(stack)]
+        stack[length(stack)] <- a^2
+      } else if (op == 18L) {
+        a <- stack[length(stack)]
+        stack[length(stack)] <- sinh(a)
+      } else if (op == 19L) {
+        a <- stack[length(stack)]
+        stack[length(stack)] <- cosh(a)
+      } else if (op == 20L) {
+        a <- stack[length(stack)]
+        stack[length(stack)] <- tanh(a)
+      } else if (op == 21L) {
+        a <- stack[length(stack)]
+        stack[length(stack)] <- asinh(a)
+      } else if (op == 22L) {
+        a <- stack[length(stack)]
+        stack[length(stack)] <- acosh(a)
+      } else if (op == 23L) {
+        a <- stack[length(stack)]
+        stack[length(stack)] <- atanh(a)
+      } else if (op == 24L) {
+        a <- stack[length(stack)]
+        stack[length(stack)] <- .softplus(a)
+      } else if (op == 25L) {
+        a <- stack[length(stack)]
+        stack[length(stack)] <- sign(a) * abs(a)^(1 / 3)
+      } else if (op == 26L) {
+        a <- stack[length(stack)]
+        stack[length(stack)] <- stats::pnorm(a)
+      } else {
+        cli::cli_abort("Unknown transform opcode: {op}.")
+      }
+    }
+    stack[length(stack)]
+  }
+
+  #' @keywords internal
+  #' @param x Numeric vector on link scale.
+  #' @param inv_link_bc Parsed inverse-link bytecode.
+  #' @return Numeric vector on response scale.
+  .sim_apply_inv_link_bc <- function(x, inv_link_bc) {
+    # Apply a parsed inverse-link bytecode to numeric vector x.
+    ops <- inv_link_bc$opcodes %||% inv_link_bc$bytecode %||% integer(0)
+    const_data <- inv_link_bc$const_data %||% numeric(0)
+    vapply(x, .sim_eval_bytecode_scalar, numeric(1), opcodes = ops, const_data = const_data)
+  }
+
+  #' @keywords internal
+  #' @param families Family specification input (vector or list).
+  #' @param D Number of markers.
+  #' @return List with family codes, link names, and inverse-link bytecode per marker.
+  .sim_parse_family_specs <- function(families, D) {
+    # Normalize family/link specs to a per-marker list of bytecode maps.
+    if (length(families) == 1L && !is.list(families)) {
+      families <- rep(list(families), D)
+    } else if (!is.list(families)) {
+      families <- as.list(families)
+    }
+    if (length(families) != D) {
+      cli::cli_abort("families must have length {D} (number of markers), got {length(families)}")
+    }
+
+    specs <- lapply(families, .extract_family_and_link)
+    family_codes <- vapply(specs, function(s) s$family_code, integer(1))
+    link_names <- vapply(specs, function(s) s$link_name, character(1))
+    inv_link_specs <- lapply(specs, function(s) s$inv_link_bc)
+
+    list(
+      family_codes = as.integer(family_codes),
+      link_names = as.character(link_names),
+      inv_link_specs = inv_link_specs
+    )
   }
 
   .sim_sample_ordinal <- function(eta, cutpoints) {
@@ -818,7 +1004,7 @@ simulate_joinme <- function(
 
     if (mode %in% c("spline", "bs", "ns")) {
       basis_type <- tolower(as.character(spec$basis %||% if (mode == "ns") "ns" else "bs")[1])
-      knots <- as.numeric(spec$knots %||% stats::quantile(seq(0, t_admin, length.out = 100), probs = c(0.25, 0.5, 0.75)))
+      knots <- as.numeric(spec$knots %||% stats::quantile(seq(0, time_cens, length.out = 100), probs = c(0.25, 0.5, 0.75)))
       degree <- as.integer(spec$degree %||% 3L)
       coef <- spec$coef
       intercept <- as.logical(spec$intercept %||% TRUE)
@@ -826,9 +1012,9 @@ simulate_joinme <- function(
       return(function(t) {
         t <- pmax(as.numeric(t), 0)
         if (basis_type == "ns") {
-          B <- splines::ns(t, knots = knots, Boundary.knots = c(0, t_admin), intercept = intercept)
+          B <- splines::ns(t, knots = knots, Boundary.knots = c(0, time_cens), intercept = intercept)
         } else {
-          B <- splines::bs(t, knots = knots, Boundary.knots = c(0, t_admin), degree = degree, intercept = intercept)
+          B <- splines::bs(t, knots = knots, Boundary.knots = c(0, time_cens), degree = degree, intercept = intercept)
         }
         B <- as.matrix(B)
         coef_vec <- .sim_align_coef(
@@ -866,7 +1052,12 @@ simulate_joinme <- function(
       i = "Expected {D}, got {length(marker_levels)}."
     ))
   }
-  family_codes <- .parse_family(families)
+  # ---- Resolve family specs and inverse-link bytecode per marker
+  family_spec <- .sim_parse_family_specs(families, D)
+  family_codes <- family_spec$family_codes
+  link_names <- family_spec$link_names
+  inv_link_specs <- family_spec$inv_link_specs
+  family_names <- vapply(family_codes, .family_code_to_name, character(1))
 
   marker_weights_raw <- marker_weights %||% rep(1, D)
   if (length(marker_weights_raw) == 1L) marker_weights_raw <- rep(marker_weights_raw, D)
@@ -877,7 +1068,11 @@ simulate_joinme <- function(
       i = "Provide one weight per marker or a scalar recycled across markers."
     ))
   }
-  marker_weights_eff <- marker_weights_raw
+  .sim_inv_logit_signed <- function(w) {
+    w <- as.numeric(w)
+    2 * stats::plogis(w) - 1
+  }
+  marker_weights_eff <- .sim_inv_logit_signed(marker_weights_raw)
 
   # ---- Parse longitudinal formula structure
   f_exp <- reformulas::expandDoubleVerts(formulaLong)
@@ -922,9 +1117,7 @@ simulate_joinme <- function(
   assoc_effective <- unique(assoc_effective)
   if (length(assoc_effective) == 0) assoc_effective <- "cv_total"
 
-  event_rhs <- stats::delete.response(stats::terms(formulaEvent))
-  W_event <- stats::model.matrix(event_rhs, dataEvent)
-  storage.mode(W_event) <- "double"
+  W_event <- .mm_event(formulaEvent, dataEvent)
 
   if (is.null(beta_event)) {
     beta_event <- .sim_align_coef(
@@ -1052,7 +1245,7 @@ simulate_joinme <- function(
     anchor_val <- as.numeric(assoc_coef_scalar[[anchor]])
     if (is.finite(anchor_val) && anchor_val < 0) {
       marker_weights_raw <- -marker_weights_raw
-      marker_weights_eff <- -marker_weights_eff
+      marker_weights_eff <- .sim_inv_logit_signed(marker_weights_raw)
       assoc_coef_scalar[weighted_terms] <- -assoc_coef_scalar[weighted_terms]
     }
     assoc_coef_scalar[weighted_terms] <- abs(assoc_coef_scalar[weighted_terms])
@@ -1244,35 +1437,20 @@ simulate_joinme <- function(
     lp_val
   }
 
-  .gk15_nodes <- c(
-    -0.9914553711208126, -0.9491079123427585, -0.8648644233597691,
-    -0.7415311855993945, -0.5860872354676911, -0.4058451513773972,
-    -0.2077849550078985, 0.0,
-    0.2077849550078985, 0.4058451513773972, 0.5860872354676911,
-    0.7415311855993945, 0.8648644233597691, 0.9491079123427585,
-    0.9914553711208126
-  )
-  .gk15_weights <- c(
-    0.02293532201052922, 0.06309209262997855, 0.1047900103222502,
-    0.1406532597155259, 0.1690047266392679, 0.1903505780647854,
-    0.2044329400752989, 0.2094821410847278,
-    0.2044329400752989, 0.1903505780647854, 0.1690047266392679,
-    0.1406532597155259, 0.1047900103222502, 0.06309209262997855,
-    0.02293532201052922
-  )
+  # ---- Resolve Gauss-Kronrod nodes/weights for survival integration
+  gk_spec <- gk_quadrature(nodes = quadrature_nodes)
 
-  .sim_composite_gk15 <- function(f, upper, panels) {
+  .sim_composite_gk <- function(f, upper, panels) {
+    # Composite Gauss-Kronrod with nodes defined on [0,1] per panel.
     if (upper <= 0) return(0)
     edges <- seq(0, upper, length.out = panels + 1L)
     total <- 0
     for (p in seq_len(panels)) {
       a <- edges[p]
       b <- edges[p + 1L]
-      center <- 0.5 * (a + b)
-      half <- 0.5 * (b - a)
-      nodes <- center + half * .gk15_nodes
+      nodes <- a + (b - a) * gk_spec$nodes
       vals <- f(nodes)
-      total <- total + half * sum(.gk15_weights * vals)
+      total <- total + (b - a) * sum(gk_spec$weights * vals)
     }
     total
   }
@@ -1312,7 +1490,7 @@ simulate_joinme <- function(
       prev <- NA_real_
       curr <- NA_real_
       for (iter in seq_len(max_refine)) {
-        curr <- .sim_composite_gk15(function(u) hazard_i(i, u), upper = t, panels = panels)
+        curr <- .sim_composite_gk(function(u) hazard_i(i, u), upper = t, panels = panels)
         if (is.finite(prev) && abs(curr - prev) <= rel_tol * max(1, abs(prev))) break
         prev <- curr
         if (panels >= max_panels) break
@@ -1338,28 +1516,28 @@ simulate_joinme <- function(
       max_expand = root_control$max_expand
     )
     if (is.null(br)) {
-      return(list(time = t_admin, event = 0L, bracketing_failed = TRUE))
+      return(list(time = time_cens, event = 0L, bracketing_failed = TRUE))
     }
     T_star <- stats::uniroot(f_root, lower = br$lower, upper = br$upper)$root
-    if (T_star > t_admin) {
-      list(time = t_admin, event = 0L, bracketing_failed = FALSE)
+    if (T_star > time_cens) {
+      list(time = time_cens, event = 0L, bracketing_failed = FALSE)
     } else {
       list(time = T_star, event = 1L, bracketing_failed = FALSE)
     }
   }
 
   # ---- Draw event/censoring times
-  event_draws <- lapply(seq_len(n_id), draw_event_time)
+  event_draws <- .sim_parallel_lapply(seq_len(n_id), draw_event_time)
   dataEvent[[event_time_var]] <- vapply(event_draws, `[[`, numeric(1), "time")
   dataEvent[[event_var]] <- vapply(event_draws, `[[`, integer(1), "event")
 
   # ---- Build longitudinal observation schedule conditional on event times
-  obs_rows <- vector("list", n_id * D)
-  idx_row <- 1L
   n_obs_target <- max(2L, as.integer(n_obs_per_marker_per_id))
+  cov_names <- setdiff(colnames(dataEvent), c(id_var, event_time_var, event_var))
 
-  for (i in seq_len(n_id)) {
-    obs_upper <- max(1e-8, min(dataEvent[[event_time_var]][i], t_admin))
+  .sim_obs_rows_for_id <- function(i) {
+    obs_upper <- max(1e-8, min(dataEvent[[event_time_var]][i], time_cens))
+    rows_i <- vector("list", D)
     for (d in seq_len(D)) {
       if (!is.null(times_obs) && length(times_obs) > 0) {
         candidate_times <- times_obs[times_obs <= obs_upper]
@@ -1382,15 +1560,15 @@ simulate_joinme <- function(
       names(row_df)[names(row_df) == "time"] <- time_var
       names(row_df)[names(row_df) == "marker"] <- marker_var
 
-      cov_names <- setdiff(colnames(dataEvent), c(id_var, event_time_var, event_var))
       for (cov_nm in cov_names) {
         row_df[[cov_nm]] <- dataEvent[[cov_nm]][i]
       }
-
-      obs_rows[[idx_row]] <- row_df
-      idx_row <- idx_row + 1L
+      rows_i[[d]] <- row_df
     }
+    do.call(rbind, rows_i)
   }
+
+  obs_rows <- .sim_parallel_lapply(seq_len(n_id), .sim_obs_rows_for_id)
   dataLong <- do.call(rbind, obs_rows)
   rownames(dataLong) <- NULL
 
@@ -1418,8 +1596,14 @@ simulate_joinme <- function(
     mu_long <- mu_long + rowSums(Z_idm_long * idm_effect)
   }
 
+  # ---- Step: apply inverse-link to the linear predictor per marker
+  # This yields response-scale means/probabilities used in sampling.
+  mu_linked <- vapply(seq_len(nrow(dataLong)), function(r) {
+    .sim_apply_inv_link_bc(mu_long[r], inv_link_specs[[marker_index[r]]])
+  }, numeric(1))
+
   # ---- Distributional parameters (family defaults + formulaDist overrides)
-  family_by_row <- families[marker_index]
+  family_by_row <- family_names[marker_index]
 
   sigma_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "sigma", 1.0), numeric(1))
   nu_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "nu", 4.0), numeric(1))
@@ -1430,7 +1614,7 @@ simulate_joinme <- function(
   trials_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "trials", 10L), numeric(1))
 
   dist_formulas <- .normalize_formula_dist(formulaDist)
-  family_names_present <- vapply(.parse_family(unique(families)), .family_code_to_name, character(1))
+  family_names_present <- vapply(sort(unique(family_codes)), .family_code_to_name, character(1))
   .validate_dist_formula_scopes(dist_formulas, family_names_present)
   for (param_name in names(dist_formulas)) {
     X_param <- .build_dist_matrix(dist_formulas[[param_name]], dataLong, family_by_row = family_by_row)$X
@@ -1445,12 +1629,13 @@ simulate_joinme <- function(
     if (param_name == "tau_sde") tau_sde_vec <- stats::plogis(eta_param)
   }
 
-  # ---- Draw outcomes by marker-specific family
+  # ---- Step: draw outcomes by marker-specific family
   y_out <- numeric(nrow(dataLong))
   for (r in seq_len(nrow(dataLong))) {
     fam_name <- family_by_row[r]
     fam_code <- .parse_family(fam_name)
     eta_r <- mu_long[r]
+    mu_r <- mu_linked[r]
 
     if (fam_code == 11L) {
       cp <- family_params[[fam_name]]$cutpoints %||% c(-1, 1)
@@ -1458,7 +1643,7 @@ simulate_joinme <- function(
     } else {
       y_out[r] <- .sample_from_family(
         n = 1,
-        eta = eta_r,
+        mu = mu_r,
         family = fam_code,
         sigma = sigma_vec[r],
         nu = nu_vec[r],
@@ -1485,8 +1670,14 @@ simulate_joinme <- function(
     alpha_cv_total = if ("cv_total" %in% names(assoc_coef_vec)) assoc_coef_vec[["cv_total"]] else NA_real_,
     assoc = assoc,
     assoc_coefs = assoc_coef_vec,
-    marker_weights = marker_weights_raw,
+    marker_weights = marker_weights_eff,
+    marker_weights_raw = marker_weights_raw,
     marker_weights_eff = marker_weights_eff,
+    link_names = link_names,
+    quadrature_nodes = as.integer(gk_spec$n_gk),
+    gk_nodes = gk_spec$nodes,
+    gk_weights = gk_spec$weights,
+    gk_rule = gk_spec$rule,
     transforms = transforms,
     baseline_hazard = baseline_hazard,
     formulaBasehaz = formulaBasehaz,

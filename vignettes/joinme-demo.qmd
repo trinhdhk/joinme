@@ -63,6 +63,28 @@ Accepted specifications include:
 - **Priors** (`priors = list(beta = ..., alpha = ..., lkj = ...)`)
 - **Computation** (`control` for sampling, and optionally threading)
 
+## Family-specific links (new)
+
+Longitudinal families can now carry per-marker inverse-links with `jm_family(...)`.
+This affects both `epred` and `predict` scales in dynamic prediction.
+
+```{r family-link-spec, eval=FALSE}
+families_linked <- list(
+  jm_family("student_t", link = "identity"),
+  jm_family("bernoulli", link = "probit"),
+  jm_family("poisson", inv_link = ~ exp(x))
+)
+
+fit_linked <- joinme(
+  formulaLong = formulaLong,
+  dataLong = sim$dataLong,
+  formulaEvent = formulaEvent,
+  dataEvent = sim$dataEvent,
+  families = families_linked,
+  assoc = c("cv_total")
+)
+```
+
 # Scenario A: Multivariate Continuous Markers with CV Association
 
 ## Data simulation
@@ -79,10 +101,16 @@ sim <- simulate_joinme(
   families = rep("student_t", 5),
   n_obs_per_marker_per_id = 10,
   times_obs = seq(0, 8, length.out = 14),
+  quadrature_nodes = 31,
   seed = 123,
   assoc = c("cv_total"),
   assoc_coefs = c(cv_total = 0.6)
 )
+
+# Gauss-Kronrod nodes/weights are fixed in Stan; `quadrature_nodes` selects
+# the node count used to build the design matrices in R.
+
+# Custom inverse-links can be supplied via jm_family(..., inv_link = ~ ...).
 
 # When estimating marker weights, compare against sim$truth$marker_weights
 # because signed marker weights are used directly in Stan.
@@ -365,7 +393,7 @@ sim_comp <- simulate_joinme(
 # Simulate cause-specific event times and derive event_type from the minimum time.
 set.seed(444)
 cause_levels <- c("cause1", "cause2")
-t_admin <- 8.0
+time_cens <- 8.0
 
 h0_list <- list(
   cause1 = weibull_h0(shape = 1.2, scale = 5.0),
@@ -409,9 +437,9 @@ draw_cause_time <- function(i, k) {
   target <- -log(U)
   f_root <- function(t) cumhaz_i(t) - target
   br <- find_bracket(f_root, lower = 0, upper = 1, upper_max = 50)
-  if (is.null(br)) return(list(time = t_admin, event = 0L))
+  if (is.null(br)) return(list(time = time_cens, event = 0L))
   T <- uniroot(f_root, lower = br$lower, upper = br$upper)$root
-  if (T > t_admin) list(time = t_admin, event = 0L) else list(time = T, event = 1L)
+  if (T > time_cens) list(time = time_cens, event = 0L) else list(time = T, event = 1L)
 }
 
 event_time <- numeric(nrow(sim_comp$dataEvent))
@@ -422,7 +450,7 @@ for (i in seq_len(nrow(sim_comp$dataEvent))) {
   times_k <- vapply(cause_levels, function(k) draw_cause_time(i, k)$time, numeric(1))
   min_idx <- which.min(times_k)
   event_time[i] <- times_k[min_idx]
-  event_flag[i] <- as.integer(event_time[i] < t_admin)
+  event_flag[i] <- as.integer(event_time[i] < time_cens)
   event_type[i] <- cause_levels[min_idx]
   if (event_flag[i] == 0L) {
     event_type[i] <- cause_levels[1]

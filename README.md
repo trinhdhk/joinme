@@ -100,16 +100,21 @@ set.seed(2026)
 # Simulate a small dataset
 sim <- simulate_joinme(
   n_id = 10,
-  families = rep("student_t", 2),
+  families = list(
+    jm_family("student_t"),
+    jm_family("student_t", inv_link = ~ inv_logit(x / 2))
+  ),
   n_obs_per_marker_per_id = 4,
   times_obs = seq(0, 5, length.out = 8),
+  quadrature_nodes = 31,
   seed = 2026,
   assoc = c("cv_total"),
   assoc_coefs = c(cv_total = 0.6)
 )
 
 # Note: when estimating marker weights, compare to sim$truth$marker_weights
-# because signed marker weights are used directly in Stan.
+# because effective marker intensities are computed as
+# 2 * inv_logit(w_raw) - 1 inside Stan.
 
 formulaLong <- y ~ 1 + time + x1 +
   (1 + time | id) +
@@ -123,7 +128,10 @@ fit <- joinme(
   formulaEvent = formulaEvent,
   dataEvent = sim$dataEvent,
   assoc = c("cv_total"),
-  families = rep("student_t", 2),
+  families = list(
+    jm_family("student_t"),
+    jm_family("student_t", inv_link = ~ inv_logit(x / 2))
+  ),
   transforms = list(cv_total = list(type = "identity")),
   control = list(
     parallel_chains = 1,

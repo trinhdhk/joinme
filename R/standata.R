@@ -21,7 +21,9 @@
 #' This builder performs three key steps:
 #' 1. Constructs fixed-effect and random-effect design matrices on a scaled time axis.
 #' 2. Creates distributional regression matrices (including optional random effects).
-#' 3. Assembles spline bases and Gaussâ€“Kronrod nodes for survival integration.
+#' 3. Assembles spline bases and Gauss-Kronrod nodes for survival integration.
+#'    Only the node count is passed to Stan; nodes/weights are hardcoded in the
+#'    Stan functions that evaluate the cumulative hazard.
 #'
 #' Time is scaled internally as `t_scaled = t/t_max` for numerical stability; indices
 #' are recorded to rescale time-associated coefficients back to the original units
@@ -61,8 +63,10 @@
 #' @param eps_fd Positive finite-difference step for association derivatives.
 #' @param assoc Character vector specifying association components
 #'   (e.g., "cv_mean", "cs_total", "corr").
-#' @param families Optional marker-specific family names. If NULL, all markers
-#'   use Gaussian responses.
+#' @param families Optional marker-specific family specification. Can be
+#'   character family names or `jm_family(...)` entries with per-marker links.
+#'   If NULL, all markers use Gaussian responses with identity link.
+#'   Supported links/inverse-links: `identity`, `log`, `logit`, `probit`, `exp`.
 #' @param transforms Optional list specifying transformations for association terms.
 #'   Each element (cv_total, cs_total, corr) is a list with a `type` and fields
 #'   required by that type (see `build_standata_transforms()`).
@@ -72,12 +76,14 @@
 #' @param allow_marker_crosscorr Integer flag; 1 allows cross-marker correlation in marker RE.
 #' @param shrinkage Integer flag controlling shrinkage behavior for marker-by-id effects.
 #' @param marker_weights Optional numeric vector of length D giving base weights
-#'   for marker-specific association components. These weights are applied to both
-#'   current value (CV) and current slope (CS) marker summaries as signed
-#'   aggregation weights. Values in `marker_weights` are used directly. When
-#'   NULL, equal base weights are used.
-#' @param estimate_marker_weights Logical; if TRUE, estimate marker weights via a
-#'   signed additive perturbation around base weights,
+#'   for marker-specific association components. These are used as prior offsets
+#'   for latent marker intensities and are mapped in Stan to effective weights via
+#'   `2 * inv_logit(w_raw) - 1`, where `w_raw = marker_weights` or
+#'   `marker_weights + z_marker_weights`. When NULL, base weights default to
+#'   zeros for estimated weights and ones for fixed weights.
+#' @param fixed_marker_weights Logical; if TRUE, marker weights are kept fixed
+#'   at `marker_weights` (no perturbation). If FALSE, marker weights are estimated
+#'   via signed additive perturbations,
 #'   `marker_weights + z_marker_weights`, with `z_marker_weights ~ N(0, 1)`.
 #' @param flag_resid_dim Integer flag to include residual dimension checks.
 #' @param basehaz Baseline hazard basis type: "bs", "ns", or "formula".
@@ -85,6 +91,9 @@
 #' @param basehaz_degree Degree of spline basis for baseline hazard.
 #' @param basehaz_formula Formula for baseline hazard when `basehaz = "formula"`.
 #' @param tau_spline Prior scale for spline coefficients (penalized spline).
+#' @param quadrature_nodes Optional positive integer target for total quadrature
+#'   points. Allowed values are exactly `7`, `15`, `31`, `41`, `51`, and `61`.
+#'   Only the node count is passed to Stan; GK nodes/weights are fixed in Stan.
 #' @param corr_diag_link Link for covariance regression diagonals: "softplus" or "exp".
 #' @param tau_sde_fixed Optional fixed tau for skew-double-exponential (0 < tau < 1).
 #' @param seed Optional random seed for deterministic components of standata.
@@ -118,13 +127,14 @@ joinme_standata <- function(
   allow_marker_crosscorr = 1L,
   shrinkage = 2L,
   marker_weights = NULL,
-  estimate_marker_weights = TRUE,
+  fixed_marker_weights = FALSE,
   flag_resid_dim = 0L,
   basehaz = c("bs", "ns", "formula"),
   n_knots = 5L,
   basehaz_degree = 3L,
   basehaz_formula = ~ 1 + time,
   tau_spline = 0.4,
+  quadrature_nodes = NULL,
   corr_diag_link = c("softplus", "exp"),
   tau_sde_fixed = NULL,
   seed = NULL
@@ -133,6 +143,14 @@ joinme_standata <- function(
   assertthat::assert_that(is.data.frame(dataEvent), msg = "dataEvent must be a data.frame")
   basehaz <- match.arg(basehaz)
   corr_diag_link <- match.arg(corr_diag_link)
+  quad_req <- .resolve_gk_request(nodes = quadrature_nodes %||% 15L)
+
+  if (!is.logical(fixed_marker_weights) || length(fixed_marker_weights) != 1L || is.na(fixed_marker_weights)) {
+    cli::cli_abort(c(
+      x = "{.arg fixed_marker_weights} must be TRUE/FALSE.",
+      i = "Use TRUE to keep supplied marker weights fixed; FALSE to estimate marker-weight perturbations."
+    ))
+  }
 
   # Workflow: parse formulas -> build matrices -> assemble survival basis -> pack list
   # Handle mixed families
@@ -288,7 +306,7 @@ joinme_standata <- function(
   # Marker-weighted association channels use marker weights only for:
   # cv_total, cv_marker, cs_total, cs_marker.
   marker_weight_assoc_active <- as.integer(any(c("cv_total", "cv_marker", "cs_total", "cs_marker") %in% assoc))
-  estimate_marker_weights_active <- as.integer(isTRUE(estimate_marker_weights) && marker_weight_assoc_active == 1L)
+  estimate_marker_weights_active <- as.integer(!isTRUE(fixed_marker_weights) && marker_weight_assoc_active == 1L)
 
   # Marker weights (for weighted means in CV/CS association components)
   if (is.null(marker_weights)) {
@@ -317,16 +335,12 @@ joinme_standata <- function(
         i = "Weights may be positive or negative, but cannot be NA/Inf."
       ))
     }
-    if (all(abs(marker_weights) < 1e-12)) {
-      cli::cli_abort(c(
-        x = "{.arg marker_weights} cannot be all zeros.",
-        i = "Provide at least one non-zero weight."
-      ))
-    }
+    # All-zero base weights are allowed; inv_logit mapping in Stan will still
+    # yield a well-defined set of effective weights.
   }
 
   # Marker-weight estimation controls
-  # - estimate_marker_weights toggles whether shrinkage is applied in Stan
+  # - estimate_marker_weights_active toggles whether shrinkage is applied in Stan
     # Independence flags from lme4-style double-bar syntax
     # - (... || id) enforces diagonal id RE covariance
     # - (... || marker) enforces diagonal marker RE covariance
@@ -334,15 +348,47 @@ joinme_standata <- function(
     indep_flags <- .resolve_re_independence(formulaLong, marker_var = marker_var, id_var = id_var)
   # Process mixed families (optional)
   # - family_codes drive distributional parameter availability
+  # - link_codes drive family-specific inverse-link mapping in Stan
   if (!is.null(families)) {
+    # Treat a single family spec object/list as scalar and recycle to D markers.
+    if (inherits(families, "joinme_family_spec") || (is.list(families) && !is.null(families$family))) {
+      families <- rep(list(families), D)
+    }
     # If only length 1, duplicate to all markers
     if (length(families) == 1) {
       families <- rep(families, D)
     }
-    family_codes <- .validate_family_list(families, D, dataLong, marker_var, y_var)
+    family_spec <- .validate_family_list(families, D, dataLong, marker_var, y_var)
+    family_codes <- as.integer(family_spec$family_codes)
+    link_codes <- as.integer(family_spec$link_codes)
+    link_names <- as.character(family_spec$link_names)
+    inv_link_n_ops <- as.integer(family_spec$inv_link_n_ops)
+    inv_link_ops <- family_spec$inv_link_ops
+    inv_link_n_const <- as.integer(family_spec$inv_link_n_const)
+    inv_link_const <- family_spec$inv_link_const
+    max_inv_link_ops <- ncol(inv_link_ops)
+    max_inv_link_const <- ncol(inv_link_const)
   } else {
     family_codes <- rep(1L, D)  # Default: all gaussian
+    link_names <- vapply(family_codes, .default_link_for_family, character(1))
+    link_codes <- as.integer(vapply(link_names, .link_code_from_name, integer(1)))
+    inv_link_specs <- lapply(link_names, .inv_link_bc_from_name)
+    inv_link_n_ops <- as.integer(vapply(inv_link_specs, function(x) length(x$opcodes), integer(1)))
+    inv_link_n_const <- as.integer(vapply(inv_link_specs, function(x) length(x$const_data), integer(1)))
+    max_inv_link_ops <- max(inv_link_n_ops, 1L)
+    max_inv_link_const <- max(inv_link_n_const, 1L)
+    inv_link_ops <- matrix(0L, nrow = D, ncol = max_inv_link_ops)
+    inv_link_const <- matrix(0.0, nrow = D, ncol = max_inv_link_const)
+    for (d in seq_len(D)) {
+      if (inv_link_n_ops[d] > 0L) {
+        inv_link_ops[d, seq_len(inv_link_n_ops[d])] <- as.integer(inv_link_specs[[d]]$opcodes)
+      }
+      if (inv_link_n_const[d] > 0L) {
+        inv_link_const[d, seq_len(inv_link_n_const[d])] <- as.numeric(inv_link_specs[[d]]$const_data)
+      }
+    }
   }
+
   family_names <- vapply(family_codes, .family_code_to_name, character(1))
 
   # Family-level distributional parameter indexing.
@@ -532,10 +578,8 @@ joinme_standata <- function(
   }
 
   # Hazard covariates W
-  # - baseline covariates only, handled in survival submodel
-  fe_rhs <- stats::update(formulaEvent, . ~ .)
-  fe_rhs[[2]] <- NULL
-  W <- .mm(fe_rhs, dataEvent)
+  # - baseline covariates only, intercept always fused into baseline hazard
+  W <- .mm_event(formulaEvent, dataEvent)
   p_w <- ncol(W)
 
   # Covariance covariates Xcov (intercept-only -> Xcov=0)
@@ -593,11 +637,14 @@ joinme_standata <- function(
 
   # GK times now/fwd on scaled domain
   # - u_now/u_fwd feed CV/CS feature computations
-  gk <- .gk15_nodes()
-  u_now <- matrix(NA_real_, n_id, 15)
-  u_fwd <- matrix(NA_real_, n_id, 15)
+  # - only n_gk is passed to Stan; nodes/weights are hardcoded in Stan
+  quad <- .gk_single_panel(rule = quad_req$rule)
+  n_gk <- quad$n_gk
+  gk_nodes <- quad$nodes
+  u_now <- matrix(NA_real_, n_id, n_gk)
+  u_fwd <- matrix(NA_real_, n_id, n_gk)
   for (i in seq_len(n_id)) {
-    u <- 0.5 * S_event[i] * (gk + 1)
+    u <- S_event[i] * gk_nodes
     uf <- pmin(u + eps_fd, 1)
     u_now[i, ] <- u
     u_fwd[i, ] <- uf
@@ -624,7 +671,7 @@ joinme_standata <- function(
 
     u_vec <- as.vector(t(u_now))
     B_now <- as.matrix(predict(Bs_obj, newx = u_vec))
-    Bs_gk_raw <- array(B_now, dim = c(15, n_id, Kbs))
+    Bs_gk_raw <- array(B_now, dim = c(n_gk, n_id, Kbs))
     Bs_gk_raw <- aperm(Bs_gk_raw, c(2, 1, 3))
   }
 
@@ -654,7 +701,7 @@ joinme_standata <- function(
 
   # Marker-only designs (optional)
   if (R_mk == 0) {
-    mk0 <- .zero_marker_block(N = nrow(dl), n_id = n_id)
+    mk0 <- .zero_marker_block(N = nrow(dl), n_id = n_id, n_gk = n_gk)
     Z_mk_gk_now <- mk0$Z_mk_gk_now
     Z_mk_gk_fwd <- mk0$Z_mk_gk_fwd
     Z_mk_event_now <- mk0$Z_mk_event_now
@@ -748,6 +795,13 @@ joinme_standata <- function(
     y_int = as.integer(y_int),
     trials = as.integer(trials),
     family_long = as.integer(family_long),
+    link_long = as.integer(link_codes),
+    max_inv_link_ops = as.integer(max_inv_link_ops),
+    inv_link_n_ops = as.integer(inv_link_n_ops),
+    inv_link_ops = matrix(as.integer(inv_link_ops), nrow = nrow(inv_link_ops), ncol = ncol(inv_link_ops)),
+    max_inv_link_const = as.integer(max_inv_link_const),
+    inv_link_n_const = as.integer(inv_link_n_const),
+    inv_link_const = matrix(as.numeric(inv_link_const), nrow = nrow(inv_link_const), ncol = ncol(inv_link_const)),
     n_family_sigma = fam_sigma$n,
     marker_to_sigma_family = fam_sigma$marker_to,
     n_family_nu = fam_nu$n,
@@ -794,6 +848,7 @@ joinme_standata <- function(
     K_event = as.integer(K_event),
     event_type = as.integer(event_type),
     eps_fd = eps_fd,
+    n_gk = as.integer(n_gk),
 
     # Distributional regression
     P_sigma = as.integer(dist_sigma$P),
@@ -900,6 +955,7 @@ joinme_standata <- function(
     # Time metadata
     # --------------------------
     tmax = as.numeric(tmax),
+    quadrature_nodes = as.integer(n_gk),
     n_time_beta = as.integer(time_meta$n_time_beta),
     idx_time_beta = as.array(as.integer(time_meta$idx_time_beta)),
     n_time_uid = as.integer(time_meta$n_time_uid),
@@ -921,9 +977,11 @@ joinme_standata <- function(
     marker_levels = marker_levels,
     marker_weights = as.numeric(marker_weights),
     estimate_marker_weights = as.integer(estimate_marker_weights_active),
+    fixed_marker_weights = as.integer(!as.logical(estimate_marker_weights_active)),
     use_marker_weight_assoc = as.integer(marker_weight_assoc_active),
     family_codes = family_codes,
     family_names = family_names,
+    link_names = link_names,
     family_sigma_codes = fam_sigma$family_codes,
     family_sigma_names = fam_sigma$family_names,
     family_nu_codes = fam_nu$family_codes,

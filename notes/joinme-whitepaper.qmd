@@ -168,13 +168,19 @@ $\omega^{(0)}$ be the base latent weights and $z_d$ be shrinkage perturbations.
 Define
 
 $$
-\omega_d^{lat} = \omega^{(0)}_d + z_d,
+\omega_d^{raw} = \omega^{(0)}_d + z_d,
 $$
 
-with $z_d \sim \mathcal{N}(0,1)$, and map to effective association weights via
-and use the resulting signed weights directly in marker-aggregated association
-terms. This allows both positive and negative effects while regularizing latent
-perturbations.
+with $z_d \sim \mathcal{N}(0,1)$. Effective marker intensities used in
+association aggregation are computed with a bounded inv_logit map:
+
+$$
+\omega_d^{eff} = 2 \cdot \text{inv\_logit}(\omega^{raw}_d) - 1.
+$$
+
+This yields weights in $(-1, 1)$ while preserving the sign and magnitude implied
+by the latent offsets. The $\omega^{(0)}$ offsets act as priors that shift the
+latent weight distribution.
 
 ## 4.2. Regularizing Smoothness
 For B-spline baseline hazards and penalized I-spline associations, we impose a second-order random walk prior on coefficients $\gamma$:
@@ -199,7 +205,7 @@ This allows the *variability* and *correlation* of biomarker trajectories to dep
 
 Solving the integral $\Lambda(t) = \int_0^t \lambda(s) ds$ inside an MCMC loop is expensive. We optimize this via:
 
-1.  **Gauss-Kronrod Quadrature**: We use a fixed 15-point rule $(\mathbf{x}_{GK}, \mathbf{w}_{GK})$ (Patterson 1968). The cumulative hazard is a weighted sum of hazards at these nodes.
+1.  **Gauss-Kronrod Quadrature**: We use a default 15-point rule $(\mathbf{x}_{GK}, \mathbf{w}_{GK})$ (Patterson 1968), configurable to other Gauss-Kronrod node counts. Only the node count is passed to Stan; the GK nodes and weights are fixed in the Stan code, and the cumulative hazard is a weighted sum of hazards at these nodes.
 2.  **Pre-computation**: Design matrices for B-splines and fixed effects are pre-calculated in R at the quadrature nodes. Stan only performs matrix-vector multiplications.
 3.  **Massive Parallelism via `reduce_sum`**:
     The log-likelihood contribution is independent across subjects. We use Stan's `reduce_sum` primitive to slice the subject blocks and map them to available threads (TBB).

@@ -5,7 +5,7 @@
   array[N] int<lower=1> marker;  // marker index per row (1..D)
   int<lower=1> D;                // total number of markers
   vector<lower=0>[n_id] subject_weights; // subject-level weights for longitudinal/survival likelihood
-  vector[D] marker_weights;      // base signed weights for marker-averaged CV/CS terms
+  vector[D] marker_weights;      // base weights (prior offsets) for marker-averaged CV/CS terms
   int<lower=0, upper=1> estimate_marker_weights; // 1 enables signed shrinkage perturbations around base weights
   int<lower=0, upper=1> use_marker_weight_assoc; // 1 when marker-weighted assoc terms are active
 
@@ -19,6 +19,13 @@
   // 7 skew_normal, 8 double_exponential, 9 skew_double_exponential, 10 beta,
   // 11 cumulative_logit
   array[D] int<lower=1, upper=11> family_long;
+  array[D] int<lower=0, upper=5> link_long; // 0 custom VM; 1 identity, 2 log, 3 logit, 4 probit, 5 exp
+  int<lower=1> max_inv_link_ops;
+  array[D] int<lower=0> inv_link_n_ops;
+  array[D, max_inv_link_ops] int<lower=0, upper=26> inv_link_ops;
+  int<lower=1> max_inv_link_const;
+  array[D] int<lower=0> inv_link_n_const;
+  matrix[D, max_inv_link_const] inv_link_const;
 
   /* Family-level distributional parameter indexing */
   int<lower=0> n_family_sigma;                    // number of families using sigma
@@ -143,7 +150,8 @@
   /* Baseline hazard spline (centered basis) */
   int<lower=1> Kbs;              // number of baseline hazard basis functions
   matrix[n_id, Kbs] Bs_event_c;  // event-time basis per subject (centered)
-  array[n_id] matrix[15, Kbs] Bs_gk_c; // GK-node basis per subject (centered)
+  int<lower=1> n_gk;             // quadrature node count (nodes/weights hardcoded in Stan)
+  array[n_id] matrix[n_gk, Kbs] Bs_gk_c; // quadrature-node basis per subject (centered)
   real<lower=0> tau_spline;      // spline penalty scale for baseline hazard
 
   /* Survival outcomes */
@@ -159,20 +167,20 @@
   real<lower=1e-6> eps_fd;       // finite-difference step for slope approximation
 
   /* Mean association designs (CV_mean) */
-  array[n_id] matrix[15, P] X_gk_now;
-  array[n_id] matrix[15, P] X_gk_fwd;
-  array[n_id] matrix[15, R_id] Z_id_gk_now;
-  array[n_id] matrix[15, R_id] Z_id_gk_fwd;
+  array[n_id] matrix[n_gk, P] X_gk_now;
+  array[n_id] matrix[n_gk, P] X_gk_fwd;
+  array[n_id] matrix[n_gk, R_id] Z_id_gk_now;
+  array[n_id] matrix[n_gk, R_id] Z_id_gk_fwd;
   matrix[n_id, P] X_event_now;
   matrix[n_id, P] X_event_fwd;
   matrix[n_id, R_id] Z_id_event_now;
   matrix[n_id, R_id] Z_id_event_fwd;
 
   /* Marker association designs (CV_marker) */
-  array[n_id] matrix[15, R_mk] Z_mk_gk_now;
-  array[n_id] matrix[15, R_mk] Z_mk_gk_fwd;
-  array[n_id] matrix[15, Q_idm] Z_idm_gk_now;
-  array[n_id] matrix[15, Q_idm] Z_idm_gk_fwd;
+  array[n_id] matrix[n_gk, R_mk] Z_mk_gk_now;
+  array[n_id] matrix[n_gk, R_mk] Z_mk_gk_fwd;
+  array[n_id] matrix[n_gk, Q_idm] Z_idm_gk_now;
+  array[n_id] matrix[n_gk, Q_idm] Z_idm_gk_fwd;
   matrix[n_id, R_mk] Z_mk_event_now;
   matrix[n_id, R_mk] Z_mk_event_fwd;
   matrix[n_id, Q_idm] Z_idm_event_now;
@@ -217,37 +225,37 @@
 
   /* Functional opcode specifications */
   int<lower=0> n_functional_ops_cv;         // op count for total CV
-  array[n_functional_ops_cv] int<lower=0, upper=25> functional_ops_cv; // opcode stream
+  array[n_functional_ops_cv] int<lower=0, upper=26> functional_ops_cv; // opcode stream
   int<lower=0> n_const_cv;                  // constants used by CV opcodes
   vector[n_const_cv] const_data_cv;         // constants used by CV opcodes
 
   int<lower=0> n_functional_ops_cs;         // op count for total CS
-  array[n_functional_ops_cs] int<lower=0, upper=25> functional_ops_cs; // opcode stream
+  array[n_functional_ops_cs] int<lower=0, upper=26> functional_ops_cs; // opcode stream
   int<lower=0> n_const_cs;                  // constants used by CS opcodes
   vector[n_const_cs] const_data_cs;         // constants used by CS opcodes
 
   int<lower=0> n_functional_ops_corr;       // op count for corr
-  array[n_functional_ops_corr] int<lower=0, upper=25> functional_ops_corr; // opcode stream
+  array[n_functional_ops_corr] int<lower=0, upper=26> functional_ops_corr; // opcode stream
   int<lower=0> n_const_corr;                // constants used by corr opcodes
   vector[n_const_corr] const_data_corr;     // constants used by corr opcodes
 
   int<lower=0> n_functional_ops_cv_mean;    // op count for mean CV
-  array[n_functional_ops_cv_mean] int<lower=0, upper=25> functional_ops_cv_mean; // opcode stream
+  array[n_functional_ops_cv_mean] int<lower=0, upper=26> functional_ops_cv_mean; // opcode stream
   int<lower=0> n_const_cv_mean;             // constants used by mean CV opcodes
   vector[n_const_cv_mean] const_data_cv_mean; // constants used by mean CV opcodes
 
   int<lower=0> n_functional_ops_cv_marker;  // op count for marker CV
-  array[n_functional_ops_cv_marker] int<lower=0, upper=25> functional_ops_cv_marker; // opcode stream
+  array[n_functional_ops_cv_marker] int<lower=0, upper=26> functional_ops_cv_marker; // opcode stream
   int<lower=0> n_const_cv_marker;           // constants used by marker CV opcodes
   vector[n_const_cv_marker] const_data_cv_marker; // constants used by marker CV opcodes
 
   int<lower=0> n_functional_ops_cs_mean;    // op count for mean CS
-  array[n_functional_ops_cs_mean] int<lower=0, upper=25> functional_ops_cs_mean; // opcode stream
+  array[n_functional_ops_cs_mean] int<lower=0, upper=26> functional_ops_cs_mean; // opcode stream
   int<lower=0> n_const_cs_mean;             // constants used by mean CS opcodes
   vector[n_const_cs_mean] const_data_cs_mean; // constants used by mean CS opcodes
 
   int<lower=0> n_functional_ops_cs_marker;  // op count for marker CS
-  array[n_functional_ops_cs_marker] int<lower=0, upper=25> functional_ops_cs_marker; // opcode stream
+  array[n_functional_ops_cs_marker] int<lower=0, upper=26> functional_ops_cs_marker; // opcode stream
   int<lower=0> n_const_cs_marker;           // constants used by marker CS opcodes
   vector[n_const_cs_marker] const_data_cs_marker; // constants used by marker CS opcodes
 

@@ -113,10 +113,12 @@
   // Goal:
   // - Allow positive and negative marker contributions.
   // - Keep perturbation model simple and directly interpretable.
+  // - Constrain effective weights to (-1, 1) with an inv_logit map.
   // Rule:
-  // - Start from signed base weights (provided from standata).
+  // - Start from signed base weights (provided from standata) as a prior offset.
   // - If estimation is enabled, add a signed standard-normal perturbation z.
-  // - Use the resulting signed weights directly for association aggregation.
+  // - Map to effective weights via 2 * inv_logit(w_raw) - 1.
+  // - Interpret marker_weights_eff as marker-intensity multipliers for association.
   vector[D] marker_weights_eff; // effective signed marker weights
   {
     vector[D] w_raw;
@@ -125,7 +127,11 @@
     } else {
       w_raw = marker_weights;
     }
-    marker_weights_eff = w_raw;
+    if (use_marker_weight_assoc == 1) {
+      marker_weights_eff = 2.0 * inv_logit(w_raw) - 1.0;
+    } else {
+      marker_weights_eff = w_raw;
+    }
   }
 
   /* -------------------- marker averages for survival association (unweighted mean across markers) */

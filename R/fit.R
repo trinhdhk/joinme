@@ -24,10 +24,11 @@
 #'
 #' Marker weights (see `joinme_standata()`) are used to form marker-average summaries
 #' for both current value (CV) and current slope (CS) association components. When
-#' `estimate_marker_weights = TRUE`, signed perturbations are estimated around base
+#' `fixed_marker_weights = FALSE`, signed perturbations are estimated around base
 #' weights using `marker_weights + z_marker_weights` with
-#' `z_marker_weights ~ N(0, 1)`, and the resulting signed weights are used
-#' directly in marker-aggregated association channels.
+#' `z_marker_weights ~ N(0, 1)`. The effective marker intensities are then computed
+#' as `2 * inv_logit(w_raw) - 1`, yielding bounded weights in (-1, 1) that scale the
+#' association contributions.
 #'
 #' Formula-scoped subject weighting is supported in random-effect grouping terms via
 #' `weighted(group, weights = <column>)`. For example:
@@ -107,15 +108,23 @@
 #'     For engine = "rstan", threading uses options(stan.thread = threads_per_chain).
 #'   - grainsize: integer; reduce_sum grainsize for threading (default max(1, min(n_cores, ceiling(n_id/(4*threads_per_chain*chains))))).
 #'   - force_recompile: logical; recompile the Stan model if needed.
+#'   - quadrature_nodes: optional positive integer total node target for survival
+#'     integration. Allowed values are exactly 7/15/31/41/51/61. Only the node
+#'     count is passed to Stan; GK nodes/weights are fixed in the Stan code.
 #'   - corr_diag_link: "softplus" or "exp" for covariance regression diagonals.
 #'   - tau_sde_fixed: optional fixed tau in (0,1) for skew-double-exponential.
 #' @param draws Optional number of posterior draws used for summaries (not sampling).
-#' @param families Marker-specific family specification (optional). Can be a vector
-#'   of family names aligned to marker order.
+#' @param families Marker-specific family specification (optional).
+#'   Can be a character vector of family names aligned to marker order, or a
+#'   list of `jm_family(...)` entries with per-marker links.
+#'   Supported links/inverse-links: `identity`, `log`, `logit`, `probit`, `exp`.
 #' @param transforms Transformation specifications for association terms
 #'   (cv_total, cs_total, corr). Each entry is a list with a `type` and fields
 #'   required by that type.
 #' @param priors Named list for priors: list(beta = ..., alpha = ..., lkj = ...).
+#' @param fixed_marker_weights Logical; if TRUE, marker weights are fixed at
+#'   provided `marker_weights` (or defaults). If FALSE, marker-weight perturbations
+#'   are estimated.
 #' @param ... Additional args passed to joinme_standata().
 #'
 #' @examples
@@ -148,6 +157,7 @@ joinme <- function(
   families = NULL,
   transforms = NULL,
   priors = list(beta = NULL, alpha = NULL, lkj = NULL),
+  fixed_marker_weights = FALSE,
   ...
 ) {
   if (!is.list(control)) {
@@ -174,6 +184,7 @@ joinme <- function(
   # - sd: prepared Stan data list with all dimensions and transforms
   corr_diag_link <- control$corr_diag_link %||% "softplus"
   tau_sde_fixed <- control$tau_sde_fixed %||% NULL
+  quadrature_nodes <- control$quadrature_nodes %||% NULL
   sd <- joinme_standata(
     formulaLong = formulaLong,
     dataLong = dataLong,
@@ -186,6 +197,8 @@ joinme <- function(
     beta_prior = priors$beta,
     alpha_prior = priors$alpha,
     lkj_prior = priors$lkj,
+    fixed_marker_weights = fixed_marker_weights,
+    quadrature_nodes = quadrature_nodes,
     corr_diag_link = corr_diag_link,
     tau_sde_fixed = tau_sde_fixed,
     ...
@@ -371,6 +384,7 @@ joinme <- function(
     "threads",
     "mc.cores",
     "grainsize",
+    "quadrature_nodes",
     "force_recompile"
   ))]
   args <- modifyList(defaults, sample_control)
@@ -408,6 +422,12 @@ joinme <- function(
 
   cfg <- list(
     family_long = sd$family_long,
+    family_link = sd$link_long,
+    family_link_names = sd$link_names,
+    family_inv_link_n_ops = sd$inv_link_n_ops,
+    family_inv_link_ops = sd$inv_link_ops,
+    family_inv_link_n_const = sd$inv_link_n_const,
+    family_inv_link_const = sd$inv_link_const,
     assoc = c(
       cv_total = sd$assoc_cv_total,
       cv_mean = sd$assoc_cv_mean,
@@ -450,7 +470,7 @@ joinme <- function(
       idx_time_widm = sd$idx_time_widm
     ),
     marker_weights = sd$marker_weights,
-    estimate_marker_weights = sd$estimate_marker_weights,
+    fixed_marker_weights = sd$fixed_marker_weights,
     basehaz = sd$basehaz,
     n_knots = sd$n_knots,
     basehaz_degree = sd$basehaz_degree,

@@ -20,15 +20,355 @@ suppressPackageStartupMessages({
   library(posterior)
 })
 
+#' Gauss-Kronrod quadrature grid helper
+#'
+#' Build a quadrature grid on `[0, 1]` for survival integration.
+#'
+#' @param nodes Positive integer node count. Allowed values are exactly
+#'   `7`, `15`, `31`, `41`, `51`, and `61`. Defaults to `15`.
+#'
+#' @return A named list with components:
+#' \\describe{
+#'   \\item{n_gk}{Integer total node count.}
+#'   \\item{nodes}{Numeric vector of nodes on `[0, 1]`.}
+#'   \\item{weights}{Numeric vector of normalized weights summing to `1`.}
+#'   \\item{panels}{Always `1L` (single fixed rule).}
+#'   \\item{rule}{Character rule label (`"gk7"`, `"gk15"`, `"gk31"`, `"gk41"`, `"gk51"`, or `"gk61"`).}
+#' }
+#'
+#' @details
+#' Only fixed single-panel rules are supported.
+#'
+#' @export
+gk_quadrature <- function(nodes = 15L) {
+  spec <- .resolve_gk_request(nodes = nodes)
+  .gk_single_panel(rule = spec$rule)
+}
+
 #' @keywords internal
- .gk15_nodes <- function() {
-  # 15-point Gauss-Kronrod nodes on [-1, 1] (fixed reference grid)
+.resolve_gk_request <- function(nodes = 15L) {
+  supported_single <- c(7L, 15L, 31L, 41L, 51L, 61L)
+
+  nodes <- as.integer(nodes)
+  if (!is.finite(nodes) || length(nodes) != 1L || nodes < 1L) {
+    cli::cli_abort(c(
+      x = "{.arg nodes} must be a positive integer.",
+      i = "Allowed values are {.code 7}, {.code 15}, {.code 31}, {.code 41}, {.code 51}, and {.code 61}."
+    ))
+  }
+
+  if (!nodes %in% supported_single) {
+    cli::cli_abort(c(
+      x = "Unsupported quadrature node count: {.val {nodes}}.",
+      i = "Allowed values are {.code 7}, {.code 15}, {.code 31}, {.code 41}, {.code 51}, and {.code 61}."
+    ))
+  }
+
+  list(kind = "single", rule = nodes, nodes = nodes, panels = 1L, rounded = FALSE)
+}
+
+#' @keywords internal
+.gk_nodes <- function(rule) {
+  rule <- as.integer(rule)
+  if (!rule %in% c(7L, 15L, 31L, 41L, 51L, 61L)) {
+    cli::cli_abort(c(
+      x = "Unsupported Gauss-Kronrod rule: {.val {rule}}.",
+      i = "Supported single-panel rules are 7, 15, 31, 41, 51, and 61."
+    ))
+  }
+
+  if (rule == 7L) {
+    return(list(
+      xi = c(
+        0.0000000000000000,
+        0.4342437493468026,
+        0.7745966692414834,
+        0.9604912687080203
+      ),
+      wi = c(
+        0.4509165386584741,
+        0.4013974147759622,
+        0.2684880898683334,
+        0.1046562260264673
+      )
+    ))
+  }
+
+  if (rule == 15L) {
+    return(list(
+      xi = c(
+        0.0000000000000000,
+        0.2077849550078985,
+        0.4058451513773972,
+        0.5860872354676911,
+        0.7415311855993945,
+        0.8648644233597691,
+        0.9491079123427585,
+        0.9914553711208126
+      ),
+      wi = c(
+        0.2094821410847278,
+        0.2044329400752989,
+        0.1903505780647854,
+        0.1690047266392679,
+        0.1406532597155259,
+        0.1047900103222502,
+        0.06309209262997855,
+        0.02293532201052922
+      )
+    ))
+  }
+
+  if (rule == 31L) {
+    return(list(
+      xi = c(
+        0.0000000000000000,
+        0.1011420669187175,
+        0.2011940939974345,
+        0.2991800071531688,
+        0.3941513470775634,
+        0.4850818636402397,
+        0.5709721726085388,
+        0.6509967412974170,
+        0.7244177313601700,
+        0.7904185014424659,
+        0.8482065834104272,
+        0.8972645323440819,
+        0.9372733924007059,
+        0.9677390756791391,
+        0.9879925180204854,
+        0.9980022986933971
+      ),
+      wi = c(
+        0.1013300070147915,
+        0.1007698455238756,
+        0.0991735987217920,
+        0.09664272698362368,
+        0.09312659817082532,
+        0.08856444305621177,
+        0.08308050282313302,
+        0.07684968075772038,
+        0.06985412131872826,
+        0.06200956780067064,
+        0.05348152469092809,
+        0.04458975132476488,
+        0.03534636079137585,
+        0.02546084732671532,
+        0.01500794732931612,
+        0.005377479872923349
+      )
+    ))
+  }
+
+  if (rule == 41L) {
+    return(list(
+      xi = c(
+        0.0000000000000000,
+        0.07652652113349733,
+        0.1526054652409227,
+        0.2277858511416451,
+        0.3016278681149130,
+        0.3737060887154196,
+        0.4435931752387251,
+        0.5108670019508271,
+        0.5751404468197103,
+        0.6360536807265150,
+        0.6932376563347514,
+        0.7463319064601508,
+        0.7950414288375512,
+        0.8391169718222188,
+        0.8782768112522820,
+        0.9122344282513259,
+        0.9408226338317548,
+        0.9639719272779138,
+        0.9815078774502503,
+        0.9931285991850949,
+        0.9988590315882777
+      ),
+      wi = c(
+        0.07660071191799966,
+        0.07637786767208074,
+        0.07570449768455667,
+        0.07458287540049919,
+        0.07303069033278667,
+        0.07105442355344407,
+        0.06864867292852162,
+        0.06583459713361842,
+        0.06265323755478117,
+        0.05911140088063957,
+        0.05519510534828600,
+        0.05094457392372869,
+        0.04643482186749767,
+        0.04166887332797369,
+        0.03660016975820080,
+        0.03128730677703280,
+        0.02588213360495116,
+        0.02038837346126652,
+        0.01462616925697125,
+        0.008600269855642943,
+        0.003073583718520531
+      )
+    ))
+  }
+
+  if (rule == 51L) {
+    return(list(
+      xi = c(
+        0.0000000000000000,
+        0.06154448300568508,
+        0.1228646926107104,
+        0.1837189394210489,
+        0.2438668837209884,
+        0.3030895389311078,
+        0.3611723058093878,
+        0.4178853821930377,
+        0.4730027314457150,
+        0.5263252843347192,
+        0.5776629302412230,
+        0.6268100990103174,
+        0.6735663684734684,
+        0.7177664068130844,
+        0.7592592630373576,
+        0.7978737979985001,
+        0.8334426287608340,
+        0.8658470652932756,
+        0.8949919978782754,
+        0.9207471152817016,
+        0.9429745712289743,
+        0.9616149864258425,
+        0.9766639214595175,
+        0.9880357945340773,
+        0.9955569697904981,
+        0.9992621049926098
+      ),
+      wi = c(
+        0.06158081806783294,
+        0.06147118987142532,
+        0.06112850971705305,
+        0.06053945537604586,
+        0.05972034032417406,
+        0.05868968002239421,
+        0.05743711636156783,
+        0.05595081122041232,
+        0.05425112988854549,
+        0.05236288580640748,
+        0.05027767908071567,
+        0.04798253713883671,
+        0.04550291304992179,
+        0.04287284502017005,
+        0.04008382550403238,
+        0.03711627148341554,
+        0.03400213027432934,
+        0.03079230016738749,
+        0.02747531758785174,
+        0.02400994560695322,
+        0.02043537114588284,
+        0.01684781770912830,
+        0.01323622919557167,
+        0.009473973386174152,
+        0.005561932135356714,
+        0.001987383892330316
+      )
+    ))
+  }
+
+  list(
+    xi = c(
+      0.0000000000000000,
+      0.05147184255531770,
+      0.1028069379667370,
+      0.1538699136085835,
+      0.2045251166823099,
+      0.2546369261678898,
+      0.3040732022736251,
+      0.3527047255308781,
+      0.4004012548303944,
+      0.4470337695380892,
+      0.4924804678617786,
+      0.5366241481420199,
+      0.5793452358263617,
+      0.6205261829892429,
+      0.6600610641266270,
+      0.6978504947933158,
+      0.7337900624532268,
+      0.7677774321048262,
+      0.7997278358218391,
+      0.8295657623827684,
+      0.8572052335460611,
+      0.8825605357920527,
+      0.9055733076999078,
+      0.9262000474292743,
+      0.9443744447485600,
+      0.9600218649683075,
+      0.9731163225011263,
+      0.9836681232797472,
+      0.9916309968704046,
+      0.9968934840746495,
+      0.9994844100504906
+    ),
+    wi = c(
+      0.05149472942945157,
+      0.05142612853745903,
+      0.05122154784925877,
+      0.05088179589874961,
+      0.05040592140278235,
+      0.04979568342707421,
+      0.04905543455502978,
+      0.04818586175708713,
+      0.04718554656929915,
+      0.04605923827100700,
+      0.04481480013316266,
+      0.04345253970135607,
+      0.04196981021516425,
+      0.04037453895153596,
+      0.03867894562472759,
+      0.03688236465182123,
+      0.03497933802806002,
+      0.03298144705748373,
+      0.03090725756238776,
+      0.02875404876504129,
+      0.02650995488233310,
+      0.02419116207808060,
+      0.02182803582160919,
+      0.01941414119394238,
+      0.01692088918905327,
+      0.01436972950704580,
+      0.01182301525349634,
+      0.009273279659517763,
+      0.006630703915931292,
+      0.003890461127099884,
+      0.001389013698677008
+    )
+  )
+}
+
+#' @keywords internal
+.gk_expand_rule <- function(xi_half, wi_half) {
   c(
-    -0.9914553711208126, -0.9491079123427585, -0.8648644233597691,
-    -0.7415311855993945, -0.5860872354676911, -0.4058451513773972,
-    -0.2077849550078985, 0.0, 0.2077849550078985,
-    0.4058451513773972, 0.5860872354676911, 0.7415311855993945,
-    0.8648644233597691, 0.9491079123427585, 0.9914553711208126
+    -rev(xi_half[-1L]),
+    xi_half
+  ) -> xi
+  c(
+    rev(wi_half[-1L]),
+    wi_half
+  ) -> wi
+  list(xi = xi, wi = wi)
+}
+
+#' @keywords internal
+.gk_single_panel <- function(rule = 15L) {
+  tab <- .gk_nodes(rule)
+  expanded <- .gk_expand_rule(tab$xi, tab$wi)
+
+  nodes <- 0.5 * (expanded$xi + 1.0)
+  weights <- 0.5 * expanded$wi
+
+  list(
+    n_gk = as.integer(length(nodes)),
+    nodes = as.numeric(nodes),
+    weights = as.numeric(weights / sum(weights)),
+    panels = 1L,
+    rule = paste0("gk", as.integer(rule))
   )
 }
 
@@ -37,6 +377,18 @@ suppressPackageStartupMessages({
 .mm <- function(formula, data) {
   # Always return double matrices for Stan compatibility
   X <- stats::model.matrix(formula, data = data)
+  storage.mode(X) <- "double"
+  X
+}
+
+#' Survival/event model matrix without intercept
+#' @keywords internal
+.mm_event <- function(formulaEvent, data) {
+  rhs <- stats::delete.response(stats::terms(formulaEvent))
+  X <- stats::model.matrix(rhs, data = data)
+  if ("(Intercept)" %in% colnames(X)) {
+    X <- X[, colnames(X) != "(Intercept)", drop = FALSE]
+  }
   storage.mode(X) <- "double"
   X
 }
@@ -622,9 +974,10 @@ suppressPackageStartupMessages({
 .center_baseline <- function(Bs_event_raw, Bs_gk_raw) {
   n_id <- nrow(Bs_event_raw)
   Kbs <- ncol(Bs_event_raw)
+  n_gk <- dim(Bs_gk_raw)[2]
   big <- rbind(
     Bs_event_raw,
-    matrix(aperm(Bs_gk_raw, c(1, 3, 2)), nrow = n_id * 15, ncol = Kbs)
+    matrix(aperm(Bs_gk_raw, c(1, 3, 2)), nrow = n_id * n_gk, ncol = Kbs)
   )
   colm <- colMeans(big)
   Bs_event_c <- sweep(Bs_event_raw, 2, colm, "-")
@@ -634,12 +987,13 @@ suppressPackageStartupMessages({
 
 #' Construct a zero-dimension marker-only block
 #' @keywords internal
-.zero_marker_block <- function(N, n_id) {
+.zero_marker_block <- function(N, n_id, n_gk = 15L) {
+  n_gk <- as.integer(n_gk)
   list(
     R_mk = 0L,
     Z_mk_obs = matrix(0.0, N, 0),
-    Z_mk_gk_now = array(0.0, dim = c(n_id, 15, 0)),
-    Z_mk_gk_fwd = array(0.0, dim = c(n_id, 15, 0)),
+    Z_mk_gk_now = array(0.0, dim = c(n_id, n_gk, 0)),
+    Z_mk_gk_fwd = array(0.0, dim = c(n_id, n_gk, 0)),
     Z_mk_event_now = matrix(0.0, n_id, 0),
     Z_mk_event_fwd = matrix(0.0, n_id, 0)
   )
@@ -1180,11 +1534,14 @@ suppressPackageStartupMessages({
 .safe_progress <- function(show_progress = FALSE, expr) {
   has_progressr <- requireNamespace("progressr", quietly = TRUE)
   if (has_progressr && show_progress) {
-    call <- match.call()
-    call[[1]] <- quote(progressr::with_progress)
-    eval(call, parent.frame())
+    with_progress_f <- get("with_progress", envir = asNamespace("progressr"))
+    args <- list(expr = substitute(expr))
+    fm <- tryCatch(formals(with_progress_f), error = function(e) NULL)
+    if (!is.null(fm) && "show_progress" %in% names(fm)) {
+      args$show_progress <- show_progress
+    }
+    do.call(with_progress_f, args, envir = parent.frame())
   } else {
     expr
   }
 }
-

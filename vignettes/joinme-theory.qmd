@@ -171,10 +171,12 @@ history using a small set of interpretable features:
 - **Variance association (CORR)**: a subject-specific, time-constant summary of
   the marker-by-subject covariance structure.
 
-In implementation, CV and CS are evaluated at 15 Gauss-Kronrod nodes on the
-scaled time interval $[0, 1]$. CS is approximated by a forward finite difference
-with step size $\varepsilon$. These summaries can be transformed before entering
-the hazard, as described below.
+In implementation, CV and CS are evaluated at a default set of 15 Gauss-Kronrod
+nodes on the scaled time interval $[0, 1]$ (configurable). Only the node count
+is passed to Stan; the GK nodes and weights themselves are fixed in the Stan
+code and used via precomputed design matrices. CS is approximated by a forward
+finite difference with step size $\varepsilon$. These summaries can be
+transformed before entering the hazard, as described below.
 
 ### Marker-weighted contributions (CV and CS)
 
@@ -252,8 +254,8 @@ $$
 1.  **Analytic Gradient of the Log-Likelihood**: Stan's autodiff engine handles the complex chain rule derivatives required for the joint likelihood.
 2.  **Multithreading via `reduce_sum`**: The likelihood calculation is parallelized over subjects ("grainsize"). This allows linear scaling with the number of available CPU cores.
 3.  **Gauss-Kronrod Quadrature**: The survival integral
-  $\int_0^{T_i} \lambda_i(s) ds$ is approximated using the fixed 15-point
-  Gauss-Kronrod rule for high accuracy at modest computational cost.
+  $\int_0^{T_i} \lambda_i(s) ds$ is approximated using a Gauss-Kronrod rule
+  (default 15-point, configurable) for high accuracy at modest computational cost.
 
 ## 5.2. Priors
 Default priors are weakly informative and aligned with the Stan implementation:

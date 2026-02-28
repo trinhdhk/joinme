@@ -30,13 +30,14 @@ joinme_standata(
   allow_marker_crosscorr = 1L,
   shrinkage = 2L,
   marker_weights = NULL,
-  estimate_marker_weights = TRUE,
+  fixed_marker_weights = FALSE,
   flag_resid_dim = 0L,
   basehaz = c("bs", "ns", "formula"),
   n_knots = 5L,
   basehaz_degree = 3L,
   basehaz_formula = ~1 + time,
   tau_spline = 0.4,
+  quadrature_nodes = NULL,
   corr_diag_link = c("softplus", "exp"),
   tau_sde_fixed = NULL,
   seed = NULL
@@ -96,8 +97,11 @@ Grouping factors in distributional random-effects terms may also use
 \item{assoc}{Character vector specifying association components
 (e.g., "cv_mean", "cs_total", "corr").}
 
-\item{families}{Optional marker-specific family names. If NULL, all markers
-use Gaussian responses.}
+\item{families}{Optional marker-specific family specification.
+Can be character family names or \code{jm_family(...)} entries with per-marker links.
+If NULL, all markers use Gaussian responses with identity link.
+Supported links/inverse-links are \code{identity}, \code{log}, \code{logit},
+\code{probit}, and \code{exp}.}
 
 \item{transforms}{Optional list specifying transformations for association terms.
 Each element (cv_total, cs_total, corr) is a list with a \code{type} and fields
@@ -114,13 +118,16 @@ required by that type (see \code{build_standata_transforms()}).}
 \item{shrinkage}{Integer flag controlling shrinkage behavior for marker-by-id effects.}
 
 \item{marker_weights}{Optional numeric vector of length D giving base weights
-for marker-specific association components. These weights are applied to both
-current value (CV) and current slope (CS) marker summaries as signed
-aggregation weights. Inputs are used directly. When NULL, equal base weights
-are used.}
+for marker-specific association components. These are used as prior offsets and
+mapped in Stan to effective marker intensities via
+\eqn{2 \cdot \text{inv\_logit}(w_{raw}) - 1}, where
+\eqn{w_{raw} = \text{marker\_weights}} or
+\eqn{w_{raw} = \text{marker\_weights} + z_{\text{marker\_weights}}}.
+When NULL, base weights default to zeros for estimated weights and ones for fixed weights.}
 
-\item{estimate_marker_weights}{Logical; if TRUE, estimate marker weights via a
-signed additive perturbation around base weights,
+\item{fixed_marker_weights}{Logical; if TRUE, marker weights are kept fixed
+at \code{marker_weights} (no perturbation). If FALSE, marker weights are estimated
+via signed additive perturbations,
 \eqn{marker\_weights + z\_marker\_weights}, with
 \code{z_marker_weights ~ N(0, 1)}.}
 
@@ -135,6 +142,11 @@ signed additive perturbation around base weights,
 \item{basehaz_formula}{Formula for baseline hazard when \code{basehaz = "formula"}.}
 
 \item{tau_spline}{Prior scale for spline coefficients (penalized spline).}
+
+\item{quadrature_nodes}{Optional positive integer target for total quadrature
+points. Allowed values are exactly \code{7}, \code{15}, \code{31}, \code{41}, \code{51}, and
+\code{61}. Only the node count is passed to Stan; GK nodes/weights are fixed in the
+Stan code.}
 
 \item{corr_diag_link}{Link for covariance regression diagonals: "softplus" or "exp".}
 
@@ -164,7 +176,8 @@ This builder performs three key steps:
 \enumerate{
 \item Constructs fixed-effect and random-effect design matrices on a scaled time axis.
 \item Creates distributional regression matrices (including optional random effects).
-\item Assembles spline bases and Gaussâ€“Kronrod nodes for survival integration.
+\item Assembles spline bases and Gauss-Kronrod nodes for survival integration.
+Only the node count is passed to Stan; GK nodes/weights are fixed in the Stan code.
 }
 
 Time is scaled internally as \code{t_scaled = t/t_max} for numerical stability; indices

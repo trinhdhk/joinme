@@ -36,7 +36,8 @@ competing-risk survival models.
 
 ## Step-by-step: how association summaries are constructed
 
-At the event time and at the 15 Gauss-Kronrod nodes used for integration, the
+At the event time and at the default 15 Gauss-Kronrod nodes used for integration
+(configurable), the
 longitudinal linear predictor is decomposed into a mean component and a marker
 component. From these components, `joinme` constructs:
 
@@ -87,7 +88,7 @@ and analogously for `cs_marker`. This is intentionally not equal to
 $f_{cs}(\frac{1}{D}\sum_d \omega_d CS_{id}(t))$ unless $f_{cs}$ is linear.
 
 In practice, provide fixed weights via `marker_weights`, or set
-`estimate_marker_weights = TRUE` to estimate signed perturbations around base
+`fixed_marker_weights = FALSE` to estimate signed perturbations around base
 weights via `marker_weights + z_marker_weights` with
 `z_marker_weights ~ N(0, 1)`. These signed weights are used directly in
 marker-aggregated association terms. The simulator reports them in

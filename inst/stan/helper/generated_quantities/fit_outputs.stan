@@ -31,6 +31,8 @@
                        : 0.0)
                     + dot_product(Z_idm_obs[n], w_idscaled[i, d]);
      // eta_long: linear predictor for longitudinal outcome
+    int link_d = canonical_link_code_from_program(d, inv_link_n_ops, inv_link_ops, inv_link_n_const);
+    real mu_long = inv_link_eta_vm(eta_long, d, inv_link_n_ops, inv_link_ops, inv_link_n_const, inv_link_const);
 
     if (family_long[d] == 1) {
       real eta_sigma = 0; // linear predictor for log sigma
@@ -47,7 +49,7 @@
                  ? exp(eta_sigma)
                  : sigma_family[marker_to_sigma_family[d]];
       // sig: residual scale for Gaussian
-      log_lik_long[n] = normal_lpdf(y_real[n] | eta_long, sig);
+      log_lik_long[n] = normal_lpdf(y_real[n] | mu_long, sig);
     } else if (family_long[d] == 2) {
       real eta_sigma = 0; // linear predictor for log sigma
       if (P_sigma > 0) eta_sigma += dot_product(X_sigma[n], beta_sigma);
@@ -75,13 +77,22 @@
       }
       real nu = (P_nu > 0 || n_re_nu > 0) ? (2 + exp(eta_nu)) : nu_family[marker_to_nu_family[d]];
       // nu: degrees of freedom for Student-t
-      log_lik_long[n] = student_t_lpdf(y_real[n] | nu, eta_long, sig);
+      log_lik_long[n] = student_t_lpdf(y_real[n] | nu, mu_long, sig);
     } else if (family_long[d] == 3) {
-      log_lik_long[n] = bernoulli_logit_lpmf(y_int[n] | eta_long);
+      if (link_d == 3)
+        log_lik_long[n] = bernoulli_logit_lpmf(y_int[n] | eta_long);
+      else
+        log_lik_long[n] = bernoulli_lpmf(y_int[n] | fmin(fmax(mu_long, 1e-12), 1 - 1e-12));
     } else if (family_long[d] == 4) {
-      log_lik_long[n] = binomial_logit_lpmf(y_int[n] | trials[n], eta_long);
+      if (link_d == 3)
+        log_lik_long[n] = binomial_logit_lpmf(y_int[n] | trials[n], eta_long);
+      else
+        log_lik_long[n] = binomial_lpmf(y_int[n] | trials[n], fmin(fmax(mu_long, 1e-12), 1 - 1e-12));
     } else if (family_long[d] == 5) {
-      log_lik_long[n] = poisson_log_lpmf(y_int[n] | eta_long);
+      if (link_d == 5)
+        log_lik_long[n] = poisson_log_lpmf(y_int[n] | eta_long);
+      else
+        log_lik_long[n] = poisson_lpmf(y_int[n] | fmax(mu_long, 1e-12));
     } else if (family_long[d] == 6) {
       real eta_phi = 0; // linear predictor for log phi (dispersion)
       if (P_phi > 0) eta_phi += dot_product(X_phi[n], beta_phi);
@@ -95,7 +106,10 @@
       }
       real phi = (P_phi > 0 || n_re_phi > 0) ? exp(eta_phi) : phi_family[marker_to_phi_family[d]];
       // phi: negbin2 dispersion parameter
-      log_lik_long[n] = neg_binomial_2_log_lpmf(y_int[n] | eta_long, phi);
+      if (link_d == 5)
+        log_lik_long[n] = neg_binomial_2_log_lpmf(y_int[n] | eta_long, phi);
+      else
+        log_lik_long[n] = neg_binomial_2_lpmf(y_int[n] | fmax(mu_long, 1e-12), phi);
     } else if (family_long[d] == 7) {
       real eta_sigma = 0; // linear predictor for log sigma
       if (P_sigma > 0) eta_sigma += dot_product(X_sigma[n], beta_sigma);
@@ -123,7 +137,7 @@
       }
       real alpha = (P_alpha > 0 || n_re_alpha > 0) ? eta_alpha : alpha_family[marker_to_alpha_family[d]];
       // alpha: skewness parameter
-      log_lik_long[n] = skew_normal_lpdf(y_real[n] | eta_long, sig, alpha);
+      log_lik_long[n] = skew_normal_lpdf(y_real[n] | mu_long, sig, alpha);
     } else if (family_long[d] == 8) {
       real eta_sigma = 0; // linear predictor for log sigma
       if (P_sigma > 0) eta_sigma += dot_product(X_sigma[n], beta_sigma);
@@ -139,7 +153,7 @@
                  ? exp(eta_sigma)
                  : sigma_family[marker_to_sigma_family[d]];
       // sig: residual scale for Laplace
-      log_lik_long[n] = double_exponential_lpdf(y_real[n] | eta_long, sig);
+      log_lik_long[n] = double_exponential_lpdf(y_real[n] | mu_long, sig);
     } else if (family_long[d] == 9) {
       real eta_sigma = 0; // linear predictor for log sigma
       if (P_sigma > 0) eta_sigma += dot_product(X_sigma[n], beta_sigma);
@@ -167,7 +181,7 @@
       }
       real tau_sde = (P_tau_sde > 0 || n_re_tau_sde > 0) ? inv_logit(eta_tau) : tau_sde_family[marker_to_tau_sde_family[d]];
       // tau_sde: skewness parameter in (0,1)
-      log_lik_long[n] = skew_double_exponential_lpdf(y_real[n] | eta_long, sig, tau_sde);
+      log_lik_long[n] = skew_double_exponential_lpdf(y_real[n] | mu_long, sig, tau_sde);
     } else if (family_long[d] == 10) {
       real eta_phi_beta = 0; // linear predictor for log phi_beta
       if (P_phi_beta > 0) eta_phi_beta += dot_product(X_phi_beta[n], beta_phi_beta);
@@ -180,7 +194,7 @@
         }
       }
       real phi_beta = (P_phi_beta > 0 || n_re_phi_beta > 0) ? exp(eta_phi_beta) : phi_beta_family[marker_to_phi_beta_family[d]];
-      real mu = inv_logit(eta_long); // beta mean on (0,1)
+      real mu = fmin(fmax(mu_long, 1e-12), 1 - 1e-12); // beta mean on (0,1)
       real shape1 = fmax(mu * phi_beta, 1e-6); // beta shape1
       real shape2 = fmax((1 - mu) * phi_beta, 1e-6); // beta shape2
       log_lik_long[n] = beta_lpdf(y_real[n] | shape1, shape2);
@@ -191,12 +205,12 @@
 
   /* -------------------- Survival log-likelihood per subject */
   for (i in 1 : n_id) {
-    vector[15] cvm_now;
-    vector[15] cvm_fwd;
-    vector[15] cvk_now;
-    vector[15] cvk_fwd;
+    vector[n_gk] cvm_now;
+    vector[n_gk] cvm_fwd;
+    vector[n_gk] cvk_now;
+    vector[n_gk] cvk_fwd;
 
-    for (j in 1 : 15) {
+    for (j in 1 : n_gk) {
       cvm_now[j] = dot_product(X_gk_now[i][j], beta_scaled)
                    + dot_product(Z_id_gk_now[i][j], u_id[i]);
       cvm_fwd[j] = dot_product(X_gk_fwd[i][j], beta_scaled)
@@ -216,16 +230,16 @@
       // cvk_now/cvk_fwd: marker-id CV at GK node and forward shift
     }
 
-    vector[15] csm_raw = eta_fd(cvm_now, cvm_fwd, eps_fd) / tmax; // mean slope
-    vector[15] csk_raw; // marker slope (weighted across markers)
+    vector[n_gk] csm_raw = eta_fd(cvm_now, cvm_fwd, eps_fd) / tmax; // mean slope
+    vector[n_gk] csk_raw; // marker slope (weighted across markers)
     int M_corr_local = num_elements(a_corr);
     vector[M_corr_local] corr_terms_raw = eta_corr_varonly_weighted_const(L_i[i]); // raw off-diagonal corr terms
 
-    vector[15] cv_tot = cvm_now + cvk_now; // total CV at GK nodes
+    vector[n_gk] cv_tot = cvm_now + cvk_now; // total CV at quadrature nodes
 
     int D_mkrs = size(v_marker);
-    vector[15] cv_tot_tf;
-    vector[15] cv_mean_tf = apply_transform_vector(
+    vector[n_gk] cv_tot_tf;
+    vector[n_gk] cv_mean_tf = apply_transform_vector(
       cvm_now,
       tf_mode_cv_mean,
       functional_ops_cv_mean,
@@ -234,10 +248,10 @@
       coeff_cv_mean,
       spline_degree_cv_mean
     );
-    vector[15] cv_marker_tf;
-    vector[15] cs_tot_tf;
-    vector[15] cs_marker_tf;
-    for (j in 1 : 15) {
+    vector[n_gk] cv_marker_tf;
+    vector[n_gk] cs_tot_tf;
+    vector[n_gk] cs_marker_tf;
+    for (j in 1 : n_gk) {
       real acc_cv_tot_tf = 0;
       real acc_cv_marker_tf = 0;
       real acc_csk_raw = 0;
@@ -283,7 +297,7 @@
       cs_marker_tf[j] = acc_cs_marker_tf / D_mkrs;
     }
 
-    vector[15] cs_mean_tf = apply_transform_vector(
+    vector[n_gk] cs_mean_tf = apply_transform_vector(
       csm_raw,
       tf_mode_cs_mean,
       functional_ops_cs_mean,
@@ -302,9 +316,9 @@
       spline_degree_corr
     );
     real corr_assoc_scalar = dot_product(a_corr, corr_terms_tf);
-    vector[15] corr_assoc = rep_vector(corr_assoc_scalar, 15);
+    vector[n_gk] corr_assoc = rep_vector(corr_assoc_scalar, n_gk);
 
-    vector[15] eta_assoc_nodes = a_cv_total * cv_tot_tf
+    vector[n_gk] eta_assoc_nodes = a_cv_total * cv_tot_tf
                                  + a_cv_mean * cv_mean_tf
                                  + a_cv_marker * cv_marker_tf
                                  + a_cs_total * cs_tot_tf
@@ -421,8 +435,8 @@
       event_term = log_h0_S + eta_w_ev + eta_assoc_S;
     }
 
-    vector[15] log_h_total; // total log-hazard at GK nodes
-    for (j in 1 : 15) {
+    vector[n_gk] log_h_total; // total log-hazard at quadrature nodes
+    for (j in 1 : n_gk) {
       vector[K_event] log_h_cause; // cause-specific log hazards
       for (k_ev in 1 : K_event) {
         real eta_w = 0;
@@ -436,6 +450,6 @@
       log_h_total[j] = log_sum_exp(log_h_cause);
     }
 
-    log_lik_surv[i] = event_term - cumhaz(S_event[i], log_h_total, rep_vector(0.0, 15));
+    log_lik_surv[i] = event_term - cumhaz(S_event[i], n_gk, log_h_total, rep_vector(0.0, n_gk));
     // log_lik_surv: event term minus cumulative hazard
   }

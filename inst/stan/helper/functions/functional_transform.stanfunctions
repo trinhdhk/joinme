@@ -34,6 +34,7 @@
  *  23: ATANH         (pop a; push atanh(a))
  *  24: SOFTPLUS      (pop a; push log1p_exp(a))
  *  25: CBRT          (pop a; push cbrt(a))
+ *  26: PROBIT        (pop a; push Phi(a))
  *
  * Usage:
  *   opcodes    : integer array of operation codes
@@ -50,7 +51,7 @@
    * @brief Functional opcode evaluator for scalar inputs.
    *
    * @param x Input value
-  * @param opcodes Array of operation codes (0-25)
+  * @param opcodes Array of operation codes (0-26)
    * @param const_data Vector of constant values for PUSH_CONST operations
    * @return Scalar result of opcode evaluation
    */
@@ -153,6 +154,9 @@
       } else if (op == 25) {
         // CBRT
         stack[stack_ptr] = cbrt(stack[stack_ptr]);
+      } else if (op == 26) {
+        // PROBIT
+        stack[stack_ptr] = Phi(stack[stack_ptr]);
       }
     }
 
@@ -163,7 +167,7 @@
    * @brief Functional opcode evaluator for vector inputs (element-wise).
    *
    * @param x Vector of input values
-  * @param opcodes Array of operation codes (0-25)
+  * @param opcodes Array of operation codes (0-26)
    * @param const_data Vector of constant values for PUSH_CONST operations
    * @return Vector result of opcode evaluation applied element-wise
    */

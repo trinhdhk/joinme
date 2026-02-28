@@ -27,8 +27,9 @@ The **JoinME** package implements a sophisticated joint model for multivariate l
 
 Additional implementation details that are central to the interpretation:
 
-- Marker-weighted contributions are formed as weighted means across markers,
-  using either fixed weights or shrinkage-estimated weights.
+- Marker-weighted contributions are formed as weighted means across markers.
+  Base weights act as prior offsets and are mapped to effective intensities via
+  $2 \cdot \text{inv\_logit}(w_{raw}) - 1$, keeping weights in $(-1, 1)$.
 - The CORR association depends on an id-level latent effect that drives a
   covariance regression, producing subject-specific Cholesky factors.
 - Non-linear transforms are applied to CV, CS, and CORR before they enter the
@@ -260,10 +261,10 @@ FUNCTION partial_joinme(id_seq, start, end, ... [all data & parameters]):
     // SURVIVAL LIKELIHOOD
     // -------------------
     
-    // 1. Compute association features at 15 Gauss-Kronrod (GK) quadrature nodes
-    //    These nodes tile [0, S_event[i]] for numerical integration
+    // 1. Compute association features at K Gauss-Kronrod (GK) quadrature nodes
+    //    (default 15; configurable) to tile [0, S_event[i]] for numerical integration
     
-    FOR j = 1 TO 15:  // For each GK node
+    FOR j = 1 TO K:  // For each GK node
       // a. Compute current value (CV) components
       cvm_now[j] = X_gk_now[i][j]'Î²_scaled + Z_id_gk_now[i][j]'u_id[i]  // Mean component
       cvm_fwd[j] = X_gk_fwd[i][j]'Î²_scaled + Z_id_gk_fwd[i][j]'u_id[i]
@@ -401,8 +402,9 @@ $$ CS(t) \approx \frac{CV(t + \varepsilon) - CV(t)}{\varepsilon} $$
 To integrate hazard over $[0, T]$:
 $$ \Lambda(T) = \int_0^T \lambda(s) ds $$
 
-Use 15-point Gauss-Kronrod rule:
-$$ \Lambda(T) \approx \frac{T}{2} \sum_{j=1}^{15} \omega_j \lambda(T \cdot x_j) $$
+Use Gauss-Kronrod rule (default 15-point, configurable). Only the node count is
+passed to Stan; the GK nodes and weights are fixed in the Stan code:
+$$ \Lambda(T) \approx \frac{T}{2} \sum_{j=1}^{K} \omega_j \lambda(T \cdot x_j) $$
 where $x_j \in [0,1]$ are GK nodes and $\omega_j$ are weights. Design matrices are pre-computed at these nodes.
 
 #### 4. **Flexible Transformations**
@@ -720,12 +722,12 @@ $$ \text{slope}[j] = \frac{\text{fwd}[j] - \text{now}[j]}{\varepsilon} $$
 
 ## `cumhaz(S, log_h0_nodes, eta_nodes)`: Cumulative Hazard via Gauss-Kronrod
 
-**Purpose**: Numerically integrate hazard function over $[0, S]$ using 15-point Gauss-Kronrod quadrature.
+**Purpose**: Numerically integrate hazard function over $[0, S]$ using Gauss-Kronrod quadrature (default 15-point, configurable).
 
 **Algorithm Setup**:
 - $S$: upper limit of integration (scaled event/censoring time)
-- `log_h0_nodes`: log baseline hazard at 15 GK nodes
-- `eta_nodes`: hazard predictor at 15 GK nodes
+- `log_h0_nodes`: log baseline hazard at $K$ GK nodes
+- `eta_nodes`: hazard predictor at $K$ GK nodes
 
 **Output**:
 $$ \Lambda(S) = \int_0^S h(t) dt $$

@@ -18,6 +18,7 @@ functions {
   #include helper/functions/eta_fd.stanfunctions
   #include helper/functions/eta_corr_varonly_weighted_const.stanfunctions
   #include helper/functions/cumhaz.stanfunctions
+  #include helper/functions/link_functions.stanfunctions
   #include helper/functions/functional_transform.stanfunctions
   #include helper/functions/basis_functions.stanfunctions
   #include helper/functions/composite_transform.stanfunctions
@@ -90,6 +91,7 @@ model {
     vec_cov_hazard,
     n_basehaz_basis,
     time_condition,
+    n_gk,
     /* GK node design (conditioning interval) */
     mat_basis_gk_cond,
     mat_fixed_gk_cond,
@@ -102,6 +104,13 @@ model {
     mat_marker_id_gk_cond_fwd,
     eps_finite_diff,
     family_long,
+    link_long,
+    max_inv_link_ops,
+    inv_link_n_ops,
+    inv_link_ops,
+    max_inv_link_const,
+    inv_link_n_const,
+    inv_link_const,
     n_family_sigma,
     marker_to_sigma_family,
     n_family_nu,
@@ -230,4 +239,3 @@ model {
 generated quantities {
   #include helper/generated_quantities/dynpred_outputs.stan
 }
-

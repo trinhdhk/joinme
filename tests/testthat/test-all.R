@@ -24,7 +24,7 @@ test_that("all", {
     assoc = c("cv_total"),
     families = "student_t",
     transforms = list(cv_total = list(type = "identity")),
-    estimate_marker_weights = TRUE,
+    fixed_marker_weights = FALSE,
     control = list(
       # engine = "rstan",
       parallel_chains = 2,

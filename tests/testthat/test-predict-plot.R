@@ -10,7 +10,7 @@ test_that("predict accepts time_start column and plot returns ribbons", {
     assoc = c("cv_total"),
     assoc_coefs = c(cv_total = 0.2),
     beta_event = c("(Intercept)" = -2.5, "x1" = 0.1, "x2" = -0.1),
-    t_admin = 8
+    time_cens = 8
   )
 
   formulaLong <- y ~ 1 + time + x1 +

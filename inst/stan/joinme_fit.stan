@@ -21,6 +21,8 @@ functions {
   #include helper/functions/eta_corr_varonly_weighted_const.stanfunctions
   
   #include helper/functions/cumhaz.stanfunctions
+
+  #include helper/functions/link_functions.stanfunctions
   
   #include helper/functions/functional_transform.stanfunctions
   
@@ -76,6 +78,13 @@ model {
     y_int,
     trials,
     family_long,
+    link_long,
+    max_inv_link_ops,
+    inv_link_n_ops,
+    inv_link_ops,
+    max_inv_link_const,
+    inv_link_n_const,
+    inv_link_const,
     n_family_sigma,
     marker_to_sigma_family,
     n_family_nu,
@@ -191,6 +200,7 @@ model {
     K_event,
     event_type,
     eps_fd,
+    n_gk,
     /* Design matrices at GK and event grids */
     X_gk_now,
     X_gk_fwd,
@@ -272,4 +282,3 @@ model {
 generated quantities {
   #include helper/generated_quantities/fit_outputs.stan
 }
-

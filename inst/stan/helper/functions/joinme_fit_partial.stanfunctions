@@ -100,7 +100,7 @@
  *     a. For each GK node j in {1, ..., 15}:
  *        - Compute total log-hazard across all competing risks:
  *          log h_total(t_j) = log sum_k exp(log h0_k(t_j) + eta_w[k] + eta_assoc[j])
- *     b. Apply cumhaz() function with GK weights to numerically integrate
+ *     b. Apply cumhaz() function with hardcoded GK weights to numerically integrate
  *     c. Add survival contribution: log S(S_i) = -Lambda(S_i)
  *
  * ## PARALLELIZATION STRATEGY:
@@ -299,6 +299,13 @@ real partial_joinme(
     array[] int y_int,
     array[] int trials,
     array[] int family_long,
+    array[] int link_long,
+    int max_inv_link_ops,
+    array[] int inv_link_n_ops,
+    array[,] int inv_link_ops,
+    int max_inv_link_const,
+    array[] int inv_link_n_const,
+    matrix inv_link_const,
     int n_family_sigma,
     array[] int marker_to_sigma_family,
     int n_family_nu,
@@ -407,6 +414,7 @@ real partial_joinme(
     int K_event,
     array[] int event_type,
     real eps_fd,
+    int n_gk,
     array[] matrix X_gk_now,
     array[] matrix X_gk_fwd,
     array[] matrix Z_id_gk_now,
@@ -480,6 +488,7 @@ real partial_joinme(
     real tmax
 ) {
   real lp = 0;  // Accumulated log-likelihood for this subject slice
+  vector[n_gk] gk_weights = gk_weights_from_n(n_gk);
 
   // =====================================================================
   // LOOP OVER SUBJECTS IN THIS SLICE
@@ -531,6 +540,10 @@ real partial_joinme(
       //   - Marker-specific constants (sigma_marker, nu_marker, etc.)
       //   - Global constant (sigma_y)
       
+      // Per-marker inverse-link mapping from eta to mean/location scale.
+      int link_d = canonical_link_code_from_program(d, inv_link_n_ops, inv_link_ops, inv_link_n_const);
+      real mu_long = inv_link_eta_vm(eta_long, d, inv_link_n_ops, inv_link_ops, inv_link_n_const, inv_link_const);
+
       // FAMILY 1: GAUSSIAN
       // p(y | eta, sigma) = Normal(y | eta, sigma)
       // Location: eta (computed above)
@@ -558,7 +571,7 @@ real partial_joinme(
              : sigma_family[marker_to_sigma_family[d]];
         // sig: residual scale
         
-        lp_i += normal_lpdf(y_real[n] | eta_long, sig);
+        lp_i += normal_lpdf(y_real[n] | mu_long, sig);
         
       // FAMILY 2: STUDENT-T
       // p(y | eta, sigma, nu) = Student_t(y | nu, eta, sigma)
@@ -595,25 +608,39 @@ real partial_joinme(
         real nu = (P_nu > 0 || n_re_nu > 0) ? (2 + exp(eta_nu)) : nu_family[marker_to_nu_family[d]];
         // nu: degrees of freedom
         
-        lp_i += student_t_lpdf(y_real[n] | nu, eta_long, sig);
+        lp_i += student_t_lpdf(y_real[n] | nu, mu_long, sig);
         
       // FAMILY 3: BERNOULLI (BINARY LOGISTIC)
       // p(y = 1 | eta) = logit^-1(eta) = 1 / (1 + exp(-eta))
       // For binary outcomes (y in {0, 1})
       } else if (family_long[d] == 3) {
-        lp_i += bernoulli_logit_lpmf(y_int[n] | eta_long);
+        if (link_d == 3) {
+          lp_i += bernoulli_logit_lpmf(y_int[n] | eta_long);
+        } else {
+          real p = fmin(fmax(mu_long, 1e-12), 1 - 1e-12);
+          lp_i += bernoulli_lpmf(y_int[n] | p);
+        }
         
       // FAMILY 4: BINOMIAL (BINOMIAL LOGISTIC)
       // p(y | N, eta) = Binomial(y | N, p), where p = logit^-1(eta)
       // For count outcomes with known number of trials N
       } else if (family_long[d] == 4) {
-        lp_i += binomial_logit_lpmf(y_int[n] | trials[n], eta_long);
+        if (link_d == 3) {
+          lp_i += binomial_logit_lpmf(y_int[n] | trials[n], eta_long);
+        } else {
+          real p = fmin(fmax(mu_long, 1e-12), 1 - 1e-12);
+          lp_i += binomial_lpmf(y_int[n] | trials[n], p);
+        }
         
       // FAMILY 5: POISSON
       // p(y | eta) = Poisson(y | mu), where mu = exp(eta)
       // For count data (y in {0, 1, 2, ...})
       } else if (family_long[d] == 5) {
-        lp_i += poisson_log_lpmf(y_int[n] | eta_long);
+        if (link_d == 5) {
+          lp_i += poisson_log_lpmf(y_int[n] | eta_long);
+        } else {
+          lp_i += poisson_lpmf(y_int[n] | fmax(mu_long, 1e-12));
+        }
         
       // FAMILY 6: NEGATIVE BINOMIAL
       // p(y | eta, phi) = NegBinom(y | mu, phi), where mu = exp(eta)
@@ -633,7 +660,11 @@ real partial_joinme(
         real phi = (P_phi > 0 || n_re_phi > 0) ? exp(eta_phi) : phi_family[marker_to_phi_family[d]];
         // phi: negbin dispersion
         
-        lp_i += neg_binomial_2_log_lpmf(y_int[n] | eta_long, phi);
+        if (link_d == 5) {
+          lp_i += neg_binomial_2_log_lpmf(y_int[n] | eta_long, phi);
+        } else {
+          lp_i += neg_binomial_2_lpmf(y_int[n] | fmax(mu_long, 1e-12), phi);
+        }
         
       // FAMILY 7: SKEW-NORMAL
       // p(y | eta, sigma, alpha) = SkewNormal(y | eta, sigma, alpha)
@@ -668,7 +699,7 @@ real partial_joinme(
         real alpha = (P_alpha > 0 || n_re_alpha > 0) ? eta_alpha : alpha_family[marker_to_alpha_family[d]];
         // alpha: skewness
         
-        lp_i += skew_normal_lpdf(y_real[n] | eta_long, sig, alpha);
+        lp_i += skew_normal_lpdf(y_real[n] | mu_long, sig, alpha);
         
       // FAMILY 8: SKEW-DOUBLE-EXPONENTIAL (ASYMMETRIC LAPLACE)
       // p(y | eta, sigma, tau) = SkewDE(y | eta, sigma, tau)
@@ -689,7 +720,7 @@ real partial_joinme(
              ? exp(eta_sigma)
              : sigma_family[marker_to_sigma_family[d]];
         // sig: residual scale
-        lp_i += double_exponential_lpdf(y_real[n] | eta_long, sig);
+        lp_i += double_exponential_lpdf(y_real[n] | mu_long, sig);
       } else if (family_long[d] == 9) {
         real eta_sigma = 0; // log-sigma linear predictor
         if (P_sigma > 0) eta_sigma += dot_product(X_sigma[n], beta_sigma);
@@ -724,7 +755,7 @@ real partial_joinme(
         }
         // tau_sde: asymmetry parameter in (0,1)
         
-        lp_i += skew_double_exponential_lpdf(y_real[n] | eta_long, sig, tau_sde);
+        lp_i += skew_double_exponential_lpdf(y_real[n] | mu_long, sig, tau_sde);
         
       // FAMILY 10: BETA REGRESSION
       // p(y | eta, phi) = Beta(y | a, b), where y in (0, 1)
@@ -746,8 +777,8 @@ real partial_joinme(
         real phi_beta = (P_phi_beta > 0 || n_re_phi_beta > 0) ? exp(eta_phi_beta) : phi_beta_family[marker_to_phi_beta_family[d]];
         // phi_beta: precision
         
-        // Convert eta to mean mu in (0,1) via inverse logit
-        real mu = inv_logit(eta_long); // beta mean
+        // Convert eta to mean mu in (0,1) using configured inverse link.
+        real mu = fmin(fmax(mu_long, 1e-12), 1 - 1e-12); // beta mean
         
         // Compute Beta shape parameters with floor to avoid numerical issues
         real shape1 = fmax(mu * phi_beta, 1e-6); // beta shape1
@@ -772,15 +803,16 @@ real partial_joinme(
     // Integrates longitudinal trajectory information into survival hazard
     // via association features (current value, current slope, variance components).
     //
-    // STEP 2.1: Compute association features at Gauss-Kronrod nodes
-    // - Gauss-Kronrod 15-point quadrature approximates integral_0^S h(t) dt
+    // STEP 2.1: Compute association features at quadrature nodes
+    // - Composite Gauss-Kronrod-15 approximates integral_0^S h(t) dt
     // - Evaluate current values (CV) and forward values (for slopes) at each node
+    // Gauss-Kronrod node count is passed from data; weights are hardcoded.
     
-    // Storage for association features at 15 GK nodes
-    vector[15] cvm_now;  // Current Value - Mean component at node j
-    vector[15] cvm_fwd;  // Forward value (for finite difference slope)
-    vector[15] cvk_now;  // Current Value - Marker component at node j
-    vector[15] cvk_fwd;  // Forward value
+    // Storage for association features at quadrature nodes
+    vector[n_gk] cvm_now;  // Current Value - Mean component at node j
+    vector[n_gk] cvm_fwd;  // Forward value (for finite difference slope)
+    vector[n_gk] cvk_now;  // Current Value - Marker component at node j
+    vector[n_gk] cvk_fwd;  // Forward value
 
     // Algorithm detail for marker-aggregated channels at each GK node j:
     //   1) Reconstruct marker-specific CV components for each marker d.
@@ -788,7 +820,7 @@ real partial_joinme(
     //   3) Apply transforms per marker for CV/CS total+marker channels.
     //   4) Aggregate transformed marker channels using signed marker weights.
     //   5) Normalize by D_mkrs to keep the aggregation scale stable across D.
-    for (j in 1 : 15) {
+    for (j in 1 : n_gk) {
       // CURRENT VALUE - MEAN COMPONENT
       // cvm(t) = X(t)*beta + Z_id(t)*u_i
       // Captures subject-average trajectory (population + subject deviation)
@@ -819,8 +851,8 @@ real partial_joinme(
     // CS(t) approx [CV(t + eps) - CV(t)] / eps
     // Captures rate of change of longitudinal trajectory at time t
     // Time rescaling: divide by tmax (since time internally scaled to [0,1])
-    vector[15] csm_raw = eta_fd(cvm_now, cvm_fwd, eps_fd) / tmax; // mean slope
-    vector[15] csk_raw; // marker slope (weighted across markers)
+    vector[n_gk] csm_raw = eta_fd(cvm_now, cvm_fwd, eps_fd) / tmax; // mean slope
+    vector[n_gk] csk_raw; // marker slope (weighted across markers)
 
     // STEP 2.3: Compute variance-covariance association feature
     // CORR feature pipeline:
@@ -833,7 +865,7 @@ real partial_joinme(
 
     // STEP 2.4: Aggregate total association features
     // Combine mean and marker components for "total" associations
-    vector[15] cv_tot = cvm_now + cvk_now;  // Total current value
+    vector[n_gk] cv_tot = cvm_now + cvk_now;  // Total current value
 
     // STEP 2.5: Apply nonlinear transformations
     // Each association feature can be transformed flexibly before entering hazard
@@ -845,14 +877,14 @@ real partial_joinme(
     // Transform CV features
     // CV total and CV marker are transformed at marker level, then weighted-averaged.
     int D_mkrs = size(v_marker);
-    vector[15] cv_tot_tf;
-    vector[15] cv_mean_tf = apply_transform_vector(cvm_now, tf_mode_cv_mean, 
+    vector[n_gk] cv_tot_tf;
+    vector[n_gk] cv_mean_tf = apply_transform_vector(cvm_now, tf_mode_cv_mean, 
                                                      functional_ops_cv_mean, const_data_cv_mean, 
                                                      knots_cv_mean, coeff_cv_mean, spline_degree_cv_mean);
-    vector[15] cv_marker_tf;
-    vector[15] cs_tot_tf;
-    vector[15] cs_marker_tf;
-    for (j in 1 : 15) {
+    vector[n_gk] cv_marker_tf;
+    vector[n_gk] cs_tot_tf;
+    vector[n_gk] cs_marker_tf;
+    for (j in 1 : n_gk) {
       real acc_cv_tot_tf = 0;
       real acc_cv_marker_tf = 0;
       real acc_csk_raw = 0;
@@ -907,7 +939,7 @@ real partial_joinme(
     }
 
     // Transform CS features
-    vector[15] cs_mean_tf = apply_transform_vector(csm_raw, tf_mode_cs_mean, 
+    vector[n_gk] cs_mean_tf = apply_transform_vector(csm_raw, tf_mode_cs_mean, 
                                                      functional_ops_cs_mean, const_data_cs_mean, 
                                                      knots_cs_mean, coeff_cs_mean, spline_degree_cs_mean);
 
@@ -916,7 +948,7 @@ real partial_joinme(
                                     functional_ops_corr, const_data_corr,
                                     knots_corr, coeff_corr, spline_degree_corr);
     real corr_assoc_scalar = dot_product(a_corr, corr_terms_tf);
-    vector[15] corr_assoc = rep_vector(corr_assoc_scalar, 15);
+    vector[n_gk] corr_assoc = rep_vector(corr_assoc_scalar, n_gk);
 
     // STEP 2.6: Combine into survival predictor at GK nodes
     // eta_assoc(t) = sum(coefficient * transformed_association_feature)
@@ -927,7 +959,7 @@ real partial_joinme(
     // Coefficients (a_*) quantify strength and direction of association:
     //   - Positive: Higher longitudinal value/slope -> Higher hazard
     //   - Negative: Higher longitudinal value/slope -> Lower hazard (protective)
-    vector[15] eta_assoc_nodes = a_cv_total * cv_tot_tf
+    vector[n_gk] eta_assoc_nodes = a_cv_total * cv_tot_tf
                      + a_cv_mean * cv_mean_tf
                      + a_cv_marker * cv_marker_tf
                      + a_cs_total * cs_tot_tf
@@ -1071,9 +1103,9 @@ real partial_joinme(
 
     //   where t_j are GK nodes in [0, S_i], w_j are GK weights
     
-    vector[15] log_h_total;  // Total log-hazard at each GK node
+    vector[n_gk] log_h_total;  // Total log-hazard at each quadrature node
     
-    for (j in 1 : 15) {
+    for (j in 1 : n_gk) {
       // Storage for log-hazard from each competing risk
       vector[K_event] log_h_cause; // cause-specific log hazards
       
@@ -1107,7 +1139,7 @@ real partial_joinme(
     //   - zeros: no additional eta (already included)
     //
 
-    lp_i += -cumhaz(S_event[i], log_h_total, rep_vector(0.0, 15));
+    lp_i += -cumhaz(S_event[i], n_gk, log_h_total, rep_vector(0.0, n_gk));
     lp += subj_w * lp_i;
     
   } // End subject loop

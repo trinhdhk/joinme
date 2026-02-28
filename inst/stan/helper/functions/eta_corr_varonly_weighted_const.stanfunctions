@@ -27,6 +27,9 @@ vector eta_corr_varonly_weighted_const(matrix L_i) {
   int m = 1;
   vector[M] corr_terms;
 
+  if (Q < 2)
+    return corr_terms;
+
   // Enumerate off-diagonal correlations in lower-triangular row-major order.
   for (r in 2 : Q) {
     for (c in 1 : (r - 1)) {

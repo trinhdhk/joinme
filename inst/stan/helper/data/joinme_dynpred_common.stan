@@ -4,7 +4,7 @@
   int<lower=1> n_obs_long;                          // number of observed rows
   array[n_obs_long] int<lower=1> idx_marker_obs;    // marker index per observed row
   int<lower=1> n_marker_types;                      // total number of markers
-  vector[n_marker_types] marker_weights;            // base weights (reference only)
+  vector[n_marker_types] marker_weights;            // effective weights (reference only)
   matrix[n_draws, n_marker_types] marker_weights_draws; // per-draw weights
   vector[n_obs_long] y_real;                        // continuous outcomes
   array[n_obs_long] int y_int;                      // discrete outcomes
@@ -57,17 +57,18 @@
   /* Conditioning information */
   int<lower=1> n_basehaz_basis;                   // baseline hazard basis count
   real<lower=0> time_condition;                   // conditioning time T_cond
-  matrix[15, n_basehaz_basis] mat_basis_gk_cond;  // basis at GK nodes (0..T_cond)
-  matrix[15, n_fixed_effects] mat_fixed_gk_cond;  // fixed effects at GK nodes
-  matrix[15, n_random_id] mat_id_gk_cond;         // id RE design at GK nodes
-  matrix[15, n_random_marker] mat_marker_gk_cond; // marker RE design at GK nodes
-  matrix[15, n_random_marker_id] mat_marker_id_gk_cond; // marker-id RE design
+  int<lower=1> n_gk;                              // quadrature node count (nodes/weights hardcoded in Stan)
+  matrix[n_gk, n_basehaz_basis] mat_basis_gk_cond;  // basis at quadrature nodes (0..T_cond)
+  matrix[n_gk, n_fixed_effects] mat_fixed_gk_cond;  // fixed effects at quadrature nodes
+  matrix[n_gk, n_random_id] mat_id_gk_cond;         // id RE design at quadrature nodes
+  matrix[n_gk, n_random_marker] mat_marker_gk_cond; // marker RE design at quadrature nodes
+  matrix[n_gk, n_random_marker_id] mat_marker_id_gk_cond; // marker-id RE design
 
   /* Forward-step design matrices for slope (finite difference) */
-  matrix[15, n_fixed_effects] mat_fixed_gk_cond_fwd;
-  matrix[15, n_random_id] mat_id_gk_cond_fwd;
-  matrix[15, n_random_marker] mat_marker_gk_cond_fwd;
-  matrix[15, n_random_marker_id] mat_marker_id_gk_cond_fwd;
+  matrix[n_gk, n_fixed_effects] mat_fixed_gk_cond_fwd;
+  matrix[n_gk, n_random_id] mat_id_gk_cond_fwd;
+  matrix[n_gk, n_random_marker] mat_marker_gk_cond_fwd;
+  matrix[n_gk, n_random_marker_id] mat_marker_id_gk_cond_fwd;
 
   real<lower=1e-6> eps_finite_diff;               // finite-difference step
 
@@ -81,18 +82,25 @@
   /* Survival prediction grid */
   int<lower=1> n_times_surv;                     // number of survival time points
   vector[n_times_surv] vec_time_surv;            // times for S(t | T_cond)
-  array[n_times_surv] matrix[15, n_basehaz_basis] mat_basis_gk_surv;
-  array[n_times_surv] matrix[15, n_fixed_effects] mat_fixed_gk_surv;
-  array[n_times_surv] matrix[15, n_random_id] mat_id_gk_surv;
-  array[n_times_surv] matrix[15, n_random_marker] mat_marker_gk_surv;
-  array[n_times_surv] matrix[15, n_random_marker_id] mat_marker_id_gk_surv;
-  array[n_times_surv] matrix[15, n_fixed_effects] mat_fixed_gk_surv_fwd;
-  array[n_times_surv] matrix[15, n_random_id] mat_id_gk_surv_fwd;
-  array[n_times_surv] matrix[15, n_random_marker] mat_marker_gk_surv_fwd;
-  array[n_times_surv] matrix[15, n_random_marker_id] mat_marker_id_gk_surv_fwd;
+  array[n_times_surv] matrix[n_gk, n_basehaz_basis] mat_basis_gk_surv;
+  array[n_times_surv] matrix[n_gk, n_fixed_effects] mat_fixed_gk_surv;
+  array[n_times_surv] matrix[n_gk, n_random_id] mat_id_gk_surv;
+  array[n_times_surv] matrix[n_gk, n_random_marker] mat_marker_gk_surv;
+  array[n_times_surv] matrix[n_gk, n_random_marker_id] mat_marker_id_gk_surv;
+  array[n_times_surv] matrix[n_gk, n_fixed_effects] mat_fixed_gk_surv_fwd;
+  array[n_times_surv] matrix[n_gk, n_random_id] mat_id_gk_surv_fwd;
+  array[n_times_surv] matrix[n_gk, n_random_marker] mat_marker_gk_surv_fwd;
+  array[n_times_surv] matrix[n_gk, n_random_marker_id] mat_marker_id_gk_surv_fwd;
 
   /* Model configuration flags and draws */
   array[n_marker_types] int<lower=1, upper=11> family_long; // family codes
+  array[n_marker_types] int<lower=0, upper=5> link_long; // 0 custom VM; 1 identity, 2 log, 3 logit, 4 probit, 5 exp
+  int<lower=1> max_inv_link_ops;
+  array[n_marker_types] int<lower=0> inv_link_n_ops;
+  array[n_marker_types, max_inv_link_ops] int<lower=0, upper=26> inv_link_ops;
+  int<lower=1> max_inv_link_const;
+  array[n_marker_types] int<lower=0> inv_link_n_const;
+  matrix[n_marker_types, max_inv_link_const] inv_link_const;
   int<lower=0> n_family_sigma;
   array[n_marker_types] int<lower=0, upper=n_family_sigma> marker_to_sigma_family;
   int<lower=0> n_family_nu;
@@ -154,7 +162,7 @@
   array[n_draws] real coeff_assoc_cs_mean;      // association coeffs: mean CS
   array[n_draws] real coeff_assoc_cv_marker;    // association coeffs: marker CV
   array[n_draws] real coeff_assoc_cs_marker;    // association coeffs: marker CS
-  array[n_draws] vector[n_random_marker_id] coeff_assoc_corr; // corr coeffs
+  array[n_draws] vector[(n_random_marker_id * (n_random_marker_id - 1)) %/% 2] coeff_assoc_corr; // corr coeffs (off-diagonal correlations)
 
   int<lower=0, upper=1> flag_assoc_cv_total;    // include total CV association
   int<lower=0, upper=1> flag_assoc_cv_mean;     // include mean CV association
@@ -173,17 +181,17 @@
   int<lower=0, upper=3> tf_mode_cs_marker;     // transform mode: marker CS
 
   int<lower=0> n_functional_ops_cv;            // op count for total CV
-  array[n_functional_ops_cv] int<lower=0, upper=25> functional_ops_cv; // opcode stream
+  array[n_functional_ops_cv] int<lower=0, upper=26> functional_ops_cv; // opcode stream
   int<lower=0> n_const_cv;                     // constants for total CV opcodes
   vector[n_const_cv] const_data_cv;            // constants for total CV opcodes
 
   int<lower=0> n_functional_ops_cs;            // op count for total CS
-  array[n_functional_ops_cs] int<lower=0, upper=25> functional_ops_cs; // opcode stream
+  array[n_functional_ops_cs] int<lower=0, upper=26> functional_ops_cs; // opcode stream
   int<lower=0> n_const_cs;                     // constants for total CS opcodes
   vector[n_const_cs] const_data_cs;            // constants for total CS opcodes
 
   int<lower=0> n_functional_ops_corr;          // op count for corr
-  array[n_functional_ops_corr] int<lower=0, upper=25> functional_ops_corr; // opcode stream
+  array[n_functional_ops_corr] int<lower=0, upper=26> functional_ops_corr; // opcode stream
   int<lower=0> n_const_corr;                   // constants for corr opcodes
   vector[n_const_corr] const_data_corr;        // constants for corr opcodes
 
@@ -206,22 +214,22 @@
   int<lower=1, upper=5> spline_degree_corr;    // spline degree for corr
 
   int<lower=0> n_functional_ops_cv_mean;        // op count for mean CV
-  array[n_functional_ops_cv_mean] int<lower=0, upper=25> functional_ops_cv_mean; // opcode stream
+  array[n_functional_ops_cv_mean] int<lower=0, upper=26> functional_ops_cv_mean; // opcode stream
   int<lower=0> n_const_cv_mean;                 // constants for mean CV opcodes
   vector[n_const_cv_mean] const_data_cv_mean;   // constants for mean CV opcodes
 
   int<lower=0> n_functional_ops_cv_marker;      // op count for marker CV
-  array[n_functional_ops_cv_marker] int<lower=0, upper=25> functional_ops_cv_marker; // opcode stream
+  array[n_functional_ops_cv_marker] int<lower=0, upper=26> functional_ops_cv_marker; // opcode stream
   int<lower=0> n_const_cv_marker;               // constants for marker CV opcodes
   vector[n_const_cv_marker] const_data_cv_marker; // constants for marker CV opcodes
 
   int<lower=0> n_functional_ops_cs_mean;        // op count for mean CS
-  array[n_functional_ops_cs_mean] int<lower=0, upper=25> functional_ops_cs_mean; // opcode stream
+  array[n_functional_ops_cs_mean] int<lower=0, upper=26> functional_ops_cs_mean; // opcode stream
   int<lower=0> n_const_cs_mean;                 // constants for mean CS opcodes
   vector[n_const_cs_mean] const_data_cs_mean;   // constants for mean CS opcodes
 
   int<lower=0> n_functional_ops_cs_marker;      // op count for marker CS
-  array[n_functional_ops_cs_marker] int<lower=0, upper=25> functional_ops_cs_marker; // opcode stream
+  array[n_functional_ops_cs_marker] int<lower=0, upper=26> functional_ops_cs_marker; // opcode stream
   int<lower=0> n_const_cs_marker;               // constants for marker CS opcodes
   vector[n_const_cs_marker] const_data_cs_marker; // constants for marker CS opcodes
 
@@ -248,4 +256,3 @@
   int<lower=0> n_coeff_cs_marker;               // coeff count for marker CS spline
   vector[n_coeff_cs_marker] coeff_cs_marker;    // coefficients for marker CS spline
   int<lower=1, upper=5> spline_degree_cs_marker; // spline degree for marker CS
-

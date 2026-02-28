@@ -97,9 +97,9 @@ association summaries, each optionally transformed:
 - **Variance association (CORR)**: a subject-specific, time-constant summary of
   the marker-by-id covariance structure.
 
-In implementation, CV and CS are evaluated at a fixed set of 15 Gauss-Kronrod
-nodes on the scaled time interval, and CS is approximated by a forward
-finite difference with step size $\varepsilon$.
+In implementation, CV and CS are evaluated at a default set of 15 Gauss-Kronrod
+nodes on the scaled time interval (configurable via `quadrature_nodes`), and CS
+is approximated by a forward finite difference with step size $\varepsilon$.
 
 When multiple markers are present, `joinme` forms marker-average CV and CS components
 using weights $\omega_d$ (one per marker). These weights apply to both current value
@@ -127,10 +127,13 @@ Coefficients reported to the user are automatically rescaled to the original tim
 
 The survival likelihood requires evaluating the cumulative hazard $H_i(T_i) = \int_0^{T_i} h_i(s) ds$. Since the hazard contains time-varying random effects $\eta_{id}(s)$, this integral has no closed form.
 
-`joinme` employs **15-point Gauss-Kronrod quadrature** to approximate this integral numerically within the Stan `log_prob` block.
+`joinme` employs **Gauss-Kronrod quadrature** (default 15-point, configurable)
+to approximate this integral numerically within the Stan `log_prob` block.
+The Stan program uses hardcoded nodes and weights for the supported node counts,
+so only the node count is passed in the data.
 
 $$
-\int_0^{T_i} h_i(s) ds \approx \frac{T_i}{2} \sum_{j=1}^{15} w_j h_i \left( \frac{T_i}{2}(x_j + 1) \right)
+\int_0^{T_i} h_i(s) ds \approx \frac{T_i}{2} \sum_{j=1}^{K} w_j h_i \left( \frac{T_i}{2}(x_j + 1) \right)
 $$
 
 This method provides high accuracy with relatively few function evaluations compared to Simpson's rule or trapezoidal integration.

@@ -56,7 +56,7 @@ We will walk through a complete end-to-end simulation study:
 The `joinme` workflow follows a fixed sequence that mirrors the Stan program:
 
 1. **Data assembly (R)**: build design matrices, scale time to $[0, 1]$,
-  and prepare Gauss-Kronrod nodes for survival integration.
+  and prepare Gauss-Kronrod nodes (default 15, configurable) for survival integration.
 2. **Parameter declarations (Stan)**: define fixed effects, random effects,
   distributional regression coefficients, baseline hazard parameters, and
   association coefficients.
@@ -86,13 +86,21 @@ set.seed(2025)
 # - ~10 observations per marker per subject
 sim <- simulate_joinme(
   n_id = 40,
-  families = rep("student_t", 3),
+  families = list(
+    jm_family("student_t"),
+    jm_family("student_t"),
+    jm_family("student_t", inv_link = ~ inv_logit(x / 2))
+  ),
   n_obs_per_marker_per_id = 6,
   times_obs = seq(0, 8, length.out = 12),
+  quadrature_nodes = 31,
   beta_long = c("(Intercept)" = 1.0, "time" = 0.5, "x1" = 0.4),
   assoc = c("cv_total"),
   assoc_coefs = c(cv_total = 0.5)
 )
+
+# Gauss-Kronrod nodes/weights are fixed in Stan; `quadrature_nodes` selects
+# the node count used to build the design matrices in R.
 
 # When estimating marker weights, compare against sim$truth$marker_weights
 # because signed marker weights are used directly in Stan.

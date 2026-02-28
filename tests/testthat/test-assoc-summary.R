@@ -63,7 +63,7 @@ test_that("summary hides marker weights when marker-weighted assoc terms are ina
     dataEvent = sim$dataEvent,
     assoc = c("cv_mean"),
     families = rep("gaussian", 3),
-    estimate_marker_weights = TRUE,
+    fixed_marker_weights = FALSE,
     control = list(
       engine = "cmdstanr",
       chains = 1,

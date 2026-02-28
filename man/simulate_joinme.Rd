@@ -35,10 +35,11 @@ simulate_joinme(
   baseline_hazard = list(type = "weibull", shape = 1.4, scale = 6),
   formulaBasehaz = NULL,
   beta_basehaz = NULL,
-  t_admin = 8,
+  time_cens = 8,
   eps_cs = 0.001,
   integration_control = list(rel.tol = 1e-06, subdivisions = 2000L, stop.on.error = TRUE),
   root_control = list(t_init = 1, t_max = 50, expand = 1.7, max_expand = 60L),
+  quadrature_nodes = 15L,
   id_var = "id",
   marker_var = "marker",
   time_var = "time",
@@ -97,11 +98,10 @@ including \code{inv_logit}/\code{expit}/\code{sigmoid}, \code{exp}, \code{log}, 
 \item{covariate_formulas}{Named or LHS formulas used to generate event-level covariates,
 e.g. \code{list(x1 ~ rnorm(n_id), x2 ~ rt(n_id, df = 5))}.}
 
-\item{marker_weights}{Optional marker weights used in association aggregation.
-If \code{NULL}, equal weights are used and aggregated
-as weighted means divided by marker count. Inputs are treated as direct signed
-weights used in association aggregation. Weights are reported as
-\code{truth$marker_weights}.}
+\item{marker_weights}{Optional base marker weights used as prior offsets for
+association aggregation. Effective weights are computed as
+\eqn{2 \cdot \text{inv\_logit}(w_{raw}) - 1} and used for marker-averaged CV/CS
+summaries. Weights are reported as \code{truth$marker_weights}.}
 
 \item{assoc}{Association components (same names as fit): \code{cv_total}, \code{cv_mean},
 \code{cv_marker}, \code{cs_total}, \code{cs_mean}, \code{cs_marker}, \code{corr}.}
@@ -140,13 +140,17 @@ e.g. \code{~ 1 + time + I(time^2)}.}
 \item{beta_basehaz}{Optional coefficients for \code{formulaBasehaz} (aligned by
 model-matrix column names). If NULL, coefficients are generated.}
 
-\item{t_admin}{Administrative censoring horizon.}
+\item{time_cens}{Administrative censoring horizon.}
 
 \item{eps_cs}{Finite-difference step for slope-type associations (\verb{cs_*}).}
 
 \item{integration_control}{Control list passed to \code{integrate()}.}
 
 \item{root_control}{Root finding control for inverse-CDF sampling.}
+
+\item{quadrature_nodes}{Optional Gauss-Kronrod node count for simulation-side
+survival integration. Allowed values: 7, 15, 31, 41, 51, 61. These match the
+fixed GK rules hardcoded in Stan; only the node count is passed when fitting.}
 
 \item{id_var, marker_var, time_var, y_var, event_time_var, event_var}{Column names aligned
 with \code{joinme_standata()} defaults.}

@@ -186,22 +186,50 @@ corr <- function(object, ...) {
     tau_sde = sort(unique(family_long[vapply(req_by_marker, function(x) "tau_sde" %in% x, logical(1))]))
   )
 
-  add_family_terms <- function(stan_prefix, label_prefix, fam_codes, use_regression) {
+  marker_label_prefix <- list(
+    sigma = "sigma_marker",
+    nu = "nu_marker",
+    phi = "phi_nb_marker",
+    alpha = "alpha_skew_marker",
+    phi_beta = "phi_beta_marker",
+    tau_sde = "tau_sde_marker"
+  )
+  family_label_prefix <- list(
+    sigma = "sigma",
+    nu = "nu",
+    phi = "phi_nb",
+    alpha = "alpha_skew",
+    phi_beta = "phi_beta",
+    tau_sde = "tau_sde"
+  )
+
+  markers_for_param <- function(param, fam_code) {
+    which(family_long == fam_code & vapply(req_by_marker, function(x) param %in% x, logical(1)))
+  }
+
+  add_family_terms <- function(param, stan_prefix, fam_codes, use_regression) {
     if (length(fam_codes) == 0 || isTRUE(use_regression)) return(invisible(NULL))
     for (idx in seq_along(fam_codes)) {
       var_nm <- paste0(stan_prefix, "[", idx, "]")
       if (var_nm %in% all_vars) {
-        term_map[var_nm] <<- paste0(label_prefix, "[family=", fam_name(fam_codes[idx]), "]")
+        fam_code <- fam_codes[idx]
+        mk_idx <- markers_for_param(param, fam_code)
+        if (length(mk_idx) == 1) {
+          mk <- marker_levels[mk_idx]
+          term_map[var_nm] <<- paste0(marker_label_prefix[[param]], "[", mk, "]")
+        } else {
+          term_map[var_nm] <<- paste0(family_label_prefix[[param]], "[family=", fam_name(fam_code), "]")
+        }
       }
     }
   }
 
-  add_family_terms("sigma_family", "sigma", fam_sets$sigma, has_reg$sigma)
-  add_family_terms("nu_family", "nu", fam_sets$nu, has_reg$nu)
-  add_family_terms("phi_family", "phi", fam_sets$phi, has_reg$phi)
-  add_family_terms("alpha_family", "alpha", fam_sets$alpha, has_reg$alpha)
-  add_family_terms("phi_beta_family", "phi_beta", fam_sets$phi_beta, has_reg$phi_beta)
-  add_family_terms("tau_sde_family", "tau_sde", fam_sets$tau_sde, has_reg$tau_sde)
+  add_family_terms("sigma", "sigma_family", fam_sets$sigma, has_reg$sigma)
+  add_family_terms("nu", "nu_family", fam_sets$nu, has_reg$nu)
+  add_family_terms("phi", "phi_family", fam_sets$phi, has_reg$phi)
+  add_family_terms("alpha", "alpha_family", fam_sets$alpha, has_reg$alpha)
+  add_family_terms("phi_beta", "phi_beta_family", fam_sets$phi_beta, has_reg$phi_beta)
+  add_family_terms("tau_sde", "tau_sde_family", fam_sets$tau_sde, has_reg$tau_sde)
 
   # Backward-compatible fallback for older fits that still expose marker-level
   # distributional constants.
@@ -556,9 +584,35 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
   if (sd$p_w > 0) {
     g_vars <- paste0("gamma_w[", seq_len(sd$p_w), "]")
     g_vars <- g_vars[g_vars %in% all_vars]
+
+    if (length(g_vars) == 0) {
+      k_event <- sd$K_event %||% 1L
+      g_vars_mat <- outer(
+        seq_len(k_event),
+        seq_len(sd$p_w),
+        function(k, j) paste0("gamma_w[", k, ",", j, "]")
+      )
+      g_vars <- as.vector(g_vars_mat)
+      g_vars <- g_vars[g_vars %in% all_vars]
+    }
+
     if (length(g_vars) > 0) {
       s_g <- as.data.frame(.summarise_draws_diag(fit, g_vars, draws = draws, seed = seed))
-      s_g$term <- if (!is.null(sd$w_cols) && length(sd$w_cols) == nrow(s_g)) sd$w_cols else s_g$variable
+      if (!is.null(sd$w_cols)) {
+        var_idx <- regmatches(s_g$variable, regexec("^gamma_w\\[(\\d+)(?:,(\\d+))?\\]$", s_g$variable))
+        k_idx <- vapply(var_idx, function(x) if (length(x) >= 2) as.integer(x[2]) else NA_integer_, integer(1))
+        j_idx <- vapply(var_idx, function(x) if (length(x) >= 3 && nzchar(x[3])) as.integer(x[3]) else NA_integer_, integer(1))
+        k_event <- sd$K_event %||% 1L
+        term_base <- s_g$variable
+        if (any(!is.na(j_idx))) term_base[!is.na(j_idx)] <- sd$w_cols[j_idx[!is.na(j_idx)]]
+        if (k_event > 1 && !all(is.na(k_idx))) {
+          s_g$term <- paste0("event", k_idx, ": ", term_base)
+        } else {
+          s_g$term <- term_base
+        }
+      } else {
+        s_g$term <- s_g$variable
+      }
       s_g <- s_g[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
       s_g$Estimate <- round(s_g$Estimate, digits)
       s_g$Est.Error <- round(s_g$Est.Error, digits)
@@ -570,21 +624,39 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
 
   # Survival-process report (non-association baseline covariates only)
   #
+  # IMPORTANT:
+  # - If and only if baseline event covariates exist in the survival model,
+  #   `survival_process` must be reported.
+  # - These terms must match the event design columns (e.g., x1, x2) and must
+  #   not be silently dropped.
+  #
   # Algorithm:
   # 1) Start from gamma_w summaries (the survival linear predictor terms).
-  # 2) Exclude intercept-like terms so this report is shown only when user-level
-  #    survival covariates exist beyond the baseline intercept.
-  # 3) Add hazard-ratio summaries exp(beta) for direct interpretation.
+  # 2) Re-label terms from standata event columns when available (`w_cols`).
+  # 3) Keep only non-intercept baseline covariates.
+  # 4) Add hazard-ratio summaries exp(beta) for direct interpretation.
   s_surv <- NULL
-  if (!is.null(s_g) && nrow(s_g) > 0) {
+  if (!is.null(s_g) && nrow(s_g) > 0 && isTRUE((sd$p_w %||% 0L) > 0L)) {
     is_intercept_term <- function(term) {
       term_chr <- trimws(as.character(term))
       tolower(term_chr) %in% c("(intercept)", "intercept", "1")
     }
 
-    keep_idx <- !vapply(s_g$term, is_intercept_term, logical(1))
+    baseline_terms <- if (!is.null(sd$w_cols) && length(sd$w_cols) == nrow(s_g)) {
+      as.character(sd$w_cols)
+    } else {
+      as.character(s_g$term)
+    }
+
+    keep_idx <- !vapply(baseline_terms, is_intercept_term, logical(1))
+    if (!any(keep_idx) && length(baseline_terms) > 0) {
+      # Defensive fallback: if intercept filtering drops everything, keep all
+      # baseline terms rather than hiding survival covariates.
+      keep_idx <- rep(TRUE, length(baseline_terms))
+    }
     if (any(keep_idx)) {
       s_surv <- s_g[keep_idx, , drop = FALSE]
+      s_surv$term <- baseline_terms[keep_idx]
       s_surv$Hazard.Ratio <- round(exp(s_surv$Estimate), digits)
       s_surv$HR.Q2.5 <- round(exp(s_surv$Q2.5), digits)
       s_surv$HR.Q97.5 <- round(exp(s_surv$Q97.5), digits)
@@ -657,7 +729,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
       s_mw$Q97.5 <- round(s_mw$Q97.5, digits)
       s_mw$Rhat <- round(s_mw$Rhat, 3)
       s_a <- if (is.null(s_a)) s_mw else rbind(s_a, s_mw)
-    } else if (isTRUE(as.logical(sd$estimate_marker_weights)) && !is.null(sd$marker_weights)) {
+    } else if (isTRUE(as.logical(sd$fixed_marker_weights)) && !is.null(sd$marker_weights)) {
       marker_terms <- sd$marker_levels %||% paste0("marker_", seq_len(sd$D))
       s_mw <- data.frame(
         term = paste0("weight: ", marker_terms),
@@ -1162,7 +1234,7 @@ ranef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
       }
     }
     out_long$assoc_weight <- mw
-  } else if (show_marker_weights && isTRUE(as.logical(sd$estimate_marker_weights)) && !is.null(sd$marker_weights)) {
+  } else if (show_marker_weights && isTRUE(as.logical(sd$fixed_marker_weights)) && !is.null(sd$marker_weights)) {
     marker_terms <- sd$marker_levels %||% paste0("marker_", seq_len(sd$D))
     mw <- data.frame(
       term = paste0("weight: ", marker_terms),

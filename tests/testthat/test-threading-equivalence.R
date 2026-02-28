@@ -16,7 +16,7 @@ test_that("threaded and non-threaded Stan paths stay aligned", {
     seed = seed,
     assoc = c("cv_total"),
     assoc_coefs = c(cv_total = 0.6),
-    t_admin = 5.0,
+    time_cens = 5.0,
     family_params = list(
       student_t = list(sigma = 0.35, nu = 4)
     )

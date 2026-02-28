@@ -16,6 +16,7 @@ joinme(
   families = NULL,
   transforms = NULL,
   priors = list(beta = NULL, alpha = NULL, lkj = NULL),
+  fixed_marker_weights = FALSE,
   ...
 )
 }
@@ -81,20 +82,34 @@ iter_warmup, iter_sampling, seed, refresh, adapt_delta, max_treedepth).
 For engine = "rstan", threading uses options(stan.thread = threads_per_chain).
 \item grainsize: integer; reduce_sum grainsize for threading (default max(1, min(n_cores, ceiling(n_id/(4\emph{threads_per_chain}chains))))).
 \item force_recompile: logical; recompile the Stan model if needed.
+\item quadrature_nodes: optional positive integer total node target for survival
+integration. Allowed values are exactly 7/15/31/41/51/61. Only the node count is
+passed to Stan; GK nodes/weights are fixed in the Stan code.
 \item corr_diag_link: "softplus" or "exp" for covariance regression diagonals.
 \item tau_sde_fixed: optional fixed tau in (0,1) for skew-double-exponential.
 }}
 
 \item{draws}{Optional number of posterior draws used for summaries (not sampling).}
 
-\item{families}{Marker-specific family specification (optional). Can be a vector
-of family names aligned to marker order.}
+\item{families}{Marker-specific family specification (optional).
+Can be:
+\itemize{
+\item a character vector of family names aligned to marker order, or
+\item a list of \code{jm_family(...)} specifications with per-marker links.
+}
+Supported links/inverse-links are \code{identity}, \code{log}, \code{logit},
+\code{probit}, and \code{exp}. Example:
+\code{families = list(jm_family("student_t", link = "identity"), jm_family("bernoulli", link = "probit"))}.}
 
 \item{transforms}{Transformation specifications for association terms
 (cv_total, cs_total, corr). Each entry is a list with a \code{type} and fields
 required by that type.}
 
 \item{priors}{Named list for priors: list(beta = ..., alpha = ..., lkj = ...).}
+
+\item{fixed_marker_weights}{Logical; if TRUE, marker weights are fixed at
+provided \code{marker_weights} (or defaults). If FALSE, marker-weight perturbations
+are estimated.}
 
 \item{...}{Additional args passed to joinme_standata().}
 }
@@ -121,10 +136,11 @@ are rescaled within Stan so fixed effects remain interpretable on the original s
 
 Marker weights (see \code{joinme_standata()}) are used to form marker-average summaries
 for both current value (CV) and current slope (CS) association components. When
-\code{estimate_marker_weights = TRUE}, signed perturbations are estimated around base
+\code{fixed_marker_weights = FALSE}, signed perturbations are estimated around base
 weights using \code{marker_weights + z_marker_weights} with
-\code{z_marker_weights ~ N(0, 1)}, and the resulting signed weights are used
-directly in marker-aggregated association channels.
+\code{z_marker_weights ~ N(0, 1)}. The effective marker intensities used in
+association aggregation are then computed as
+\eqn{2 \cdot \text{inv\_logit}(w_{raw}) - 1}, yielding bounded weights in (-1, 1).
 
 Formula-scoped subject weighting is supported in random-effect grouping terms via
 \verb{weighted(group, weights = <column>)}. For example:

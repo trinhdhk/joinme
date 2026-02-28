@@ -17,7 +17,7 @@ simulate_joinme_joint_student_t_cvtotal(
   gamma_w = c(`(Intercept)` = 0, x1 = 0.3, x2 = -0.2),
   alpha_cv_total = 0.6,
   h0 = weibull_h0(shape = 1.4, scale = 6),
-  t_admin = 8,
+  time_cens = 8,
   nu = 5,
   sigma_y = 0.4,
   sigma_fun = NULL,
@@ -53,7 +53,7 @@ simulate_joinme_joint_student_t_cvtotal(
 
 \item{h0}{Baseline hazard function h0(t).}
 
-\item{t_admin}{Administrative censoring time.}
+\item{time_cens}{Administrative censoring time.}
 
 \item{nu}{Student-t df.}
 

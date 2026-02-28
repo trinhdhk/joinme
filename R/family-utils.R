@@ -10,6 +10,223 @@ NULL
 # - Map between family names and integer codes.
 # - Validate outcome ranges and parse transform compositions.
 
+#' Build a per-marker family specification
+#'
+#' @description
+#' Creates a family specification object for `joinme(..., families = ...)` with an
+#' optional custom longitudinal link (or inverse-link) per marker family.
+#'
+#' This helper is intentionally small and explicit: it stores only canonical family
+#' name plus a supported inverse-link choice that can be passed to Stan as compact
+#' integer link codes.
+#'
+#' Supported links / inverse-links:
+#' - `"identity"` : $g^{-1}(x)=x$
+#' - `"log"`      : $g^{-1}(x)=\log(x)$
+#' - `"logit"`    : $g^{-1}(x)=\operatorname{logit}^{-1}(x)$
+#' - `"probit"`   : $g^{-1}(x)=\Phi(x)$
+#' - `"exp"`      : $g^{-1}(x)=\exp(x)$
+#'
+#' @param name Character scalar family name, e.g. `"student_t"`, `"bernoulli"`.
+#' @param link Optional character scalar naming the inverse-link.
+#' @param inv_link Optional one-sided formula `~ ...` or expression string using `x`
+#'   (e.g. `~ exp(x)`, `~ inv_logit(x)`, `~ probit(x)`).
+#'
+#' @return Object of class `"joinme_family_spec"`.
+#' @export
+jm_family <- function(name, link = NULL, inv_link = NULL) {
+  .jm_family_spec(name = name, link = link, inv_link = inv_link)
+}
+
+#' @keywords internal
+.jm_family_spec <- function(name, link = NULL, inv_link = NULL) {
+  fam_code <- .parse_family(name)
+  fam_name <- .family_code_to_name(fam_code)
+
+  if (!is.null(link) && !is.null(inv_link)) {
+    cli::cli_abort(c(
+      x = "Specify only one of {.arg link} or {.arg inv_link}.",
+      i = "Use {.code link = 'logit'} or {.code inv_link = ~ inv_logit(x)}."
+    ))
+  }
+
+  inv_link_bc <- if (!is.null(inv_link)) {
+    parse_transform_expr(inv_link)
+  } else if (!is.null(link)) {
+    .inv_link_bc_from_name(link)
+  } else {
+    .inv_link_bc_from_name(.default_link_for_family(fam_code))
+  }
+
+  link_name <- .canonical_link_from_inv_link_bc(inv_link_bc)
+
+  structure(
+    list(
+      family = fam_name,
+      link = link_name,
+      inv_link = inv_link_bc
+    ),
+    class = "joinme_family_spec"
+  )
+}
+
+#' @keywords internal
+.normalize_link_name <- function(link) {
+  if (!is.character(link) || length(link) != 1L || !nzchar(link)) {
+    cli::cli_abort(c(
+      x = "{.arg link} must be a non-empty character scalar.",
+      i = "Allowed values: identity, log, logit, probit, exp."
+    ))
+  }
+
+  key <- tolower(trimws(link))
+  key <- switch(
+    key,
+    id = "identity",
+    inverse = "identity",
+    inverse_logit = "logit",
+    inv_logit = "logit",
+    sigmoid = "logit",
+    expit = "logit",
+    key
+  )
+
+  allowed <- c("identity", "log", "logit", "probit", "exp")
+  if (!key %in% allowed) {
+    cli::cli_abort(c(
+      x = "Unsupported link: {.val {link}}.",
+      i = "Allowed values: identity, log, logit, probit, exp."
+    ))
+  }
+  key
+}
+
+#' @keywords internal
+.link_code_from_name <- function(link_name) {
+  nm <- .normalize_link_name(link_name)
+  switch(
+    nm,
+    identity = 1L,
+    log = 2L,
+    logit = 3L,
+    probit = 4L,
+    exp = 5L
+  )
+}
+
+#' @keywords internal
+.inv_link_bc_from_name <- function(link_name) {
+  nm <- .normalize_link_name(link_name)
+  bc <- switch(
+    nm,
+    identity = list(opcodes = c(0L), const_data = numeric(0)),
+    log = list(opcodes = c(0L, 6L), const_data = numeric(0)),
+    logit = list(opcodes = c(0L, 9L), const_data = numeric(0)),
+    probit = list(opcodes = c(0L, 26L), const_data = numeric(0)),
+    exp = list(opcodes = c(0L, 7L), const_data = numeric(0))
+  )
+  bc$n_ops <- length(bc$opcodes)
+  bc$n_const <- length(bc$const_data)
+  bc
+}
+
+#' @keywords internal
+.canonical_link_from_inv_link_bc <- function(inv_link_bc) {
+  ops <- as.integer(inv_link_bc$opcodes %||% integer(0))
+  const_data <- as.numeric(inv_link_bc$const_data %||% numeric(0))
+  if (length(const_data) > 0L) {
+    return(NA_character_)
+  }
+  if (identical(ops, c(0L))) return("identity")
+  if (identical(ops, c(0L, 6L))) return("log")
+  if (identical(ops, c(0L, 9L))) return("logit")
+  if (identical(ops, c(0L, 26L))) return("probit")
+  if (identical(ops, c(0L, 7L))) return("exp")
+  NA_character_
+}
+
+#' @keywords internal
+.link_name_from_code <- function(link_code) {
+  switch(
+    as.character(as.integer(link_code)),
+    "0" = "custom",
+    "1" = "identity",
+    "2" = "log",
+    "3" = "logit",
+    "4" = "probit",
+    "5" = "exp",
+    "identity"
+  )
+}
+
+#' @keywords internal
+.default_link_for_family <- function(family_code) {
+  switch(
+    as.character(as.integer(family_code)),
+    "3" = "logit",  # bernoulli
+    "4" = "logit",  # binomial
+    "5" = "exp",    # poisson
+    "6" = "exp",    # negbin2
+    "10" = "logit", # beta mean
+    "11" = "logit", # cumulative logit latent scale
+    "identity"
+  )
+}
+
+#' @keywords internal
+.link_name_from_inv_link_expr <- function(inv_link) {
+  bc <- parse_transform_expr(inv_link)
+  .canonical_link_from_inv_link_bc(bc)
+}
+
+#' @keywords internal
+.extract_family_and_link <- function(x) {
+  if (inherits(x, "joinme_family_spec")) {
+    fam_code <- .parse_family(x$family)
+    inv_link_bc <- x$inv_link
+    if (is.null(inv_link_bc)) {
+      inv_link_bc <- .inv_link_bc_from_name(x$link %||% .default_link_for_family(fam_code))
+    }
+    link_name <- .canonical_link_from_inv_link_bc(inv_link_bc)
+    return(list(
+      family_code = as.integer(fam_code),
+      link_name = link_name,
+      inv_link_bc = inv_link_bc
+    ))
+  }
+
+  if (is.list(x) && !is.null(x$family)) {
+    fam_code <- .parse_family(x$family)
+    if (!is.null(x$link) && !is.null(x$inv_link)) {
+      cli::cli_abort(c(
+        x = "Family specification cannot contain both {.arg link} and {.arg inv_link}.",
+        i = "Keep only one of them."
+      ))
+    }
+    inv_link_bc <- if (!is.null(x$inv_link)) {
+      parse_transform_expr(x$inv_link)
+    } else if (!is.null(x$link)) {
+      .inv_link_bc_from_name(x$link)
+    } else {
+      .inv_link_bc_from_name(.default_link_for_family(fam_code))
+    }
+    link_name <- .canonical_link_from_inv_link_bc(inv_link_bc)
+    return(list(
+      family_code = as.integer(fam_code),
+      link_name = link_name,
+      inv_link_bc = inv_link_bc
+    ))
+  }
+
+  fam_code <- .parse_family(x)
+  inv_link_bc <- .inv_link_bc_from_name(.default_link_for_family(fam_code))
+  list(
+    family_code = as.integer(fam_code),
+    link_name = .canonical_link_from_inv_link_bc(inv_link_bc),
+    inv_link_bc = inv_link_bc
+  )
+}
+
 #' Parse family string to numeric code
 #' @param family String family name (e.g., "gaussian", "student_t", "binomial") or vector of names
 #' @return Integer family code (1-11) or vector of codes
@@ -227,10 +444,30 @@ NULL
     stop("families must have length ", D, " (number of markers), got ", length(families))
   }
   
-  # Parse each family
+  # Parse each family/link pair with strict, deterministic defaults.
   family_codes <- integer(D)
+  link_names <- rep(NA_character_, D)
+  link_codes <- integer(D)
+  inv_link_specs <- vector("list", D)
   for (d in seq_along(families)) {
-    family_codes[d] <- .parse_family(families[[d]])
+    spec_d <- .extract_family_and_link(families[[d]])
+    family_codes[d] <- as.integer(spec_d$family_code)
+    inv_link_specs[[d]] <- spec_d$inv_link_bc
+    link_names[d] <- spec_d$link_name
+    link_codes[d] <- if (is.na(spec_d$link_name)) 0L else .link_code_from_name(spec_d$link_name)
+  }
+
+  inv_link_n_ops <- as.integer(vapply(inv_link_specs, function(x) length(x$opcodes %||% integer(0)), integer(1)))
+  inv_link_n_const <- as.integer(vapply(inv_link_specs, function(x) length(x$const_data %||% numeric(0)), integer(1)))
+  max_inv_link_ops <- as.integer(max(inv_link_n_ops, 1L))
+  max_inv_link_const <- as.integer(max(inv_link_n_const, 1L))
+  inv_link_ops <- matrix(0L, nrow = D, ncol = max_inv_link_ops)
+  inv_link_const <- matrix(0.0, nrow = D, ncol = max_inv_link_const)
+  for (d in seq_len(D)) {
+    ops_d <- as.integer(inv_link_specs[[d]]$opcodes %||% integer(0))
+    const_d <- as.numeric(inv_link_specs[[d]]$const_data %||% numeric(0))
+    if (length(ops_d) > 0L) inv_link_ops[d, seq_along(ops_d)] <- ops_d
+    if (length(const_d) > 0L) inv_link_const[d, seq_along(const_d)] <- const_d
   }
   
   # Validate against actual data
@@ -253,7 +490,15 @@ NULL
     }
   }
   
-  family_codes
+  list(
+    family_codes = as.integer(family_codes),
+    link_codes = as.integer(link_codes),
+    link_names = as.character(link_names),
+    inv_link_n_ops = inv_link_n_ops,
+    inv_link_ops = inv_link_ops,
+    inv_link_n_const = inv_link_n_const,
+    inv_link_const = inv_link_const
+  )
 }
 
 #' Get required distributional parameters for a family
@@ -283,7 +528,7 @@ NULL
 #' Simple prior predictive sampling for validation/simulation
 #' 
 #' @param n Sample size
-#' @param eta Linear predictor
+#' @param mu Mean/probability on the response scale (i.e., inverse-link applied).
 #' @param family Integer family code
 #' @param sigma Standard deviation (if needed)
 #' @param nu Degrees of freedom (if needed, student_t)
@@ -296,7 +541,7 @@ NULL
 #' @keywords internal
 .sample_from_family <- function(
   n,
-  eta,
+  mu,
   family,
   sigma = 1,
   nu = 4,
@@ -308,49 +553,46 @@ NULL
 ) {
   # Prior predictive helper for a single family
   family <- as.integer(family)
+  if (is.null(mu)) {
+    cli::cli_abort("{.arg mu} must be provided as the inverse-link mean/probability.")
+  }
   
   if (family == 1) {
     # Gaussian
-    rnorm(n, eta, sigma)
+    rnorm(n, mu, sigma)
   } else if (family == 2) {
     # Student-t
-    rt(n, df = nu) * sigma + eta
+    rt(n, df = nu) * sigma + mu
   } else if (family == 3) {
     # Bernoulli
-    rbinom(n, size = 1, prob = plogis(eta))
+    rbinom(n, size = 1, prob = mu)
   } else if (family == 4) {
     # Binomial
-    rbinom(n, size = trials, prob = plogis(eta))
+    rbinom(n, size = trials, prob = mu)
   } else if (family == 5) {
     # Poisson
-    rpois(n, lambda = exp(eta))
+    rpois(n, lambda = mu)
   } else if (family == 6) {
     # Negative binomial 2
-    mu <- exp(eta)
-    rnbinom(n, size = phi, mu = mu)
+    rnbinom(n, size = phi, mu = pmax(mu, 1e-10))
   } else if (family == 7) {
-    # Skew-normal (using fGarch::rssnorm if available, else fallback)
-    if (requireNamespace("fGarch", quietly = TRUE)) {
-      fGarch::rssnorm(n, mean = eta, sd = sigma, xi = skew)
-    } else {
-      rnorm(n, mean = eta, sd = sigma)
-    }
+    # Skew-normal
+    brms::rskew_normal(n, mu = mu, sigma = sigma, alpha = skew)
   } else if (family == 8) {
     # Double exponential (Laplace)
     # Sample by drawing an exponential magnitude and random sign.
     sign <- sample(c(-1, 1), size = n, replace = TRUE)
-    eta + sign * rexp(n, rate = 1 / sigma)
+    mu + sign * rexp(n, rate = 1 / sigma)
   } else if (family == 9) {
     # Skew double exponential (asymmetric Laplace)
     # Piecewise exponential: probability mass split by tau_sde.
     u <- runif(n)
     e <- rexp(n, rate = 1)
-    eta + ifelse(u < tau_sde, e * sigma / tau_sde, -e * sigma / (1 - tau_sde))
+    mu + ifelse(u < tau_sde, e * sigma / tau_sde, -e * sigma / (1 - tau_sde))
   } else if (family == 10) {
     # Beta: mean is logistic(eta), precision is phi_beta
-    mu <- plogis(eta)
-    shape1 <- pmax(mu * phi_beta, 1e-6)
-    shape2 <- pmax((1 - mu) * phi_beta, 1e-6)
+    shape1 <- mu * phi_beta
+    shape2 <- (1 - mu) * phi_beta
     rbeta(n, shape1 = shape1, shape2 = shape2)
   } else if (family == 11) {
     # Cumulative logit: return category labels (1..K)

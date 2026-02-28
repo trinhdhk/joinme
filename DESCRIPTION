@@ -38,10 +38,13 @@ Imports:
     quarto,
     loo,
     bayesplot
+    ,
+    brms
 Suggests:
     knitr,
     latex2exp,
     loo,
+    mirai,
     patchwork,
     rmarkdown,
     testthat,

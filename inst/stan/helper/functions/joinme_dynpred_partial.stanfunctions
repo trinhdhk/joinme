@@ -235,6 +235,7 @@ real partial_draw(
     vector vec_cov_hazard,
     int n_basehaz_basis,
     real time_condition,
+    int n_gk,
     matrix mat_basis_gk_cond,
     matrix mat_fixed_gk_cond,
     matrix mat_id_gk_cond,
@@ -246,6 +247,13 @@ real partial_draw(
     matrix mat_marker_id_gk_cond_fwd,
     real eps_finite_diff,
     array[] int family_long,
+    array[] int link_long,
+    int max_inv_link_ops,
+    array[] int inv_link_n_ops,
+    array[,] int inv_link_ops,
+    int max_inv_link_const,
+    array[] int inv_link_n_const,
+    matrix inv_link_const,
     int n_family_sigma,
     array[] int marker_to_sigma_family,
     int n_family_nu,
@@ -361,6 +369,9 @@ real partial_draw(
     vector z_L
 ) {
   real lp = 0;  // Accumulated log-likelihood for this draw slice
+  // Load Gauss-Kronrod weights from the hardcoded table keyed by n_gk.
+  // Only the node count is passed from data; nodes/weights are fixed in Stan.
+  vector[n_gk] gk_weights = gk_weights_from_n(n_gk);
 
   // =====================================================================
   // LOOP OVER POSTERIOR DRAWS IN THIS SLICE
@@ -464,6 +475,8 @@ real partial_draw(
                  + ((n_random_marker > 0) ? dot_product(mat_marker_obs[n], v_marker[d]) : 0.0)
                  + dot_product(mat_marker_id_obs[n], w_idscaled[d]);
       // eta: linear predictor for observed row n
+      int link_d = canonical_link_code_from_program(d, inv_link_n_ops, inv_link_ops, inv_link_n_const);
+      real mu = inv_link_eta_vm(eta, d, inv_link_n_ops, inv_link_ops, inv_link_n_const, inv_link_const);
 
       // Evaluate log-likelihood based on family type and distributional
       // parameters. Each distributional parameter can be draw-specific
@@ -487,39 +500,51 @@ real partial_draw(
       if (family_long[d] == 1) {
         real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_obs[n], beta_sigma[k])) : sigma_family[k][marker_to_sigma_family[d]];
         // sig: residual scale
-        lp += normal_lpdf(y_real[n] | eta, sig);
+        lp += normal_lpdf(y_real[n] | mu, sig);
       // FAMILY 2: Student-t
       // sigma from regression; nu = 2 + exp(eta_nu) if P_nu > 0
       } else if (family_long[d] == 2) {
         real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_obs[n], beta_sigma[k])) : sigma_family[k][marker_to_sigma_family[d]];
         real nu = (P_nu > 0) ? (2 + exp(dot_product(X_nu_obs[n], beta_nu[k]))) : nu_family[k][marker_to_nu_family[d]];
         // sig: residual scale, nu: degrees of freedom
-        lp += student_t_lpdf(y_real[n] | nu, eta, sig);
+        lp += student_t_lpdf(y_real[n] | nu, mu, sig);
       // FAMILY 3: Bernoulli (logit)
       } else if (family_long[d] == 3) {
-        lp += bernoulli_logit_lpmf(y_int[n] | eta);
+        if (link_d == 3)
+          lp += bernoulli_logit_lpmf(y_int[n] | eta);
+        else
+          lp += bernoulli_lpmf(y_int[n] | fmin(fmax(mu, 1e-12), 1 - 1e-12));
       // FAMILY 4: Binomial (logit)
       } else if (family_long[d] == 4) {
-        lp += binomial_logit_lpmf(y_int[n] | trials_obs[n], eta);
+        if (link_d == 3)
+          lp += binomial_logit_lpmf(y_int[n] | trials_obs[n], eta);
+        else
+          lp += binomial_lpmf(y_int[n] | trials_obs[n], fmin(fmax(mu, 1e-12), 1 - 1e-12));
       // FAMILY 5: Poisson (log)
       } else if (family_long[d] == 5) {
-        lp += poisson_log_lpmf(y_int[n] | eta);
+        if (link_d == 5)
+          lp += poisson_log_lpmf(y_int[n] | eta);
+        else
+          lp += poisson_lpmf(y_int[n] | fmax(mu, 1e-12));
       // FAMILY 6: Negative binomial (log, dispersion phi)
       } else if (family_long[d] == 6) {
         real phi = (P_phi > 0) ? exp(dot_product(X_phi_obs[n], beta_phi[k])) : phi_family[k][marker_to_phi_family[d]];
         // phi: negbin dispersion
-        lp += neg_binomial_2_log_lpmf(y_int[n] | eta, phi);
+        if (link_d == 5)
+          lp += neg_binomial_2_log_lpmf(y_int[n] | eta, phi);
+        else
+          lp += neg_binomial_2_lpmf(y_int[n] | fmax(mu, 1e-12), phi);
       // FAMILY 7: Skew-normal (eta, sigma, alpha)
       } else if (family_long[d] == 7) {
         real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_obs[n], beta_sigma[k])) : sigma_family[k][marker_to_sigma_family[d]];
         real alpha = (P_alpha > 0) ? dot_product(X_alpha_obs[n], beta_alpha[k]) : alpha_family[k][marker_to_alpha_family[d]];
         // sig: residual scale, alpha: skewness
-        lp += skew_normal_lpdf(y_real[n] | eta, sig, alpha);
+        lp += skew_normal_lpdf(y_real[n] | mu, sig, alpha);
       // FAMILY 8: Double-exponential (Laplace)
       } else if (family_long[d] == 8) {
         real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_obs[n], beta_sigma[k])) : sigma_family[k][marker_to_sigma_family[d]];
         // sig: residual scale
-        lp += double_exponential_lpdf(y_real[n] | eta, sig);
+        lp += double_exponential_lpdf(y_real[n] | mu, sig);
       // FAMILY 9: Skew double-exponential (eta, sigma, tau)
       // tau constrained to (0,1) via logit link if regression used
       } else if (family_long[d] == 9) {
@@ -528,15 +553,15 @@ real partial_draw(
           ? tau_sde_fixed
           : ((P_tau_sde > 0) ? inv_logit(dot_product(X_tau_sde_obs[n], beta_tau_sde[k])) : tau_sde_family[k][marker_to_tau_sde_family[d]]);
         // sig: residual scale, tau_sde: skewness in (0,1)
-        lp += skew_double_exponential_lpdf(y_real[n] | eta, sig, tau_sde);
+        lp += skew_double_exponential_lpdf(y_real[n] | mu, sig, tau_sde);
       // FAMILY 10: Beta regression
       // mu = inv_logit(eta), phi = precision
       } else if (family_long[d] == 10) {
         real phi_beta = (P_phi_beta > 0) ? exp(dot_product(X_phi_beta_obs[n], beta_phi_beta[k])) : phi_beta_family[k][marker_to_phi_beta_family[d]];
-        real mu = inv_logit(eta);
+        real mu_beta = fmin(fmax(mu, 1e-12), 1 - 1e-12);
         // mu: beta mean, phi_beta: precision
-        real shape1 = fmax(mu * phi_beta, 1e-6);
-        real shape2 = fmax((1 - mu) * phi_beta, 1e-6);
+        real shape1 = fmax(mu_beta * phi_beta, 1e-6);
+        real shape2 = fmax((1 - mu_beta) * phi_beta, 1e-6);
         // shape1/shape2: beta shapes
         lp += beta_lpdf(y_real[n] | shape1, shape2);
       } else {
@@ -548,13 +573,14 @@ real partial_draw(
     // ---------------------------------------------------------------
     // STEP 5: Survival conditioning at time_condition
     // ---------------------------------------------------------------
-    // Compute association features at 15 Gauss-Kronrod nodes in [0, T_cond].
+    // Compute association features at quadrature nodes in [0, T_cond].
     // These features depend on current value, current slope, and covariance.
+    // Gauss-Kronrod node count is passed from data; weights are hardcoded.
 
-    vector[15] cvm;   // mean CV at GK nodes
-    vector[15] cvk;   // marker CV at GK nodes
-    vector[15] cvm_f; // mean CV forward
-    vector[15] cvk_f; // marker CV forward
+    vector[n_gk] cvm;   // mean CV at quadrature nodes
+    vector[n_gk] cvk;   // marker CV at quadrature nodes
+    vector[n_gk] cvm_f; // mean CV forward
+    vector[n_gk] cvk_f; // marker CV forward
 
     // Marker weights for draw k (used only for transformed marker aggregation).
     vector[n_marker_types] marker_weights_k = to_vector(marker_weights_draws[k, ]); // draw-specific signed weights
@@ -579,7 +605,7 @@ real partial_draw(
     // Convert unweighted latent effects into actual ID-by-marker REs
     vector[n_random_marker_id] wbar_i = Li * zbar; // scaled unweighted mean
 
-    for (j in 1 : 15) {
+    for (j in 1 : n_gk) {
       cvm[j] = dot_product(mat_fixed_gk_cond[j], beta_fixed[k]) + dot_product(mat_id_gk_cond[j], u_id);
       cvm_f[j] = dot_product(mat_fixed_gk_cond_fwd[j], beta_fixed[k]) + dot_product(mat_id_gk_cond_fwd[j], u_id);
 
@@ -594,8 +620,8 @@ real partial_draw(
     }
 
     // Current slopes via finite difference (time already scaled)
-    vector[15] csm_raw = eta_fd(cvm, cvm_f, eps_finite_diff); // mean slope
-    vector[15] csk_raw = eta_fd(cvk, cvk_f, eps_finite_diff); // marker slope
+    vector[n_gk] csm_raw = eta_fd(cvm, cvm_f, eps_finite_diff); // mean slope
+    vector[n_gk] csk_raw = eta_fd(cvk, cvk_f, eps_finite_diff); // marker slope
     // Variance association feature:
     // transform raw corr terms first, then apply assoc coefficients.
     int M_corr_local = num_elements(coeff_assoc_corr[k]);
@@ -621,12 +647,12 @@ real partial_draw(
     for (d in 1 : n_marker_types)
       w_draw[d] = Li * z_w[d];
 
-    vector[15] cv_tot_tf;
-    vector[15] cv_mean_tf = apply_transform_vector(cvm, tf_mode_cv_mean, functional_ops_cv_mean, const_data_cv_mean, knots_cv_mean, coeff_cv_mean, spline_degree_cv_mean);
-    vector[15] cv_marker_tf;
-    vector[15] cs_tot_tf;
-    vector[15] cs_marker_tf;
-    for (j in 1 : 15) {
+    vector[n_gk] cv_tot_tf;
+    vector[n_gk] cv_mean_tf = apply_transform_vector(cvm, tf_mode_cv_mean, functional_ops_cv_mean, const_data_cv_mean, knots_cv_mean, coeff_cv_mean, spline_degree_cv_mean);
+    vector[n_gk] cv_marker_tf;
+    vector[n_gk] cs_tot_tf;
+    vector[n_gk] cs_marker_tf;
+    for (j in 1 : n_gk) {
       real acc_cv_tot_tf = 0;
       real acc_cv_marker_tf = 0;
       real acc_cs_tot_tf = 0;
@@ -676,13 +702,13 @@ real partial_draw(
       cs_marker_tf[j] = acc_cs_marker_tf / n_marker_types;
     }
 
-    vector[15] cs_mean_tf = apply_transform_vector(csm_raw, tf_mode_cs_mean, functional_ops_cs_mean, const_data_cs_mean, knots_cs_mean, coeff_cs_mean, spline_degree_cs_mean);
+    vector[n_gk] cs_mean_tf = apply_transform_vector(csm_raw, tf_mode_cs_mean, functional_ops_cs_mean, const_data_cs_mean, knots_cs_mean, coeff_cs_mean, spline_degree_cs_mean);
     vector[M_corr_local] corr_terms_tf = apply_transform_vector(corr_terms_raw, tf_mode_corr, functional_ops_corr, const_data_corr, knots_corr, coeff_corr, spline_degree_corr);
     real corr_assoc_scalar = dot_product(flag_assoc_corr * coeff_assoc_corr[k], corr_terms_tf);
-    vector[15] corr_assoc = rep_vector(corr_assoc_scalar, 15);
+    vector[n_gk] corr_assoc = rep_vector(corr_assoc_scalar, n_gk);
 
     // Combine transformed association features into hazard predictor
-    vector[15] eta_assoc_nodes = a_cv_total * cv_tot_tf
+    vector[n_gk] eta_assoc_nodes = a_cv_total * cv_tot_tf
                                  + a_cv_mean * cv_mean_tf
                                  + a_cv_marker * cv_marker_tf
                                  + a_cs_total * cs_tot_tf
@@ -694,8 +720,8 @@ real partial_draw(
     // ---------------------------------------------------------------
     // STEP 6: Cumulative hazard via Gauss-Kronrod integration
     // ---------------------------------------------------------------
-    vector[15] log_h_total; // total log-hazard at GK nodes
-    for (j in 1 : 15) {
+    vector[n_gk] log_h_total; // total log-hazard at quadrature nodes
+    for (j in 1 : n_gk) {
       vector[K_event] log_h_cause; // cause-specific log hazards
       for (k_ev in 1 : K_event) {
         real eta_w = 0; // hazard covariate effect
@@ -711,7 +737,7 @@ real partial_draw(
     }
 
     // Survival contribution at T_cond: log S(T_cond) = -Lambda(T_cond)
-    lp += -cumhaz(time_condition, log_h_total, rep_vector(0.0, 15));
+    lp += -cumhaz(time_condition, n_gk, log_h_total, rep_vector(0.0, n_gk));
   }
 
   return lp;
