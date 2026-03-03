@@ -27,8 +27,7 @@
   vector[n_id] z_L;                      // latent standard normals for u_L
 
   /* baseline hazard (cause-specific) */
-  array[K_event] real log_h0_intercept;  // baseline log-hazard intercepts
-  array[K_event] vector[Kbs] bs_gamma_c; // spline coefficients for baseline hazard
+  array[K_event] vector[Kbs] bs_gamma_c; // spline coefficients for baseline hazard (includes intercept basis)
 
   /* hazard covariates (cause-specific) */
   array[K_event] vector[p_w] gamma_w;    // regression coefficients for W
@@ -62,14 +61,14 @@
   /* Ordinal cutpoints (shared across ordinal markers) */
   ordered[K_ord - 1] cutpoints_ord;     // cumulative-logit cutpoints
 
-  /* association coefficients (non-centered for CV/CS total + marker) */
-  real<lower=0> z_alpha_cv_total;               // latent for total CV association
-  real<lower=0> z_alpha_cs_total;               // latent for total CS association
-  real z_alpha_cv_mean;                // latent for mean CV association
-  real z_alpha_cs_mean;                // latent for mean CS association
-  real<lower=0> z_alpha_cv_marker;              // latent for marker CV association
-  real<lower=0> z_alpha_cs_marker;              // latent for marker CS association
-  vector[M_corr] alpha_corr; // corr association coefficients (off-diagonal correlations)
+  /* association coefficients (non-centered for totals/mean/marker) */
+  real z_alpha_cv_total;               // latent for total CV association
+  real z_alpha_cs_total;               // latent for total CS association
+  real z_alpha_cv_mean;               // latent for mean CV association
+  real z_alpha_cs_mean;               // latent for mean CS association
+  real z_alpha_cv_marker;              // latent for marker CV association
+  real z_alpha_cs_marker;              // latent for marker CS association
+  vector[M_corr] alpha_corr;          // corr association coefficients (off-diagonal correlations)
 
   /* marker-weight perturbations (global across ids) */
   vector[D * estimate_marker_weights * use_marker_weight_assoc] z_marker_weights; // latent signed perturbations (active only when needed)

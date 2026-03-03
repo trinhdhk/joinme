@@ -65,13 +65,13 @@
  *
  *   Transformation modes (tf_mode):
  *     0: Identity (no transformation)
- *     1: Functional opcodes (stack-based evaluator for arbitrary compositions)
+ *     1: Functional bytecode (stack-based evaluator for arbitrary compositions)
  *     2: I-spline basis (monotonic smooth transformation)
  *     3: Piecewise-linear interpolation
  *
  *   Each transform configured via:
- *     - functional_ops_*: Opcodes for mode 1
- *     - const_data_*: Constants for opcodes
+ *     - functional_ops_*: Bytecode instructions for mode 1
+ *     - const_data_*: Constants for bytecode
  *     - knots_*, coeff_*: Spline knots and coefficients for modes 2-3
  *     - spline_degree_*: Spline degree for mode 2
  *
@@ -79,7 +79,7 @@
  *   If subject i experienced an event (d_event[i] = 1):
  *     a. Identify event cause: k_ev = event_type[i] in {1, ..., K_event}
  *     b. Compute baseline log-hazard at event time:
- *        log h0(S_i) = log_h0_intercept[k_ev] + Bs_event_c[i]'*bs_gamma_c[k_ev]
+ *        log h0(S_i) = Bs_event_c[i]'*bs_gamma_c[k_ev]
  *        where Bs_event_c are B-spline basis values at S_event[i]
  *     c. Compute hazard covariate effect:
  *        eta_w = W[i]'*gamma_w[k_ev]
@@ -206,7 +206,6 @@
  * @param p_w Number of survival covariates.
  * @param W Survival design matrix.
  * @param gamma_w Survival coefficients.
- * @param log_h0_intercept Baseline hazard intercepts.
  * @param bs_gamma_c B-spline coefficients for baseline hazard.
  * @param Kbs Number of B-spline basis functions for baseline hazard.
  * @param Bs_event_c B-spline basis at event times.
@@ -403,7 +402,6 @@ real partial_joinme(
     int p_w,
     matrix W,
     array[] vector gamma_w,
-    array[] real log_h0_intercept,
     array[] vector bs_gamma_c,
     int Kbs,
     matrix Bs_event_c,
@@ -488,7 +486,6 @@ real partial_joinme(
     real tmax
 ) {
   real lp = 0;  // Accumulated log-likelihood for this subject slice
-  vector[n_gk] gk_weights = gk_weights_from_n(n_gk);
 
   // =====================================================================
   // LOOP OVER SUBJECTS IN THIS SLICE
@@ -542,7 +539,7 @@ real partial_joinme(
       
       // Per-marker inverse-link mapping from eta to mean/location scale.
       int link_d = canonical_link_code_from_program(d, inv_link_n_ops, inv_link_ops, inv_link_n_const);
-      real mu_long = inv_link_eta_vm(eta_long, d, inv_link_n_ops, inv_link_ops, inv_link_n_const, inv_link_const);
+      real mu_long = inv_link_bytecode(eta_long, d, inv_link_n_ops, inv_link_ops, inv_link_n_const, inv_link_const);
 
       // FAMILY 1: GAUSSIAN
       // p(y | eta, sigma) = Normal(y | eta, sigma)
@@ -811,15 +808,13 @@ real partial_joinme(
     // Storage for association features at quadrature nodes
     vector[n_gk] cvm_now;  // Current Value - Mean component at node j
     vector[n_gk] cvm_fwd;  // Forward value (for finite difference slope)
-    vector[n_gk] cvk_now;  // Current Value - Marker component at node j
-    vector[n_gk] cvk_fwd;  // Forward value
 
     // Algorithm detail for marker-aggregated channels at each GK node j:
-    //   1) Reconstruct marker-specific CV components for each marker d.
-    //   2) Compute marker-specific slopes with finite differences.
-    //   3) Apply transforms per marker for CV/CS total+marker channels.
-    //   4) Aggregate transformed marker channels using signed marker weights.
-    //   5) Normalize by D_mkrs to keep the aggregation scale stable across D.
+    //   Step A: reconstruct marker-specific CV components for each marker d.
+    //   Step B: compute marker-specific slopes via finite differences.
+    //   Step C: apply per-marker transforms for CV/CS total+marker channels.
+    //   Step D: aggregate transformed marker channels with signed weights.
+    //   Step E: normalize by D_mkrs to keep scale stable across marker counts.
     for (j in 1 : n_gk) {
       // CURRENT VALUE - MEAN COMPONENT
       // cvm(t) = X(t)*beta + Z_id(t)*u_i
@@ -831,20 +826,6 @@ real partial_joinme(
       cvm_fwd[j] = dot_product(X_gk_fwd[i][j], beta_scaled) 
                  + dot_product(Z_id_gk_fwd[i][j], u_id[i]);
 
-      // CURRENT VALUE - MARKER COMPONENT
-      // cvk(t) = Z_mk(t)*vbar + Z_idm(t)*wbar_i
-      // where: vbar = weighted average of v_marker (marker-level REs)
-      //        wbar_i = weighted average of w_idscaled[i, ] (ID-by-marker REs)
-      // Captures marker-specific deviations and ID-by-marker interactions
-      real mk_part_now = 0; // marker-only CV contribution
-      real mk_part_fwd = 0; // marker-only CV forward contribution
-      if (R_mk > 0) {  // Only if marker-level REs present
-        mk_part_now = dot_product(Z_mk_gk_now[i][j], vbar);
-        mk_part_fwd = dot_product(Z_mk_gk_fwd[i][j], vbar);
-      }
-
-      cvk_now[j] = mk_part_now + dot_product(Z_idm_gk_now[i][j], wbar_i_i);
-      cvk_fwd[j] = mk_part_fwd + dot_product(Z_idm_gk_fwd[i][j], wbar_i_i);
     }
 
     // STEP 2.2: Compute current slopes via finite differences
@@ -863,13 +844,9 @@ real partial_joinme(
     int M_corr_local = num_elements(a_corr);
     vector[M_corr_local] corr_terms_raw = eta_corr_varonly_weighted_const(L_i[i]);
 
-    // STEP 2.4: Aggregate total association features
-    // Combine mean and marker components for "total" associations
-    vector[n_gk] cv_tot = cvm_now + cvk_now;  // Total current value
-
-    // STEP 2.5: Apply nonlinear transformations
+    // STEP 2.4: Apply nonlinear transformations
     // Each association feature can be transformed flexibly before entering hazard
-    // Transformation modes: 0=identity, 1=functional opcodes, 2=I-spline, 3=piecewise
+    // Transformation modes: 0=identity, 1=functional bytecode, 2=I-spline, 3=piecewise
     //
     // Example: If CV exhibits nonlinear association with hazard risk,
     //          we can transform via f(CV) = log(CV), spline(CV), etc.
@@ -890,6 +867,7 @@ real partial_joinme(
       real acc_csk_raw = 0;
       real acc_cs_tot_tf = 0;
       real acc_cs_marker_tf = 0;
+      // Step A/B/C/D: per-marker build -> transform -> weighted sum.
       for (d in 1 : D_mkrs) {
         // Marker-d reconstruction (current and forward) so slope channels are
         // always formed at marker resolution before transformation.
@@ -930,7 +908,7 @@ real partial_joinme(
                                      knots_cs_marker, coeff_cs_marker, spline_degree_cs_marker);
         }
       }
-      // Final normalized marker-aggregated channels at GK node j.
+      // Step E: finalize marker-aggregated channels at GK node j.
       cv_tot_tf[j] = acc_cv_tot_tf / D_mkrs;
       cv_marker_tf[j] = acc_cv_marker_tf / D_mkrs;
       csk_raw[j] = acc_csk_raw / D_mkrs;
@@ -984,10 +962,10 @@ real partial_joinme(
         eta_w_ev = dot_product(to_vector(W[i]'), gamma_w[k_ev]);
 
       // Baseline log-hazard at event time
-      // log h0(S_i) = log_h0_intercept[k_ev] + Bs_event_c[i]' * bs_gamma_c[k_ev]
+      // log h0(S_i) = Bs_event_c[i]' * bs_gamma_c[k_ev]
       // where Bs_event_c = B-spline basis evaluated at S_event[i]
       // This gives flexible nonparametric baseline hazard
-      real log_h0_S = log_h0_intercept[k_ev] + dot_product(Bs_event_c[i], bs_gamma_c[k_ev]);
+      real log_h0_S = dot_product(Bs_event_c[i], bs_gamma_c[k_ev]);
       // log_h0_S: baseline log-hazard at event time
 
       // Association features at event time
@@ -1005,19 +983,11 @@ real partial_joinme(
         mk_part_S_fwd = dot_product(Z_mk_event_fwd[i], vbar);
       }
 
-      real cvk_S = mk_part_S + dot_product(Z_idm_event_now[i], wbar_i_i);
-      real cvk_S_fwd = mk_part_S_fwd + dot_product(Z_idm_event_fwd[i], wbar_i_i);
-      // cvk_S/cvk_S_fwd: marker-id CV at event time and forward shift
-
       // Current slopes at event time (finite difference)
       real csm_S_raw = ((cvm_S_fwd - cvm_S) / eps_fd) / tmax; // mean slope at event
-      real csk_S_raw = 0; // marker slope at event (weighted across markers)
 
       // CORR at event time equals the same transformed-and-weighted constant.
       real corr_S_assoc = corr_assoc_scalar;
-
-      // Aggregate totals
-      real cv_S_tot = cvm_S + cvk_S; // total CV at event
 
       // Association features at event time
       real cv_S_tot_tf = 0;
@@ -1027,7 +997,10 @@ real partial_joinme(
       real cv_S_marker_tf = 0;
       real cs_S_tot_tf = 0;
       real cs_S_marker_tf = 0;
-      // Event-time counterpart of the same marker-resolved transform pipeline.
+      // Event-time marker pipeline:
+      //   Step A: rebuild marker-specific CV/CS pieces at S_event.
+      //   Step B: apply transforms per marker.
+      //   Step C: aggregate with weights and normalize.
       for (d in 1 : D_mkrs) {
         real mk_part_S_d = 0;
         real mk_part_S_fwd_d = 0;
@@ -1052,7 +1025,6 @@ real partial_joinme(
           real csk_S_raw_d = ((cvk_S_fwd_d - cvk_S_d) / eps_fd) / tmax;
           real cs_S_tot_raw_d = csm_S_raw + csk_S_raw_d;
 
-          csk_S_raw += marker_weights_eff[d] * csk_S_raw_d;
           cs_S_tot_tf += marker_weights_eff[d]
             * apply_transform_scalar(cs_S_tot_raw_d, tf_mode_cs_tot,
                                      functional_ops_cs, const_data_cs,
@@ -1063,9 +1035,9 @@ real partial_joinme(
                                      knots_cs_marker, coeff_cs_marker, spline_degree_cs_marker);
         }
       }
+      // Step C: normalize aggregated marker channels.
       cv_S_tot_tf /= D_mkrs;
       cv_S_marker_tf /= D_mkrs;
-      csk_S_raw /= D_mkrs;
       cs_S_tot_tf /= D_mkrs;
       cs_S_marker_tf /= D_mkrs;
 
@@ -1084,7 +1056,7 @@ real partial_joinme(
       // eta_assoc_S: association predictor at event time
       
 
-      // log h0(S_i) = log_h0_intercept[k_ev] + Bs_event_c[i]' * bs_gamma_c[k_ev]
+      // log h0(S_i) = Bs_event_c[i]' * bs_gamma_c[k_ev]
       lp_i += log_h0_S + eta_w_ev + eta_assoc_S;
     }
 
@@ -1094,12 +1066,11 @@ real partial_joinme(
 
     //
     // For COMPETING RISKS, total hazard at time t is SUM across all event types:
-
     //
     // Each cause-specific hazard:
 
     //
-    // Numerical integration via 15-point Gauss-Kronrod:
+    // Numerical integration via n-gk-point Gauss-Kronrod:
 
     //   where t_j are GK nodes in [0, S_i], w_j are GK weights
     
@@ -1118,8 +1089,7 @@ real partial_joinme(
         
         // Cause-specific log-hazard:
 
-        log_h_cause[k_ev] = log_h0_intercept[k_ev]
-                            + dot_product(Bs_gk_c[i][j], bs_gamma_c[k_ev])  // Baseline hazard
+        log_h_cause[k_ev] = dot_product(Bs_gk_c[i][j], bs_gamma_c[k_ev])  // Baseline hazard
                             + eta_w                                          // Covariate effect
                             + eta_assoc_nodes[j];                            // Association effect
       }

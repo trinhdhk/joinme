@@ -7,24 +7,22 @@
 gk_quadrature(nodes = 15L)
 }
 \arguments{
-\item{nodes}{Positive integer target node count. Defaults to \code{15}.
-Allowed values are exactly \code{7}, \code{15}, \code{31}, \code{41}, \code{51}, and
-\code{61}.}
+\item{nodes}{Positive integer node count. Allowed values are exactly
+\code{7}, \code{15}, \code{31}, \code{41}, \code{51}, and \code{61}. Defaults to \code{15}.}
 }
 \value{
 A named list with components:
-\describe{
-  \item{n_gk}{Integer total node count.}
-  \item{nodes}{Numeric vector of nodes on \code{[0, 1]}.}
-  \item{weights}{Numeric vector of normalized weights summing to \code{1}.}
-  \item{panels}{Integer number of panels (\code{1} for single-panel rules).}
-  \item{rule}{Character rule label (\code{"gk7"}, \code{"gk15"}, \code{"gk31"}, \code{"gk41"}, \code{"gk51"}, or \code{"gk61"}).}
+\\describe{
+\\item{n_gk}{Integer total node count.}
+\\item{nodes}{Numeric vector of nodes on \verb{[0, 1]}.}
+\\item{weights}{Numeric vector of normalized weights summing to \code{1}.}
+\\item{panels}{Always \code{1L} (single fixed rule).}
+\\item{rule}{Character rule label (\code{"gk7"}, \code{"gk15"}, \code{"gk31"}, \code{"gk41"}, \code{"gk51"}, or \code{"gk61"}).}
 }
 }
 \description{
-Build a quadrature grid on \code{[0, 1]} for survival integration.
+Build a quadrature grid on \verb{[0, 1]} for survival integration.
 }
 \details{
-The function returns exact single-panel Gauss-Kronrod rules for supported node
-counts \code{7}, \code{15}, \code{31}, \code{41}, \code{51}, and \code{61}.
+Only fixed single-panel rules are supported.
 }

@@ -134,7 +134,6 @@
   array[n_draws] vector[num_unique_cov_entries] lambda_corr_reg; // loadings
 
   int<lower=1> K_event;                        // number of competing risks
-  array[n_draws, K_event] real log_h0_intercept; // baseline hazard intercepts
   array[n_draws, K_event] vector[n_basehaz_basis] bs_gamma_c; // spline coeffs
   array[n_draws, K_event] vector[n_cov_hazard] gamma_hazard;  // hazard covariates
 
@@ -181,19 +180,19 @@
   int<lower=0, upper=3> tf_mode_cs_marker;     // transform mode: marker CS
 
   int<lower=0> n_functional_ops_cv;            // op count for total CV
-  array[n_functional_ops_cv] int<lower=0, upper=26> functional_ops_cv; // opcode stream
-  int<lower=0> n_const_cv;                     // constants for total CV opcodes
-  vector[n_const_cv] const_data_cv;            // constants for total CV opcodes
+  array[n_functional_ops_cv] int<lower=0, upper=26> functional_ops_cv; // bytecode stream
+  int<lower=0> n_const_cv;                     // constants for total CV bytecode
+  vector[n_const_cv] const_data_cv;            // constants for total CV bytecode
 
   int<lower=0> n_functional_ops_cs;            // op count for total CS
-  array[n_functional_ops_cs] int<lower=0, upper=26> functional_ops_cs; // opcode stream
-  int<lower=0> n_const_cs;                     // constants for total CS opcodes
-  vector[n_const_cs] const_data_cs;            // constants for total CS opcodes
+  array[n_functional_ops_cs] int<lower=0, upper=26> functional_ops_cs; // bytecode stream
+  int<lower=0> n_const_cs;                     // constants for total CS bytecode
+  vector[n_const_cs] const_data_cs;            // constants for total CS bytecode
 
   int<lower=0> n_functional_ops_corr;          // op count for corr
-  array[n_functional_ops_corr] int<lower=0, upper=26> functional_ops_corr; // opcode stream
-  int<lower=0> n_const_corr;                   // constants for corr opcodes
-  vector[n_const_corr] const_data_corr;        // constants for corr opcodes
+  array[n_functional_ops_corr] int<lower=0, upper=26> functional_ops_corr; // bytecode stream
+  int<lower=0> n_const_corr;                   // constants for corr bytecode
+  vector[n_const_corr] const_data_corr;        // constants for corr bytecode
 
   int<lower=0> n_knots_cv;                     // knots for total CV spline
   vector[n_knots_cv] knots_cv;                 // knot locations
@@ -214,24 +213,24 @@
   int<lower=1, upper=5> spline_degree_corr;    // spline degree for corr
 
   int<lower=0> n_functional_ops_cv_mean;        // op count for mean CV
-  array[n_functional_ops_cv_mean] int<lower=0, upper=26> functional_ops_cv_mean; // opcode stream
-  int<lower=0> n_const_cv_mean;                 // constants for mean CV opcodes
-  vector[n_const_cv_mean] const_data_cv_mean;   // constants for mean CV opcodes
+  array[n_functional_ops_cv_mean] int<lower=0, upper=26> functional_ops_cv_mean; // bytecode stream
+  int<lower=0> n_const_cv_mean;                 // constants for mean CV bytecode
+  vector[n_const_cv_mean] const_data_cv_mean;   // constants for mean CV bytecode
 
   int<lower=0> n_functional_ops_cv_marker;      // op count for marker CV
-  array[n_functional_ops_cv_marker] int<lower=0, upper=26> functional_ops_cv_marker; // opcode stream
-  int<lower=0> n_const_cv_marker;               // constants for marker CV opcodes
-  vector[n_const_cv_marker] const_data_cv_marker; // constants for marker CV opcodes
+  array[n_functional_ops_cv_marker] int<lower=0, upper=26> functional_ops_cv_marker; // bytecode stream
+  int<lower=0> n_const_cv_marker;               // constants for marker CV bytecode
+  vector[n_const_cv_marker] const_data_cv_marker; // constants for marker CV bytecode
 
   int<lower=0> n_functional_ops_cs_mean;        // op count for mean CS
-  array[n_functional_ops_cs_mean] int<lower=0, upper=26> functional_ops_cs_mean; // opcode stream
-  int<lower=0> n_const_cs_mean;                 // constants for mean CS opcodes
-  vector[n_const_cs_mean] const_data_cs_mean;   // constants for mean CS opcodes
+  array[n_functional_ops_cs_mean] int<lower=0, upper=26> functional_ops_cs_mean; // bytecode stream
+  int<lower=0> n_const_cs_mean;                 // constants for mean CS bytecode
+  vector[n_const_cs_mean] const_data_cs_mean;   // constants for mean CS bytecode
 
   int<lower=0> n_functional_ops_cs_marker;      // op count for marker CS
-  array[n_functional_ops_cs_marker] int<lower=0, upper=26> functional_ops_cs_marker; // opcode stream
-  int<lower=0> n_const_cs_marker;               // constants for marker CS opcodes
-  vector[n_const_cs_marker] const_data_cs_marker; // constants for marker CS opcodes
+  array[n_functional_ops_cs_marker] int<lower=0, upper=26> functional_ops_cs_marker; // bytecode stream
+  int<lower=0> n_const_cs_marker;               // constants for marker CS bytecode
+  vector[n_const_cs_marker] const_data_cs_marker; // constants for marker CS bytecode
 
   int<lower=0> n_knots_cv_mean;                 // knots for mean CV spline
   vector[n_knots_cv_mean] knots_cv_mean;         // knot locations

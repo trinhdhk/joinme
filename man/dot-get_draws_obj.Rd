@@ -4,7 +4,13 @@
 \alias{.get_draws_obj}
 \title{Unified draws object helper}
 \usage{
-.get_draws_obj(fit, variables = NULL, draws = NULL, seed = 1)
+.get_draws_obj(
+  fit,
+  variables = NULL,
+  draws = NULL,
+  seed = 1,
+  keep_chains = FALSE
+)
 }
 \description{
 Unified draws object helper

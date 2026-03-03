@@ -1,13 +1,13 @@
 /**
  * @file functional_transform.stanfunctions
- * @brief Runtime opcode interpreter for arbitrary transformations.
+ * @brief Runtime bytecode interpreter for arbitrary transformations.
  *
- * @details This module evaluates transformations defined by an opcode
- * sequence in Reverse Polish Notation (RPN). Each opcode can push values
+ * @details This module evaluates transformations defined by a bytecode
+ * sequence in Reverse Polish Notation (RPN). Each bytecode instruction can push values
  * onto a stack or apply an operation to the top elements. This allows
  * complex transformations to be defined entirely by data.
  *
- * Opcode definitions:
+ * Bytecode instruction definitions:
  *   0: PUSH_X        (push input x onto stack)
  *   1: PUSH_CONST    (push next data element as constant)
  *   2: ADD           (pop b,a; push a+b)
@@ -37,31 +37,31 @@
  *  26: PROBIT        (pop a; push Phi(a))
  *
  * Usage:
- *   opcodes    : integer array of operation codes
+ *   bytecode   : integer array of bytecode instructions
  *   const_data : vector of constants referenced by PUSH_CONST
- *   result = eval_functional_scalar(x, opcodes, const_data)
+ *   result = eval_bytecode_scalar(x, bytecode, const_data)
  *
  * Example: f(x) = (x + 2) * 3
- *   opcodes:    [0, 1, 2, 1, 4]  (PUSH_X, PUSH_CONST, ADD, PUSH_CONST, MUL)
+ *   bytecode:   [0, 1, 2, 1, 4]  (PUSH_X, PUSH_CONST, ADD, PUSH_CONST, MUL)
  *   const_data: [2, 3]
  *   x = 5 -> (5 + 2) * 3 = 21
  */
 
   /**
-   * @brief Functional opcode evaluator for scalar inputs.
+   * @brief Functional bytecode evaluator for scalar inputs.
    *
    * @param x Input value
-  * @param opcodes Array of operation codes (0-26)
+  * @param bytecode Array of bytecode instructions (0-26)
    * @param const_data Vector of constant values for PUSH_CONST operations
-   * @return Scalar result of opcode evaluation
+   * @return Scalar result of bytecode evaluation
    */
-  real eval_functional_scalar(real x, array[] int opcodes, vector const_data) {
+  real eval_bytecode_scalar(real x, array[] int bytecode, vector const_data) {
     vector[100] stack;  // Stack for computation (fixed maximum depth)
     int stack_ptr = 0;  // Stack pointer (top index)
     int const_idx = 1;  // Index into const_data for PUSH_CONST
 
-    for (op_idx in 1:size(opcodes)) {
-      int op = opcodes[op_idx];
+    for (op_idx in 1:size(bytecode)) {
+      int op = bytecode[op_idx];
 
       if (op == 0) {
         // PUSH_X
@@ -164,21 +164,35 @@
   }
 
   /**
-   * @brief Functional opcode evaluator for vector inputs (element-wise).
+   * @brief Functional bytecode evaluator for vector inputs (element-wise).
    *
    * @param x Vector of input values
-  * @param opcodes Array of operation codes (0-26)
+  * @param bytecode Array of bytecode instructions (0-26)
    * @param const_data Vector of constant values for PUSH_CONST operations
-   * @return Vector result of opcode evaluation applied element-wise
+   * @return Vector result of bytecode evaluation applied element-wise
    */
-  vector eval_functional_vector(vector x, array[] int opcodes, vector const_data) {
+  vector eval_bytecode_vector(vector x, array[] int bytecode, vector const_data) {
     int n = num_elements(x);
     vector[n] result;
 
     for (i in 1:n) {
       // Apply scalar evaluator element-wise
-      result[i] = eval_functional_scalar(x[i], opcodes, const_data);
+      result[i] = eval_bytecode_scalar(x[i], bytecode, const_data);
     }
 
     return result;
+  }
+
+  /**
+   * @brief Backward-compatible alias for older functional interpreter naming.
+   */
+  real eval_functional_scalar(real x, array[] int opcodes, vector const_data) {
+    return eval_bytecode_scalar(x, opcodes, const_data);
+  }
+
+  /**
+   * @brief Backward-compatible alias for older functional interpreter naming.
+   */
+  vector eval_functional_vector(vector x, array[] int opcodes, vector const_data) {
+    return eval_bytecode_vector(x, opcodes, const_data);
   }

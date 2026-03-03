@@ -5,7 +5,7 @@
  * @details This layer provides a consistent interface for applying
  * transformations to scalar or vector inputs. It dispatches to one of:
  *   - Mode 0: Identity (no transformation)
- *   - Mode 1: Functional opcode evaluator (stack-based)
+ *   - Mode 1: Functional bytecode evaluator (stack-based)
  *   - Mode 2: I-spline basis (monotone smooth)
  *   - Mode 3: Piecewise-linear interpolation
  *
@@ -17,9 +17,9 @@
    * @brief Dispatch scalar transformation evaluation.
    *
    * @param x Input scalar
-  * @param mode Transformation mode (0=identity, 1=functional opcode, 2=ispline, 3=pwlin)
-  * @param opcodes Functional opcodes (for mode 1)
-  * @param const_data Functional opcode constants (for mode 1)
+  * @param mode Transformation mode (0=identity, 1=functional bytecode, 2=ispline, 3=pwlin)
+  * @param opcodes Functional bytecode instructions (for mode 1)
+  * @param const_data Functional bytecode constants (for mode 1)
   * @param spline_knots Knot vector (for modes 2-3)
   * @param spline_coeff Spline or piecewise coefficients (for modes 2-3)
    * @param spline_degree Spline degree (for mode 2)
@@ -37,8 +37,8 @@
     if (mode == 0) {
       return x;
     } else if (mode == 1) {
-      // Functional opcode evaluation
-      return eval_functional_scalar(x, opcodes, const_data);
+      // Functional bytecode evaluation
+      return eval_bytecode_scalar(x, opcodes, const_data);
     } else if (mode == 2) {
       // I-spline basis evaluation (monotone)
       return ispline_eval(x, spline_knots, spline_degree, spline_coeff);
@@ -54,9 +54,9 @@
    * @brief Dispatch vector transformation evaluation.
    *
    * @param x Vector of input values
-  * @param mode Transformation mode (0=identity, 1=functional opcode, 2=ispline, 3=pwlin)
-  * @param opcodes Functional opcodes (for mode 1)
-  * @param const_data Functional opcode constants (for mode 1)
+  * @param mode Transformation mode (0=identity, 1=functional bytecode, 2=ispline, 3=pwlin)
+  * @param opcodes Functional bytecode instructions (for mode 1)
+  * @param const_data Functional bytecode constants (for mode 1)
   * @param spline_knots Knot vector (for modes 2-3)
   * @param spline_coeff Spline or piecewise coefficients (for modes 2-3)
    * @param spline_degree Spline degree (for mode 2)
@@ -74,8 +74,8 @@
     if (mode == 0) {
       return x;
     } else if (mode == 1) {
-      // Functional opcode evaluation (element-wise)
-      return eval_functional_vector(x, opcodes, const_data);
+      // Functional bytecode evaluation (element-wise)
+      return eval_bytecode_vector(x, opcodes, const_data);
     } else if (mode == 2) {
       // I-spline basis evaluation (element-wise)
       return ispline_eval_vec(x, spline_knots, spline_degree, spline_coeff);

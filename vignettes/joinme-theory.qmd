@@ -194,9 +194,10 @@ marker-aggregated terms.
 To make the weighting explicit, let $\mathbf{v}_d$ denote marker-level random
 effects and $\mathbf{w}_{id}$ denote marker-by-subject random effects. The
 marker-weighted summaries are formed as weighted means across markers with
-weights $\omega_d$. In the Stan implementation, signed marker weights are used
-directly for aggregation (or estimated as additive perturbations around base
-weights), and the corresponding weighted means are computed as
+weights $\omega_d$. In the Stan implementation, base weights are treated as
+prior offsets and used directly. Let $w^{raw}_d = w^{(0)}_d + z_d$ (or
+$w^{raw}_d = w^{(0)}_d$ if fixed), and set $\omega_d = w^{raw}_d$. The
+corresponding weighted means are computed as
 
 $$
 \bar{\mathbf{v}} = \sum_{d=1}^D \omega_d \mathbf{v}_d, \qquad
@@ -212,11 +213,14 @@ Marker weights and CV/CS association coefficients are regularized to avoid
 overfitting when $D$ is large.
 
 - **Marker weights**: when estimated, `joinme` uses latent additive perturbations
-  $\,\omega = \omega^{(0)} + z_w$ with $z_w \sim \mathcal{N}(0, I)$, and these
-  signed weights are used directly in marker-aggregated association terms.
-- **CV/CS total and marker coefficients**: non-centered normal parameterization,
-  e.g. $\alpha_{cv,total} = z_{cv,total}\,\sigma_{cv,total}$ with
-  $z_{cv,total} \sim \mathcal{N}(0,1)$ and $\sigma_{cv,total} > 0$.
+  $\,w^{raw} = w^{(0)} + z_w$ with $z_w \sim \mathcal{N}(0, I)$ and uses the
+  resulting weights directly in marker-aggregated association terms.
+- **CV/CS total and marker coefficients**: non-centered priors
+  $\alpha = z_{\alpha} \cdot sd_{\alpha}$ with a single sign anchor for
+  identifiability when marker-weight channels are active. Specifically, only the
+  first active latent in the order `cv_total`, `cs_total`, `cv_marker`,
+  `cs_marker` is constrained non-negative (via absolute-value mapping); remaining
+  active channels are unconstrained.
 
 This keeps marker effects signed (positive or negative) while improving sampling
 geometry for hierarchical association parameters.
@@ -264,21 +268,25 @@ Default priors are weakly informative and aligned with the Stan implementation:
   longitudinal and survival covariates use Student-$t$ priors with 6 degrees of
   freedom, centered at 0, with user-specified or default scales. The heavier
   tails stabilize inference while keeping weak regularization.
-- **Association coefficients**: CV/CS total and marker coefficients use
-  non-centered normal priors; mean-side terms use standard normal priors.
+- **Association coefficients**: CV/CS total, mean, and marker coefficients use
+  a non-centered parameterization $\alpha = z_{\alpha} \cdot sd_{\alpha}$. For
+  marker-weight-involving channels (`cv_total`, `cs_total`, `cv_marker`,
+  `cs_marker`), only the first active latent is sign-anchored non-negative to
+  improve identifiability; other channels remain free to be positive or negative.
 - **Marker weights**: when estimated, marker-weight perturbations use
   standard normal priors in additive latent form around user-supplied base
-  weights, and the resulting signed weights are used directly in
-  marker-aggregated association terms.
+  weights, and the resulting weights enter marker-aggregated association terms
+  without additional normalization.
 - **Random-effect scales**: subject, marker, and marker-by-subject standard
   deviations use half-normal priors on the original scale for weakly informative
   positivity constraints.
 - **Random-effect correlations**: correlation matrices use an LKJ-Cholesky prior
   with concentration parameter $\eta$, allowing mild regularization toward
   identity while remaining flexible.
-- **Baseline hazard**: log-baseline intercepts have normal priors centered at a
-  low log-hazard. Spline coefficients are penalized via second-difference
-  priors, providing smoothness control for the baseline hazard.
+- **Baseline hazard**: the baseline level is encoded by the intercept basis
+  column in `bs_gamma_c` (there is no standalone `log_h0_intercept` parameter).
+  Spline coefficients are penalized via second-difference priors excluding that
+  intercept-basis column, providing smoothness control for the baseline hazard.
 - **Penalized transformations**: when `type = "ispline_penalized"`, the I-spline
   coefficients use a smoothness penalty (second differences) to stabilize
   nonlinear association transforms in sparse time regions.

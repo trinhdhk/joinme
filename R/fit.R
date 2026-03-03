@@ -26,9 +26,8 @@
 #' for both current value (CV) and current slope (CS) association components. When
 #' `fixed_marker_weights = FALSE`, signed perturbations are estimated around base
 #' weights using `marker_weights + z_marker_weights` with
-#' `z_marker_weights ~ N(0, 1)`. The effective marker intensities are then computed
-#' as `2 * inv_logit(w_raw) - 1`, yielding bounded weights in (-1, 1) that scale the
-#' association contributions.
+#' `z_marker_weights ~ N(0, 1)`. The effective marker intensities are used directly
+#' from `w_raw` without additional normalization and scale the association contributions.
 #'
 #' Formula-scoped subject weighting is supported in random-effect grouping terms via
 #' `weighted(group, weights = <column>)`. For example:
@@ -42,7 +41,9 @@
 #'
 #' Association coefficients are denoted with the `alpha_` prefix to match joint-model
 #' conventions and to avoid confusion with the linear predictor eta used throughout
-#' the longitudinal and survival submodels.
+#' the longitudinal and survival submodels. Total, marker, and mean associations use
+#' a positive non-centered parameterization: `alpha = z_alpha * sd_alpha`, which
+#' stabilizes sampling while preserving the intended sign structure via marker weights.
 #'
 #' The typical workflow is:
 #' 1. Prepare `dataLong` and `dataEvent` with aligned ids and time scales.

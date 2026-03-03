@@ -25,11 +25,15 @@ extract <- function(object, ...) {
 #'   to subset extracted columns.
 #' @param variable Optional character vector of raw Stan variable names. This is
 #'   used directly when `what = "raw"` and can also further filter mapped outputs.
-#' @param draws Optional number of posterior draws to keep.
+#' @param draws Optional number of posterior draws to keep per chain.
 #' @param seed Integer seed used when subsetting draws.
+#' @param keep_chains Logical; if TRUE, return draws with chains in a separate
+#'   dimension (iteration x chain x term). If FALSE, return a flattened
+#'   draws-by-term matrix.
 #'
 #' @return A list with fields:
-#'   - `draws`: numeric matrix (rows = draws, cols = requested terms)
+#'   - `draws`: numeric array when `keep_chains = TRUE` (iteration x chain x term),
+#'     otherwise a numeric matrix (rows = draws, cols = requested terms)
 #'   - `term_map`: data.frame mapping `term` to Stan `variable`
 #' @export
 extract.JoinMeFit <- function(object,
@@ -38,6 +42,7 @@ extract.JoinMeFit <- function(object,
                               variable = NULL,
                               draws = NULL,
                               seed = 1,
+                              keep_chains = TRUE,
                               ...) {
   what <- match.arg(what)
   fit <- object$fit
@@ -155,11 +160,31 @@ extract.JoinMeFit <- function(object,
 
   # Preserve order and duplicates from the map for user-facing terms.
   var_unique <- unique(map$variable)
-  dm <- .get_draws_matrix(fit, variables = var_unique, draws = draws, seed = seed)
-  out <- matrix(NA_real_, nrow = nrow(dm), ncol = nrow(map))
-  colnames(out) <- make.unique(map$term)
-  for (j in seq_len(nrow(map))) {
-    out[, j] <- dm[, map$variable[j]]
+  if (isTRUE(keep_chains)) {
+    arr <- .get_draws_array(fit, variables = var_unique, draws = draws, seed = seed)
+    var_idx <- match(map$variable, dimnames(arr)[[3]])
+    if (any(is.na(var_idx))) {
+      cli::cli_abort("Requested variables not found in the draw array.")
+    }
+    out <- array(
+      NA_real_,
+      dim = c(dim(arr)[1], dim(arr)[2], nrow(map)),
+      dimnames = list(
+        iteration = dimnames(arr)[[1]],
+        chain = dimnames(arr)[[2]],
+        term = make.unique(map$term)
+      )
+    )
+    for (j in seq_len(nrow(map))) {
+      out[, , j] <- arr[, , var_idx[j]]
+    }
+  } else {
+    dm <- .get_draws_matrix(fit, variables = var_unique, draws = draws, seed = seed)
+    out <- matrix(NA_real_, nrow = nrow(dm), ncol = nrow(map))
+    colnames(out) <- make.unique(map$term)
+    for (j in seq_len(nrow(map))) {
+      out[, j] <- dm[, map$variable[j]]
+    }
   }
 
   list(

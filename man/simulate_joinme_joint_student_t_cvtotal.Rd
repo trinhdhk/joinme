@@ -14,7 +14,7 @@ simulate_joinme_joint_student_t_cvtotal(
   R_id = 2,
   R_mk = 1,
   beta = c(`(Intercept)` = 1, time = 0.5, x1 = 0.4),
-  gamma_w = c(`(Intercept)` = 0, x1 = 0.3, x2 = -0.2),
+  gamma_w = c(x1 = 0.3, x2 = -0.2),
   alpha_cv_total = 0.6,
   h0 = weibull_h0(shape = 1.4, scale = 6),
   time_cens = 8,
@@ -47,7 +47,7 @@ simulate_joinme_joint_student_t_cvtotal(
 
 \item{beta}{Fixed effects (Intercept, time, x1) on original scale.}
 
-\item{gamma_w}{Hazard covariates (Intercept, x1, x2).}
+\item{gamma_w}{Hazard covariates (e.g. x1, x2).}
 
 \item{alpha_cv_total}{Association coefficient for CV_total.}
 

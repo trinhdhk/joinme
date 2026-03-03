@@ -6,7 +6,7 @@
 \usage{
 simulate_joinme(
   formulaLong = y ~ 1 + time + x1 + (1 + time | id) + (0 + x1 + (1 + time | id) | marker),
-  formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
+  formulaEvent = survival::Surv(time, event) ~ x1 + x2,
   formulaDist = NULL,
   formulaAssoc = NULL,
   transforms = NULL,
@@ -40,6 +40,8 @@ simulate_joinme(
   integration_control = list(rel.tol = 1e-06, subdivisions = 2000L, stop.on.error = TRUE),
   root_control = list(t_init = 1, t_max = 50, expand = 1.7, max_expand = 60L),
   quadrature_nodes = 15L,
+  n_workers = 1L,
+  use_mirai = TRUE,
   id_var = "id",
   marker_var = "marker",
   time_var = "time",
@@ -83,7 +85,7 @@ including \code{inv_logit}/\code{expit}/\code{sigmoid}, \code{exp}, \code{log}, 
 
 \item{n_id}{Number of subjects.}
 
-\item{families}{Marker-specific family names.}
+\item{families}{Family specification input (vector or list).}
 
 \item{marker_levels}{Optional marker names; defaults to \code{m1}, \code{m2}, ...}
 
@@ -100,22 +102,25 @@ e.g. \code{list(x1 ~ rnorm(n_id), x2 ~ rt(n_id, df = 5))}.}
 
 \item{marker_weights}{Optional base marker weights used as prior offsets for
 association aggregation. Effective weights are computed as
-\eqn{2 \cdot \text{inv\_logit}(w_{raw}) - 1} and used for marker-averaged CV/CS
-summaries. Weights are reported as \code{truth$marker_weights}.}
+\code{w_raw} and used for marker-averaged CV/CS terms.
+If \code{NULL}, equal weights are used and aggregated
+as weighted means divided by marker count. Inputs are treated as direct
+signed weights used in association aggregation.}
 
 \item{assoc}{Association components (same names as fit): \code{cv_total}, \code{cv_mean},
 \code{cv_marker}, \code{cs_total}, \code{cs_mean}, \code{cs_marker}, \code{corr}.}
 
 \item{assoc_coefs}{Association coefficients for hazard terms.
 Non-\code{corr} terms accept scalar values. The \code{corr} term accepts a vector of
-off-diagonal correlation coefficients ordered as \code{(2,1), (3,1), (3,2), ...}
+off-diagonal correlation coefficients ordered as \verb{(2,1), (3,1), (3,2), ...}
 in lower-triangular row-major order of the marker-by-id random-effect
 covariance dimension.}
 
 \item{beta_long}{Fixed-effect coefficients for \code{formulaLong} fixed part. If NULL,
 coefficients are randomly generated and named by model-matrix columns.}
 
-\item{beta_event}{Survival baseline-covariate coefficients for \code{formulaEvent} RHS.
+\item{beta_event}{Survival baseline-covariate coefficients for non-intercept
+terms in \code{formulaEvent} RHS.
 If NULL, coefficients are randomly generated.}
 
 \item{dist_coefs}{Named list of vectors for distributional regressions (\code{sigma}, \code{nu},
@@ -149,14 +154,35 @@ model-matrix column names). If NULL, coefficients are generated.}
 \item{root_control}{Root finding control for inverse-CDF sampling.}
 
 \item{quadrature_nodes}{Optional Gauss-Kronrod node count for simulation-side
-survival integration. Allowed values: 7, 15, 31, 41, 51, 61. These match the
-fixed GK rules hardcoded in Stan; only the node count is passed when fitting.}
+survival integration. Allowed values: 7, 15, 31, 41, 51, 61.}
+
+\item{n_workers}{Number of workers to use when \code{use_mirai = TRUE}.}
+
+\item{use_mirai}{Logical; when TRUE and \code{n_workers > 1}, use \code{mirai} for
+parallel simulation if available. Parallel jobs are seeded deterministically
+from the main \code{seed} for reproducible simulations.}
 
 \item{id_var, marker_var, time_var, y_var, event_time_var, event_var}{Column names aligned
 with \code{joinme_standata()} defaults.}
+
+\item{fun}{Function to apply.}
+
+\item{...}{Additional arguments passed to fun.}
+
+\item{x}{Numeric vector on link scale.}
+
+\item{inv_link_bc}{Parsed inverse-link bytecode.}
+
+\item{D}{Number of markers.}
 }
 \value{
 list(dataLong, dataEvent, true_params, marker_info, helpers, tmax)
+
+List of results.
+
+Numeric vector on response scale.
+
+List with family codes, link names, and inverse-link bytecode per marker.
 }
 \description{
 Generalized simulator for \code{joinme} that mirrors the fitting syntax as closely as
@@ -176,7 +202,12 @@ is generated from the same formula machinery used during fitting.
 \dontrun{
 sim <- simulate_joinme(
   n_id = 30,
-  families = c("gaussian", "student_t", "skew_normal"),
+  families = list(
+    jm_family("gaussian"),
+    jm_family("student_t", inv_link = ~ inv_logit(x / 2)),
+    jm_family("skew_normal")
+  ),
+  quadrature_nodes = 31,
   formulaDist = list(
     sigma[family=gaussian] ~ 1 + x1,
     sigma[family=student_t] ~ 1 + time,
@@ -186,3 +217,4 @@ sim <- simulate_joinme(
 )
 }
 }
+\keyword{internal}

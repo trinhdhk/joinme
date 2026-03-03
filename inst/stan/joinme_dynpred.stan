@@ -18,8 +18,8 @@ functions {
   #include helper/functions/eta_fd.stanfunctions
   #include helper/functions/eta_corr_varonly_weighted_const.stanfunctions
   #include helper/functions/cumhaz.stanfunctions
+  #include helper/functions/bytecode_transform.stanfunctions
   #include helper/functions/link_functions.stanfunctions
-  #include helper/functions/functional_transform.stanfunctions
   #include helper/functions/basis_functions.stanfunctions
   #include helper/functions/composite_transform.stanfunctions
 
@@ -153,7 +153,6 @@ model {
     lambda_corr_reg,
     /* Draw-specific survival parameters */
     K_event,
-    log_h0_intercept,
     bs_gamma_c,
     gamma_hazard,
     /* Draw-specific longitudinal distributional parameters */
@@ -189,7 +188,7 @@ model {
     tf_mode_cv_marker,
     tf_mode_cs_mean,
     tf_mode_cs_marker,
-    /* Transform configs (opcodes, constants, splines) */
+    /* Transform configs (bytecode, constants, splines) */
     functional_ops_cv,
     const_data_cv,
     knots_cv,

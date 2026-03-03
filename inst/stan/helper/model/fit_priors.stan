@@ -113,10 +113,12 @@
   
   /* Baseline hazard priors (per event type) */
   for (k_ev in 1 : K_event) { // event-specific baseline hazard
-    log_h0_intercept[k_ev] ~ normal(-3, alpha_scale);
-    bs_gamma_c[k_ev] ~ normal(0, alpha_scale);
-    if (Kbs >= 3) // penalized spline second differences
-      for (k in 3 : Kbs)
+    // Intercept is encoded in the first basis column (constant 1s).
+    bs_gamma_c[k_ev][1] ~ normal(-3, alpha_scale);
+    if (Kbs > 1)
+      bs_gamma_c[k_ev][2:Kbs] ~ normal(0, alpha_scale);
+    if (Kbs >= 4) // penalized spline second differences (exclude intercept)
+      for (k in 4 : Kbs)
         target += normal_lpdf(
                               bs_gamma_c[k_ev][k] - 2 * bs_gamma_c[k_ev][k - 1]
                               + bs_gamma_c[k_ev][k - 2] | 0, tau_spline);

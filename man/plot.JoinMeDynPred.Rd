@@ -113,7 +113,7 @@ conditional survival curves.
 \details{
 \strong{Longitudinal Plots:}
 \itemize{
-\item The longitudinal scale is selected via \code{scale} (or inferred when NULL).
+\item The longitudinal scale is selected via \verb{.arg scale} (or inferred when NULL).
 \item On \"predict\" scale: observed values are shown for times in interval
 \verb{[0, time_start]} and predictions are drawn for \verb{[time_start, time_horizon]}.
 \item On \"linpred\" or \"epred\" scale: predictions are shown for \verb{[0, time_horizon]},

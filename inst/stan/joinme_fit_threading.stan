@@ -19,9 +19,9 @@ functions {
   
   #include helper/functions/cumhaz.stanfunctions
 
+  #include helper/functions/bytecode_transform.stanfunctions
+
   #include helper/functions/link_functions.stanfunctions
-  
-  #include helper/functions/functional_transform.stanfunctions
   
   #include helper/functions/basis_functions.stanfunctions
   
@@ -182,7 +182,6 @@ model {
     W,
     gamma_w,
     /* Baseline hazard spline pieces */
-    log_h0_intercept,
     bs_gamma_c,
     Kbs,
     Bs_event_c,
@@ -231,7 +230,7 @@ model {
     tf_mode_cv_marker,
     tf_mode_cs_mean,
     tf_mode_cs_marker,
-    /* Transform opcodes + constants */
+    /* Transform bytecode + constants */
     functional_ops_cv,
     const_data_cv,
     knots_cv,

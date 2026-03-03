@@ -113,8 +113,7 @@ sim <- simulate_joinme(
 )
 
 # Note: when estimating marker weights, compare to sim$truth$marker_weights
-# because effective marker intensities are computed as
-# 2 * inv_logit(w_raw) - 1 inside Stan.
+# because effective marker intensities are used directly from w_raw inside Stan.
 
 formulaLong <- y ~ 1 + time + x1 +
   (1 + time | id) +

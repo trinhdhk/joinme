@@ -20,6 +20,8 @@
    */
   vector[N] log_lik_long;
   vector[n_id] log_lik_surv;
+  vector[n_id] cumhaz_event;
+  vector[n_id] surv_prob_event;
 
   /* -------------------- Longitudinal log-likelihood per observation */
   for (n in 1 : N) {
@@ -32,7 +34,7 @@
                     + dot_product(Z_idm_obs[n], w_idscaled[i, d]);
      // eta_long: linear predictor for longitudinal outcome
     int link_d = canonical_link_code_from_program(d, inv_link_n_ops, inv_link_ops, inv_link_n_const);
-    real mu_long = inv_link_eta_vm(eta_long, d, inv_link_n_ops, inv_link_ops, inv_link_n_const, inv_link_const);
+    real mu_long = inv_link_bytecode(eta_long, d, inv_link_n_ops, inv_link_ops, inv_link_n_const, inv_link_const);
 
     if (family_long[d] == 1) {
       real eta_sigma = 0; // linear predictor for log sigma
@@ -194,9 +196,9 @@
         }
       }
       real phi_beta = (P_phi_beta > 0 || n_re_phi_beta > 0) ? exp(eta_phi_beta) : phi_beta_family[marker_to_phi_beta_family[d]];
-      real mu = fmin(fmax(mu_long, 1e-12), 1 - 1e-12); // beta mean on (0,1)
-      real shape1 = fmax(mu * phi_beta, 1e-6); // beta shape1
-      real shape2 = fmax((1 - mu) * phi_beta, 1e-6); // beta shape2
+      real mu = mu_long; // beta mean on (0,1)
+      real shape1 = phi_beta; // beta shape1
+      real shape2 = (1 - mu) * phi_beta; // beta shape2
       log_lik_long[n] = beta_lpdf(y_real[n] | shape1, shape2);
     } else {
       log_lik_long[n] = ordered_logistic_lpmf(y_int[n] | eta_long, cutpoints_ord);
@@ -207,8 +209,6 @@
   for (i in 1 : n_id) {
     vector[n_gk] cvm_now;
     vector[n_gk] cvm_fwd;
-    vector[n_gk] cvk_now;
-    vector[n_gk] cvk_fwd;
 
     for (j in 1 : n_gk) {
       cvm_now[j] = dot_product(X_gk_now[i][j], beta_scaled)
@@ -217,25 +217,12 @@
                    + dot_product(Z_id_gk_fwd[i][j], u_id[i]);
       // cvm_now/cvm_fwd: mean CV at GK node and forward shift
 
-      real mk_part_now = 0;
-      real mk_part_fwd = 0;
-      // mk_part_*: marker-only CV contribution
-      if (R_mk > 0) {
-        mk_part_now = dot_product(Z_mk_gk_now[i][j], vbar);
-        mk_part_fwd = dot_product(Z_mk_gk_fwd[i][j], vbar);
-      }
-
-      cvk_now[j] = mk_part_now + dot_product(Z_idm_gk_now[i][j], wbar_i[i]);
-      cvk_fwd[j] = mk_part_fwd + dot_product(Z_idm_gk_fwd[i][j], wbar_i[i]);
-      // cvk_now/cvk_fwd: marker-id CV at GK node and forward shift
     }
 
     vector[n_gk] csm_raw = eta_fd(cvm_now, cvm_fwd, eps_fd) / tmax; // mean slope
     vector[n_gk] csk_raw; // marker slope (weighted across markers)
     int M_corr_local = num_elements(a_corr);
     vector[M_corr_local] corr_terms_raw = eta_corr_varonly_weighted_const(L_i[i]); // raw off-diagonal corr terms
-
-    vector[n_gk] cv_tot = cvm_now + cvk_now; // total CV at quadrature nodes
 
     int D_mkrs = size(v_marker);
     vector[n_gk] cv_tot_tf;
@@ -334,8 +321,7 @@
       real eta_w_ev = 0; // hazard covariate contribution
       if (p_w > 0)
         eta_w_ev = dot_product(to_vector(W[i]'), gamma_w[k_ev]);
-      real log_h0_S = log_h0_intercept[k_ev]
-                      + dot_product(Bs_event_c[i], bs_gamma_c[k_ev]);
+      real log_h0_S = dot_product(Bs_event_c[i], bs_gamma_c[k_ev]);
       // log_h0_S: baseline log-hazard at event time
 
       real cvm_S = dot_product(X_event_now[i], beta_scaled)
@@ -360,7 +346,6 @@
 
       real corr_S_assoc = corr_assoc_scalar; // same transformed-and-weighted constant at event time
 
-      real cv_S_tot = cvm_S + cvk_S; // total CV at event
       real cv_S_tot_tf = 0;
       real cv_S_mean_tf = apply_transform_scalar(
         cvm_S,
@@ -442,14 +427,18 @@
         real eta_w = 0;
         if (p_w > 0)
           eta_w = dot_product(to_vector(W[i]'), gamma_w[k_ev]);
-        log_h_cause[k_ev] = log_h0_intercept[k_ev]
-                            + dot_product(Bs_gk_c[i][j], bs_gamma_c[k_ev])
+        log_h_cause[k_ev] = dot_product(Bs_gk_c[i][j], bs_gamma_c[k_ev])
                             + eta_w
                             + eta_assoc_nodes[j];
       }
       log_h_total[j] = log_sum_exp(log_h_cause);
     }
 
-    log_lik_surv[i] = event_term - cumhaz(S_event[i], n_gk, log_h_total, rep_vector(0.0, n_gk));
+    {
+      real H_event = cumhaz(S_event[i], n_gk, log_h_total, rep_vector(0.0, n_gk));
+      cumhaz_event[i] = H_event;
+      surv_prob_event[i] = exp(-H_event);
+      log_lik_surv[i] = event_term - H_event;
+    }
     // log_lik_surv: event term minus cumulative hazard
   }

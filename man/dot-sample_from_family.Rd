@@ -6,7 +6,7 @@
 \usage{
 .sample_from_family(
   n,
-  eta,
+  mu,
   family,
   sigma = 1,
   nu = 4,
@@ -20,7 +20,7 @@
 \arguments{
 \item{n}{Sample size}
 
-\item{eta}{Linear predictor}
+\item{mu}{Mean/probability on the response scale (i.e., inverse-link applied).}
 
 \item{family}{Integer family code}
 

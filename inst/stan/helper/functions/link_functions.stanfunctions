@@ -1,8 +1,38 @@
 /**
  * @file link_functions.stanfunctions
  * @brief Inverse-link helpers backed by per-marker functional bytecode.
+ *
+ * This file provides two utilities:
+ * 1) A lightweight recognizer for canonical inverse links expressed in bytecode.
+ * 2) A bytecode interpreter that evaluates a per-marker inverse-link program.
+ *
+ * The bytecode is a stack-based program generated in R. Each program is stored
+ * as bytecode instructions and constants per marker. The interpreter is deliberately simple
+ * and safe: it clamps extreme outputs to avoid NaN/Inf propagation into the
+ * likelihood.
  */
 
+/**
+ * @brief Detect whether a marker's inverse-link bytecode is one of a few canonical links.
+ *
+ * @param marker_idx Index of the marker whose bytecode program is being inspected.
+ * @param inv_link_n_ops Number of operations for each marker's inverse-link program.
+ * @param inv_link_ops Bytecode matrix; row = marker, column = instruction position.
+ * @param inv_link_n_const Number of constants referenced by each marker program.
+ *
+ * @return An integer code for known canonical inverse links:
+ *   - 0: unknown or non-canonical
+ *   - 1: identity
+ *   - 2: log
+ *   - 3: inv_logit
+ *   - 4: probit (Phi)
+ *   - 5: exp
+ *
+ * The recognizer is intentionally conservative. It only returns a nonzero code
+ * when the program has no constants and matches a two-op sequence of the form
+ * push-eta, apply-op. This allows fast paths elsewhere without misclassifying
+ * user-specified programs.
+ */
 int canonical_link_code_from_program(
   int marker_idx,
   array[] int inv_link_n_ops,
@@ -21,7 +51,53 @@ int canonical_link_code_from_program(
   return 0;
 }
 
-real inv_link_eta_vm(
+/**
+ * @brief Evaluate an inverse-link program for a single marker using shared bytecode evaluator.
+ *
+ * @param eta Linear predictor for the current observation/marker.
+ * @param marker_idx Index of the marker whose inverse-link program is used.
+ * @param inv_link_n_ops Number of operations for each marker program.
+ * @param inv_link_ops Bytecode matrix containing the program instructions.
+ * @param inv_link_n_const Number of constants for each marker program.
+ * @param inv_link_const Matrix of constants used by each marker program.
+ *
+ * @return The inverse-linked value corresponding to eta and the marker program.
+ *
+ * Algorithm overview:
+ * - Extract the marker-specific bytecode and constants from row-wise data blocks.
+ * - Delegate evaluation to `eval_bytecode_scalar`, shared with association transforms.
+ * - Return the resulting transformed value for the marker-level inverse link.
+ *
+ * Bytecode reference (subset):
+ *   0: PUSH_ETA
+ *   1: PUSH_CONST
+ *   2: ADD
+ *   3: SUB
+ *   4: MUL
+ *   5: DIV
+ *   6: LOG
+ *   7: EXP
+ *   8: SQRT
+ *   9: INV_LOGIT
+ *  10: LOGIT
+ *  11: RECIP
+ *  12: POW
+ *  13: SIN
+ *  14: COS
+ *  15: TAN
+ *  16: ABS
+ *  17: SQUARE
+ *  18: SINH
+ *  19: COSH
+ *  20: TANH
+ *  21: ASINH
+ *  22: ACOSH
+ *  23: ATANH
+ *  24: LOG1P_EXP
+ *  25: CBRT
+ *  26: PROBIT (Phi)
+ */
+real inv_link_bytecode(
   real eta,
   int marker_idx,
   array[] int inv_link_n_ops,
@@ -30,89 +106,20 @@ real inv_link_eta_vm(
   matrix inv_link_const
 ) {
   int n_ops = inv_link_n_ops[marker_idx];
-  vector[100] stack;
-  int stack_ptr = 0;
-  int const_idx = 1;
+  int n_const = inv_link_n_const[marker_idx];
+  array[n_ops] int marker_bytecode;
+  vector[n_const] marker_const;
 
-  for (op_idx in 1:n_ops) {
-    int op = inv_link_ops[marker_idx, op_idx];
-    if (op == 0) {
-      stack_ptr += 1;
-      stack[stack_ptr] = eta;
-    } else if (op == 1) {
-      stack_ptr += 1;
-      stack[stack_ptr] = inv_link_const[marker_idx, const_idx];
-      const_idx += 1;
-    } else if (op == 2) {
-      real b = stack[stack_ptr];
-      stack_ptr -= 1;
-      stack[stack_ptr] = stack[stack_ptr] + b;
-    } else if (op == 3) {
-      real b = stack[stack_ptr];
-      stack_ptr -= 1;
-      stack[stack_ptr] = stack[stack_ptr] - b;
-    } else if (op == 4) {
-      real b = stack[stack_ptr];
-      stack_ptr -= 1;
-      stack[stack_ptr] = stack[stack_ptr] * b;
-    } else if (op == 5) {
-      real b = stack[stack_ptr];
-      stack_ptr -= 1;
-      stack[stack_ptr] = stack[stack_ptr] / b;
-    } else if (op == 6) {
-      stack[stack_ptr] = log(stack[stack_ptr]);
-    } else if (op == 7) {
-      stack[stack_ptr] = exp(stack[stack_ptr]);
-    } else if (op == 8) {
-      stack[stack_ptr] = sqrt(stack[stack_ptr]);
-    } else if (op == 9) {
-      stack[stack_ptr] = inv_logit(stack[stack_ptr]);
-    } else if (op == 10) {
-      stack[stack_ptr] = logit(stack[stack_ptr]);
-    } else if (op == 11) {
-      stack[stack_ptr] = 1.0 / stack[stack_ptr];
-    } else if (op == 12) {
-      real b = stack[stack_ptr];
-      stack_ptr -= 1;
-      stack[stack_ptr] = stack[stack_ptr] ^ b;
-    } else if (op == 13) {
-      stack[stack_ptr] = sin(stack[stack_ptr]);
-    } else if (op == 14) {
-      stack[stack_ptr] = cos(stack[stack_ptr]);
-    } else if (op == 15) {
-      stack[stack_ptr] = tan(stack[stack_ptr]);
-    } else if (op == 16) {
-      stack[stack_ptr] = abs(stack[stack_ptr]);
-    } else if (op == 17) {
-      stack[stack_ptr] = square(stack[stack_ptr]);
-    } else if (op == 18) {
-      stack[stack_ptr] = sinh(stack[stack_ptr]);
-    } else if (op == 19) {
-      stack[stack_ptr] = cosh(stack[stack_ptr]);
-    } else if (op == 20) {
-      stack[stack_ptr] = tanh(stack[stack_ptr]);
-    } else if (op == 21) {
-      stack[stack_ptr] = asinh(stack[stack_ptr]);
-    } else if (op == 22) {
-      stack[stack_ptr] = acosh(stack[stack_ptr]);
-    } else if (op == 23) {
-      stack[stack_ptr] = atanh(stack[stack_ptr]);
-    } else if (op == 24) {
-      stack[stack_ptr] = log1p_exp(stack[stack_ptr]);
-    } else if (op == 25) {
-      stack[stack_ptr] = cbrt(stack[stack_ptr]);
-    } else if (op == 26) {
-      stack[stack_ptr] = Phi(stack[stack_ptr]);
+  if (n_ops > 0) {
+    for (j in 1:n_ops) {
+      marker_bytecode[j] = inv_link_ops[marker_idx, j];
     }
   }
-  {
-    real out = stack[stack_ptr];
-    if (is_nan(out))
-      out = 0;
-    else if (is_inf(out))
-      out = out > 0 ? 1e100 : -1e100;
-    else
-      out = fmin(fmax(out, -1e100), 1e100);
-    return out;
+  if (n_const > 0) {
+    for (j in 1:n_const) {
+      marker_const[j] = inv_link_const[marker_idx, j];
+    }
   }
+
+  return eval_bytecode_scalar(eta, marker_bytecode, marker_const);
 }

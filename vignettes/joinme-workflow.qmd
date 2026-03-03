@@ -103,7 +103,7 @@ sim <- simulate_joinme(
 # the node count used to build the design matrices in R.
 
 # When estimating marker weights, compare against sim$truth$marker_weights
-# because signed marker weights are used directly in Stan.
+# because weights are used directly in Stan.
 
 dataLong <- sim$dataLong
 dataEvent <- sim$dataEvent

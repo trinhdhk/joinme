@@ -90,7 +90,7 @@ $f_{cs}(\frac{1}{D}\sum_d \omega_d CS_{id}(t))$ unless $f_{cs}$ is linear.
 In practice, provide fixed weights via `marker_weights`, or set
 `fixed_marker_weights = FALSE` to estimate signed perturbations around base
 weights via `marker_weights + z_marker_weights` with
-`z_marker_weights ~ N(0, 1)`. These signed weights are used directly in
+`z_marker_weights ~ N(0, 1)`. The resulting weights are used directly in
 marker-aggregated association terms. The simulator reports them in
 `truth$marker_weights`.
 
@@ -99,6 +99,8 @@ marker-aggregated association terms. The simulator reports them in
 Association coefficients are denoted with the $\alpha$ prefix (e.g., `alpha_cv_total`).
 This follows joint-model conventions and avoids confusion with the linear predictor
 $\eta$ used throughout the longitudinal and survival submodels.
+Total, mean, and marker associations use a positive non-centered parameterization
+$\alpha = z_{\alpha} \cdot sd_{\alpha}$ for stable sampling.
 
 When an association component is not selected in `assoc`, its coefficient is
 prior-only and does not enter the likelihood. Summaries only report active

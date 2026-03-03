@@ -1181,11 +1181,11 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         # Fallback: reconstruct basis (suppress warnings about boundary knots)
         if (basehaz_type == "bs") {
             B_raw <- suppressWarnings(
-                splines::bs(S_event, knots = knots, Boundary.knots = c(0, 1), degree = degree, intercept = FALSE)
+                splines::bs(S_event, knots = knots, Boundary.knots = c(0, 1), degree = degree, intercept = TRUE)
             )
         } else if (basehaz_type == "ns") {
             B_raw <- suppressWarnings(
-                splines::ns(S_event, knots = knots, Boundary.knots = c(0, 1), intercept = FALSE)
+                splines::ns(S_event, knots = knots, Boundary.knots = c(0, 1), intercept = TRUE)
             )
         } else {
             # formula or other
@@ -1322,12 +1322,6 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         }
     }
 
-    log_h0_intercept <- matrix(0, n, sd$K_event %||% 1L)
-    for (k_ev in 1:(sd$K_event %||% 1L)) {
-        nm <- paste0("log_h0_intercept[", k_ev, "]")
-        if (nm %in% colnames(dmat)) log_h0_intercept[, k_ev] <- dmat[, nm]
-    }
-
     bs_gamma_c <- array(0, dim = c(n, sd$K_event %||% 1L, sd$Kbs))
     for (k_ev in 1:(sd$K_event %||% 1L)) {
         for (j in 1:sd$Kbs) {
@@ -1344,11 +1338,6 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         }
     }
 
-    .inv_logit_signed <- function(w) {
-        w <- as.numeric(w)
-        2 * stats::plogis(w) - 1
-    }
-
     marker_weights_draws <- NULL
     if (all(paste0("marker_weights_eff[", 1:sd$D, "]") %in% colnames(dmat))) {
         marker_weights_draws <- get_mat(paste0("marker_weights_eff[", 1:sd$D, "]"))
@@ -1356,7 +1345,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         marker_weights_draws <- get_mat(paste0("marker_weights[", 1:sd$D, "]"))
     } else if (!is.null(sd$marker_weights)) {
         base_weights <- as.numeric(sd$marker_weights)
-        marker_weights_draws <- matrix(rep(.inv_logit_signed(base_weights), each = n), nrow = n, byrow = TRUE)
+        marker_weights_draws <- matrix(rep(base_weights, each = n), nrow = n, byrow = TRUE)
     }
 
     n_family_sigma <- as.integer(sd$n_family_sigma %||% if ((sd$flag_resid_dim %||% 1L) == 0L) 1L else sd$D)
@@ -1468,7 +1457,6 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         beta_corr_reg_flat = beta_corr_reg_flat,
         tau_corr_reg = get_col("tau_L"),
         lambda_corr_reg = if (M_cov > 0) get_mat(paste0("lambda_L[", 1:M_cov, "]")) else matrix(0, n, 0),
-        log_h0_intercept = log_h0_intercept,
         bs_gamma_c = bs_gamma_c,
         gamma_hazard = gamma_hazard,
         marker_weights_draws = marker_weights_draws,
@@ -1623,6 +1611,9 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     
     # Create prediction grid: expand time grid to include all markers
     # - vectorized expansion avoids nested loops for speed
+    if (length(t_grid) == 0 && length(t_surv_grid) > 0) {
+        t_grid <- t_surv_grid
+    }
     n_obs_pred_per_marker <- length(t_grid)
     n_obs_pred <- n_obs_pred_per_marker * n_markers_subject
     
@@ -1758,11 +1749,6 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     }
 
     # Marker weights (use fitted weights when available)
-    .inv_logit_signed <- function(w) {
-        w <- as.numeric(w)
-        2 * stats::plogis(w) - 1
-    }
-
     marker_weights <- object$stan_data$marker_weights
     if (is.null(marker_weights)) {
         marker_weights <- rep(1, length(marker_levels))
@@ -1774,7 +1760,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
             marker_weights <- rep(1, length(marker_levels))
         }
     }
-    marker_weights_eff <- .inv_logit_signed(marker_weights)
+    marker_weights_eff <- marker_weights
 
     marker_weights_draws <- draws_list$marker_weights_draws
     n_pred_draws <- nrow(draws_list$beta_fixed)
@@ -1887,7 +1873,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         alpha_corr_reg = draws_list$alpha_corr_reg, beta_corr_reg_flat = draws_list$beta_corr_reg_flat,
         tau_corr_reg = draws_list$tau_corr_reg, lambda_corr_reg = draws_list$lambda_corr_reg,
         K_event = sd$K_event %||% 1L,
-        log_h0_intercept = draws_list$log_h0_intercept, bs_gamma_c = draws_list$bs_gamma_c, gamma_hazard = draws_list$gamma_hazard,
+        bs_gamma_c = draws_list$bs_gamma_c, gamma_hazard = draws_list$gamma_hazard,
         beta_sigma = draws_list$beta_sigma,
         beta_nu = draws_list$beta_nu,
         beta_phi = draws_list$beta_phi,
@@ -2573,6 +2559,22 @@ corr.JoinMeDynPred <- function(object, ...) {
             marker_by_id = sum_obj$tables$corr_marker_id
         )
     )
+}
+
+#' Extract predicted covariance summaries
+#'
+#' @description
+#' Returns covariance summaries from dynamic predictions. This delegates to
+#' [corr()] and is available only when marker covariance depends on id.
+#'
+#' @param object A `JoinMeDynPred` object.
+#' @param ... Unused.
+#'
+#' @return A named list containing covariance summary tables.
+#' @method vcov JoinMeDynPred
+#' @export
+vcov.JoinMeDynPred <- function(object, ...) {
+    corr(object, ...)
 }
 
 #' Print dynamic prediction results

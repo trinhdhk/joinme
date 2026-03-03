@@ -120,7 +120,6 @@
  * @param tau_corr_reg Array of scales for latent covariance effects (per draw).
  * @param lambda_corr_reg Array of loading vectors for latent covariance effects (per draw).
  * @param K_event Number of competing risks.
- * @param log_h0_intercept Array of baseline hazard intercepts (per draw).
  * @param bs_gamma_c Array of baseline hazard spline coefficients (per draw).
  * @param gamma_hazard Array of hazard covariate coefficients (per draw).
  * @param sigma_y_shared Array of shared residual standard deviations (per draw).
@@ -153,37 +152,37 @@
  * @param tf_mode_cv_marker Transform mode for Marker Current Value.
  * @param tf_mode_cs_mean Transform mode for Mean Current Slope.
  * @param tf_mode_cs_marker Transform mode for Marker Current Slope.
- * @param functional_ops_cv Function opcodes for Value transforms.
+ * @param functional_ops_cv Function bytecode for Value transforms.
  * @param const_data_cv Constants for Value transforms.
  * @param knots_cv Knots for Value transforms.
  * @param coeff_cv Coefficients for Value transforms.
  * @param spline_degree_cv Spline degree for Value transforms.
- * @param functional_ops_cs Function opcodes for Slope transforms.
+ * @param functional_ops_cs Function bytecode for Slope transforms.
  * @param const_data_cs Constants for Slope transforms.
  * @param knots_cs Knots for Slope transforms.
  * @param coeff_cs Coefficients for Slope transforms.
  * @param spline_degree_cs Spline degree for Slope transforms.
- * @param functional_ops_corr Function opcodes for Variance transforms.
+ * @param functional_ops_corr Function bytecode for Variance transforms.
  * @param const_data_corr Constants for Variance transforms.
  * @param knots_corr Knots for Variance transforms.
  * @param coeff_corr Coefficients for Variance transforms.
  * @param spline_degree_corr Spline degree for Variance transforms.
- * @param functional_ops_cv_mean Function opcodes for Mean Value transforms.
+ * @param functional_ops_cv_mean Function bytecode for Mean Value transforms.
  * @param const_data_cv_mean Constants for Mean Value transforms.
  * @param knots_cv_mean Knots for Mean Value transforms.
  * @param coeff_cv_mean Coefficients for Mean Value transforms.
  * @param spline_degree_cv_mean Spline degree for Mean Value transforms.
- * @param functional_ops_cv_marker Function opcodes for Marker Value transforms.
+ * @param functional_ops_cv_marker Function bytecode for Marker Value transforms.
  * @param const_data_cv_marker Constants for Marker Value transforms.
  * @param knots_cv_marker Knots for Marker Value transforms.
  * @param coeff_cv_marker Coefficients for Marker Value transforms.
  * @param spline_degree_cv_marker Spline degree for Marker Value transforms.
- * @param functional_ops_cs_mean Function opcodes for Mean Slope transforms.
+ * @param functional_ops_cs_mean Function bytecode for Mean Slope transforms.
  * @param const_data_cs_mean Constants for Mean Slope transforms.
  * @param knots_cs_mean Knots for Mean Slope transforms.
  * @param coeff_cs_mean Coefficients for Mean Slope transforms.
  * @param spline_degree_cs_mean Spline degree for Mean Slope transforms.
- * @param functional_ops_cs_marker Function opcodes for Marker Slope transforms.
+ * @param functional_ops_cs_marker Function bytecode for Marker Slope transforms.
  * @param const_data_cs_marker Constants for Marker Slope transforms.
  * @param knots_cs_marker Knots for Marker Slope transforms.
  * @param coeff_cs_marker Coefficients for Marker Slope transforms.
@@ -292,7 +291,6 @@ real partial_draw(
     array[] real tau_corr_reg,
     array[] vector lambda_corr_reg,
     int K_event,
-    array[,] real log_h0_intercept,
     array[,] vector bs_gamma_c,
     array[,] vector gamma_hazard,
     array[] vector sigma_family,
@@ -476,7 +474,7 @@ real partial_draw(
                  + dot_product(mat_marker_id_obs[n], w_idscaled[d]);
       // eta: linear predictor for observed row n
       int link_d = canonical_link_code_from_program(d, inv_link_n_ops, inv_link_ops, inv_link_n_const);
-      real mu = inv_link_eta_vm(eta, d, inv_link_n_ops, inv_link_ops, inv_link_n_const, inv_link_const);
+      real mu = inv_link_bytecode(eta, d, inv_link_n_ops, inv_link_ops, inv_link_n_const, inv_link_const);
 
       // Evaluate log-likelihood based on family type and distributional
       // parameters. Each distributional parameter can be draw-specific
@@ -695,7 +693,7 @@ real partial_draw(
                                      knots_cs_marker, coeff_cs_marker, spline_degree_cs_marker);
         }
       }
-      // Final normalized marker-aggregated channels at GK node j.
+      // Final marker-aggregated channels at GK node j.
       cv_tot_tf[j] = acc_cv_tot_tf / n_marker_types;
       cv_marker_tf[j] = acc_cv_marker_tf / n_marker_types;
       cs_tot_tf[j] = acc_cs_tot_tf / n_marker_types;
@@ -728,8 +726,7 @@ real partial_draw(
         if (n_cov_hazard > 0)
           eta_w = dot_product(vec_cov_hazard, gamma_hazard[k, k_ev]);
         // Cause-specific log hazard at GK node j
-        log_h_cause[k_ev] = log_h0_intercept[k, k_ev]
-                            + dot_product(mat_basis_gk_cond[j], bs_gamma_c[k, k_ev])
+        log_h_cause[k_ev] = dot_product(mat_basis_gk_cond[j], bs_gamma_c[k, k_ev])
                             + eta_w
                             + eta_assoc_nodes[j];
       }

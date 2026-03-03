@@ -23,6 +23,7 @@
 *.rds
 *.html
 *.pdf
+*.png
 
 
 # Editor/IDE
@@ -44,7 +45,7 @@ renv.lock
 *.log
 *.aux
 *.out
-*.tmp*
+*tmp*
 
 # Quarto / knitr / vignette caches and outputs
 _quarto_out/

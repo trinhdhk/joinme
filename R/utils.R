@@ -381,7 +381,7 @@ gk_quadrature <- function(nodes = 15L) {
   X
 }
 
-#' Survival/event model matrix without intercept
+#' Survival/event model matrix
 #' @keywords internal
 .mm_event <- function(formulaEvent, data) {
   rhs <- stats::delete.response(stats::terms(formulaEvent))
@@ -980,8 +980,12 @@ gk_quadrature <- function(nodes = 15L) {
     matrix(aperm(Bs_gk_raw, c(1, 3, 2)), nrow = n_id * n_gk, ncol = Kbs)
   )
   colm <- colMeans(big)
-  Bs_event_c <- sweep(Bs_event_raw, 2, colm, "-")
-  Bs_gk_c <- sweep(Bs_gk_raw, MARGIN = 3, STATS = colm, FUN = "-")
+  # Keep constant (intercept) columns uncentered so the baseline level is preserved.
+  col_sd <- apply(big, 2, stats::sd)
+  center_mask <- !(col_sd < 1e-8 | !is.finite(col_sd))
+  colm_use <- ifelse(center_mask, colm, 0)
+  Bs_event_c <- sweep(Bs_event_raw, 2, colm_use, "-")
+  Bs_gk_c <- sweep(Bs_gk_raw, MARGIN = 3, STATS = colm_use, FUN = "-")
   list(Bs_event_c = Bs_event_c, Bs_gk_c = Bs_gk_c, col_means = colm)
 }
 
@@ -1006,9 +1010,13 @@ gk_quadrature <- function(nodes = 15L) {
   # Suppress warnings about x values beyond boundary knots
   # (This is expected in prediction when using Gauss-Kronrod quadrature near boundaries)
   if (basis == "bs") {
-    suppressWarnings(splines::bs(x, knots = knots, Boundary.knots = boundary, degree = degree, intercept = FALSE))
+    suppressWarnings(
+      splines::bs(x, knots = knots, Boundary.knots = boundary, degree = degree, intercept = TRUE)
+    )
   } else {
-    suppressWarnings(splines::ns(x, knots = knots, Boundary.knots = boundary, intercept = FALSE))
+    suppressWarnings(
+      splines::ns(x, knots = knots, Boundary.knots = boundary, intercept = TRUE)
+    )
   }
 }
 
@@ -1306,7 +1314,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Unified draws object helper
 #' @keywords internal
-.get_draws_obj <- function(fit, variables = NULL, draws = NULL, seed = 1) {
+.get_draws_obj <- function(fit, variables = NULL, draws = NULL, seed = 1, keep_chains = FALSE) {
   if (.is_cmdstanr_fit(fit)) {
     d <- fit$draws(variables = variables)
   } else if (.is_rstan_fit(fit)) {
@@ -1318,7 +1326,7 @@ gk_quadrature <- function(nodes = 15L) {
   } else {
     cli::cli_abort("Unsupported Stan fit object; expected CmdStanR or rstan.")
   }
-  if (!is.null(draws) && is.finite(draws)) {
+  if (!is.null(draws) && is.finite(draws) && !isTRUE(keep_chains)) {
     nd <- posterior::ndraws(d)
     if (draws < nd) {
       set.seed(seed)
@@ -1334,6 +1342,22 @@ gk_quadrature <- function(nodes = 15L) {
 .get_draws_matrix <- function(fit, variables = NULL, draws = NULL, seed = 1) {
   d <- .get_draws_obj(fit, variables = variables, draws = draws, seed = seed)
   posterior::as_draws_matrix(d)
+}
+
+#' Unified draws array helper (keeps chains separate)
+#' @keywords internal
+.get_draws_array <- function(fit, variables = NULL, draws = NULL, seed = 1) {
+  d <- .get_draws_obj(fit, variables = variables, draws = NULL, seed = seed, keep_chains = TRUE)
+  arr <- posterior::as_draws_array(d)
+  if (!is.null(draws) && is.finite(draws)) {
+    n_iter <- dim(arr)[1]
+    if (draws < n_iter) {
+      set.seed(seed)
+      idx <- sample.int(n_iter, size = draws)
+      arr <- arr[idx, , , drop = FALSE]
+    }
+  }
+  arr
 }
 
 # ---- Posterior draw helpers for methods -----------------------------------

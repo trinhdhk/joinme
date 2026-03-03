@@ -1373,7 +1373,8 @@ corr.JoinMeFit <- function(object, what = NULL, draws = NULL, ...) {
     if (dim <= 0) {
       return(data.frame(
         block = label, row = integer(0), col = integer(0),
-        Estimate = numeric(0), Est.Error = numeric(0), Q2.5 = numeric(0), Q97.5 = numeric(0)
+        Estimate = numeric(0), Est.Error = numeric(0), Q2.5 = numeric(0), Q97.5 = numeric(0),
+        Rhat = numeric(0), ess_bulk = numeric(0), ess_tail = numeric(0)
       ))
     }
     tau_vars <- paste0(tau_prefix, "[", seq_len(dim), "]")
@@ -1399,9 +1400,10 @@ corr.JoinMeFit <- function(object, what = NULL, draws = NULL, ...) {
     for (r in seq_len(dim)) for (c in seq_len(dim)) {
       vals <- vapply(Sigma_list, function(S) S[r, c], numeric(1))
       ss <- .summarize_draw_col(vals)
+      rhat <- suppressWarnings(tryCatch(as.numeric(posterior::rhat(vals)), error = function(e) NA_real_))
       ess_bulk <- suppressWarnings(tryCatch(as.numeric(posterior::ess_basic(vals)), error = function(e) NA_real_))
       ess_tail <- suppressWarnings(tryCatch(as.numeric(posterior::ess_tail(vals)), error = function(e) NA_real_))
-      out[[length(out) + 1]] <- cbind(block = label, row = r, col = c, t(ss), ess_bulk = ess_bulk, ess_tail = ess_tail)
+      out[[length(out) + 1]] <- cbind(block = label, row = r, col = c, t(ss), Rhat = rhat, ess_bulk = ess_bulk, ess_tail = ess_tail)
     }
     df <- as.data.frame(do.call(rbind, out), stringsAsFactors = FALSE)
     df$row <- as.integer(df$row)
@@ -1410,6 +1412,7 @@ corr.JoinMeFit <- function(object, what = NULL, draws = NULL, ...) {
     df$Est.Error <- as.numeric(df$Est.Error)
     df$Q2.5 <- as.numeric(df$Q2.5)
     df$Q97.5 <- as.numeric(df$Q97.5)
+    df$Rhat <- as.numeric(df$Rhat)
     df$ess_bulk <- as.numeric(df$ess_bulk)
     df$ess_tail <- as.numeric(df$ess_tail)
     df
@@ -1452,6 +1455,7 @@ corr.JoinMeFit <- function(object, what = NULL, draws = NULL, ...) {
             vals <- rep(0, nrow(dmat))
           }
           ss <- .summarize_draw_col(vals)
+          rhat <- suppressWarnings(tryCatch(as.numeric(posterior::rhat(vals)), error = function(e) NA_real_))
           ess_bulk <- suppressWarnings(tryCatch(as.numeric(posterior::ess_basic(vals)), error = function(e) NA_real_))
           ess_tail <- suppressWarnings(tryCatch(as.numeric(posterior::ess_tail(vals)), error = function(e) NA_real_))
           rows[[idx]] <- data.frame(
@@ -1462,6 +1466,7 @@ corr.JoinMeFit <- function(object, what = NULL, draws = NULL, ...) {
             Est.Error = as.numeric(ss[["Est.Error"]]),
             Q2.5 = as.numeric(ss[["Q2.5"]]),
             Q97.5 = as.numeric(ss[["Q97.5"]]),
+            Rhat = rhat,
             ess_bulk = ess_bulk,
             ess_tail = ess_tail,
             stringsAsFactors = FALSE
@@ -1498,4 +1503,21 @@ corr.JoinMeFit <- function(object, what = NULL, draws = NULL, ...) {
   out$formulaLong <- out$formulaLong[!vapply(out$formulaLong, is.null, logical(1))]
   out$formulaDist <- out$formulaDist[!vapply(out$formulaDist, is.null, logical(1))]
   out
+}
+
+#' Extract posterior covariance summaries
+#'
+#' @description
+#' Returns posterior covariance summaries for fitted joinme models.
+#' This method delegates to [corr()] and supports selecting specific blocks
+#' through `...` (for example, `what = "id"`).
+#'
+#' @param object A joinme fit object.
+#' @param ... Additional arguments passed to [corr()].
+#'
+#' @return Posterior covariance summary table(s).
+#' @method vcov JoinMeFit
+#' @export
+vcov.JoinMeFit <- function(object, ...) {
+  corr(object, ...)
 }

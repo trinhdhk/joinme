@@ -28,8 +28,8 @@ The **JoinME** package implements a sophisticated joint model for multivariate l
 Additional implementation details that are central to the interpretation:
 
 - Marker-weighted contributions are formed as weighted means across markers.
-  Base weights act as prior offsets and are mapped to effective intensities via
-  $2 \cdot \text{inv\_logit}(w_{raw}) - 1$, keeping weights in $(-1, 1)$.
+  Base weights act as prior offsets and are used directly as effective intensities
+  (no additional normalization).
 - The CORR association depends on an id-level latent effect that drives a
   covariance regression, producing subject-specific Cholesky factors.
 - Non-linear transforms are applied to CV, CS, and CORR before they enter the
@@ -332,7 +332,7 @@ FUNCTION partial_joinme(id_seq, start, end, ... [all data & parameters]):
       k_ev = event_type[i]  // Which competing risk
       
       // Baseline hazard at event time
-      log_h0_S = log_h0_intercept[k_ev] + Bs_event_c[i]'bs_gamma_c[k_ev]
+      log_h0_S = Bs_event_c[i]'bs_gamma_c[k_ev]
       
       // Hazard covariate effects
       Î·_w_S = W[i]'Î³_w[k_ev]
@@ -350,7 +350,7 @@ FUNCTION partial_joinme(id_seq, start, end, ... [all data & parameters]):
     
     FOR j = 1 TO 15:
       // Total hazard at node j across all K_event competing risks
-      log_h_total[j] = log Î£â‚– exp(log_h0[k] + Bs_gk_c[i][j]'bs_gamma_c[k] + Î·_w + Î·_assoc_nodes[j])
+      log_h_total[j] = log Î£â‚– exp(Bs_gk_c[i][j]'bs_gamma_c[k] + Î·_w + Î·_assoc_nodes[j])
     END FOR
     
     // Apply Gauss-Kronrod formula with weights w[j]
@@ -1083,7 +1083,8 @@ Family-specific auxiliary parameters require constraints matching their support:
 - **Coefficients ($\gamma_{bs}$)**: Normal($0, \sigma_{bs}$).
 - **Smoothness Penalty**: When B-splines are used, `joinme` imposes a **random-walk prior** (second-order difference penalty) on the spline coefficients.
   $$ \gamma_k - 2\gamma_{k-1} + \gamma_{k-2} \sim \mathcal{N}(0, \tau_{smooth}) $$
-- **Rationale**: This effectively smooths the baseline hazard, preventing overfitting to small clusters of events (spikes) while allowing flexibility in the hazard shape over time. This is critical for robust extrapolation in dynamic prediction.
+- **Intercept handling**: The baseline level is represented by the spline intercept basis column in `bs_gamma_c`; there is no separate `log_h0_intercept` parameter.
+- **Rationale**: This effectively smooths the baseline hazard, preventing overfitting to small clusters of events (spikes) while allowing flexibility in the hazard shape over time. The smoothness penalty is applied to non-intercept spline contrasts, preserving a stable baseline level for robust dynamic prediction.
 
 ### Hazard Covariates ($\gamma_w$)
 - **Prior**: Student-$t(\nu=6, \mu=0, \sigma=2.5)$.
@@ -1097,10 +1098,14 @@ The association module is the most complex component and requires hierarchical s
 The total association is often a sum of a mean term, a marker-specific deviation, and interactions.
 - **Base Effect ($\alpha_{mean}$)**: Normal($0, 1$). Weakly informative.
 - **CV/CS total + marker effects**:
-  - Non-centered form: $\alpha_d = z_d\,\sigma_d$.
-  - Latent: $z_d \sim \mathcal{N}(0, 1)$.
+  - Non-centered latent form: $\alpha_d = z_d \cdot \sigma_d$.
+  - Latent: $z_d \sim \mathcal{N}(0, 1)$ (or Laplace under shrinkage mode).
   - Scale: $\sigma_d > 0$ with weakly informative half-normal prior.
-- **Rationale**: In joint models with many biomarkers, it is a priori unlikely that all markers contribute equally to the risk. Shrinkage priors automatically attenuate noise markers, improving out-of-sample prediction performance.
+  - **Sign anchor**: when any marker-weight-involving channel is active
+    (`cv_total`, `cs_total`, `cv_marker`, `cs_marker`), only the first active
+    channel in that order is constrained non-negative (via absolute-value mapping);
+    all remaining active channels are unconstrained.
+- **Rationale**: This keeps one anchored direction for identifiability while preserving signed effects in other channels, improving geometry without forcing all associations to be positive.
 
 ### Marker Weights ($\omega_d$)
 When estimating a composite score (e.g., weighted sum of current values), weights are modeled as signed perturbations around base weights.

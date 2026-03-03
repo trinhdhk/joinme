@@ -77,8 +77,8 @@
 #' @param shrinkage Integer flag controlling shrinkage behavior for marker-by-id effects.
 #' @param marker_weights Optional numeric vector of length D giving base weights
 #'   for marker-specific association components. These are used as prior offsets
-#'   for latent marker intensities and are mapped in Stan to effective weights via
-#'   `2 * inv_logit(w_raw) - 1`, where `w_raw = marker_weights` or
+#'   for latent marker intensities and are used directly in Stan, where
+#'   `w_raw = marker_weights` or
 #'   `marker_weights + z_marker_weights`. When NULL, base weights default to
 #'   zeros for estimated weights and ones for fixed weights.
 #' @param fixed_marker_weights Logical; if TRUE, marker weights are kept fixed
@@ -335,7 +335,7 @@ joinme_standata <- function(
         i = "Weights may be positive or negative, but cannot be NA/Inf."
       ))
     }
-    # All-zero base weights are allowed; inv_logit mapping in Stan will still
+    # All-zero base weights are allowed; raw weights are used directly in Stan.
     # yield a well-defined set of effective weights.
   }
 
@@ -578,7 +578,7 @@ joinme_standata <- function(
   }
 
   # Hazard covariates W
-  # - baseline covariates only, intercept always fused into baseline hazard
+  # - baseline covariates (intercept removed; baseline level handled by spline basis)
   W <- .mm_event(formulaEvent, dataEvent)
   p_w <- ncol(W)
 
@@ -678,7 +678,6 @@ joinme_standata <- function(
   centered <- .center_baseline(Bs_event_raw, Bs_gk_raw)
   Bs_event_c <- centered$Bs_event_c
   Bs_gk_c <- centered$Bs_gk_c
-
   # Association designs at GK and event times
   S_now <- S_event
   S_fwd <- pmin(S_event + eps_fd, 1)

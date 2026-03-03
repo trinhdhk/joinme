@@ -153,12 +153,18 @@ transforming an already-averaged marker value only when $f$ is linear.
 Valid inference in high dimensions requires principled priors. `JoinME` employs a hierarchy of regularization:
 
 ## 4.1. Sparse Association Priors
-When $D$ is large, we use shrinkage priors on the association coefficients $\alpha_d$:
+When $D$ is large, we use shrinkage priors on non-centered association latents
+$z_{\alpha,d}$, with $\alpha_d = z_{\alpha,d}\,\sigma_{\alpha,d}$:
 
-*   **Bayesian Lasso (Laplace)**: $\alpha_d \sim \text{Laplace}(0, \lambda)$. Promotes sparsity (setting irrelevant markers to zero).
-*   **Bayesian Ridge (Normal)**: $\alpha_d \sim \mathcal{N}(0, \tau)$. Promotes grouping (shrinkage toward the mean).
+*   **Bayesian Lasso (Laplace)**: $z_{\alpha,d} \sim \text{Laplace}(0, \lambda)$. Promotes sparsity (shrinking irrelevant markers toward zero).
+*   **Bayesian Ridge (Normal)**: $z_{\alpha,d} \sim \mathcal{N}(0, \tau)$. Promotes grouping (shrinkage toward the mean).
 
 This allows the model to "select" relevant biomarkers automatically.
+
+For marker-weight-involving channels (`cv_total`, `cs_total`, `cv_marker`,
+`cs_marker`), identifiability is stabilized by constraining only the first
+active latent in that order to be non-negative; remaining active channels remain
+signed.
 
 ### Marker Weights
 
@@ -172,22 +178,24 @@ $$
 $$
 
 with $z_d \sim \mathcal{N}(0,1)$. Effective marker intensities used in
-association aggregation are computed with a bounded inv_logit map:
+association aggregation use the raw latent weights:
 
 $$
-\omega_d^{eff} = 2 \cdot \text{inv\_logit}(\omega^{raw}_d) - 1.
+\omega_d^{eff} = \omega^{raw}_d.
 $$
 
-This yields weights in $(-1, 1)$ while preserving the sign and magnitude implied
-by the latent offsets. The $\omega^{(0)}$ offsets act as priors that shift the
-latent weight distribution.
+The $\omega^{(0)}$ offsets act as priors that shift the latent weight distribution,
+and no additional normalization is applied.
 
 ## 4.2. Regularizing Smoothness
-For B-spline baseline hazards and penalized I-spline associations, we impose a second-order random walk prior on coefficients $\gamma$:
+For B-spline baseline hazards and penalized I-spline associations, we impose a second-order random walk prior on spline coefficients (excluding the intercept):
 
 $$ \gamma_j - 2\gamma_{j-1} + \gamma_{j-2} \sim \mathcal{N}(0, \sigma_{smooth}) $$
 
 This prevents overfitting to small clusters of events (spikes in the hazard) and ensures smooth extrapolations.
+
+The baseline hazard level is carried by the spline intercept basis coefficient
+inside $\gamma_{bs}$; there is no separate baseline-intercept parameter.
 
 ## 4.3. Robustness
 *   **Fixed Effects**: Student-$t(\nu=6)$ priors provide heavier tails than the Normal, robustifying against outliers.

@@ -83,8 +83,8 @@ For engine = "rstan", threading uses options(stan.thread = threads_per_chain).
 \item grainsize: integer; reduce_sum grainsize for threading (default max(1, min(n_cores, ceiling(n_id/(4\emph{threads_per_chain}chains))))).
 \item force_recompile: logical; recompile the Stan model if needed.
 \item quadrature_nodes: optional positive integer total node target for survival
-integration. Allowed values are exactly 7/15/31/41/51/61. Only the node count is
-passed to Stan; GK nodes/weights are fixed in the Stan code.
+integration. Allowed values are exactly 7/15/31/41/51/61. Only the node
+count is passed to Stan; GK nodes/weights are fixed in the Stan code.
 \item corr_diag_link: "softplus" or "exp" for covariance regression diagonals.
 \item tau_sde_fixed: optional fixed tau in (0,1) for skew-double-exponential.
 }}
@@ -92,14 +92,9 @@ passed to Stan; GK nodes/weights are fixed in the Stan code.
 \item{draws}{Optional number of posterior draws used for summaries (not sampling).}
 
 \item{families}{Marker-specific family specification (optional).
-Can be:
-\itemize{
-\item a character vector of family names aligned to marker order, or
-\item a list of \code{jm_family(...)} specifications with per-marker links.
-}
-Supported links/inverse-links are \code{identity}, \code{log}, \code{logit},
-\code{probit}, and \code{exp}. Example:
-\code{families = list(jm_family("student_t", link = "identity"), jm_family("bernoulli", link = "probit"))}.}
+Can be a character vector of family names aligned to marker order, or a
+list of \code{jm_family(...)} entries with per-marker links.
+Supported links/inverse-links: \code{identity}, \code{log}, \code{logit}, \code{probit}, \code{exp}.}
 
 \item{transforms}{Transformation specifications for association terms
 (cv_total, cs_total, corr). Each entry is a list with a \code{type} and fields
@@ -138,9 +133,8 @@ Marker weights (see \code{joinme_standata()}) are used to form marker-average su
 for both current value (CV) and current slope (CS) association components. When
 \code{fixed_marker_weights = FALSE}, signed perturbations are estimated around base
 weights using \code{marker_weights + z_marker_weights} with
-\code{z_marker_weights ~ N(0, 1)}. The effective marker intensities used in
-association aggregation are then computed as
-\eqn{2 \cdot \text{inv\_logit}(w_{raw}) - 1}, yielding bounded weights in (-1, 1).
+\code{z_marker_weights ~ N(0, 1)}. The effective marker intensities are used directly
+from \code{w_raw} without additional normalization and scale the association contributions.
 
 Formula-scoped subject weighting is supported in random-effect grouping terms via
 \verb{weighted(group, weights = <column>)}. For example:
@@ -156,7 +150,9 @@ survival contributions. Weight columns must be finite and strictly positive.
 
 Association coefficients are denoted with the \code{alpha_} prefix to match joint-model
 conventions and to avoid confusion with the linear predictor eta used throughout
-the longitudinal and survival submodels.
+the longitudinal and survival submodels. Total, marker, and mean associations use
+a positive non-centered parameterization: \code{alpha = z_alpha * sd_alpha}, which
+stabilizes sampling while preserving the intended sign structure via marker weights.
 
 The typical workflow is:
 \enumerate{

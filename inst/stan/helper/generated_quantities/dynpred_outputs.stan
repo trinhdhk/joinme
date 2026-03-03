@@ -123,7 +123,7 @@ for (k in 1 : n_draws) {
     y_fit_linpred[k, n] = eta_long;
     {
       int link_d = canonical_link_code_from_program(d, inv_link_n_ops, inv_link_ops, inv_link_n_const);
-      real mu_long = inv_link_eta_vm(eta_long, d, inv_link_n_ops, inv_link_ops, inv_link_n_const, inv_link_const);
+      real mu_long = inv_link_bytecode(eta_long, d, inv_link_n_ops, inv_link_ops, inv_link_n_const, inv_link_const);
 
       if (family_long[d] == 1) {
         y_fit_epred[k, n] = mu_long;
@@ -175,7 +175,7 @@ for (k in 1 : n_draws) {
     y_pred_linpred[k, n] = eta_long;
     {
       int link_d = canonical_link_code_from_program(d, inv_link_n_ops, inv_link_ops, inv_link_n_const);
-      real mu_long = inv_link_eta_vm(eta_long, d, inv_link_n_ops, inv_link_ops, inv_link_n_const, inv_link_const);
+      real mu_long = inv_link_bytecode(eta_long, d, inv_link_n_ops, inv_link_ops, inv_link_n_const, inv_link_const);
 
       if (family_long[d] == 1) {
       // Gaussian
@@ -399,8 +399,7 @@ for (k in 1 : n_draws) {
         real eta_w = 0;
         if (n_cov_hazard > 0)
           eta_w = dot_product(vec_cov_hazard, gamma_hazard[k, k_ev]);
-        log_h_cause[k_ev] = log_h0_intercept[k, k_ev]
-                            + dot_product(mat_basis_gk_cond[j], bs_gamma_c[k, k_ev])
+        log_h_cause[k_ev] = dot_product(mat_basis_gk_cond[j], bs_gamma_c[k, k_ev])
                             + eta_w
                             + eta_assoc_nodes[j];
       }
@@ -536,8 +535,7 @@ for (k in 1 : n_draws) {
         real eta_w = 0;
         if (n_cov_hazard > 0)
           eta_w = dot_product(vec_cov_hazard, gamma_hazard[k, k_ev]);
-        log_h_cause[k_ev] = log_h0_intercept[k, k_ev]
-                            + dot_product(mat_basis_gk_surv[s][j], bs_gamma_c[k, k_ev])
+        log_h_cause[k_ev] = dot_product(mat_basis_gk_surv[s][j], bs_gamma_c[k, k_ev])
                             + eta_w
                             + eta_assoc_nodes[j];
       }

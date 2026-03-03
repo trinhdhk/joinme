@@ -113,24 +113,18 @@
   // Goal:
   // - Allow positive and negative marker contributions.
   // - Keep perturbation model simple and directly interpretable.
-  // - Constrain effective weights to (-1, 1) with an inv_logit map.
+  // - No normalization is applied; raw weights are used directly.
   // Rule:
   // - Start from signed base weights (provided from standata) as a prior offset.
   // - If estimation is enabled, add a signed standard-normal perturbation z.
-  // - Map to effective weights via 2 * inv_logit(w_raw) - 1.
+  // - Map to effective weights via w_raw (no normalization).
   // - Interpret marker_weights_eff as marker-intensity multipliers for association.
   vector[D] marker_weights_eff; // effective signed marker weights
   {
-    vector[D] w_raw;
     if (estimate_marker_weights == 1 && use_marker_weight_assoc == 1) {
-      w_raw = marker_weights + z_marker_weights;
+      marker_weights_eff = marker_weights + z_marker_weights;
     } else {
-      w_raw = marker_weights;
-    }
-    if (use_marker_weight_assoc == 1) {
-      marker_weights_eff = 2.0 * inv_logit(w_raw) - 1.0;
-    } else {
-      marker_weights_eff = w_raw;
+      marker_weights_eff = marker_weights;
     }
   }
 
@@ -163,12 +157,33 @@
     wbar_i[i] = L_i[i] * zbar[i];
   
   /* -------------------- Effective association coefficients (flags applied) */
-  real alpha_cv_total = z_alpha_cv_total * sd_alpha_cv_total;
-  real alpha_cs_total = z_alpha_cs_total * sd_alpha_cs_total;
+  // Non-centered association construction with flexible sign constraints:
+  // if any marker-weight-involving association is active, only the first
+  // active latent in the order (cv_total, cs_total, cv_marker, cs_marker)
+  // is constrained positive; all others remain unconstrained.
+  real z_alpha_cv_total_eff = z_alpha_cv_total;
+  real z_alpha_cs_total_eff = z_alpha_cs_total;
+  real z_alpha_cv_marker_eff = z_alpha_cv_marker;
+  real z_alpha_cs_marker_eff = z_alpha_cs_marker;
+
+  if ((assoc_cv_total + assoc_cs_total + assoc_cv_marker + assoc_cs_marker) > 0) {
+    if (assoc_cv_total == 1) {
+      z_alpha_cv_total_eff = abs(z_alpha_cv_total);
+    } else if (assoc_cs_total == 1) {
+      z_alpha_cs_total_eff = abs(z_alpha_cs_total);
+    } else if (assoc_cv_marker == 1) {
+      z_alpha_cv_marker_eff = abs(z_alpha_cv_marker);
+    } else if (assoc_cs_marker == 1) {
+      z_alpha_cs_marker_eff = abs(z_alpha_cs_marker);
+    }
+  }
+
+  real alpha_cv_total = z_alpha_cv_total_eff * sd_alpha_cv_total;
+  real alpha_cs_total = z_alpha_cs_total_eff * sd_alpha_cs_total;
   real alpha_cv_mean = z_alpha_cv_mean * sd_alpha_cv_mean;
   real alpha_cs_mean = z_alpha_cs_mean * sd_alpha_cs_mean;
-  real alpha_cv_marker = z_alpha_cv_marker * sd_alpha_cv_marker;
-  real alpha_cs_marker = z_alpha_cs_marker * sd_alpha_cs_marker;
+  real alpha_cv_marker = z_alpha_cv_marker_eff * sd_alpha_cv_marker;
+  real alpha_cs_marker = z_alpha_cs_marker_eff * sd_alpha_cs_marker;
 
   real a_cv_total = assoc_cv_total * alpha_cv_total; // total CV coefficient
   real a_cs_total = assoc_cs_total * alpha_cs_total; // total CS coefficient

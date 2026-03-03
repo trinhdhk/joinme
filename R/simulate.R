@@ -402,7 +402,7 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   `cbrt`, `softplus`/`log1p_exp`, trigonometric and hyperbolic functions.
 #' @param marker_weights Optional base marker weights used as prior offsets for
 #'   association aggregation. Effective weights are computed as
-#'   `2 * inv_logit(w_raw) - 1` and used for marker-averaged CV/CS terms.
+#'   `w_raw` and used for marker-averaged CV/CS terms.
 #'   If `NULL`, equal weights are used and aggregated
 #'   as weighted means divided by marker count. Inputs are treated as direct
 #'   signed weights used in association aggregation.
@@ -449,7 +449,8 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   survival integration. Allowed values: 7, 15, 31, 41, 51, 61.
 #' @param n_workers Number of workers to use when `use_mirai = TRUE`.
 #' @param use_mirai Logical; when TRUE and `n_workers > 1`, use `mirai` for
-#'   parallel simulation if available.
+#'   parallel simulation if available. Parallel jobs are seeded deterministically
+#'   from the main `seed` for reproducible simulations.
 #' @param id_var,marker_var,time_var,y_var,event_time_var,event_var Column names aligned
 #'   with `joinme_standata()` defaults.
 #'
@@ -542,6 +543,8 @@ simulate_joinme <- function(
   # 4) Simulate event times by inverse transform using hazard linked to assoc terms.
   # 5) Simulate observation times, generate responses by family, and return truth.
   set.seed(seed)
+  # Base seed for deterministic parallel jobs when mirai is enabled.
+  seed_base <- as.integer(seed %||% 1L)
   n_workers <- as.integer(n_workers)
   if (!is.finite(n_workers) || n_workers < 1L) n_workers <- 1L
   use_mirai <- isTRUE(use_mirai) && n_workers > 1L
@@ -554,6 +557,91 @@ simulate_joinme <- function(
     on.exit(mirai::daemons(0L), add = TRUE)
   }
 
+  # Local bytecode evaluators used by simulation closures.
+  # These are intentionally self-contained so mirai workers do not depend on
+  # package namespace internals.
+  .sim_eval_bytecode_scalar <- function(x, bytecode, const_data) {
+    code <- as.integer(bytecode %||% integer(0))
+    constants <- as.numeric(const_data %||% numeric(0))
+    if (length(code) == 0L) return(as.numeric(x))
+
+    stack <- numeric(0)
+    const_idx <- 1L
+    for (op in code) {
+      if (op == 0L) {
+        stack <- c(stack, as.numeric(x))
+      } else if (op == 1L) {
+        stack <- c(stack, constants[const_idx])
+        const_idx <- const_idx + 1L
+      } else if (op == 2L) {
+        b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
+        stack <- c(stack[-c(length(stack) - 1L, length(stack))], a + b)
+      } else if (op == 3L) {
+        b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
+        stack <- c(stack[-c(length(stack) - 1L, length(stack))], a - b)
+      } else if (op == 4L) {
+        b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
+        stack <- c(stack[-c(length(stack) - 1L, length(stack))], a * b)
+      } else if (op == 5L) {
+        b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
+        stack <- c(stack[-c(length(stack) - 1L, length(stack))], a / b)
+      } else if (op == 6L) {
+        stack[length(stack)] <- log(stack[length(stack)])
+      } else if (op == 7L) {
+        stack[length(stack)] <- exp(stack[length(stack)])
+      } else if (op == 8L) {
+        stack[length(stack)] <- sqrt(stack[length(stack)])
+      } else if (op == 9L) {
+        stack[length(stack)] <- stats::plogis(stack[length(stack)])
+      } else if (op == 10L) {
+        stack[length(stack)] <- stats::qlogis(stack[length(stack)])
+      } else if (op == 11L) {
+        stack[length(stack)] <- 1 / stack[length(stack)]
+      } else if (op == 12L) {
+        b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
+        stack <- c(stack[-c(length(stack) - 1L, length(stack))], a^b)
+      } else if (op == 13L) {
+        stack[length(stack)] <- sin(stack[length(stack)])
+      } else if (op == 14L) {
+        stack[length(stack)] <- cos(stack[length(stack)])
+      } else if (op == 15L) {
+        stack[length(stack)] <- tan(stack[length(stack)])
+      } else if (op == 16L) {
+        stack[length(stack)] <- abs(stack[length(stack)])
+      } else if (op == 17L) {
+        stack[length(stack)] <- stack[length(stack)]^2
+      } else if (op == 18L) {
+        stack[length(stack)] <- sinh(stack[length(stack)])
+      } else if (op == 19L) {
+        stack[length(stack)] <- cosh(stack[length(stack)])
+      } else if (op == 20L) {
+        stack[length(stack)] <- tanh(stack[length(stack)])
+      } else if (op == 21L) {
+        stack[length(stack)] <- asinh(stack[length(stack)])
+      } else if (op == 22L) {
+        stack[length(stack)] <- acosh(stack[length(stack)])
+      } else if (op == 23L) {
+        stack[length(stack)] <- atanh(stack[length(stack)])
+      } else if (op == 24L) {
+        stack[length(stack)] <- .softplus(stack[length(stack)])
+      } else if (op == 25L) {
+        a <- stack[length(stack)]
+        stack[length(stack)] <- sign(a) * abs(a)^(1 / 3)
+      } else if (op == 26L) {
+        stack[length(stack)] <- stats::pnorm(stack[length(stack)])
+      } else {
+        cli::cli_abort("Unknown transform bytecode instruction: {op}.")
+      }
+    }
+    stack[length(stack)]
+  }
+
+  .sim_eval_bytecode_vector <- function(x, bytecode, const_data) {
+    code <- as.integer(bytecode %||% integer(0))
+    constants <- as.numeric(const_data %||% numeric(0))
+    vapply(as.numeric(x), .sim_eval_bytecode_scalar, numeric(1), bytecode = code, const_data = constants)
+  }
+
   #' @keywords internal
   #' @param x Vector of inputs to process.
   #' @param fun Function to apply.
@@ -561,12 +649,19 @@ simulate_joinme <- function(
   #' @return List of results.
   .sim_parallel_lapply <- function(x, fun, ...) {
     # Parallel map with mirai; falls back to serial when mirai is disabled.
+    # Each job sets a deterministic seed derived from the main seed.
     if (!use_mirai) return(lapply(x, fun, ...))
     args <- list(...)
-    jobs <- lapply(x, function(xi) mirai::mirai({
-      do.call(fun, c(list(xi), args))
-    }, fun = fun, xi = xi, args = args))
-    lapply(jobs, mirai::collect_mirai)
+    jobs <- lapply(seq_along(x), function(idx) {
+      xi <- x[[idx]]
+      seed_i <- seed_base + as.integer(idx)
+      mirai::mirai({
+        set.seed(seed_i)
+        do.call(fun, c(list(xi), args))
+      }, fun = fun, xi = xi, args = args, seed_i = seed_i)
+    })
+    # lapply(jobs, mirai::collect_mirai)
+    mirai::collect_mirai(jobs, options = c('.stop', '.progress'))
   }
 
   .sim_align_coef <- function(col_names, user_coef = NULL, sd_default = 0.4, intercept_default = 0.0) {
@@ -673,115 +768,16 @@ simulate_joinme <- function(
   }
 
   #' @keywords internal
-  #' @param x Scalar input to transform.
-  #' @param opcodes Integer opcode sequence.
-  #' @param const_data Numeric constants referenced by opcodes.
-  #' @return Transformed scalar.
-  .sim_eval_bytecode_scalar <- function(x, opcodes, const_data) {
-    # Evaluate transform bytecode on a scalar x (matches Stan opcode order).
-    ops <- as.integer(opcodes %||% integer(0))
-    const_data <- as.numeric(const_data %||% numeric(0))
-    if (length(ops) == 0L) return(x)
-
-    stack <- numeric(0)
-    const_idx <- 1L
-    for (op in ops) {
-      if (op == 0L) {
-        stack <- c(stack, x)
-      } else if (op == 1L) {
-        stack <- c(stack, const_data[const_idx])
-        const_idx <- const_idx + 1L
-      } else if (op == 2L) {
-        b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
-        stack <- c(stack[-c(length(stack) - 1L, length(stack))], a + b)
-      } else if (op == 3L) {
-        b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
-        stack <- c(stack[-c(length(stack) - 1L, length(stack))], a - b)
-      } else if (op == 4L) {
-        b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
-        stack <- c(stack[-c(length(stack) - 1L, length(stack))], a * b)
-      } else if (op == 5L) {
-        b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
-        stack <- c(stack[-c(length(stack) - 1L, length(stack))], a / b)
-      } else if (op == 6L) {
-        a <- stack[length(stack)]
-        stack[length(stack)] <- log(a)
-      } else if (op == 7L) {
-        a <- stack[length(stack)]
-        stack[length(stack)] <- exp(a)
-      } else if (op == 8L) {
-        a <- stack[length(stack)]
-        stack[length(stack)] <- sqrt(a)
-      } else if (op == 9L) {
-        a <- stack[length(stack)]
-        stack[length(stack)] <- stats::plogis(a)
-      } else if (op == 10L) {
-        a <- stack[length(stack)]
-        stack[length(stack)] <- stats::qlogis(a)
-      } else if (op == 11L) {
-        a <- stack[length(stack)]
-        stack[length(stack)] <- 1 / a
-      } else if (op == 12L) {
-        b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
-        stack <- c(stack[-c(length(stack) - 1L, length(stack))], a^b)
-      } else if (op == 13L) {
-        a <- stack[length(stack)]
-        stack[length(stack)] <- sin(a)
-      } else if (op == 14L) {
-        a <- stack[length(stack)]
-        stack[length(stack)] <- cos(a)
-      } else if (op == 15L) {
-        a <- stack[length(stack)]
-        stack[length(stack)] <- tan(a)
-      } else if (op == 16L) {
-        a <- stack[length(stack)]
-        stack[length(stack)] <- abs(a)
-      } else if (op == 17L) {
-        a <- stack[length(stack)]
-        stack[length(stack)] <- a^2
-      } else if (op == 18L) {
-        a <- stack[length(stack)]
-        stack[length(stack)] <- sinh(a)
-      } else if (op == 19L) {
-        a <- stack[length(stack)]
-        stack[length(stack)] <- cosh(a)
-      } else if (op == 20L) {
-        a <- stack[length(stack)]
-        stack[length(stack)] <- tanh(a)
-      } else if (op == 21L) {
-        a <- stack[length(stack)]
-        stack[length(stack)] <- asinh(a)
-      } else if (op == 22L) {
-        a <- stack[length(stack)]
-        stack[length(stack)] <- acosh(a)
-      } else if (op == 23L) {
-        a <- stack[length(stack)]
-        stack[length(stack)] <- atanh(a)
-      } else if (op == 24L) {
-        a <- stack[length(stack)]
-        stack[length(stack)] <- .softplus(a)
-      } else if (op == 25L) {
-        a <- stack[length(stack)]
-        stack[length(stack)] <- sign(a) * abs(a)^(1 / 3)
-      } else if (op == 26L) {
-        a <- stack[length(stack)]
-        stack[length(stack)] <- stats::pnorm(a)
-      } else {
-        cli::cli_abort("Unknown transform opcode: {op}.")
-      }
-    }
-    stack[length(stack)]
-  }
-
-  #' @keywords internal
   #' @param x Numeric vector on link scale.
   #' @param inv_link_bc Parsed inverse-link bytecode.
   #' @return Numeric vector on response scale.
   .sim_apply_inv_link_bc <- function(x, inv_link_bc) {
-    # Apply a parsed inverse-link bytecode to numeric vector x.
-    ops <- inv_link_bc$opcodes %||% inv_link_bc$bytecode %||% integer(0)
-    const_data <- inv_link_bc$const_data %||% numeric(0)
-    vapply(x, .sim_eval_bytecode_scalar, numeric(1), opcodes = ops, const_data = const_data)
+    # Apply a parsed inverse-link bytecode using the shared interpreter.
+    .sim_eval_bytecode_vector(
+      x = x,
+      bytecode = inv_link_bc$bytecode %||% inv_link_bc$opcodes,
+      const_data = inv_link_bc$const_data %||% numeric(0)
+    )
   }
 
   #' @keywords internal
@@ -853,34 +849,13 @@ simulate_joinme <- function(
     tf_type <- as.character(spec$type)[1]
 
     if (identical(tf_type, "functional")) {
-      expr_node <- .coerce_transform_expr(spec$expr)
-      env_template <- list(
-        exp = base::exp,
-        log = base::log,
-        sqrt = base::sqrt,
-        abs = base::abs,
-        sin = base::sin,
-        cos = base::cos,
-        tan = base::tan,
-        sinh = base::sinh,
-        cosh = base::cosh,
-        tanh = base::tanh,
-        asinh = base::asinh,
-        acosh = base::acosh,
-        atanh = base::atanh,
-        inv_logit = stats::plogis,
-        expit = stats::plogis,
-        sigmoid = stats::plogis,
-        softplus = .softplus,
-        log1p_exp = .softplus,
-        power = function(a, b) a^b,
-        pow = function(a, b) a^b,
-        rec = function(a) 1 / a,
-        cbrt = function(a) sign(a) * abs(a)^(1 / 3)
-      )
+      bc <- parse_transform_expr(spec$expr)
       return(function(x) {
-        eval_env <- list2env(c(list(x = x), env_template), parent = baseenv())
-        as.numeric(eval(expr_node, envir = eval_env))
+        .sim_eval_bytecode_vector(
+          x = x,
+          bytecode = bc$bytecode %||% bc$opcodes,
+          const_data = bc$const_data %||% numeric(0)
+        )
       })
     }
 
@@ -1060,19 +1035,22 @@ simulate_joinme <- function(
   family_names <- vapply(family_codes, .family_code_to_name, character(1))
 
   marker_weights_raw <- marker_weights %||% rep(1, D)
+  marker_weights_raw <- as.numeric(unlist(marker_weights_raw, use.names = FALSE))
   if (length(marker_weights_raw) == 1L) marker_weights_raw <- rep(marker_weights_raw, D)
-  marker_weights_raw <- as.numeric(marker_weights_raw)
-  if (length(marker_weights_raw) != D || any(!is.finite(marker_weights_raw))) {
+  if (length(marker_weights_raw) != D) {
+    if (length(marker_weights_raw) > D) {
+      marker_weights_raw <- marker_weights_raw[seq_len(D)]
+    } else {
+      marker_weights_raw <- rep(marker_weights_raw, length.out = D)
+    }
+  }
+  if (any(!is.finite(marker_weights_raw))) {
     cli::cli_abort(c(
       x = "{.arg marker_weights} must be finite numeric with length equal to number of markers ({D}).",
       i = "Provide one weight per marker or a scalar recycled across markers."
     ))
   }
-  .sim_inv_logit_signed <- function(w) {
-    w <- as.numeric(w)
-    2 * stats::plogis(w) - 1
-  }
-  marker_weights_eff <- .sim_inv_logit_signed(marker_weights_raw)
+  marker_weights_eff <- marker_weights_raw
 
   # ---- Parse longitudinal formula structure
   f_exp <- reformulas::expandDoubleVerts(formulaLong)
@@ -1241,17 +1219,7 @@ simulate_joinme <- function(
 
   weighted_terms <- intersect(c("cv_total", "cs_total", "cv_marker", "cs_marker"), assoc)
   if (length(weighted_terms) > 0) {
-    anchor <- weighted_terms[1]
-    anchor_val <- as.numeric(assoc_coef_scalar[[anchor]])
-    if (is.finite(anchor_val) && anchor_val < 0) {
-      marker_weights_raw <- -marker_weights_raw
-      marker_weights_eff <- .sim_inv_logit_signed(marker_weights_raw)
-      assoc_coef_scalar[weighted_terms] <- -assoc_coef_scalar[weighted_terms]
-    }
     assoc_coef_scalar[weighted_terms] <- abs(assoc_coef_scalar[weighted_terms])
-  }
-  if ("corr" %in% assoc && M_corr > 0) {
-    assoc_coef_corr <- abs(assoc_coef_corr)
   }
 
   # Use signed marker weights directly (no logistic bounding), aligned with Stan.
@@ -1342,11 +1310,13 @@ simulate_joinme <- function(
   corr_by_id <- lapply(seq_len(n_id), .sim_corr_features)
 
   assoc_components <- function(i, t) {
+    # Step A: build marker-resolved CV components at t and t + eps_cs.
     now <- eta_components_all_markers(i, t)
     eps <- eta_components_all_markers(i, t + eps_cs)
 
     w_mean <- function(x) sum(marker_weights_eff * x) / D
 
+    # Step B: aggregate raw CV summaries (mean, marker, total).
     cv_mean_raw <- mean(now$mu_mean)
     cv_marker_raw <- w_mean(now$mu_marker)
     cv_total_raw <- w_mean(now$mu_total)
@@ -1355,20 +1325,21 @@ simulate_joinme <- function(
     cv_marker <- if (has_tf_cv_marker) w_mean(tf_funs$cv_marker(now$mu_marker)) else cv_marker_raw
     cv_total <- if (has_tf_cv_total) w_mean(tf_funs$cv_total(now$mu_total)) else cv_total_raw
 
+    # Step C: compute mean slope via finite difference.
     cs_mean_raw <- (mean(eps$mu_mean) - cv_mean_raw) / eps_cs
 
-    # Marker-level slopes for marker and total components.
-    # We keep these at marker resolution so cs transforms can be applied
-    # per marker before weighted averaging, mirroring Stan.
+    # Step D: marker-level slopes for marker and total components.
+    # We keep these at marker resolution so CS transforms are applied per marker
+    # before weighted averaging, mirroring Stan semantics.
     cs_marker_raw_by_marker <- (eps$mu_marker - now$mu_marker) / eps_cs
     cs_total_raw_by_marker <- (eps$mu_total - now$mu_total) / eps_cs
 
-    # CS aggregation semantics (aligned with CV aggregation semantics):
+    # Step E: CS aggregation semantics (aligned with CV aggregation semantics):
     # transform first at marker level, then weighted-average across markers.
     cs_marker <- w_mean(tf_funs$cs_marker(cs_marker_raw_by_marker))
     cs_total <- w_mean(tf_funs$cs_total(cs_total_raw_by_marker))
 
-    # Keep weighted raw summaries for debugging/inspection helpers.
+    # Step F: keep weighted raw summaries for debugging/inspection helpers.
     cs_marker_raw <- w_mean(cs_marker_raw_by_marker)
     cs_total_raw <- w_mean(cs_total_raw_by_marker)
 
@@ -1528,8 +1499,36 @@ simulate_joinme <- function(
 
   # ---- Draw event/censoring times
   event_draws <- .sim_parallel_lapply(seq_len(n_id), draw_event_time)
-  dataEvent[[event_time_var]] <- vapply(event_draws, `[[`, numeric(1), "time")
-  dataEvent[[event_var]] <- vapply(event_draws, `[[`, integer(1), "event")
+
+  .is_valid_event_draw <- function(x) {
+    is.list(x) &&
+      !is.null(x$time) && length(x$time) == 1L && is.finite(as.numeric(x$time)) &&
+      !is.null(x$event) && length(x$event) == 1L && is.finite(as.numeric(x$event))
+  }
+
+  bad_idx <- which(!vapply(event_draws, .is_valid_event_draw, logical(1)))
+  if (length(bad_idx) > 0L) {
+    cli::cli_warn(c(
+      x = "{length(bad_idx)} parallel event-draw job(s) returned malformed output.",
+      i = "Recomputing those jobs deterministically in-process."
+    ))
+
+    for (idx in bad_idx) {
+      set.seed(seed_base + as.integer(idx))
+      event_draws[[idx]] <- draw_event_time(idx)
+    }
+
+    still_bad <- which(!vapply(event_draws, .is_valid_event_draw, logical(1)))
+    if (length(still_bad) > 0L) {
+      cli::cli_abort(c(
+        x = "Failed to generate valid event draws for indices: {paste(still_bad, collapse = ', ')}.",
+        i = "Check custom hazard/transforms for numerical failures."
+      ))
+    }
+  }
+
+  dataEvent[[event_time_var]] <- vapply(event_draws, function(x) as.numeric(x$time), numeric(1))
+  dataEvent[[event_var]] <- vapply(event_draws, function(x) as.integer(x$event), integer(1))
 
   # ---- Build longitudinal observation schedule conditional on event times
   n_obs_target <- max(2L, as.integer(n_obs_per_marker_per_id))

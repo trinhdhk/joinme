@@ -55,3 +55,4 @@ Each element of transform_list should be a list with:
 Use \code{build_standata_transforms()} to construct the data list entries,
 and \code{validate_transforms()} to verify consistency before sampling.
 }
+

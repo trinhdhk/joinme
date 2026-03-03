@@ -58,6 +58,10 @@ jm_family <- function(name, link = NULL, inv_link = NULL) {
     .inv_link_bc_from_name(.default_link_for_family(fam_code))
   }
 
+  if (!is.null(inv_link)) {
+    .warn_noninvertible_inv_link(inv_link_bc, context = paste0("jm_family(family = '", fam_name, "')"))
+  }
+
   link_name <- .canonical_link_from_inv_link_bc(inv_link_bc)
 
   structure(
@@ -146,6 +150,41 @@ jm_family <- function(name, link = NULL, inv_link = NULL) {
 }
 
 #' @keywords internal
+.bytecode_has_potentially_noninvertible_ops <- function(inv_link_bc) {
+  # Heuristic operators that are non-injective on their natural/global domains.
+  risky_ops <- c(
+    13L, # sin
+    14L, # cos
+    15L, # tan
+    16L, # abs
+    17L, # square
+    18L, # sinh (strictly monotone but can induce extreme tails)
+    19L, # cosh
+    20L  # tanh (bounded; may flatten heavily)
+  )
+  ops <- as.integer(inv_link_bc$bytecode %||% inv_link_bc$opcodes %||% integer(0))
+  any(ops %in% risky_ops)
+}
+
+#' @keywords internal
+.warn_noninvertible_inv_link <- function(inv_link_bc, context) {
+  # Issue an explicit identifiability warning when inverse-link program is not canonical
+  # or uses operations that are frequently non-invertible in practical model domains.
+  canonical_name <- .canonical_link_from_inv_link_bc(inv_link_bc)
+  has_risky_ops <- .bytecode_has_potentially_noninvertible_ops(inv_link_bc)
+  if (!is.na(canonical_name) && !has_risky_ops) {
+    return(invisible(NULL))
+  }
+
+  cli::cli_warn(c(
+    x = "Custom inverse-link bytecode in {context} may be non-invertible.",
+    i = "This can make the joint model weakly identified or unidentifiable (e.g., periodic transforms like sin/cos).",
+    i = "Prefer monotone one-to-one inverse links when possible (identity, exp, inv_logit, probit, etc.)."
+  ))
+  invisible(NULL)
+}
+
+#' @keywords internal
 .link_name_from_code <- function(link_code) {
   switch(
     as.character(as.integer(link_code)),
@@ -209,6 +248,9 @@ jm_family <- function(name, link = NULL, inv_link = NULL) {
       .inv_link_bc_from_name(x$link)
     } else {
       .inv_link_bc_from_name(.default_link_for_family(fam_code))
+    }
+    if (!is.null(x$inv_link)) {
+      .warn_noninvertible_inv_link(inv_link_bc, context = paste0("families[[", x$family, "]]"))
     }
     link_name <- .canonical_link_from_inv_link_bc(inv_link_bc)
     return(list(

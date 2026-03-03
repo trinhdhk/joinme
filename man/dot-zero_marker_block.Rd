@@ -4,7 +4,7 @@
 \alias{.zero_marker_block}
 \title{Construct a zero-dimension marker-only block}
 \usage{
-.zero_marker_block(N, n_id)
+.zero_marker_block(N, n_id, n_gk = 15L)
 }
 \description{
 Construct a zero-dimension marker-only block

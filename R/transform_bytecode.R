@@ -67,24 +67,28 @@
 ##'
 ##' @export
 # File overview:
-# - Legacy alias for functional bytecode parsing.
-# - Maintains compatibility with earlier bytecode naming.
+# - Parse R expressions into portable bytecode programs.
+# - Validate bytecode stack behavior before handing programs to Stan.
+# - Evaluate bytecode in R (shared by inverse-link and association transforms).
 parse_transform_expr <- function(expr) {
-  # Legacy alias for opcode parsing
+  # Step 1: normalize any supported expression input into a language object.
   expr_call <- .coerce_transform_expr(expr)
-  
-  opcodes <- integer()
+
+  # Step 2: emit bytecode instructions and constant payload.
+  bytecode <- integer()
   const_data <- numeric()
-  result <- .emit_opcode_expr(expr_call, opcodes, const_data)
-  
-  verify_opcodes(result$opcodes, result$const_data)
-  
+  result <- .emit_bytecode_expr(expr_call, bytecode, const_data)
+
+  # Step 3: validate stack consistency so runtime evaluation is deterministic.
+  verify_opcodes(result$bytecode, result$const_data)
+
+  # Step 4: return both `bytecode` and legacy `opcodes` aliases for compatibility.
   list(
-    opcodes = result$opcodes,
-    bytecode = result$opcodes,
+    opcodes = result$bytecode,
+    bytecode = result$bytecode,
     const_data = result$const_data,
-    n_ops = length(result$opcodes),
-    n_bytecode = length(result$opcodes),
+    n_ops = length(result$bytecode),
+    n_bytecode = length(result$bytecode),
     n_const = length(result$const_data)
   )
 }
@@ -125,13 +129,13 @@ parse_transform_expr <- function(expr) {
 }
 
 ##' @keywords internal
-##' Emit opcodes from an R language object (calls, names, constants).
-.emit_opcode_expr <- function(node, opcodes, const_data) {
-  # Recursive descent over AST nodes to emit opcodes
+##' Emit bytecode from an R language object (calls, names, constants).
+.emit_bytecode_expr <- function(node, bytecode, const_data) {
+  # Recursive descent over AST nodes to emit bytecode
   if (is.numeric(node)) {
-    opcodes <- c(opcodes, 1L)
+    bytecode <- c(bytecode, 1L)
     const_data <- c(const_data, as.numeric(node))
-    return(list(opcodes = opcodes, const_data = const_data))
+    return(list(bytecode = bytecode, const_data = const_data))
   }
   if (is.name(node)) {
     if (as.character(node) != "x") {
@@ -140,8 +144,8 @@ parse_transform_expr <- function(expr) {
         i = "Use 'x' as the transformation input variable."
       ))
     }
-    opcodes <- c(opcodes, 0L)
-    return(list(opcodes = opcodes, const_data = const_data))
+    bytecode <- c(bytecode, 0L)
+    return(list(bytecode = bytecode, const_data = const_data))
   }
   if (!is.call(node)) {
     cli::cli_abort(c(
@@ -160,19 +164,19 @@ parse_transform_expr <- function(expr) {
         i = "Remove stray commas or extra arguments inside parentheses."
       ))
     }
-    return(.emit_opcode_expr(args[[1]], opcodes, const_data))
+    return(.emit_bytecode_expr(args[[1]], bytecode, const_data))
   }
   
   if (op %in% c("+", "-", "*", "/", "^")) {
     if (length(args) == 1 && op == "-") {
-      res <- .emit_opcode_expr(0, opcodes, const_data)
-      opcodes <- res$opcodes
+      res <- .emit_bytecode_expr(0, bytecode, const_data)
+      bytecode <- res$bytecode
       const_data <- res$const_data
-      res <- .emit_opcode_expr(args[[1]], opcodes, const_data)
-      opcodes <- res$opcodes
+      res <- .emit_bytecode_expr(args[[1]], bytecode, const_data)
+      bytecode <- res$bytecode
       const_data <- res$const_data
-      opcodes <- c(opcodes, 3L)
-      return(list(opcodes = opcodes, const_data = const_data))
+      bytecode <- c(bytecode, 3L)
+      return(list(bytecode = bytecode, const_data = const_data))
     }
     if (length(args) != 2) {
       cli::cli_abort(c(
@@ -180,15 +184,15 @@ parse_transform_expr <- function(expr) {
         i = "Check the transform expression for missing operands."
       ))
     }
-    res <- .emit_opcode_expr(args[[1]], opcodes, const_data)
-    opcodes <- res$opcodes
+    res <- .emit_bytecode_expr(args[[1]], bytecode, const_data)
+    bytecode <- res$bytecode
     const_data <- res$const_data
-    res <- .emit_opcode_expr(args[[2]], opcodes, const_data)
-    opcodes <- res$opcodes
+    res <- .emit_bytecode_expr(args[[2]], bytecode, const_data)
+    bytecode <- res$bytecode
     const_data <- res$const_data
-    opcode <- switch(op, "+" = 2L, "-" = 3L, "*" = 4L, "/" = 5L, "^" = 12L)
-    opcodes <- c(opcodes, opcode)
-    return(list(opcodes = opcodes, const_data = const_data))
+    op_id <- switch(op, "+" = 2L, "-" = 3L, "*" = 4L, "/" = 5L, "^" = 12L)
+    bytecode <- c(bytecode, op_id)
+    return(list(bytecode = bytecode, const_data = const_data))
   }
 
   if (op == "power") {
@@ -198,17 +202,17 @@ parse_transform_expr <- function(expr) {
         i = "Check the transform expression for missing arguments."
       ))
     }
-    res <- .emit_opcode_expr(args[[1]], opcodes, const_data)
-    opcodes <- res$opcodes
+    res <- .emit_bytecode_expr(args[[1]], bytecode, const_data)
+    bytecode <- res$bytecode
     const_data <- res$const_data
-    res <- .emit_opcode_expr(args[[2]], opcodes, const_data)
-    opcodes <- res$opcodes
+    res <- .emit_bytecode_expr(args[[2]], bytecode, const_data)
+    bytecode <- res$bytecode
     const_data <- res$const_data
-    opcodes <- c(opcodes, 12L)
-    return(list(opcodes = opcodes, const_data = const_data))
+    bytecode <- c(bytecode, 12L)
+    return(list(bytecode = bytecode, const_data = const_data))
   }
   
-  func_opcode <- switch(op,
+  func_op_id <- switch(op,
     log = 6L,
     exp = 7L,
     sqrt = 8L,
@@ -233,18 +237,18 @@ parse_transform_expr <- function(expr) {
     probit = 26L,
     NULL
   )
-  if (!is.null(func_opcode)) {
+  if (!is.null(func_op_id)) {
     if (length(args) != 1) {
       cli::cli_abort(c(
         x = "Function {op} expects one argument.",
         i = "Check the transform expression for missing arguments."
       ))
     }
-    res <- .emit_opcode_expr(args[[1]], opcodes, const_data)
-    opcodes <- res$opcodes
+    res <- .emit_bytecode_expr(args[[1]], bytecode, const_data)
+    bytecode <- res$bytecode
     const_data <- res$const_data
-    opcodes <- c(opcodes, func_opcode)
-    return(list(opcodes = opcodes, const_data = const_data))
+    bytecode <- c(bytecode, func_op_id)
+    return(list(bytecode = bytecode, const_data = const_data))
   }
   
   if (op == "ISpline") {
@@ -264,11 +268,12 @@ parse_transform_expr <- function(expr) {
 ##' Legacy tokenizer/parser removed in favor of R's formula parsing.
 
 ##' @keywords internal
-##' Verify functional opcodes for basic sanity (stack under/overflow, etc.)
+##' Verify functional bytecode for basic sanity (stack under/overflow, etc.)
 verify_opcodes <- function(opcodes, const_data) {
+  # Accept both historical `opcodes` naming and modern `bytecode` naming.
   stack_height <- 0
   const_idx <- 0
-  
+
   for (op in opcodes) {
     if (op == 0) {
       # PUSH_X
@@ -289,10 +294,152 @@ verify_opcodes <- function(opcodes, const_data) {
       stack_height <- stack_height - 1
     }
   }
-  
+
   if (stack_height != 1) {
     stop(paste("Final stack height is", stack_height, "; expected 1"))
   }
-  
+
   return(TRUE)
 }
+
+#' Evaluate bytecode for a scalar input
+#'
+#' @description
+#' Executes a stack-based bytecode program for a single numeric input.
+#' This evaluator mirrors the Stan-side instruction semantics exactly so
+#' simulation, preprocessing checks, and Stan likelihood evaluation remain aligned.
+#'
+#' @param x Numeric scalar input.
+#' @param bytecode Integer bytecode sequence. Legacy name `opcodes` is also accepted.
+#' @param const_data Numeric constants consumed by `PUSH_CONST` instructions.
+#'
+#' @return Numeric scalar result.
+#' @keywords internal
+eval_bytecode_scalar <- function(x, bytecode = NULL, const_data = numeric(), opcodes = NULL) {
+  # Step 1: normalize inputs and resolve legacy naming aliases.
+  program <- .normalize_bytecode_program(bytecode = bytecode, opcodes = opcodes, const_data = const_data)
+  code <- program$bytecode
+  constants <- program$const_data
+
+  # Identity behavior for empty programs keeps backward compatibility.
+  if (length(code) == 0L) {
+    return(as.numeric(x))
+  }
+
+  # Step 2: validate stack behavior before execution for reproducibility.
+  verify_opcodes(code, constants)
+
+  # Step 3: execute the bytecode stack machine instruction by instruction.
+  stack <- numeric(0)
+  const_idx <- 1L
+  for (op in code) {
+    if (op == 0L) {
+      stack <- c(stack, as.numeric(x))
+    } else if (op == 1L) {
+      stack <- c(stack, constants[const_idx])
+      const_idx <- const_idx + 1L
+    } else if (op == 2L) {
+      b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
+      stack <- c(stack[-c(length(stack) - 1L, length(stack))], a + b)
+    } else if (op == 3L) {
+      b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
+      stack <- c(stack[-c(length(stack) - 1L, length(stack))], a - b)
+    } else if (op == 4L) {
+      b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
+      stack <- c(stack[-c(length(stack) - 1L, length(stack))], a * b)
+    } else if (op == 5L) {
+      b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
+      stack <- c(stack[-c(length(stack) - 1L, length(stack))], a / b)
+    } else if (op == 6L) {
+      stack[length(stack)] <- log(stack[length(stack)])
+    } else if (op == 7L) {
+      stack[length(stack)] <- exp(stack[length(stack)])
+    } else if (op == 8L) {
+      stack[length(stack)] <- sqrt(stack[length(stack)])
+    } else if (op == 9L) {
+      stack[length(stack)] <- stats::plogis(stack[length(stack)])
+    } else if (op == 10L) {
+      stack[length(stack)] <- stats::qlogis(stack[length(stack)])
+    } else if (op == 11L) {
+      stack[length(stack)] <- 1 / stack[length(stack)]
+    } else if (op == 12L) {
+      b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
+      stack <- c(stack[-c(length(stack) - 1L, length(stack))], a^b)
+    } else if (op == 13L) {
+      stack[length(stack)] <- sin(stack[length(stack)])
+    } else if (op == 14L) {
+      stack[length(stack)] <- cos(stack[length(stack)])
+    } else if (op == 15L) {
+      stack[length(stack)] <- tan(stack[length(stack)])
+    } else if (op == 16L) {
+      stack[length(stack)] <- abs(stack[length(stack)])
+    } else if (op == 17L) {
+      stack[length(stack)] <- stack[length(stack)]^2
+    } else if (op == 18L) {
+      stack[length(stack)] <- sinh(stack[length(stack)])
+    } else if (op == 19L) {
+      stack[length(stack)] <- cosh(stack[length(stack)])
+    } else if (op == 20L) {
+      stack[length(stack)] <- tanh(stack[length(stack)])
+    } else if (op == 21L) {
+      stack[length(stack)] <- asinh(stack[length(stack)])
+    } else if (op == 22L) {
+      stack[length(stack)] <- acosh(stack[length(stack)])
+    } else if (op == 23L) {
+      stack[length(stack)] <- atanh(stack[length(stack)])
+    } else if (op == 24L) {
+      stack[length(stack)] <- .softplus(stack[length(stack)])
+    } else if (op == 25L) {
+      a <- stack[length(stack)]
+      stack[length(stack)] <- sign(a) * abs(a)^(1 / 3)
+    } else if (op == 26L) {
+      stack[length(stack)] <- stats::pnorm(stack[length(stack)])
+    } else {
+      cli::cli_abort("Unknown transform bytecode instruction: {op}.")
+    }
+  }
+
+  # Step 4: return final stack top as the transformation output.
+  stack[length(stack)]
+}
+
+#' Evaluate bytecode for vector inputs
+#'
+#' @description
+#' Applies `eval_bytecode_scalar()` element-wise to a numeric vector.
+#'
+#' @param x Numeric vector input.
+#' @param bytecode Integer bytecode sequence. Legacy name `opcodes` is also accepted.
+#' @param const_data Numeric constants consumed by `PUSH_CONST` instructions.
+#'
+#' @return Numeric vector result.
+#' @keywords internal
+eval_bytecode_vector <- function(x, bytecode = NULL, const_data = numeric(), opcodes = NULL) {
+  program <- .normalize_bytecode_program(bytecode = bytecode, opcodes = opcodes, const_data = const_data)
+  vapply(as.numeric(x), eval_bytecode_scalar, numeric(1), bytecode = program$bytecode, const_data = program$const_data)
+}
+
+#' Normalize bytecode program inputs
+#'
+#' @param bytecode Integer bytecode sequence or `NULL`.
+#' @param opcodes Legacy alias for bytecode.
+#' @param const_data Numeric constant payload.
+#' @return List with normalized `bytecode` and `const_data`.
+#' @keywords internal
+.normalize_bytecode_program <- function(bytecode = NULL, opcodes = NULL, const_data = numeric()) {
+  code <- bytecode
+  if (is.null(code) && !is.null(opcodes)) {
+    code <- opcodes
+  }
+  if (is.null(code)) {
+    code <- integer(0)
+  }
+
+  list(
+    bytecode = as.integer(code),
+    const_data = as.numeric(const_data %||% numeric(0))
+  )
+}
+
+# Backward-compatible alias for older internal helper naming.
+.emit_opcode_expr <- .emit_bytecode_expr

@@ -4,10 +4,12 @@
 \alias{precompile_cmdstanr_models}
 \title{Precompile CmdStanR models}
 \usage{
-precompile_cmdstanr_models(force_recompile = TRUE)
+precompile_cmdstanr_models(force_recompile = TRUE, cleanup = TRUE)
 }
 \arguments{
 \item{force_recompile}{Logical; recompile even if cached.}
+
+\item{cleanup}{Logical; whether to clean up old cached executables before compiling.}
 }
 \value{
 Invisibly returns a named list of compiled CmdStanR models.
