@@ -158,9 +158,9 @@ jm_family <- function(name, link = NULL, inv_link = NULL) {
     15L, # tan
     16L, # abs
     17L, # square
-    18L, # sinh (strictly monotone but can induce extreme tails)
-    19L, # cosh
-    20L  # tanh (bounded; may flatten heavily)
+    # 18L, # sinh (strictly monotone but can induce extreme tails)
+    19L # cosh
+    # 20L  # tanh (bounded; may flatten heavily)
   )
   ops <- as.integer(inv_link_bc$bytecode %||% inv_link_bc$opcodes %||% integer(0))
   any(ops %in% risky_ops)
