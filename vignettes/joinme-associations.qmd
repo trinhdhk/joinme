@@ -155,6 +155,15 @@ transforms <- list(
 
 # Monotone I-Spline
 
+For `type = "ispline"`, there is no fitting step. You specify the transform
+shape directly:
+
+- `knots`: knot locations (first and last are boundary knots),
+- `coeff`: non-negative I-spline basis coefficients,
+- `degree`: spline degree (usually `3`).
+
+In this mode, `x`, `y`, and `lambda` are **not used**.
+
 ```{r monotone-ispline, eval=FALSE}
 transforms <- list(
   cv_total = list(
@@ -177,6 +186,16 @@ transforms <- list(
 - You want monotone, smooth effects with constrained shape.
 
 # Penalized Monotone I-Spline
+
+For `type = "ispline_penalized"`, the package learns spline coefficients from
+input-output training pairs:
+
+- `x`: raw association-feature values,
+- `y`: desired transformed values at those `x` points,
+- `lambda`: smoothness penalty weight (higher = smoother, lower = more flexible).
+
+Practical tip: start with `lambda = 1.0`, then decrease if too flat or increase
+if too wiggly.
 
 ```{r penalized-ispline, eval=FALSE}
 transforms <- list(

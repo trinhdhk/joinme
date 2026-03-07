@@ -27,10 +27,10 @@ integer link codes.
 
 Supported links / inverse-links:
 \itemize{
-\item \code{"identity"} : $g^{-1}(x)=x$
-\item \code{"log"}      : $g^{-1}(x)=\log(x)$
-\item \code{"logit"}    : $g^{-1}(x)=\operatorname{logit}^{-1}(x)$
-\item \code{"probit"}   : $g^{-1}(x)=\Phi(x)$
-\item \code{"exp"}      : $g^{-1}(x)=\exp(x)$
+\item \code{"identity"} : \eqn{g^{-1}(x)=x}
+\item \code{"log"}      : \eqn{g^{-1}(x)=\log(x)}
+\item \code{"logit"}    : \eqn{g^{-1}(x)=\operatorname{logit}^{-1}(x)}
+\item \code{"probit"}   : \eqn{g^{-1}(x)=\Phi(x)}
+\item \code{"exp"}      : \eqn{g^{-1}(x)=\exp(x)}
 }
 }

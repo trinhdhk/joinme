@@ -59,3 +59,4 @@ docs
 
 # rstan crap
 src/
+tests/local/*.png

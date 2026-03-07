@@ -105,6 +105,37 @@ test_that("simulate_joinme supports family-scoped formulaDist", {
   expect_gt(nrow(sim$dataLong), 0)
 })
 
+test_that("simulate_joinme supports family-specific dist_coefs for scoped formulas", {
+  set.seed(19031)
+  sim <- simulate_joinme(
+    n_id = 120,
+    families = c("gaussian", "skew_normal"),
+    n_obs_per_marker_per_id = 8,
+    times_obs = seq(0, 2, length.out = 8),
+    seed = 19031,
+    formulaDist = list(
+      sigma[family = gaussian] ~ 1,
+      sigma[family = skew_normal] ~ 1
+    ),
+    dist_coefs = list(
+      sigma = list(
+        gaussian = c("(Intercept)" = log(0.15)),
+        skew_normal = c("(Intercept)" = log(1.10))
+      )
+    ),
+    beta_long = c("(Intercept)" = 0, "time" = 0, "x1" = 0),
+    re_params = list(
+      id = list(sd = c(1e-8, 1e-8)),
+      marker = list(sd = 1e-8),
+      id_marker_cov = list(latent = list(sd = c(1e-8, 1e-8)))
+    )
+  )
+
+  y_sd_by_marker <- tapply(sim$dataLong$y, sim$dataLong$marker, stats::sd)
+  expect_true(all(is.finite(y_sd_by_marker)))
+  expect_true(unname(y_sd_by_marker["m2"]) > unname(y_sd_by_marker["m1"]) * 3)
+})
+
 
 test_that("joinme fits and predicts with family-scoped formulaDist", {
   skip_on_cran()

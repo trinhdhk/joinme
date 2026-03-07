@@ -277,7 +277,11 @@ pp_check.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, 
 	id_var <- pred$metadata$id_var %||% (eval(object$call$id_var) %||% "id")
 	time_var <- pred$metadata$time_var %||% (eval(object$call$time_var) %||% "time")
 	marker_var <- pred$metadata$marker_var %||% (eval(object$call$marker_var) %||% "marker")
-	y_var <- pred$metadata$response_var %||% (eval(object$call$y_var) %||% "y")
+	y_var <- pred$metadata$response_var %||% .resolve_response_var(
+		formulaLong = object$formulaLong,
+		dataLong = newdataLong,
+		context = "joinme_diagnosis()"
+	)
 
 	out_list <- list()
 	for (id in names(draws_fit)) {
@@ -376,17 +380,19 @@ concordance.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NUL
 
 	id_var <- eval(object$call$id_var) %||% "id"
 	time_var <- eval(object$call$time_var) %||% "time"
-	event_time_var <- eval(object$call$event_time_var) %||% "time"
-	event_var <- eval(object$call$event_var) %||% "event"
+	event_vars <- .resolve_event_model_vars(
+		formulaEvent = object$formulaEvent,
+		dataEvent = newdataEvent,
+		context = "concordance.JoinMeFit()"
+	)
+	event_time <- as.numeric(event_vars$event_time)
+	event_status <- event_vars$event_status
 
 	if (!(id_var %in% names(newdataEvent))) {
 		cli::cli_abort("{.arg newdataEvent} must include id column {id_var}.")
 	}
-	if (!(event_time_var %in% names(newdataEvent))) {
-		cli::cli_abort("{.arg newdataEvent} must include event time column {event_time_var}.")
-	}
-	if (!(event_var %in% names(newdataEvent))) {
-		cli::cli_abort("{.arg newdataEvent} must include event indicator column {event_var}.")
+	if (length(event_time) != nrow(newdataEvent) || length(event_status) != nrow(newdataEvent)) {
+		cli::cli_abort("Could not derive event time/status vectors aligned to {.arg newdataEvent}.")
 	}
 	if (!(id_var %in% names(newdataLong)) || !(time_var %in% names(newdataLong))) {
 		cli::cli_abort("{.arg newdataLong} must include id and time columns used in the model.")
@@ -474,8 +480,13 @@ concordance.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NUL
 .time_varying_concordance_single <- function(object, newdataLong, newdataEvent, time_start, time_horizon, cause, n_samples, seed, type_weights, ...) {
 	id_var <- eval(object$call$id_var) %||% "id"
 	time_var <- eval(object$call$time_var) %||% "time"
-	event_time_var <- eval(object$call$event_time_var) %||% "time"
-	event_var <- eval(object$call$event_var) %||% "event"
+	event_vars <- .resolve_event_model_vars(
+		formulaEvent = object$formulaEvent,
+		dataEvent = newdataEvent,
+		context = "concordance.JoinMeFit()"
+	)
+	event_time <- as.numeric(event_vars$event_time)
+	event_status <- event_vars$event_status
 
 	ids <- unique(newdataEvent[[id_var]])
 	ids <- ids[!is.na(ids)]
@@ -544,11 +555,16 @@ concordance.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NUL
 
 	merge_df$risk <- 1 - merge_df$Survival
 
-	event_df <- newdataEvent[, c(id_var, event_time_var, event_var), drop = FALSE]
-	colnames(event_df) <- c(id_var, "event_time", "event_status")
-	if ("event_type" %in% names(newdataEvent)) {
-		event_df$event_type <- newdataEvent$event_type
-	}
+	event_df <- data.frame(
+		event_time = as.numeric(event_time),
+		event_status = event_status,
+		stringsAsFactors = FALSE
+	)
+	event_df[[id_var]] <- newdataEvent[[id_var]]
+	event_df <- event_df[, c(id_var, "event_time", "event_status"), drop = FALSE]
+	event_decoded <- .derive_event_outcomes(event_df$event_status, context = "concordance.JoinMeFit()")
+	event_df$event_status <- event_decoded$d_event
+	event_df$event_type <- event_decoded$event_type
 	merge_df <- merge(merge_df, event_df, by = id_var, all.x = TRUE)
 	merge_df$time_start <- as.numeric(time_start_map[merge_df[[id_var]]])
 
@@ -559,9 +575,7 @@ concordance.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NUL
 	}
 
 	status <- as.integer(merge_df$event_status)
-	if (!is.null(merge_df$event_type)) {
-		status <- ifelse(status == 1 & merge_df$event_type == cause, 1L, 0L)
-	}
+	status <- ifelse(status == 1 & merge_df$event_type == cause, 1L, 0L)
 
 	merge_df$event_window <- as.integer(status == 1 & merge_df$event_time <= merge_df$time_horizon)
 	merge_df$time_window <- pmin(merge_df$event_time, merge_df$time_horizon) - merge_df$time_start

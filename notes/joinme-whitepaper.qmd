@@ -22,12 +22,12 @@ The **JoinME** (Joint Modeling Estimation) package represents a new generation o
 
 This white paper details the mathematical and algorithmic foundations of `joinme`. We describe a modular architecture that separates the longitudinal observation process from the survival mechanism, linked via a flexible association structure. Key innovations include:
 
-1.  **High-Dimensional Random Effects**: A factor-analytic approach to covariance modeling (`joinme` covariance regression) that scales to many markers.
-2.  **Regularized Association**: Hierarchical shrinkage priors (Ridge/Lasso type) that automatically select relevant markers from a large candidate set.
-3.  **Computational Efficiency**: A massive parallelization strategy using `reduce_sum` for subject-level likelihood evaluations and efficient Gauss-Kronrod quadrature for survival integrals.
-4.  **Flexible Semantics**: A domain-specific language for non-linear transformations (splines, functional compositions) defined at runtime without recompiling the Stan model.
+**High-Dimensional Random Effects**: A factor-analytic approach to covariance modeling (`joinme` covariance regression) that scales to many markers.
+**Regularized Association**: Hierarchical shrinkage priors (Ridge/Lasso type) that automatically select relevant markers from a large candidate set.
+**Computational Efficiency**: A massive parallelization strategy using `reduce_sum` for subject-level likelihood evaluations and efficient Gauss-Kronrod quadrature for survival integrals.
+**Flexible Semantics**: A domain-specific language for non-linear transformations (splines, functional compositions) defined at runtime without recompiling the Stan model.
 
-# 1. Introduction
+# Introduction
 
 Joint models for longitudinal and time-to-event data are the gold standard for analyzing clinical trials and cohorts where bio-markers are measured repeatedly over time (Rizopoulos 2012). By simultaneously modeling the longitudinal trajectory and the survival process, these models correct for measurement error and informative dropout, providing unbiased estimates of association and dynamic individual-level predictions.
 
@@ -38,7 +38,7 @@ However, scaling these models challenges standard implementations:
 
 `JoinME` addresses these challenges through a fully Bayesian framework implemented in **Stan**, leveraging Hamiltonian Monte Carlo (HMC) for efficient exploration of high-dimensional posteriors (Carpenter et al. 2017).
 
-# 2. Methodological Framework
+# Methodological Framework
 
 The joint probability density for subject $i$ with longitudinal outcomes $\mathbf{y}_i$, event time $T_i$, and event indicator $\delta_i$ is factorized as:
 
@@ -46,7 +46,7 @@ $$ p(\mathbf{y}_i, T_i, \delta_i | \mathbf{\theta}) = \int p(\mathbf{y}_i | \mat
 
 where $\mathbf{b}_i$ represents the latent random effects sharing information between the processes.
 
-## 2.1. The Multivariate Longitudinal Submodel
+## The Multivariate Longitudinal Submodel
 
 We support a generalized linear mixed model (GLMM) framework allowing diverse distributions (Gaussian, Student-$t$, Bernoulli, Negative Binomial, etc.) for different markers. For observation $j$ of marker $d$ on subject $i$ at time $t_{ij}$:
 
@@ -85,7 +85,7 @@ fitted and predicted objects:
 - `ranef(pred)` and `corr(pred)` expose marker-by-id predicted random effects
   and covariance only when marker covariance is subject-dependent.
 
-## 2.2. Family-Scoped Distributional Regression
+## Family-Scoped Distributional Regression
 
 Distributional parameters can be modeled with family-scoped formulas. A formula
 without scope (for example, `sigma ~ 1 + time`) applies to all rows where
@@ -102,7 +102,7 @@ The same syntax is supported for `nu`, `phi`, `alpha` (or `alpha_skew`),
 `phi_beta`, and `tau_sde` when those parameters are relevant for the target
 family.
 
-## 2.3. The Survival Submodel with Competing Risks
+## The Survival Submodel with Competing Risks
 
 The hazard function for the $k$-th competing risk is modeled as:
 
@@ -116,11 +116,11 @@ where:
 
 Under competing risks, the event time $T_i$ and cause $\delta_i$ contribute to the likelihood via the cause-specific hazard $\lambda_{\delta_i}(T_i)$ and the overall survival $S(T_i) = \exp(-\sum_k \Lambda_k(T_i))$ (Putter et al. 2007).
 
-# 3. Association Structures
+# Association Structures
 
 The power of `joinme` lies in how $\mathcal{A}_{iq}(t)$ is constructed. We move beyond simple "current value" associations.
 
-## 3.1. Association Primitives
+## Association Primitives
 
 We compute three fundamental features from the reconstructed trajectories:
 
@@ -130,7 +130,7 @@ We compute three fundamental features from the reconstructed trajectories:
     $$ CS(t) \approx \frac{\eta_{id}(t+\epsilon) - \eta_{id}(t)}{\epsilon} $$
 3.  **Variance (CORR)**: A measure of subject-specific volatility, derived from the covariance regression term (detailed in Section 5).
 
-## 3.2. Transformations
+## Transformations
 
 Raw biomarkers often affect survival nonlinearly (e.g., only extremely high values increase risk). `JoinME` implements a runtime transformation engine:
 
@@ -148,11 +148,11 @@ $$
 This avoids conflating aggregation and nonlinearity, and is equivalent to
 transforming an already-averaged marker value only when $f$ is linear.
 
-# 4. Bayesian Implementation and Regularization
+# Bayesian Implementation and Regularization
 
 Valid inference in high dimensions requires principled priors. `JoinME` employs a hierarchy of regularization:
 
-## 4.1. Sparse Association Priors
+## Sparse Association Priors
 When $D$ is large, we use shrinkage priors on non-centered association latents
 $z_{\alpha,d}$, with $\alpha_d = z_{\alpha,d}\,\sigma_{\alpha,d}$:
 
@@ -187,7 +187,7 @@ $$
 The $\omega^{(0)}$ offsets act as priors that shift the latent weight distribution,
 and no additional normalization is applied.
 
-## 4.2. Regularizing Smoothness
+## Regularizing Smoothness
 For B-spline baseline hazards and penalized I-spline associations, we impose a second-order random walk prior on spline coefficients (excluding the intercept):
 
 $$ \gamma_j - 2\gamma_{j-1} + \gamma_{j-2} \sim \mathcal{N}(0, \sigma_{smooth}) $$
@@ -197,11 +197,11 @@ This prevents overfitting to small clusters of events (spikes in the hazard) and
 The baseline hazard level is carried by the spline intercept basis coefficient
 inside $\gamma_{bs}$; there is no separate baseline-intercept parameter.
 
-## 4.3. Robustness
+## Robustness
 *   **Fixed Effects**: Student-$t(\nu=6)$ priors provide heavier tails than the Normal, robustifying against outliers.
 *   **Random Effect Scales**: Half-Normal priors avoid the heavy tails of the Half-Cauchy that can cause divergent transitions in hierarchical models ("funnel" problems).
 
-# 5. Advanced Architecture: Covariance Regression
+# Advanced Architecture: Covariance Regression
 
 A unique feature of `joinme` is the model for the covariance matrix itself. The Cholesky factor $L_i$ of the random effect covariance $\Sigma_{idm}$ is not static but modeled as a function of covariates and a latent volatility effect $u_{L,i}$:
 
@@ -209,7 +209,7 @@ $$ L_{i}[r,c] = \begin{cases} \text{softplus}(\mu_{r,c} + \beta_{r,c}^\top X_i +
 
 This allows the *variability* and *correlation* of biomarker trajectories to depend on patient characteristics (e.g., higher volatility in older patients) and to act as a predictor for survival itself.
 
-# 6. Computational Strategy
+# Computational Strategy
 
 Solving the integral $\Lambda(t) = \int_0^t \lambda(s) ds$ inside an MCMC loop is expensive. We optimize this via:
 
@@ -220,7 +220,7 @@ Solving the integral $\Lambda(t) = \int_0^t \lambda(s) ds$ inside an MCMC loop i
     $$ \mathcal{L}_{total} = \sum_{k=1}^{K} \text{partial\_likelihood}(\text{slice}_k) $$
     This provides nearly linear scaling with CPU cores.
 
-# 7. Dynamic Prediction
+# Dynamic Prediction
 
 The fitted model supports dynamic prediction for a new subject $j$ with history $\mathcal{Y}_j(t \le T_{cond})$.
 We estimate:
@@ -238,7 +238,7 @@ $$ \pi_j(u | T_{cond}) = P(T_j \ge u | T_j > T_{cond}, \mathcal{Y}_j, \mathcal{D
 
 Under competing risks, this procedure yields the **overall event-free survival** probability.
 
-# 8. Conclusion
+# Conclusion
 
 `JoinME` transforms joint modeling from a specialized technique for single-marker analysis into a robust, scalable engine for high-dimensional biomedical data. By combining factor-analytic random effects, shrinkage priors, and modern parallel computing, it enables researchers to discover complex associations in dense longitudinal datasets that were previously computationally inaccessible.
 

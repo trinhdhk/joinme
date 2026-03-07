@@ -120,6 +120,14 @@ Transformations are provided through a single \code{transforms} argument.
 Each element (cv_total, cs_total, corr) is defined as a list specifying a type
 and type-specific fields (see \code{build_standata_transforms()} for details).
 
+For monotone spline transforms:
+\itemize{
+\item \code{type = "ispline"}: provide \code{knots} and \code{coeff} directly (plus optional \code{degree}); \code{x}/\code{y}/\code{lambda} are not used.
+\item \code{type = "ispline_penalized"}: provide training pairs \code{x} and \code{y}, and smoothness penalty \code{lambda}.
+\item \code{x}: raw association-feature values; \code{y}: target transformed values at those \code{x} points.
+\item \code{lambda}: smoothness control (larger = smoother transform).
+}
+
 Distributional regression can be specified in two equivalent forms:
 \enumerate{
 \item A named list with RHS-only formulas, e.g. \code{list(sigma = ~ 1 + time)}.

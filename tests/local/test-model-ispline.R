@@ -1,0 +1,97 @@
+## Local script mirroring tests/local/test-model.R
+devtools::load_all()
+library(dplyr)
+
+set.seed(1234)
+sim <- simulate_joinme(
+  formulaLong = y ~ 1 + time + x1 + (1 + time | id) + (0 + x1 + (1 + time | id) | marker),
+  formulaEvent = survival::Surv(time, event) ~ x2,
+  formulaCorr = ~ x1,
+  families = c("gaussian", "gaussian"),
+  n_id = 200,
+  n_obs_per_marker_per_id = 6,
+  times_obs = seq(0, 6, length.out = 8),
+  assoc = c("cv_total", "corr"),
+  beta_long = c('(Intercept)' = 0.5, time = 0.3, x1 = -0.2),
+  beta_event = c(x2 = 0.2),
+  assoc_coefs = list(cv_total = 0.30, corr = c(0.12)),
+  transforms = list(cv_total = list(type = "ispline_penalized", knots = c(0, 1), degree = 2, x = c(0, 0.5, 1), y = c(0, 0.2, 0.6), lambda = 1.0),
+                    corr = list(type = "functional", expr = ~ -x)),
+  re_params = list(
+    id = list(sd = c(0.5, 0.25)),
+    marker = list(sd = 0.3),
+    id_marker_cov = list(
+      latent = list(sd = c(0.6, 0.25)),
+      alpha = c(-0.1, 0.05, -0.05),
+      lambda = 0.3,
+      sd_u = 0.4
+    )
+  ),
+  seed = 2026
+)
+
+engine <- if (requireNamespace("cmdstanr", quietly = TRUE)) "cmdstanr" else "rstan"
+control <- list(
+  engine = engine,
+  chains = 2,
+  iter_warmup = 1000,
+  iter_sampling = 1000,
+  parallel_chains = 2,
+  threads_per_chain = 6,
+  adapt_delta = 0.8,
+  max_treedepth = 13,
+  seed = 421
+)
+
+
+fit <- joinme(
+  formulaLong = y ~ 1 + time + x1 + (1 + time || id) + (0 + x1 + (1 + time || id) || marker),
+  formulaEvent = survival::Surv(time, event) ~ x2,
+  formulaCorr = ~ x1,
+  dataLong = sim$dataLong,
+  dataEvent = sim$dataEvent,
+  assoc = c("cv_total", "corr"),
+  transforms = list(cv_total = list(type = "ispline_penalized", knots = c(0,1), degree = 3, x = c(0, 0.5, 1), y = c(0, 0.2, 0.6), lambda = 1.0),
+                    corr = list(type = "functional", expr = ~ -x)),
+  control = control
+)
+
+sum_obj <- summary(fit)
+
+lastTime <- sim$dataLong %>%
+  group_by(id) %>%
+  summarize(last_time = max(time)) %>%
+  ungroup()
+
+ndE <- sim$dataEvent %>%
+  left_join(lastTime, by = "id") %>%
+  mutate(time_start = as.numeric(last_time))
+
+pred <- posterior_predict(
+  fit,
+  newdataLong = sim$dataLong |> filter(id %in% c(5,6,7,8)),
+  newdataEvent = ndE |> filter(id %in% c(5,6,7,8)),
+  time_start = "time_start",
+  time_horizon = 10,
+  control = list(
+    n_samples = 100,
+    n_times = 50,
+    chains = 2, parallel_chains = 2,
+    iter_warmup = 500,
+    iter_sampling = 500,
+    show_messages = TRUE,
+    refresh = 50,
+    threads_per_chain = 6
+  )
+)
+
+p <- plot(pred, which = c("longitudinal", "survival"), combined = TRUE)
+
+p3 <- if (is.list(p) && "3" %in% names(p)) p[["3"]] else p
+ggplot2::ggsave(
+  filename = "tests/local/subject3-ispline.png",
+  plot = p3,
+  width = 12,
+  height = 6,
+  dpi = 150
+)

@@ -16,9 +16,9 @@ penalized_ispline_transform(
 )
 }
 \arguments{
-\item{x}{Numeric vector of input values.}
+\item{x}{Numeric vector of input values on the raw feature scale to transform.}
 
-\item{y}{Numeric vector of target values (same length as x).}
+\item{y}{Numeric vector of target transformed values at \code{x} (same length as x).}
 
 \item{knots}{Optional numeric vector of knots (including boundary knots).}
 
@@ -27,7 +27,7 @@ penalized_ispline_transform(
 
 \item{degree}{Integer spline degree (default 3).}
 
-\item{lambda}{Non-negative penalty weight (default 1.0).}
+\item{lambda}{Non-negative smoothness penalty weight (default 1.0). Larger values produce smoother fitted transforms; smaller values allow more local curvature.}
 
 \item{weights}{Optional non-negative weights (same length as x).}
 

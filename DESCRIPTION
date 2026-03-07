@@ -35,13 +35,12 @@ Imports:
     bridgesampling,
     ggplot2,
     utils,
-    quarto,
     loo,
-    bayesplot
-    ,
+    bayesplot,
     brms
 Suggests:
     knitr,
+    quarto,
     latex2exp,
     loo,
     mirai,

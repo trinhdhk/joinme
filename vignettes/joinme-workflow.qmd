@@ -41,7 +41,7 @@ library(bayesplot)
 library(posterior)
 ```
 
-# 1. Introduction
+# Introduction
 
 Applying a joint model in a scientific publication requires more than just fitting the model. It requires a rigorous validation process to ensure the results are robust, converged, and meaningful. This vignette outlines a "best practice" workflow for using `joinme` in a research context, suitable for inclusion in high-impact statistical or clinical journals.
 
@@ -51,7 +51,7 @@ We will walk through a complete end-to-end simulation study:
 3.  Assessing convergence and model fit.
 4.  Performing dynamic predictions for individual subjects.
 
-## 1.1 Program flow in practice
+## Program flow in practice
 
 The `joinme` workflow follows a fixed sequence that mirrors the Stan program:
 
@@ -71,7 +71,7 @@ This sequence is important because it clarifies where each modeling choice
 enters the inference: formula parsing happens in R, while all probability
 calculations occur in Stan.
 
-# 2. Simulation and Data Exploration
+# Simulation and Data Exploration
 
 Before analyzing real data, it is highly recommended to perform a **parameter recovery simulation**. This confirms that the model is identifiable given your sample size and sampling frequency.
 
@@ -133,7 +133,7 @@ prop.table(table(dataEvent$event))
 
 Ensure the event rate is sufficient (typically >10-20 events per parameter in the survival submodel) to support the complexity of the proposed association structure.
 
-# 3. Model Specification
+# Model Specification
 
 We specify a joint model where:
 1.  **Longitudinal Submodel**: Linear growth over time with random intercepts and slopes for each subject-marker combination.
@@ -155,7 +155,7 @@ functional bytecode expressions, monotone I-splines, or piecewise linear
 interpolation. These transformations are specified in R and passed to Stan as
 data so that the likelihood remains deterministic and reproducible.
 
-## 3.1 Marker-only random effects (no inner id term)
+## Marker-only random effects (no inner id term)
 
 In some studies, you may want **marker-level random effects only**, without subject-specific marker deviations. This is now supported by omitting the inner `( ... | id )` term inside the marker block. In this configuration, marker-by-id random effects are disabled (`Q_idm = 0`), and associations that require those effects (notably `corr`) are not permitted.
 
@@ -178,7 +178,7 @@ priors <- list(
 )
 ```
 
-# 4. Model Fitting
+# Model Fitting
 
 We fit the model using Hamiltonian Monte Carlo (HMC) via the `cmdstanr` backend (recommended for speed and reliability).
 
@@ -212,11 +212,11 @@ fit <- joinme(
 )
 ```
 
-# 5. Convergence Diagnostics
+# Convergence Diagnostics
 
 **Do not interpret results without checking convergence.** We use the `posterior` and `bayesplot` packages to inspect the MCMC chains.
 
-## 5.1 R-hat and Effective Sample Size
+## R-hat and Effective Sample Size
 
 Values of $\hat{R} < 1.01$ and ESS > 400 indicate reasonable convergence for inference.
 
@@ -241,7 +241,7 @@ posterior::summarise_draws(
 )
 ```
 
-## 5.2 Traceplots
+## Traceplots
 
 Visual inspection of traceplots helps identify mixing issues or stuck chains.
 
@@ -250,7 +250,7 @@ Visual inspection of traceplots helps identify mixing issues or stuck chains.
 bayesplot::mcmc_trace(draws_obj, regex_pars = "alpha")
 ```
 
-# 6. Posterior Predictive Checks (PPC)
+# Posterior Predictive Checks (PPC)
 
 A key step in validation is checking if the model can reproduce the observed data patterns.
 
@@ -260,7 +260,7 @@ A key step in validation is checking if the model can reproduce the observed dat
 # bayesplot::ppc_dens_overlay(dataLong$y, y_rep)
 ```
 
-# 7. Dynamic Prediction
+# Dynamic Prediction
 
 One of the most powerful features of joint models is **dynamic prediction**: updating survival probabilities as new biomarker data becomes available.
 
@@ -322,7 +322,7 @@ if (!is.null(preds)) {
 }
 ```
 
-# 8. Conclusion
+# Conclusion
 
 By following this workflow:
 1.  **Simulate** (or explore) to understand data properties.

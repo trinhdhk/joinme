@@ -178,6 +178,17 @@ NULL
   deps <- sort(normalizePath(deps, winslash = "/", mustWork = TRUE))
   dep_md5 <- if (length(deps) > 0) tools::md5sum(deps) else character()
 
+  root_file <- normalizePath(stan_file, winslash = "/", mustWork = TRUE)
+  root_dir <- dirname(root_file)
+  dep_ids <- vapply(deps, function(p) {
+    prefix <- paste0(root_dir, "/")
+    rel <- if (startsWith(p, prefix)) substr(p, nchar(prefix) + 1L, nchar(p)) else p
+    if (!nzchar(rel) || identical(rel, p)) {
+      rel <- basename(p)
+    }
+    rel
+  }, character(1))
+
   cpp_sig <- ""
   if (!is.null(cpp_options) && length(cpp_options) > 0) {
     if (is.null(names(cpp_options))) names(cpp_options) <- rep("", length(cpp_options))
@@ -190,7 +201,7 @@ NULL
 
   payload <- c(
     "joinme-stan-cache-v2",
-    paste(names(dep_md5), unname(dep_md5), sep = "="),
+    paste(dep_ids, unname(dep_md5), sep = "="),
     paste0("cpp:", cpp_sig)
   )
 

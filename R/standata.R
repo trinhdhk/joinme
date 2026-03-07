@@ -54,12 +54,6 @@
 #' @param id_var Column name for subject id in both longitudinal and event data.
 #' @param marker_var Column name for marker/biomarker id in longitudinal data.
 #' @param time_var Column name for longitudinal time in `dataLong`.
-#' @param y_var Column name for longitudinal outcome in `dataLong`.
-#' @param event_time_var Column name for event/censoring time in `dataEvent`.
-#' @param event_var Column name for event indicator in `dataEvent`.
-#' @param event_type_var Optional column name for competing-risk event type in `dataEvent`.
-#' @param stage_from_var Optional column name for multi-stage "from" state in `dataEvent`.
-#' @param stage_to_var Optional column name for multi-stage "to" state in `dataEvent`.
 #' @param eps_fd Positive finite-difference step for association derivatives.
 #' @param assoc Character vector specifying association components
 #'   (e.g., "cv_mean", "cs_total", "corr").
@@ -111,12 +105,6 @@ joinme_standata <- function(
   id_var = "id",
   marker_var = "marker",
   time_var = "time",
-  y_var = "y",
-  event_time_var = "time",
-  event_var = "event",
-  event_type_var = "event_type",
-  stage_from_var = "state_from",
-  stage_to_var = "state_to",
   eps_fd = 1e-2,
   assoc = c("cv_mean"),
   families = NULL,
@@ -141,6 +129,18 @@ joinme_standata <- function(
 ) {
   assertthat::assert_that(is.data.frame(dataLong), msg = "dataLong must be a data.frame")
   assertthat::assert_that(is.data.frame(dataEvent), msg = "dataEvent must be a data.frame")
+  y_var <- .resolve_response_var(
+    formulaLong = formulaLong,
+    dataLong = dataLong,
+    context = "joinme_standata()"
+  )
+  event_vars <- .resolve_event_model_vars(
+    formulaEvent = formulaEvent,
+    dataEvent = dataEvent,
+    context = "joinme_standata()"
+  )
+  event_time <- as.numeric(event_vars$event_time)
+  event_status <- event_vars$event_status
   basehaz <- match.arg(basehaz)
   corr_diag_link <- match.arg(corr_diag_link)
   quad_req <- .resolve_gk_request(nodes = quadrature_nodes %||% 15L)
@@ -480,10 +480,10 @@ joinme_standata <- function(
 
   # Scale time to [0,1] by max event time
   # - tmax is also returned for coefficient rescaling in Stan
-  tmax <- max(dataEvent[[event_time_var]])
+  tmax <- max(event_time)
   if (!is.finite(tmax) || tmax <= 0) stop("Invalid max event time.")
   dataLong$t_scaled <- dataLong[[time_var]] / tmax
-  dataEvent$S_scaled <- dataEvent[[event_time_var]] / tmax
+  dataEvent$S_scaled <- event_time / tmax
 
   # Build obs matrices on scaled time
   # - distributional regression matrices follow the same scaled timeline
@@ -616,24 +616,13 @@ joinme_standata <- function(
   # Survival outcomes (scaled)
   # - S_event is on [0,1] after scaling by tmax
   S_event <- as.numeric(dataEvent$S_scaled)
-  d_event <- as.integer(dataEvent[[event_var]])
-
-  # Competing risks / multi-stage event type
-  # - event_type collapses stages into a single factor
-  if (all(c(stage_from_var, stage_to_var) %in% colnames(dataEvent))) {
-    event_type_raw <- interaction(
-      dataEvent[[stage_from_var]],
-      dataEvent[[stage_to_var]],
-      drop = TRUE
-    )
-  } else if (event_type_var %in% colnames(dataEvent)) {
-    event_type_raw <- dataEvent[[event_type_var]]
-  } else {
-    event_type_raw <- rep.int(1L, n_id)
-  }
-  event_type_fac <- factor(event_type_raw)
-  event_type <- as.integer(event_type_fac)
-  K_event <- nlevels(event_type_fac)
+  event_outcomes <- .derive_event_outcomes(
+    status_raw = event_status,
+    context = "joinme_standata()"
+  )
+  d_event <- event_outcomes$d_event
+  event_type <- event_outcomes$event_type
+  K_event <- event_outcomes$K_event
 
   # GK times now/fwd on scaled domain
   # - u_now/u_fwd feed CV/CS feature computations

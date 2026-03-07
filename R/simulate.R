@@ -379,6 +379,14 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   should be available in generated covariates (for example via
 #'   `covariate_formulas`).
 #' @param formulaEvent Event/survival formula (same role as in `joinme()`).
+#' @param formulaCorr Optional covariance-regression formula for the id-specific
+#'   marker-by-id latent covariance (same role as in `joinme_standata()`).
+#'   This formula is evaluated on event-level covariates (one row per subject),
+#'   must not include random-effect bars `( ... | ... )`, and must not include
+#'   the longitudinal time variable.
+#'
+#'   Internally, this formula drives subject-specific lower-triangular entries
+#'   of `L_i` used to scale marker-by-id latent effects; see `re_params$id_marker_cov`.
 #' @param formulaDist Optional distributional regression formulas (same role as in `joinme()`).
 #'   Supported LHS parameters are `sigma`, `nu`, `phi`, `alpha` (aliases:
 #'   `alpha_skew`, `skew`), `phi_beta`, and `tau_sde`.
@@ -418,19 +426,90 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   e.g. `list(x1 ~ rnorm(n_id), x2 ~ rt(n_id, df = 5))`.
 #' @param assoc Association components (same names as fit): `cv_total`, `cv_mean`,
 #'   `cv_marker`, `cs_total`, `cs_mean`, `cs_marker`, `corr`.
+#'
+#'   Meaning of each channel:
+#'   - `cv_*`: current-value channels from longitudinal trajectories,
+#'   - `cs_*`: current-slope channels from finite differences (`eps_cs`),
+#'   - `corr`: off-diagonal correlation features from marker-by-id random effects.
+#'
+#'   You can also provide `formulaAssoc = ~ ...` to select channels; when present,
+#'   it overrides `assoc`.
 #' @param assoc_coefs Association coefficients for hazard terms.
 #'   Non-`corr` terms accept scalar values. The `corr` term accepts a vector of
 #'   off-diagonal correlation coefficients ordered as `(2,1), (3,1), (3,2), ...`
 #'   in lower-triangular row-major order of the marker-by-id random-effect
 #'   covariance dimension.
+#'
+#'   Accepted input forms:
+#'   - named numeric vector, e.g. `c(cv_total = 0.4, cs_mean = -0.2)`,
+#'   - named list, e.g. `list(cv_total = 0.4, corr = c(0.2, -0.1))`.
+#'   Missing channels default to 0.
 #' @param beta_long Fixed-effect coefficients for `formulaLong` fixed part. If NULL,
 #'   coefficients are randomly generated and named by model-matrix columns.
 #' @param beta_event Survival baseline-covariate coefficients for non-intercept
 #'   terms in `formulaEvent` RHS.
 #'   If NULL, coefficients are randomly generated.
-#' @param dist_coefs Named list of vectors for distributional regressions (`sigma`, `nu`,
-#'   `phi`, `alpha`, `phi_beta`, `tau_sde`).
+#' @param dist_coefs Distributional fixed-effect coefficients for `formulaDist`
+#'   parameters (`sigma`, `nu`, `phi`, `alpha`, `phi_beta`, `tau_sde`).
+#'
+#'   For each parameter, coefficients can be:
+#'   - an unnamed numeric vector (matched by column order),
+#'   - a named numeric vector (matched by model-matrix column names),
+#'   - for family-scoped formulas, a named list with per-scope entries.
+#'
+#'   Family-scoped list syntax examples:
+#'   - `dist_coefs = list(sigma = list(default = c("(Intercept)" = -0.3), gaussian = c(...), student_t = c(...)))`
+#'   - alias keys like `"sigma[family='student_t']"` are also recognized and
+#'     mapped to the matching family scope.
 #' @param re_params Random-effects simulation controls.
+#'
+#'   Structure:
+#'   - `id`: controls id-level random effects from `( ... | id)` in `formulaLong`.
+#'   - `marker`: controls marker-level random effects from marker-only terms.
+#'   - `id_marker_cov`: controls subject-specific covariance-regression for
+#'     marker-by-id latent effects.
+#'   - `dist`: controls random effects for distributional regressions in
+#'     `formulaDist`.
+#'
+#'   For `id`, `marker`, and `id_marker_cov$latent`, each block is a list:
+#'   - `sd`: scalar or length-K vector of random-effect standard deviations,
+#'   - `corr`: KxK correlation matrix.
+#'
+#'   `id_marker_cov` fields:
+#'   - `latent`: latent marker-by-id random-effect block (same `sd`/`corr`
+#'     schema as above); this is the base latent draw that is later transformed
+#'     by subject-specific `L_i`,
+#'   - `alpha`: baseline linear predictors for entries of subject-specific lower
+#'     triangular `L_i` (baseline when `formulaCorr` covariates and latent
+#'     perturbation are zero),
+#'   - `beta`: covariate effects from `formulaCorr` design matrix (systematic
+#'     subject-to-subject covariance shifts by observed covariates),
+#'   - `lambda`: scaling for subject-level latent perturbation,
+#'   - `sd_u` (alias `tau_u`): SD of latent subject perturbation,
+#'   - `diag_link`: diagonal link for `L_i` diagonals (`"softplus"` or `"exp"`).
+#'
+#'   Element-wise covariance-regression form is:
+#'   `eta_im = alpha_m + x_i^T beta_m + lambda_m * u_im`, with
+#'   `u_im ~ Normal(0, sd_u_m^2)`. Diagonal entries of `L_i` apply `diag_link`
+#'   to keep them positive; off-diagonal entries remain on identity scale.
+#'   Base latent draws satisfy `z_id ~ Normal(0, Sigma_latent)`, where
+#'   `Sigma_latent` is defined by `id_marker_cov$latent` (`sd`, `corr`).
+#'   Final marker-by-id effects are obtained as `b_id = L_i z_id`, so `latent`
+#'   sets baseline RE scale/correlation and
+#'   `alpha`/`beta`/`lambda`/`sd_u` control subject-specific reshaping.
+#'   The latent-perturbation spread is controlled approximately by
+#'   `|lambda_m| * sd_u_m`.
+#'
+#'   Dimension rules for `id_marker_cov` entries follow marker-by-id random-effect
+#'   dimension `Q_idm`:
+#'   - if covariance is full: `M = Q_idm * (Q_idm + 1) / 2` lower-tri entries,
+#'   - if covariance is forced diagonal (`||` in nested id-marker term): `M = Q_idm`.
+#'
+#'   `dist` block syntax:
+#'   - `re_params$dist[[param]]` applies to all random-effect terms for that
+#'     distributional parameter,
+#'   - `re_params$dist[[param]]$terms[[j]]` optionally sets term-specific
+#'     controls (same `sd`/`corr` fields as above).
 #' @param family_params Family-specific simulation parameters.
 #' @param h0 Optional baseline hazard function `h0(t)` for backward compatibility.
 #'   If supplied, it takes precedence over `baseline_hazard`/`formulaBasehaz`.
@@ -480,6 +559,7 @@ simulate_joinme <- function(
     (1 + time | id) +
     (0 + x1 + (1 + time | id) | marker),
   formulaEvent = survival::Surv(time, event) ~ x1 + x2,
+  formulaCorr = ~ 1,
   formulaDist = NULL,
   formulaAssoc = NULL,
   transforms = NULL,
@@ -503,7 +583,15 @@ simulate_joinme <- function(
   re_params = list(
     id = list(sd = NULL, corr = NULL),
     marker = list(sd = NULL, corr = NULL),
-    id_marker = list(sd = NULL, corr = NULL)
+    id_marker_cov = list(
+      latent = list(sd = NULL, corr = NULL),
+      alpha = NULL,
+      beta = NULL,
+      lambda = NULL,
+      sd_u = NULL,
+      diag_link = "softplus"
+    ),
+    dist = list()
   ),
   family_params = list(
     gaussian = list(sigma = 1.0),
@@ -681,6 +769,82 @@ simulate_joinme <- function(
       }
     } else {
       out[seq_len(min(length(out), length(user_coef)))] <- as.numeric(user_coef)[seq_len(min(length(out), length(user_coef)))]
+    }
+    out
+  }
+
+  .sim_strip_dist_prefix <- function(cols) {
+    sub("^(all::|family=[^:]+::)", "", cols)
+  }
+
+  .sim_align_dist_coef <- function(col_names,
+                                   user_coef = NULL,
+                                   dist_scope = NULL,
+                                   sd_default = 0.15,
+                                   intercept_default = 0.0) {
+    if (length(col_names) == 0) return(numeric(0))
+
+    if (!is.list(user_coef) || is.null(dist_scope) || !.is_dist_scope(dist_scope)) {
+      return(.sim_align_coef(col_names, user_coef, sd_default = sd_default, intercept_default = intercept_default))
+    }
+
+    out <- .sim_align_coef(col_names, NULL, sd_default = sd_default, intercept_default = intercept_default)
+    default_keys <- c("default", "all", "allFamilies", "all_families")
+    user_names <- names(user_coef) %||% character(0)
+
+    # Optional default coefficients for all-scoped columns.
+    key_default <- intersect(default_keys, user_names)
+    if (length(key_default) > 0) {
+      idx_all <- grepl("^all::", col_names)
+      if (any(idx_all)) {
+        cols_all <- .sim_strip_dist_prefix(col_names[idx_all])
+        out[idx_all] <- .sim_align_coef(
+          cols_all,
+          user_coef[[key_default[1]]],
+          sd_default = sd_default,
+          intercept_default = intercept_default
+        )
+      }
+    }
+
+    # Family-specific coefficients; keys accepted: gaussian, student_t, family=gaussian.
+    fam_keys <- setdiff(user_names, default_keys)
+    for (k in fam_keys) {
+      fam_raw <- sub("^family=", "", k)
+      fam_name <- tryCatch(.canonical_family_name(fam_raw), error = function(e) fam_raw)
+      idx_f <- grepl(paste0("^family=", fam_name, "::"), col_names)
+      if (!any(idx_f)) next
+      cols_f <- .sim_strip_dist_prefix(col_names[idx_f])
+      out[idx_f] <- .sim_align_coef(
+        cols_f,
+        user_coef[[k]],
+        sd_default = sd_default,
+        intercept_default = intercept_default
+      )
+    }
+
+    out
+  }
+
+  .sim_dist_coef_spec <- function(param_name, dist_coefs, dist_scope) {
+    spec <- dist_coefs[[param_name]]
+    if (is.null(dist_scope) || !.is_dist_scope(dist_scope)) return(spec)
+
+    if (!is.list(spec) || is.null(names(spec))) {
+      out <- if (is.null(spec)) list() else list(default = spec)
+    } else {
+      out <- spec
+    }
+
+    fam_names <- names(dist_scope$by_family %||% list())
+    if (length(fam_names) == 0) return(out)
+
+    for (fam in fam_names) {
+      pat <- paste0("^", param_name, "\\[family=['\"]?", fam, "['\"]?\\]$")
+      hit <- grep(pat, names(dist_coefs), perl = TRUE)
+      if (length(hit) > 0) {
+        out[[fam]] <- dist_coefs[[names(dist_coefs)[hit[1]]]]
+      }
     }
     out
   }
@@ -874,9 +1038,19 @@ simulate_joinme <- function(
       degree <- as.integer(spec$degree %||% 3L)
       return(function(x) {
         x <- as.numeric(x)
-        boundary <- range(c(knots, x), finite = TRUE)
+        if (length(knots) < 2) {
+          cli::cli_abort(c(
+            x = "I-spline transform for {.val {term_name}} requires at least 2 knots.",
+            i = "Provide boundary knots as the first and last entries."
+          ))
+        }
+        boundary <- c(knots[1], knots[length(knots)])
+        x_range <- range(x, finite = TRUE)
+        boundary[1] <- min(boundary[1], x_range[1])
+        boundary[2] <- max(boundary[2], x_range[2])
+        internal_knots <- if (length(knots) > 2) knots[2:(length(knots) - 1)] else numeric(0)
         basis <- splines2::iSpline(x,
-          knots = knots,
+          knots = internal_knots,
           degree = degree,
           intercept = TRUE,
           Boundary.knots = boundary
@@ -1066,6 +1240,7 @@ simulate_joinme <- function(
   fixed_rhs[[2]] <- NULL
 
   grp_names <- vapply(bars, function(b) .group_name_from_expr(b[[3]]), character(1))
+  indep_flags <- .resolve_re_independence(formulaLong, marker_var = marker_var, id_var = id_var)
   id_idx <- which(grp_names == id_var)
   id_rhs_list <- if (length(id_idx) > 0) .bar_terms_to_rhs_list(bars[id_idx]) else list()
 
@@ -1077,6 +1252,36 @@ simulate_joinme <- function(
   dataEvent <- data.frame(id = seq_len(n_id), stringsAsFactors = FALSE)
   dataEvent <- .sim_eval_covariate_formulas(n_subjects = n_id, formulas = covariate_formulas, base_df = dataEvent)
   names(dataEvent)[names(dataEvent) == "id"] <- id_var
+
+  # Covariance-regression design for subject-specific marker-by-id covariance.
+  if (length(reformulas::findbars(formulaCorr)) > 0) {
+    cli::cli_abort(c(
+      x = "{.arg formulaCorr} does not support random-effects terms.",
+      i = "Remove all ( ... | ... ) terms from {.arg formulaCorr}."
+    ))
+  }
+  fv_rhs <- stats::update(formulaCorr, . ~ .)
+  fv_rhs[[2]] <- NULL
+  if (length(fv_rhs) >= 3 && .expr_has_time(fv_rhs[[3]], time_var)) {
+    cli::cli_abort(c(
+      x = "{.arg formulaCorr} cannot include the time variable {.arg {time_var}}.",
+      i = "Remove time from {.arg formulaCorr} or move it to longitudinal formulas."
+    ))
+  }
+  Xtmp <- .mm(fv_rhs, dataEvent)
+  if (ncol(Xtmp) == 1 && colnames(Xtmp)[1] == "(Intercept)") {
+    K_cov <- 1L
+    Xcov <- matrix(0.0, nrow(dataEvent), 1)
+  } else {
+    if ("(Intercept)" %in% colnames(Xtmp)) Xtmp <- Xtmp[, colnames(Xtmp) != "(Intercept)", drop = FALSE]
+    if (ncol(Xtmp) < 1) {
+      K_cov <- 1L
+      Xcov <- matrix(0.0, nrow(dataEvent), 1)
+    } else {
+      K_cov <- ncol(Xtmp)
+      Xcov <- Xtmp
+    }
+  }
 
   # ---- Build prototype data for matrix column alignment
   prototype <- dataEvent[rep(1, D), , drop = FALSE]
@@ -1120,14 +1325,120 @@ simulate_joinme <- function(
 
   re_id <- .sim_draw_re_block(n_id, K_id, re_params$id %||% list(), "id")
   re_marker <- .sim_draw_re_block(D, K_mk, re_params$marker %||% list(), "marker")
-  re_idm_flat <- .sim_draw_re_block(n_id * D, K_idm, re_params$id_marker %||% list(), "id_marker")
+  re_cov_cfg <- re_params[["id_marker_cov", exact = TRUE]] %||% list()
+  re_idm_cfg <- re_cov_cfg[["latent", exact = TRUE]] %||% list()
+  re_idm_flat <- .sim_draw_re_block(n_id * D, K_idm, re_idm_cfg, "id_marker_cov$latent")
 
-  re_idm <- array(0.0, dim = c(n_id, D, K_idm))
+  re_idm <- if (K_idm > 0) {
+    aperm(array(re_idm_flat, dim = c(D, n_id, K_idm)), c(2, 1, 3))
+  } else {
+    array(0.0, dim = c(n_id, D, 0))
+  }
+
+  M_cov <- if (K_idm > 0) {
+    if (as.integer(indep_flags$indep_idmarker_cov %||% 0L) == 1L) K_idm else K_idm * (K_idm + 1L) / 2L
+  } else {
+    0L
+  }
+
+  idx_row_cov <- integer(M_cov)
+  idx_col_cov <- integer(M_cov)
+  if (M_cov > 0) {
+    if (as.integer(indep_flags$indep_idmarker_cov %||% 0L) == 1L) {
+      idx_row_cov <- seq_len(M_cov)
+      idx_col_cov <- seq_len(M_cov)
+    } else {
+      pos <- 1L
+      for (r in seq_len(K_idm)) {
+        for (c in seq_len(r)) {
+          idx_row_cov[pos] <- r
+          idx_col_cov[pos] <- c
+          pos <- pos + 1L
+        }
+      }
+    }
+  }
+
+  .sim_align_len <- function(x, n, default) {
+    if (n <= 0) return(numeric(0))
+    if (is.null(x)) return(rep(default, n))
+    x <- as.numeric(x)
+    if (length(x) == 1L) return(rep(x, n))
+    if (length(x) != n) {
+      cli::cli_abort(c(
+        x = "Length mismatch in covariance-regression parameter specification.",
+        i = "Expected length {n}, got {length(x)}."
+      ))
+    }
+    x
+  }
+
+  .sim_align_cov_beta <- function(beta_cfg, m_cov, k_cov) {
+    if (m_cov <= 0) return(matrix(0.0, 0, k_cov))
+    if (k_cov <= 0) return(matrix(0.0, m_cov, 0))
+    if (is.null(beta_cfg)) return(matrix(0.0, m_cov, k_cov))
+    if (is.matrix(beta_cfg)) {
+      if (!all(dim(beta_cfg) == c(m_cov, k_cov))) {
+        cli::cli_abort(c(
+          x = "{.arg re_params$id_marker_cov$beta} matrix has incompatible dimensions.",
+          i = "Expected {m_cov}x{k_cov}, got {nrow(beta_cfg)}x{ncol(beta_cfg)}."
+        ))
+      }
+      return(matrix(as.numeric(beta_cfg), nrow = m_cov, ncol = k_cov))
+    }
+    beta_vec <- as.numeric(beta_cfg)
+    if (length(beta_vec) == k_cov) {
+      return(matrix(rep(beta_vec, each = m_cov), nrow = m_cov, ncol = k_cov, byrow = FALSE))
+    }
+    if (length(beta_vec) == m_cov * k_cov) {
+      return(matrix(beta_vec, nrow = m_cov, ncol = k_cov, byrow = TRUE))
+    }
+    cli::cli_abort(c(
+      x = "{.arg re_params$id_marker_cov$beta} has incompatible length.",
+      i = "Provide length {k_cov}, or {m_cov * k_cov}, or an explicit {m_cov}x{k_cov} matrix."
+    ))
+  }
+
+  diag_link_cov <- tolower(as.character(re_cov_cfg$diag_link %||% "softplus")[1])
+  if (!diag_link_cov %in% c("softplus", "exp")) {
+    cli::cli_abort(c(
+      x = "{.arg re_params$id_marker_cov$diag_link} must be 'softplus' or 'exp'.",
+      i = "Use 'softplus' (default) or 'exp'."
+    ))
+  }
+
+  alpha_cov <- .sim_align_len(re_cov_cfg$alpha, M_cov, default = -0.2)
+  lambda_cov <- .sim_align_len(re_cov_cfg$lambda, M_cov, default = 0.3)
+  tau_cov <- .sim_align_len(re_cov_cfg$sd_u %||% re_cov_cfg$tau_u, M_cov, default = 0.6)
+  beta_cov <- .sim_align_cov_beta(re_cov_cfg$beta, M_cov, K_cov)
+
+  L_i <- array(0.0, dim = c(n_id, K_idm, K_idm))
+  if (M_cov > 0 && K_idm > 0) {
+    u_cov <- matrix(stats::rnorm(n_id * M_cov), nrow = n_id, ncol = M_cov)
+    u_cov <- sweep(u_cov, 2, tau_cov, `*`)
+
+    lp_cov <- matrix(alpha_cov, nrow = n_id, ncol = M_cov, byrow = TRUE)
+    if (K_cov > 0) {
+      lp_cov <- lp_cov + Xcov %*% t(beta_cov)
+    }
+    lp_cov <- lp_cov + u_cov * matrix(lambda_cov, nrow = n_id, ncol = M_cov, byrow = TRUE)
+
+    for (m in seq_len(M_cov)) {
+      r_ <- idx_row_cov[m]
+      c_ <- idx_col_cov[m]
+      vals <- lp_cov[, m]
+      if (r_ == c_) {
+        vals <- if (diag_link_cov == "exp") exp(vals) else log1p(exp(vals))
+      }
+      L_i[cbind(seq_len(n_id), r_, c_)] <- vals
+    }
+  }
+
+  re_idm_scaled <- array(0.0, dim = c(n_id, D, K_idm))
   if (K_idm > 0) {
     for (i in seq_len(n_id)) {
-      for (d in seq_len(D)) {
-        re_idm[i, d, ] <- re_idm_flat[(i - 1L) * D + d, ]
-      }
+      Li <- matrix(L_i[i, , ], K_idm, K_idm)
+      re_idm_scaled[i, , ] <- re_idm[i, , ] %*% t(Li)
     }
   }
 
@@ -1288,7 +1599,7 @@ simulate_joinme <- function(
     if (K_idm < 2) return(numeric(0))
     if (D < 2) return(rep(0.0, M_corr))
 
-    re_mat <- matrix(re_idm[i, , ], nrow = D, ncol = K_idm)
+    re_mat <- matrix(re_idm_scaled[i, , ], nrow = D, ncol = K_idm)
     cov_re <- stats::cov(re_mat)
     if (!all(is.finite(cov_re))) return(rep(0.0, M_corr))
 
@@ -1298,12 +1609,12 @@ simulate_joinme <- function(
 
     out <- numeric(M_corr)
     m <- 1L
-    # for (r in 2:K_idm) {
-    #   for (c in 1:(r - 1L)) {
-    #     out[m] <- max(-0.999999, min(0.999999, corr_re[r, c]))
-    #     m <- m + 1L
-    #   }
-    # }
+    for (r in 2:K_idm) {
+      for (c in 1:(r - 1L)) {
+        out[m] <- max(-0.999999, min(0.999999, corr_re[r, c]))
+        m <- m + 1L
+      }
+    }
     out
   }
 
@@ -1588,10 +1899,9 @@ simulate_joinme <- function(
     mu_long <- mu_long + rowSums(Z_mk_long * re_marker[marker_index, , drop = FALSE])
   }
   if (K_idm > 0) {
-    idm_effect <- matrix(0.0, nrow(dataLong), K_idm)
-    for (r in seq_len(nrow(dataLong))) {
-      idm_effect[r, ] <- re_idm[id_index[r], marker_index[r], ]
-    }
+    re_idm_flat_scaled <- matrix(aperm(re_idm_scaled, c(2, 1, 3)), nrow = n_id * D, ncol = K_idm)
+    idx_flat <- (id_index - 1L) * D + marker_index
+    idm_effect <- re_idm_flat_scaled[idx_flat, , drop = FALSE]
     mu_long <- mu_long + rowSums(Z_idm_long * idm_effect)
   }
 
@@ -1603,6 +1913,7 @@ simulate_joinme <- function(
 
   # ---- Distributional parameters (family defaults + formulaDist overrides)
   family_by_row <- family_names[marker_index]
+  attr(dataLong, "joinme_family_by_row") <- family_by_row
 
   sigma_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "sigma", 1.0), numeric(1))
   nu_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "nu", 4.0), numeric(1))
@@ -1617,8 +1928,30 @@ simulate_joinme <- function(
   .validate_dist_formula_scopes(dist_formulas, family_names_present)
   for (param_name in names(dist_formulas)) {
     X_param <- .build_dist_matrix(dist_formulas[[param_name]], dataLong, family_by_row = family_by_row)$X
-    beta_param <- .sim_align_coef(colnames(X_param), dist_coefs[[param_name]], sd_default = 0.15, intercept_default = 0.0)
+    coef_spec <- .sim_dist_coef_spec(param_name, dist_coefs, dist_formulas[[param_name]])
+    beta_param <- .sim_align_dist_coef(
+      col_names = colnames(X_param),
+      user_coef = coef_spec,
+      dist_scope = dist_formulas[[param_name]],
+      sd_default = 0.15,
+      intercept_default = 0.0
+    )
     eta_param <- as.numeric(X_param %*% beta_param)
+
+    re_terms_param <- .build_dist_re_terms(dist_formulas[[param_name]], dataLong)
+    if (!is.null(re_terms_param$n_re) && re_terms_param$n_re > 0) {
+      cfg_dist <- (re_params$dist %||% list())[[param_name]] %||% list()
+      for (j in seq_len(re_terms_param$n_re)) {
+        cfg_j <- if (!is.null(cfg_dist$terms) && length(cfg_dist$terms) >= j) cfg_dist$terms[[j]] else cfg_dist
+        b_j <- .sim_draw_re_block(
+          n_group = as.integer(re_terms_param$G[j]),
+          K = as.integer(re_terms_param$K[j]),
+          cfg = cfg_j,
+          label = paste0("dist_", param_name, "_re", j)
+        )
+        eta_param <- eta_param + rowSums(re_terms_param$Z[[j]] * b_j[re_terms_param$J[[j]], , drop = FALSE])
+      }
+    }
 
     if (param_name == "sigma") sigma_vec <- exp(eta_param)
     if (param_name == "nu") nu_vec <- 2 + exp(eta_param)
@@ -1679,9 +2012,11 @@ simulate_joinme <- function(
     gk_rule = gk_spec$rule,
     transforms = transforms,
     baseline_hazard = baseline_hazard,
+    formulaCorr = formulaCorr,
     formulaBasehaz = formulaBasehaz,
     beta_basehaz = beta_basehaz,
     dist_coefs = dist_coefs,
+    dist_re_params = re_params$dist %||% list(),
     re_params = re_params,
     formulaLong = formulaLong,
     formulaEvent = formulaEvent,

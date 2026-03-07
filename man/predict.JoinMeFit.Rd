@@ -106,6 +106,9 @@ points during dynamic prediction. Allowed values are exactly \code{7}, \code{15}
 \code{31}, \code{41}, \code{51}, and \code{61}. Only the node count is passed to Stan; GK
 nodes/weights are fixed in the Stan code.
 \item progress: logical; show sampling progress bar (default TRUE).
+\item initialization fallback (cmdstanr): if a subject-level dynamic prediction
+chain fails to initialize, prediction automatically retries that subject
+with a narrower random init range (\code{init = 0.1}).
 }}
 
 \item{seed}{Integer. Random seed for reproducibility of random effect sampling.}

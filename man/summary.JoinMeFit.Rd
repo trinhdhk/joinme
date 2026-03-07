@@ -21,7 +21,9 @@
 }
 \value{
 A \code{summary_JoinMeFit} object containing tables such as \code{fixef},
-\code{gamma_w}, \code{survival_process} (when applicable), \code{assoc}, and diagnostics.
+\code{survival_process} (when applicable), \code{assoc}, covariance
+summaries (\code{id}, \code{marker}), dedicated \code{id:marker} covariance-parameter
+summaries (latent + covariance-regression blocks when \code{Q_idm > 0}), and diagnostics.
 }
 \description{
 Builds posterior summaries for the longitudinal process, survival process,

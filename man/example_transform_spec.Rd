@@ -25,6 +25,8 @@ spec_cs <- list(
 )
 
 # Example 3: I-spline (monotonic)
+# - knots define basis locations (first/last are boundary knots)
+# - coeff defines the monotone shape directly
 spec_corr <- list(
   type = "ispline",
   knots = c(-1, 0, 1),
@@ -33,6 +35,9 @@ spec_corr <- list(
 )
 
 # Example 4: Penalized monotone I-spline (fit in R)
+# - x is the input scale of the raw association feature
+# - y is the desired transformed output at each x
+# - lambda controls smoothness (higher = smoother)
 spec_corr_pen <- list(
   type = "ispline_penalized",
   x = seq(-2, 2, length.out = 50),

@@ -31,15 +31,15 @@ if (requireNamespace("joinme", quietly = TRUE)) {
 library(dplyr)
 ```
 
-# 1. Overview
+# Overview
 
 This document provides the formal technical specification for the `joinme` package model structure. It details the precise matrix formulations, transformation logic, and the exact algorithms used by the underlying Stan engine. Ideally, this document serves as a reference for advanced methodologists or developers seeking to understand or extend the package internals.
 
-# 2. Mathematical Framework
+# Mathematical formulation
 
 The joint model consists of two linked submodels: a multivariate longitudinal mixed-effects model and a survival model with time-varying covariates defined by the longitudinal process.
 
-## 2.1. Notation
+## Notation
 
 -   $N$: Number of subjects ($i = 1, \dots, N$).
 -   $D$: Number of longitudinal markers ($d = 1, \dots, D$).
@@ -48,7 +48,7 @@ The joint model consists of two linked submodels: a multivariate longitudinal mi
 -   $\delta_i$: Event indicator (1 if event, 0 if censored).
 -   $y_{ijk}$: The $k$-th observation of marker $d$ for subject $i$ at time $t_{ijk}$.
 
-## 2.2. Longitudinal Submodel
+## Longitudinal Submodel
 
 We assume the observed outcomes $y_{ijk}$ follow a distribution from the exponential family (e.g., Gaussian, Student-t) centered at a linear predictor $\eta_{ijk}(t)$.
 
@@ -73,7 +73,7 @@ where:
 
 This decomposition allows capturing correlations within subjects across markers, within markers across subjects, and the specific deviation of a subject's trajectory for a specific marker.
 
-## 2.3. Survival Submodel
+## Survival Submodel
 
 The hazard function $h_i(t)$ for subject $i$ at time $t$ is modeled as:
 
@@ -110,11 +110,11 @@ Marker weights and association coefficients are regularized with Normal or Lapla
 priors depending on the `shrinkage` setting, using a positive non-centered
 parameterization $\alpha = z_{\alpha} \cdot sd_{\alpha}$.
 
-# 3. Computational Implementation (Stan)
+# Implementation
 
 The model is implemented in Stan, utilizing Hamiltonian Monte Carlo (HMC) for efficient posterior sampling.
 
-## 3.1. Time Scaling
+## Time Scaling
 
 To check numerical stability and ensure spline bases are well-defined, all internal time calculations are performed on a scaled domain $t' \in [0, 1]$:
 
@@ -124,7 +124,7 @@ $$
 
 Coefficients reported to the user are automatically rescaled to the original time scale.
 
-## 3.2. Integration Strategy (Gauss-Kronrod)
+## Integration Strategy (Gauss-Kronrod)
 
 The survival likelihood requires evaluating the cumulative hazard $H_i(T_i) = \int_0^{T_i} h_i(s) ds$. Since the hazard contains time-varying random effects $\eta_{id}(s)$, this integral has no closed form.
 
@@ -139,7 +139,7 @@ $$
 
 This method provides high accuracy with relatively few function evaluations compared to Simpson's rule or trapezoidal integration.
 
-## 3.3. Arbitrary Transformation
+## Arbitrary Transformation
 
 `joinme` supports user-specified association transforms in four modes:
 
@@ -177,7 +177,7 @@ The functional bytecode evaluator implements the following operations:
 - 24: SOFTPLUS
 - 25: CBRT
 
-## 3.4. Parallelization
+## Parallelization
 
 The model supports `reduce_sum` for within-chain parallelization. The likelihood evaluation is sharded by subject $i$.
 
@@ -186,7 +186,7 @@ The model supports `reduce_sum` for within-chain parallelization. The likelihood
 
 The user controls the `grainsize` to balance overhead vs. parallelism.
 
-# 4. Stan Data Block Specification
+# Stan Data Block Specification
 
 The generated Stan data block organizes the inputs efficiently:
 
@@ -203,7 +203,7 @@ The generated Stan data block organizes the inputs efficiently:
 | `tf_mode_*`, `functional_ops_*`, `const_data_*` | association transform configuration |
 | `knots_*`, `coeff_*`, `spline_degree_*` | spline-based transform configuration |
 
-# 5. Prediction
+# Prediction
 
 Dynamic predictions $\pi_i(u|t)$ are efficiently computed using the same Stan code structure (via `generated quantities` or a separate `standalone generated quantities` run) to ensure consistency.
 

@@ -17,13 +17,13 @@ The **JoinME** package implements a sophisticated joint model for multivariate l
 
 ## Core Capabilities
 
-1. **Multivariate Longitudinal Submodel**: Handles multiple markers measured repeatedly over time with flexible distribution families (Gaussian, Student-t, Bernoulli, Poisson, negative binomial, beta, ordinal, skew-normal, double exponential)
-2. **Survival Submodel**: Proportional hazards model with competing risks and flexible baseline hazard (B-spline)
-3. **Association Structure**: Links longitudinal and survival processes through:
+**Multivariate Longitudinal Submodel**: Handles multiple markers measured repeatedly over time with flexible distribution families (Gaussian, Student-t, Bernoulli, Poisson, negative binomial, beta, ordinal, skew-normal, double exponential)
+**Survival Submodel**: Proportional hazards model with competing risks and flexible baseline hazard (B-spline)
+**Association Structure**: Links longitudinal and survival processes through:
    - Current value (CV) and current slope (CS) of longitudinal trajectories
    - Covariance structure of random effects
    - Flexible transformations of association features
-4. **Dynamic Prediction**: Conditional prediction of future longitudinal trajectories and survival probabilities given observed history
+**Dynamic Prediction**: Conditional prediction of future longitudinal trajectories and survival probabilities given observed history
 
 Additional implementation details that are central to the interpretation:
 
@@ -367,7 +367,7 @@ END FUNCTION
 
 ### Key Computational Steps Explained
 
-#### 1. **Random Effects Structure**
+#### **Random Effects Structure**
 
 Three-level random effects:
 $$ u_{id}[i] \sim \text{MVN}(0, \Sigma_{id}) $$
@@ -382,7 +382,7 @@ where $L_i$ is a subject-specific Cholesky factor driven by covariance regressio
   
 $\bar{w}[i]$ is the weighted average of $w$ across markers (for "total" associations), and $\bar{v}$ is the weighted average of $v$ across markers.
 
-#### 2. **Association Mechanisms**
+#### **Association Mechanisms**
 
 **Current Value (CV)**:
 - $CV_{total} = \text{Fixed} + u_{id} + v_{mk} + w_{id \times m}$
@@ -397,7 +397,7 @@ $$ CS(t) \approx \frac{CV(t + \varepsilon) - CV(t)}{\varepsilon} $$
 - Weighted log-variances from Cholesky factor $L_i$.
 - Captures uncertainty in subject-specific predictions.
 
-#### 3. **Gauss-Kronrod Quadrature**
+#### **Gauss-Kronrod Quadrature**
 
 To integrate hazard over $[0, T]$:
 $$ \Lambda(T) = \int_0^T \lambda(s) ds $$
@@ -407,7 +407,7 @@ passed to Stan; the GK nodes and weights are fixed in the Stan code:
 $$ \Lambda(T) \approx \frac{T}{2} \sum_{j=1}^{K} \omega_j \lambda(T \cdot x_j) $$
 where $x_j \in [0,1]$ are GK nodes and $\omega_j$ are weights. Design matrices are pre-computed at these nodes.
 
-#### 4. **Flexible Transformations**
+#### **Flexible Transformations**
 
 Association features can be transformed before entering survival predictor. Transformation modes:
 - **0**: Identity ($f(x)=x$)
@@ -1002,7 +1002,7 @@ $$ \log(\sigma[n]) = X_{\sigma}[n] \beta_{\sigma} + Z_{\sigma}[n] b_{\sigma} $$
 
 # Practical Workflow
 
-## 1. Model Fitting
+## Model Fitting
 
 ```r
 fit <- joinme(
@@ -1024,7 +1024,7 @@ fit <- joinme(
 )
 ```
 
-## 2. Inspect Convergence
+## Inspect Convergence
 
 ```r
 summary(fit)       # Parameter estimates with R-hat, ESS
@@ -1032,7 +1032,7 @@ plot(fit)          # Traceplots
 pp_check(fit)      # Posterior predictive checks
 ```
 
-## 3. Dynamic Prediction
+## Dynamic Prediction
 
 ```r
 pred <- predict(
@@ -1053,7 +1053,7 @@ plot(pred, type = "longitudinal", marker = "CD4")
 
 This section provides the definitive technical specification and rationale for the prior ecosystem within `joinme`. The prior choices strike a balance between **weakly informative defaults** (allowing data to drive inference) and **principled regularization** (preventing pathological behavior in complex joint likelihood surfaces).
 
-## 1. Longitudinal Submodel
+## Longitudinal Submodel
 
 ### Fixed Effects ($\beta$)
 - **Prior**: Student-$t(\nu=6, \mu=0, \sigma=2.5)$ (scaled).
@@ -1077,7 +1077,7 @@ Family-specific auxiliary parameters require constraints matching their support:
 - **Degrees of Freedom ($\nu$)**: Gamma($\alpha, \beta$). Prior constraints $\nu > 2$, soft-bounded to avoid infinite variance regimes while allowing normality ($\nu \to \infty$).
 - **Skew/Quantile Parameters**: Beta($\alpha, \beta$). Natural conjugate for bounded $(0,1)$ parameters, defaulting to Uniform(0,1) or centered symmetric Beta(2,2).
 
-## 2. Survival Submodel
+## Survival Submodel
 
 ### Baseline Hazard ($h_0(t)$)
 - **Coefficients ($\gamma_{bs}$)**: Normal($0, \sigma_{bs}$).
@@ -1090,7 +1090,7 @@ Family-specific auxiliary parameters require constraints matching their support:
 - **Prior**: Student-$t(\nu=6, \mu=0, \sigma=2.5)$.
 - **Rationale**: Consistent with fixed effects; robust regularization.
 
-## 3. Association and Link Functions
+## Association and Link Functions
 
 The association module is the most complex component and requires hierarchical shrinkage to handle high-dimensional marker systems ($D \gg 1$).
 

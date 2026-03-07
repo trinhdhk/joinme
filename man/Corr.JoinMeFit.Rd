@@ -9,8 +9,8 @@
 \arguments{
 \item{object}{A joinme fit object.}
 
-\item{what}{Optional covariance block selector (\code{"id"}, \code{"marker"},
-\code{"marker_by_id_latent"}). When \code{NULL} (default), returns a nested list for
+\item{what}{Optional covariance block selector (\code{"id"}, \code{"marker"}).
+When \code{NULL} (default), returns a nested list for
 all covariance components in \code{formulaLong} and \code{formulaDist}.}
 
 \item{draws}{Number of draws to use for summaries.}

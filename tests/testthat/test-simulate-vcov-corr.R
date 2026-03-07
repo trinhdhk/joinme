@@ -19,10 +19,10 @@ test_that("simulate_joinme corr uses off-diagonal correlation features", {
   expect_length(raw$corr_vals, 3)
   expect_true(all(is.finite(raw$corr_vals)))
   expect_true(all(abs(raw$corr_vals) <= 1))
-  expect_equal(raw$corr, sum(abs(vc) * raw$corr_vals), tolerance = 1e-10)
+  expect_equal(raw$corr, sum(vc * raw$corr_vals), tolerance = 1e-10)
 
   vc_names <- paste0("corr[", seq_along(vc), "]")
-  expect_equal(unname(sim$truth$assoc_coefs[vc_names]), abs(vc))
+  expect_equal(unname(sim$truth$assoc_coefs[vc_names]), vc)
 })
 
 test_that("simulate_joinme corr coefficient parsing truncates to M_corr", {

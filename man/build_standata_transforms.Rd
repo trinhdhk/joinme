@@ -44,8 +44,8 @@ Each element of transform_list should be a list with:
 \item Additional fields depend on type:
 \itemize{
 \item functional: expr (quosure, formula, quoted expression, or string)
-\item ispline: knots (vector), coeff (vector), degree (int)
-\item ispline_penalized: x, y, knots or n_knots, degree, lambda, weights
+\item ispline: knots (vector), coeff (vector), degree (int). Here you provide the transform shape directly; x/y/lambda are not used.
+\item ispline_penalized: x, y, knots or n_knots, degree, lambda, weights. Here x is input feature scale, y is target transformed output at x, and lambda controls smoothness (higher = smoother).
 \item pwlin: x (vector), y (vector)
 }
 }
@@ -55,4 +55,3 @@ Each element of transform_list should be a list with:
 Use \code{build_standata_transforms()} to construct the data list entries,
 and \code{validate_transforms()} to verify consistency before sampling.
 }
-

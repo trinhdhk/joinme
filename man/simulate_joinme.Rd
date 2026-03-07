@@ -7,6 +7,7 @@
 simulate_joinme(
   formulaLong = y ~ 1 + time + x1 + (1 + time | id) + (0 + x1 + (1 + time | id) | marker),
   formulaEvent = survival::Surv(time, event) ~ x1 + x2,
+  formulaCorr = ~1,
   formulaDist = NULL,
   formulaAssoc = NULL,
   transforms = NULL,
@@ -25,7 +26,8 @@ simulate_joinme(
   beta_event = NULL,
   dist_coefs = list(),
   re_params = list(id = list(sd = NULL, corr = NULL), marker = list(sd = NULL, corr =
-    NULL), id_marker = list(sd = NULL, corr = NULL)),
+    NULL), id_marker_cov = list(latent = list(sd = NULL, corr = NULL), alpha = NULL, beta
+    = NULL, lambda = NULL, sd_u = NULL, diag_link = "softplus"), dist = list()),
   family_params = list(gaussian = list(sigma = 1), student_t = list(sigma = 1.5, nu = 4),
     bernoulli = list(), binomial = list(trials = 10), poisson = list(), negbin2 =
     list(phi = 2), skew_normal = list(sigma = 1, alpha = 0), double_exponential =
@@ -59,6 +61,15 @@ should be available in generated covariates (for example via
 
 \item{formulaEvent}{Event/survival formula (same role as in \code{joinme()}).}
 
+\item{formulaCorr}{Optional covariance-regression formula for the id-specific
+marker-by-id latent covariance (same role as in \code{joinme_standata()}).
+This formula is evaluated on event-level covariates (one row per subject),
+must not include random-effect bars \code{( ... | ... )}, and must not include
+the longitudinal time variable.
+
+Internally, this formula drives subject-specific lower-triangular entries
+of \code{L_i} used to scale marker-by-id latent effects; see \code{re_params$id_marker_cov}.}
+
 \item{formulaDist}{Optional distributional regression formulas (same role as in \code{joinme()}).
 Supported LHS parameters are \code{sigma}, \code{nu}, \code{phi}, \code{alpha} (aliases:
 \code{alpha_skew}, \code{skew}), \code{phi_beta}, and \code{tau_sde}.
@@ -81,7 +92,16 @@ Simulation applies \code{cv_total} and \code{cv_marker} transforms at marker lev
 weighted averaging (aligned with fit/predict Stan semantics).
 Functional transforms support arithmetic and common nonlinear functions,
 including \code{inv_logit}/\code{expit}/\code{sigmoid}, \code{exp}, \code{log}, \code{sqrt}, \code{power},
-\code{cbrt}, \code{softplus}/\code{log1p_exp}, trigonometric and hyperbolic functions.}
+\code{cbrt}, \code{softplus}/\code{log1p_exp}, trigonometric and hyperbolic functions.
+
+For monotone spline transforms:
+\itemize{
+\item \code{type = "ispline"}: provide \code{knots} + \code{coeff} (+ optional \code{degree}) directly; \code{x}/\code{y}/\code{lambda} are not used.
+\item \code{type = "ispline_penalized"}: provide training pairs \code{x} and \code{y} (same length), and a smoothness penalty \code{lambda}.
+\item \code{x}: raw association-feature input scale; \code{y}: desired transformed output at those \code{x} points.
+\item \code{lambda}: smoothness strength (higher = smoother, lower = more flexible).
+}
+}
 
 \item{n_id}{Number of subjects.}
 
@@ -108,13 +128,30 @@ as weighted means divided by marker count. Inputs are treated as direct
 signed weights used in association aggregation.}
 
 \item{assoc}{Association components (same names as fit): \code{cv_total}, \code{cv_mean},
-\code{cv_marker}, \code{cs_total}, \code{cs_mean}, \code{cs_marker}, \code{corr}.}
+\code{cv_marker}, \code{cs_total}, \code{cs_mean}, \code{cs_marker}, \code{corr}.
+
+Meaning of each channel:
+\itemize{
+\item \verb{cv_*}: current-value channels from longitudinal trajectories,
+\item \verb{cs_*}: current-slope channels from finite differences (\code{eps_cs}),
+\item \code{corr}: off-diagonal correlation features from marker-by-id random effects.
+}
+
+You can also provide \code{formulaAssoc = ~ ...} to select channels; when present,
+it overrides \code{assoc}.}
 
 \item{assoc_coefs}{Association coefficients for hazard terms.
 Non-\code{corr} terms accept scalar values. The \code{corr} term accepts a vector of
 off-diagonal correlation coefficients ordered as \verb{(2,1), (3,1), (3,2), ...}
 in lower-triangular row-major order of the marker-by-id random-effect
-covariance dimension.}
+covariance dimension.
+
+Accepted input forms:
+\itemize{
+\item named numeric vector, e.g. \code{c(cv_total = 0.4, cs_mean = -0.2)},
+\item named list, e.g. \code{list(cv_total = 0.4, corr = c(0.2, -0.1))}.
+Missing channels default to 0.
+}}
 
 \item{beta_long}{Fixed-effect coefficients for \code{formulaLong} fixed part. If NULL,
 coefficients are randomly generated and named by model-matrix columns.}
@@ -123,10 +160,82 @@ coefficients are randomly generated and named by model-matrix columns.}
 terms in \code{formulaEvent} RHS.
 If NULL, coefficients are randomly generated.}
 
-\item{dist_coefs}{Named list of vectors for distributional regressions (\code{sigma}, \code{nu},
-\code{phi}, \code{alpha}, \code{phi_beta}, \code{tau_sde}).}
+\item{dist_coefs}{Distributional fixed-effect coefficients for \code{formulaDist}
+parameters (\code{sigma}, \code{nu}, \code{phi}, \code{alpha}, \code{phi_beta}, \code{tau_sde}).
 
-\item{re_params}{Random-effects simulation controls.}
+For each parameter, coefficients can be:
+\itemize{
+\item an unnamed numeric vector (matched by column order),
+\item a named numeric vector (matched by model-matrix column names),
+\item for family-scoped formulas, a named list with per-scope entries.
+}
+
+Family-scoped list syntax examples:
+\itemize{
+\item \code{dist_coefs = list(sigma = list(default = c("(Intercept)" = -0.3), gaussian = c(...), student_t = c(...)))}
+\item alias keys like \code{"sigma[family='student_t']"} are also recognized and
+mapped to the matching family scope.
+}}
+
+\item{re_params}{Random-effects simulation controls.
+
+Structure:
+\itemize{
+\item \code{id}: controls id-level random effects from \code{( ... | id)} in \code{formulaLong}.
+\item \code{marker}: controls marker-level random effects from marker-only terms.
+\item \code{id_marker_cov}: controls subject-specific covariance-regression for
+marker-by-id latent effects.
+\item \code{dist}: controls random effects for distributional regressions in
+\code{formulaDist}.
+}
+
+For \code{id}, \code{marker}, and \code{id_marker_cov$latent}, each block is a list:
+\itemize{
+\item \code{sd}: scalar or length-K vector of random-effect standard deviations,
+\item \code{corr}: KxK correlation matrix.
+}
+
+\code{id_marker_cov} fields:
+\itemize{
+\item \code{latent}: latent marker-by-id random-effect block (same \code{sd}/\code{corr}
+schema as above); this is the base latent draw that is later transformed
+by subject-specific \code{L_i},
+\item \code{alpha}: baseline linear predictors for entries of subject-specific lower
+triangular \code{L_i} (baseline when \code{formulaCorr} covariates and latent
+perturbation are zero),
+\item \code{beta}: covariate effects from \code{formulaCorr} design matrix (systematic
+subject-to-subject covariance shifts by observed covariates),
+\item \code{lambda}: scaling for subject-level latent perturbation,
+\item \code{sd_u} (alias \code{tau_u}): SD of latent subject perturbation,
+\item \code{diag_link}: diagonal link for \code{L_i} diagonals (\code{"softplus"} or \code{"exp"}).
+}
+
+Element-wise covariance-regression form is:
+\verb{eta_im = alpha_m + x_i^T beta_m + lambda_m * u_im}, with
+\code{u_im ~ Normal(0, sd_u_m^2)}. Diagonal entries of \code{L_i} apply \code{diag_link}
+to keep them positive; off-diagonal entries remain on identity scale.
+Base latent draws satisfy \code{z_id ~ Normal(0, Sigma_latent)}, where
+\code{Sigma_latent} is defined by \code{id_marker_cov$latent} (\code{sd}, \code{corr}).
+Final marker-by-id effects are obtained as \verb{b_id = L_i z_id}, so \code{latent}
+sets baseline RE scale/correlation and
+\code{alpha}/\code{beta}/\code{lambda}/\code{sd_u} control subject-specific reshaping.
+The latent-perturbation spread is controlled approximately by
+\verb{|lambda_m| * sd_u_m}.
+
+Dimension rules for \code{id_marker_cov} entries follow marker-by-id random-effect
+dimension \code{Q_idm}:
+\itemize{
+\item if covariance is full: \code{M = Q_idm * (Q_idm + 1) / 2} lower-tri entries,
+\item if covariance is forced diagonal (\code{||} in nested id-marker term): \code{M = Q_idm}.
+}
+
+\code{dist} block syntax:
+\itemize{
+\item \code{re_params$dist[[param]]} applies to all random-effect terms for that
+distributional parameter,
+\item \code{re_params$dist[[param]]$terms[[j]]} optionally sets term-specific
+controls (same \code{sd}/\code{corr} fields as above).
+}}
 
 \item{family_params}{Family-specific simulation parameters.}
 

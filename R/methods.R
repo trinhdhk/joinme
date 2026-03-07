@@ -213,12 +213,22 @@ corr <- function(object, ...) {
       var_nm <- paste0(stan_prefix, "[", idx, "]")
       if (var_nm %in% all_vars) {
         fam_code <- fam_codes[idx]
-        mk_idx <- markers_for_param(param, fam_code)
-        if (length(mk_idx) == 1) {
-          mk <- marker_levels[mk_idx]
-          term_map[var_nm] <<- paste0(marker_label_prefix[[param]], "[", mk, "]")
+        if (identical(param, "sigma")) {
+          mk_idx <- markers_for_param(param, fam_code)
+          if (length(mk_idx) == 1) {
+            mk <- marker_levels[mk_idx]
+            term_map[var_nm] <<- paste0("sigma[", mk, "]")
+          } else {
+            term_map[var_nm] <<- paste0("sigma[family=", fam_name(fam_code), "]")
+          }
         } else {
-          term_map[var_nm] <<- paste0(family_label_prefix[[param]], "[family=", fam_name(fam_code), "]")
+          mk_idx <- markers_for_param(param, fam_code)
+          if (length(mk_idx) == 1) {
+            mk <- marker_levels[mk_idx]
+            term_map[var_nm] <<- paste0(marker_label_prefix[[param]], "[", mk, "]")
+          } else {
+            term_map[var_nm] <<- paste0(family_label_prefix[[param]], "[family=", fam_name(fam_code), "]")
+          }
         }
       }
     }
@@ -239,7 +249,7 @@ corr <- function(object, ...) {
 
     if ("sigma" %in% req && !isTRUE(has_reg$sigma)) {
       var_nm <- paste0("sigma_marker[", d, "]")
-      term_map[var_nm] <- paste0("sigma_marker[", mk, "]")
+      term_map[var_nm] <- paste0("sigma[", mk, "]")
     }
     if ("nu" %in% req && !isTRUE(has_reg$nu)) {
       var_nm <- paste0("nu_marker[", d, "]")
@@ -547,7 +557,9 @@ print.JoinMeFit <- function(x, ...) {
 #' @param ... Unused.
 #'
 #' @return A `summary_JoinMeFit` object containing tables such as `fixef`,
-#'   `gamma_w`, `survival_process` (when applicable), `assoc`, and diagnostics.
+#'   `survival_process` (when applicable), `assoc`, covariance
+#'   summaries (`id`, `marker`), dedicated `id:marker` covariance-parameter
+#'   summaries (latent + covariance-regression blocks when `Q_idm > 0`), and diagnostics.
 #' @export
 summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
                            include_corr = TRUE, ...) {
@@ -801,18 +813,158 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
 
   # Optional variance/covariance summaries (costly)
   corr_tables <- NULL
+  id_marker_cov_tables <- NULL
   if (isTRUE(include_corr)) {
+    q_idm <- as.integer(sd$Q_idm %||% 0L)
+
+    if (q_idm > 0) {
+      m_cov <- if (as.integer(sd$indep_idmarker_cov %||% 0L) == 1L) q_idm else (q_idm * (q_idm + 1L)) %/% 2L
+
+      rc_map <- matrix(NA_integer_, nrow = m_cov, ncol = 2)
+      if (as.integer(sd$indep_idmarker_cov %||% 0L) == 1L) {
+        for (m in seq_len(m_cov)) rc_map[m, ] <- c(m, m)
+      } else {
+        pos <- 1L
+        for (r in seq_len(q_idm)) {
+          for (c in seq_len(r)) {
+            rc_map[pos, ] <- c(r, c)
+            pos <- pos + 1L
+          }
+        }
+      }
+
+      reg_rows <- list()
+
+      .summarize_block_parameters <- function(var_names, block_labels, term_labels) {
+        keep <- var_names %in% all_vars
+        var_names <- var_names[keep]
+        block_labels <- block_labels[keep]
+        term_labels <- term_labels[keep]
+        if (length(var_names) == 0) return(NULL)
+        out <- as.data.frame(.summarise_draws_diag(fit, var_names, draws = draws, seed = seed))
+        idx <- match(out$variable, var_names)
+        out$block <- block_labels[idx]
+        out$term <- term_labels[idx]
+        out <- out[, c("block", "term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
+        out$Estimate <- round(out$Estimate, digits)
+        out$Est.Error <- round(out$Est.Error, digits)
+        out$Q2.5 <- round(out$Q2.5, digits)
+        out$Q97.5 <- round(out$Q97.5, digits)
+        out$Rhat <- round(out$Rhat, 3)
+        out
+      }
+
+      summarize_latent_cov_matrix <- function() {
+        tau_vars <- paste0("tau_w[", seq_len(q_idm), "]")
+        L_vars <- as.vector(outer(seq_len(q_idm), seq_len(q_idm), function(r, c) paste0("Lcorr_w[", r, ",", c, "]")))
+        vars_needed <- c(tau_vars, L_vars)
+        vars_needed <- vars_needed[vars_needed %in% all_vars]
+        if (length(tau_vars[tau_vars %in% all_vars]) != q_idm) return(NULL)
+        if (length(L_vars[L_vars %in% all_vars]) != q_idm * q_idm) return(NULL)
+        dmat <- .get_draws_matrix(fit, variables = c(tau_vars, L_vars), draws = draws, seed = seed)
+        out <- list()
+        idx <- 1L
+        for (r in seq_len(q_idm)) {
+          for (c in seq_len(q_idm)) {
+            vals <- vapply(seq_len(nrow(dmat)), function(i) {
+              tau <- as.numeric(dmat[i, tau_vars])
+              L <- matrix(as.numeric(dmat[i, L_vars]), nrow = q_idm, ncol = q_idm, byrow = FALSE)
+              L[upper.tri(L)] <- 0
+              Corr <- L %*% t(L)
+              Sigma <- diag(tau, q_idm, q_idm) %*% Corr %*% diag(tau, q_idm, q_idm)
+              as.numeric(Sigma[r, c])
+            }, numeric(1))
+            ss <- .summarize_draw_col(vals)
+            rhat <- suppressWarnings(tryCatch(as.numeric(posterior::rhat(vals)), error = function(e) NA_real_))
+            ess_bulk <- suppressWarnings(tryCatch(as.numeric(posterior::ess_basic(vals)), error = function(e) NA_real_))
+            ess_tail <- suppressWarnings(tryCatch(as.numeric(posterior::ess_tail(vals)), error = function(e) NA_real_))
+            out[[idx]] <- data.frame(
+              block = "sigma_latent",
+              row = r,
+              col = c,
+              Estimate = round(as.numeric(ss[["Estimate"]]), digits),
+              Est.Error = round(as.numeric(ss[["Est.Error"]]), digits),
+              Q2.5 = round(as.numeric(ss[["Q2.5"]]), digits),
+              Q97.5 = round(as.numeric(ss[["Q97.5"]]), digits),
+              Rhat = round(rhat, 3),
+              ess_bulk = as.numeric(ess_bulk),
+              ess_tail = as.numeric(ess_tail),
+              stringsAsFactors = FALSE
+            )
+            idx <- idx + 1L
+          }
+        }
+        if (length(out) == 0) return(NULL)
+        do.call(rbind, out)
+      }
+
+      latent_tbl <- summarize_latent_cov_matrix()
+
+      alpha_vars <- paste0("alpha_L[", seq_len(m_cov), "]")
+      alpha_blocks <- vapply(seq_len(m_cov), function(m) paste0("L[", rc_map[m, 1], ",", rc_map[m, 2], "]"), character(1))
+      alpha_tbl <- .summarize_block_parameters(
+        alpha_vars,
+        block_labels = alpha_blocks,
+        term_labels = rep("(Intercept)", m_cov)
+      )
+      if (!is.null(alpha_tbl)) reg_rows[[length(reg_rows) + 1L]] <- alpha_tbl
+
+      k_cov <- as.integer(sd$K_cov %||% 0L)
+      if (m_cov > 0 && k_cov > 0) {
+        cov_labels <- colnames(sd$Xcov)
+        if (is.null(cov_labels) || length(cov_labels) != k_cov) {
+          cov_labels <- paste0("k", seq_len(k_cov))
+        }
+        beta_vars <- as.vector(outer(seq_len(m_cov), seq_len(k_cov), function(m, k) paste0("beta_L[", m, ",", k, "]")))
+        beta_blocks <- as.vector(outer(seq_len(m_cov), seq_len(k_cov), function(m, k) {
+          paste0("L[", rc_map[m, 1], ",", rc_map[m, 2], "]")
+        }))
+        beta_terms <- as.vector(outer(seq_len(m_cov), seq_len(k_cov), function(m, k) {
+          cov_labels[k]
+        }))
+        beta_tbl <- .summarize_block_parameters(
+          beta_vars,
+          block_labels = beta_blocks,
+          term_labels = beta_terms
+        )
+        if (!is.null(beta_tbl)) reg_rows[[length(reg_rows) + 1L]] <- beta_tbl
+      }
+
+      lambda_vars <- paste0("lambda_L[", seq_len(m_cov), "]")
+      lambda_blocks <- vapply(seq_len(m_cov), function(m) paste0("L[", rc_map[m, 1], ",", rc_map[m, 2], "]"), character(1))
+      lambda_tbl <- .summarize_block_parameters(
+        lambda_vars,
+        block_labels = lambda_blocks,
+        term_labels = rep("lambda", m_cov)
+      )
+      if (!is.null(lambda_tbl)) reg_rows[[length(reg_rows) + 1L]] <- lambda_tbl
+
+      sd_u_tbl <- .summarize_block_parameters("tau_L", "global", "sd_u")
+      if (!is.null(sd_u_tbl)) reg_rows[[length(reg_rows) + 1L]] <- sd_u_tbl
+
+      reg_rows <- Filter(Negate(is.null), reg_rows)
+      regression_tbl <- if (length(reg_rows) > 0) do.call(rbind, reg_rows) else NULL
+      if (!is.null(regression_tbl)) {
+        regression_tbl <- regression_tbl[, c("block", "term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
+      }
+      id_marker_cov_tables <- list(
+        latent = latent_tbl,
+        regression = regression_tbl
+      )
+      id_marker_cov_tables <- id_marker_cov_tables[!vapply(id_marker_cov_tables, is.null, logical(1))]
+      if (length(id_marker_cov_tables) == 0) id_marker_cov_tables <- NULL
+    }
+
     corr_tables <- list(
       id = corr(object, what = "id", draws = draws),
-      marker = if (sd$R_mk > 0) corr(object, what = "marker", draws = draws) else NULL,
-      marker_by_id_latent = corr(object, what = "marker_by_id_latent", draws = draws)
+      marker = if (sd$R_mk > 0) corr(object, what = "marker", draws = draws) else NULL
     )
   }
 
   transform_specs <- cfg$transforms_spec %||% object$call$transforms
   transform_formulas <- .transform_formulas_from_specs(transform_specs)
 
-  term_diag <- .term_diagnostics_from_tables(list(s_beta, s_g, s_a, s_d, s_dr, corr_tables))
+  term_diag <- .term_diagnostics_from_tables(list(s_beta, s_surv, s_a, s_d, s_dr, corr_tables, id_marker_cov_tables))
   diag_table <- .build_common_diagnostics_table(
     draws = as.numeric(diag$draws %||% NA_real_),
     divergences = as.numeric(diag$divergences %||% NA_real_),
@@ -831,12 +983,12 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     tables = list(
       diagnostics = diag_table,
       fixef = s_beta,
-      gamma_w = s_g,
       survival_process = s_surv,
       assoc = s_a,
       distributional = s_d,
       distributional_regression = s_dr,
-      corr = corr_tables
+      corr = corr_tables,
+      id_marker_cov = id_marker_cov_tables
     ),
     diagnostics = diag,
     metadata = list(
@@ -1028,15 +1180,15 @@ print.summary_JoinMeFit <- function(x, ...) {
     cat("-------------------\n")
     print(diag_tbl, row.names = FALSE)
   }
+  if (!is.null(x$metadata$transform_formulas)) {
+    cat("\nTransformations\n")
+    cat("----------------\n")
+    print(x$metadata$transform_formulas, row.names = FALSE)
+  }
   if (!is.null(x$tables$fixef)) {
     cat("\nFixed effects (beta)\n")
     cat("---------------------\n")
     print(x$tables$fixef, row.names = FALSE)
-  }
-  if (!is.null(x$tables$gamma_w)) {
-    cat("\nSurvival effects (gamma_w)\n")
-    cat("---------------------------\n")
-    print(x$tables$gamma_w, row.names = FALSE)
   }
   if (!is.null(x$tables$survival_process)) {
     cat("\nSurvival process (non-association covariates)\n")
@@ -1047,11 +1199,6 @@ print.summary_JoinMeFit <- function(x, ...) {
     cat("\nAssociation parameters\n")
     cat("-----------------------\n")
     print(x$tables$assoc, row.names = FALSE)
-  }
-  if (!is.null(x$metadata$transform_formulas)) {
-    cat("\nTransformations\n")
-    cat("----------------\n")
-    print(x$metadata$transform_formulas, row.names = FALSE)
   }
   if (!is.null(x$tables$distributional)) {
     cat("\nDistributional parameters\n")
@@ -1074,10 +1221,22 @@ print.summary_JoinMeFit <- function(x, ...) {
       cat("\nmarker\n")
       print(x$tables$corr$marker, row.names = FALSE)
     }
-    if (!is.null(x$tables$corr$marker_by_id_latent)) {
-      cat("\nid:marker\n")
-      print(x$tables$corr$marker_by_id_latent, row.names = FALSE)
+  }
+  if (!is.null(x$tables$id_marker_cov)) {
+    cat("\nid:marker covariance parameters\n")
+    cat("----------------------------------\n")
+    if (!is.null(x$tables$id_marker_cov$latent)) {
+      cat("latent covariance matrix\n")
+      print(x$tables$id_marker_cov$latent, row.names = FALSE)
     }
+    if (!is.null(x$tables$id_marker_cov$regression)) {
+      cat("\ncovariance regression coefficients\n")
+      print(x$tables$id_marker_cov$regression, row.names = FALSE)
+    }
+  } else if (!is.null(x$tables$corr) && !is.null(x$tables$corr$id_marker)) {
+    cat("\nid:marker covariance parameters\n")
+    cat("----------------------------------\n")
+    print(x$tables$corr$id_marker, row.names = FALSE)
   }
   invisible(x)
 }
@@ -1349,8 +1508,8 @@ ranef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
 #' Extract covariance summaries
 #'
 #' @param object A joinme fit object.
-#' @param what Optional covariance block selector (`"id"`, `"marker"`,
-#'   `"marker_by_id_latent"`). When `NULL` (default), returns a nested list for
+#' @param what Optional covariance block selector (`"id"`, `"marker"`).
+#'   When `NULL` (default), returns a nested list for
 #'   all covariance components in `formulaLong` and `formulaDist`.
 #' @param draws Number of draws to use for summaries.
 #' @param ... Unused.
@@ -1366,7 +1525,7 @@ corr.JoinMeFit <- function(object, what = NULL, draws = NULL, ...) {
   if (is.null(draws)) draws <- object$config$draws_default
 
   if (!is.null(what)) {
-    what <- match.arg(what, choices = c("id", "marker", "marker_by_id_latent"))
+    what <- match.arg(what, choices = c("id", "marker"))
   }
 
   summarize_cov_matrix <- function(tau_prefix, Lcorr_prefix, dim, label) {
@@ -1426,7 +1585,6 @@ corr.JoinMeFit <- function(object, what = NULL, draws = NULL, ...) {
       }
       return(summarize_cov_matrix("tau_v", "Lcorr_v", sd$R_mk, "marker"))
     }
-    return(summarize_cov_matrix("tau_w", "Lcorr_w", sd$Q_idm, "id:marker"))
   }
 
   summarize_dist_corr <- function(param_name) {
@@ -1488,8 +1646,7 @@ corr.JoinMeFit <- function(object, what = NULL, draws = NULL, ...) {
   out <- list(
     formulaLong = list(
       id = summarize_cov_matrix("tau_u", "Lcorr_u", sd$R_id, "id"),
-      marker = if (sd$R_mk > 0) summarize_cov_matrix("tau_v", "Lcorr_v", sd$R_mk, "marker") else NULL,
-      marker_by_id_latent = summarize_cov_matrix("tau_w", "Lcorr_w", sd$Q_idm, "id:marker")
+      marker = if (sd$R_mk > 0) summarize_cov_matrix("tau_v", "Lcorr_v", sd$R_mk, "marker") else NULL
     ),
     formulaDist = list(
       sigma = summarize_dist_corr("sigma"),

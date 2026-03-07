@@ -561,6 +561,11 @@ transforms <- list(
     degree = 3
   )
 )
+
+# Notes on spline arguments:
+# - type = "ispline": provide knots + coeff directly (no x/y/lambda fitting).
+# - type = "ispline_penalized": provide x and y training pairs, and lambda
+#   controls smoothness (larger lambda -> smoother transform).
 ```
 
 ## Optional: distributional regression

@@ -77,6 +77,9 @@ NULL
 #'     `31`, `41`, `51`, and `61`. Only the node count is passed to Stan; GK
 #'     nodes/weights are fixed in the Stan code.
 #'   - progress: logical; show sampling progress bar (default TRUE).
+#'   - initialization fallback (cmdstanr): if a subject-level dynamic prediction
+#'     chain fails to initialize, prediction automatically retries that subject
+#'     with a narrower random init range (`init = 0.1`).
 #' @param seed Integer. Random seed for reproducibility of random effect sampling.
 #' @importFrom stats predict median sd quantile na.omit optim terms
 #' @param ... Additional arguments (unused).
@@ -560,6 +563,17 @@ predict.JoinMeFit <- function(object,
                 allowed <- names(formals(mod$sample))
                 sample_args <- sample_args[names(sample_args) %in% allowed]
                 fit_pred <- do.call(mod$sample, sample_args)
+                pred_diag <- .joinme_sampler_diagnostics(fit_pred)
+                if (is.na(pred_diag$draws) || pred_diag$draws < 1) {
+                    retry_args <- sample_args
+                    retry_args$init <- 0.1
+                    cli::cli_warn(c(
+                        x = "Prediction sampling failed to initialize for subject {id}.",
+                        i = "Retrying with narrower random init range ({.code init = 0.1})."
+                    ))
+                    fit_pred <- do.call(mod$sample, retry_args)
+                    pred_diag <- .joinme_sampler_diagnostics(fit_pred)
+                }
             } else {
                 control_list <- list()
                 if (!is.null(sample_args$adapt_delta)) control_list$adapt_delta <- sample_args$adapt_delta
@@ -582,8 +596,9 @@ predict.JoinMeFit <- function(object,
                 }
                 if (length(control_list) > 0) rstan_args$control <- control_list
                 fit_pred <- do.call(rstan::sampling, rstan_args)
+                pred_diag <- .joinme_sampler_diagnostics(fit_pred)
             }
-            pred_sampler_diag_list[[as.character(id)]] <- .joinme_sampler_diagnostics(fit_pred)
+            pred_sampler_diag_list[[as.character(id)]] <- pred_diag
 
             draw_variables <- .prediction_draw_variables(scale, sd_pred)
             draws_mat <- suppressMessages(
@@ -831,7 +846,7 @@ predict.JoinMeFit <- function(object,
 
     # Prepare metadata
     # Extract variable names from forms for use in plotting
-    formula_long <- object$call$formulaLong %||% forms$formulaLong
+    formula_long <- object$formulaLong %||% forms$formulaLong
     resp_var <- tryCatch(
         all.vars(formula_long)[1],
         error = function(e) NA_character_
@@ -1545,7 +1560,16 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     fv_rhs <- stats::update(forms$formulaCorr, . ~ .)
     fv_rhs[[2]] <- NULL
     vec_cov_corr <- .mm(fv_rhs, dE)
-    if (ncol(vec_cov_corr) == 1 && colnames(vec_cov_corr)[1] == "(Intercept)" && sd$K_cov == 1) vec_cov_corr <- matrix(0, 1, 1)
+    if (ncol(vec_cov_corr) == 1 && colnames(vec_cov_corr)[1] == "(Intercept)") {
+        vec_cov_corr <- matrix(0.0, nrow(dE), 1)
+    } else {
+        if ("(Intercept)" %in% colnames(vec_cov_corr)) {
+            vec_cov_corr <- vec_cov_corr[, colnames(vec_cov_corr) != "(Intercept)", drop = FALSE]
+        }
+        if (ncol(vec_cov_corr) < 1) {
+            vec_cov_corr <- matrix(0.0, nrow(dE), 1)
+        }
+    }
 
     quadrature_nodes <- control$quadrature_nodes %||% sd$quadrature_nodes %||% sd$n_gk %||% NULL
     quadrature_nodes_input <- quadrature_nodes %||% 15L
@@ -1739,8 +1763,11 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     }
 
     # Response and marker identification
-    y_var <- eval(object$call$y_var) %||% "y"
-    if (!(y_var %in% colnames(dL))) stop(paste("Response variable", y_var, "not found in dL."))
+    y_var <- .resolve_response_var(
+        formulaLong = object$formulaLong,
+        dataLong = dL,
+        context = "predict.joinme()"
+    )
 
     # Map markers carefully using fitted levels
     marker_levels <- object$stan_data$marker_levels
@@ -1832,8 +1859,8 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         trials_obs = as.integer(trials_obs),
         n_fixed_effects = sd$P, n_random_id = sd$R_id, n_random_marker = sd$R_mk, n_random_marker_id = sd$Q_idm,
         mat_fixed_obs = mat_fixed_obs, mat_id_obs = mat_id_obs, mat_marker_obs = mat_marker_obs, mat_marker_id_obs = mat_marker_id_obs,
-        n_cov_corr = sd$K_cov, vec_cov_corr = as.vector(vec_cov_corr),
-        n_cov_hazard = sd$p_w, vec_cov_hazard = as.vector(vec_cov_hazard),
+        n_cov_corr = as.integer(ncol(vec_cov_corr)), vec_cov_corr = array(as.numeric(vec_cov_corr), dim = as.integer(ncol(vec_cov_corr))),
+        n_cov_hazard = as.integer(ncol(vec_cov_hazard)), vec_cov_hazard = array(as.numeric(vec_cov_hazard), dim = as.integer(ncol(vec_cov_hazard))),
         n_basehaz_basis = sd$Kbs, time_condition = T_cond_scaled,
         n_gk = as.integer(n_gk),
         mat_basis_gk_cond = mat_basis_gk_cond,

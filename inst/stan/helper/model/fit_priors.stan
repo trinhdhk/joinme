@@ -45,54 +45,54 @@
   beta_tau_sde ~ student_t(6, 0, 1);
   /* Distributional random-effect scales + latent draws */
   for (j in 1 : n_re_sigma) { // sigma RE terms
-    tau_sigma[j][1:K_sigma[j]] ~ std_normal();
+    tau_sigma[j][1:K_sigma[j]] ~ exponential(1);
     for (g in 1 : G_sigma[j])
       target += re_weight_sigma[j][g] * std_normal_lpdf(to_vector(z_sigma[j][g, 1:K_sigma[j]]));
   }
   for (j in 1 : n_re_nu) { // nu RE terms
-    tau_nu[j][1:K_nu[j]] ~ std_normal();
+    tau_nu[j][1:K_nu[j]] ~ exponential(1);
     for (g in 1 : G_nu[j])
       target += re_weight_nu[j][g] * std_normal_lpdf(to_vector(z_nu[j][g, 1:K_nu[j]]));
   }
   for (j in 1 : n_re_phi) { // phi RE terms
-    tau_phi[j][1:K_phi[j]] ~ std_normal();
+    tau_phi[j][1:K_phi[j]] ~ exponential(1);
     for (g in 1 : G_phi[j])
       target += re_weight_phi[j][g] * std_normal_lpdf(to_vector(z_phi[j][g, 1:K_phi[j]]));
   }
   for (j in 1 : n_re_alpha) { // alpha RE terms
-    tau_alpha[j][1:K_alpha[j]] ~ std_normal();
+    tau_alpha[j][1:K_alpha[j]] ~ exponential(1);
     for (g in 1 : G_alpha[j])
       target += re_weight_alpha[j][g] * std_normal_lpdf(to_vector(z_alpha[j][g, 1:K_alpha[j]]));
   }
   for (j in 1 : n_re_phi_beta) { // phi_beta RE terms
-    tau_phi_beta[j][1:K_phi_beta[j]] ~ std_normal();
+    tau_phi_beta[j][1:K_phi_beta[j]] ~ exponential(1);
     for (g in 1 : G_phi_beta[j])
       target += re_weight_phi_beta[j][g] * std_normal_lpdf(to_vector(z_phi_beta[j][g, 1:K_phi_beta[j]]));
   }
   for (j in 1 : n_re_tau_sde) { // tau_sde RE terms
-    tau_tau_sde[j][1:K_tau_sde[j]] ~ std_normal();
+    tau_tau_sde[j][1:K_tau_sde[j]] ~ exponential(1);
     for (g in 1 : G_tau_sde[j])
       target += re_weight_tau_sde[j][g] * std_normal_lpdf(to_vector(z_tau_sde[j][g, 1:K_tau_sde[j]]));
   }
   
   /* ID-level random effects (tau_u is ORIGINAL scale; internal scaling in transformed parameters) */
-  tau_u ~ normal(0, 0.5);
+  tau_u ~ exponential(1);
   Lcorr_u ~ lkj_corr_cholesky(lkj_eta);
   for (i in 1 : n_id)
     target += re_weight_id[i] * std_normal_lpdf(z_u[i]);
   
   /* Marker-only random effects (if present) */
   if (R_mk > 0) {
-    tau_v ~ normal(0, 0.5);
+    tau_v ~ exponential(1);
     Lcorr_v ~ lkj_corr_cholesky(lkj_eta);
     for (d in 1 : D)
       target += re_weight_marker[d] * std_normal_lpdf(z_v[d]);
-    to_vector(B_cross) ~ normal(0, 0.2);
+    to_vector(B_cross) ~ std_normal();
   }
   
   /* Marker-by-id latent random effects (tau_w ORIGINAL scale) */
   if (Q_idm > 0) {
-    tau_w ~ normal(0, 0.5);
+    tau_w ~ exponential(1);
     Lcorr_w ~ lkj_corr_cholesky(lkj_eta);
     for (i in 1 : n_id)
       for (d in 1 : D)
@@ -102,11 +102,11 @@
   /* Covariance regression priors */
   {
     real corr_lp_scale = (corr_diag_link == 1) ? 0.2 : 0.3;
-    alpha_L ~ normal(0, corr_lp_scale);
+    alpha_L ~ student_t(6, 0, corr_lp_scale);
     for (m in 1 : M_cov) 
-      beta_L[m] ~ normal(0, corr_lp_scale);
-    tau_L ~ normal(0, corr_lp_scale);
-    lambda_L ~ normal(0, corr_lp_scale);
+      beta_L[m] ~ student_t(6, 0, corr_lp_scale);
+    tau_L ~ student_t(6, 0, corr_lp_scale);
+    lambda_L ~ student_t(6, 0, corr_lp_scale);
     for (i in 1 : n_id)
       target += re_weight_L[i] * std_normal_lpdf(z_L[i]);
   }
@@ -122,7 +122,7 @@
         target += normal_lpdf(
                               bs_gamma_c[k_ev][k] - 2 * bs_gamma_c[k_ev][k - 1]
                               + bs_gamma_c[k_ev][k - 2] | 0, tau_spline);
-    gamma_w[k_ev] ~ normal(0, 0.5);
+    gamma_w[k_ev] ~ std_normal();
   }
   
   /* Distributional parameters (marker-specific + ordinal cutpoints) */

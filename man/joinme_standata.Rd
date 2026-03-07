@@ -14,12 +14,6 @@ joinme_standata(
   id_var = "id",
   marker_var = "marker",
   time_var = "time",
-  y_var = "y",
-  event_time_var = "time",
-  event_var = "event",
-  event_type_var = "event_type",
-  stage_from_var = "state_from",
-  stage_to_var = "state_to",
   eps_fd = 0.01,
   assoc = c("cv_mean"),
   families = NULL,
@@ -79,18 +73,6 @@ Grouping factors in distributional random-effects terms may also use
 \item{marker_var}{Column name for marker/biomarker id in longitudinal data.}
 
 \item{time_var}{Column name for longitudinal time in \code{dataLong}.}
-
-\item{y_var}{Column name for longitudinal outcome in \code{dataLong}.}
-
-\item{event_time_var}{Column name for event/censoring time in \code{dataEvent}.}
-
-\item{event_var}{Column name for event indicator in \code{dataEvent}.}
-
-\item{event_type_var}{Optional column name for competing-risk event type in \code{dataEvent}.}
-
-\item{stage_from_var}{Optional column name for multi-stage "from" state in \code{dataEvent}.}
-
-\item{stage_to_var}{Optional column name for multi-stage "to" state in \code{dataEvent}.}
 
 \item{eps_fd}{Positive finite-difference step for association derivatives.}
 

@@ -72,3 +72,22 @@ test_that("simulate_joinme functional transform aliases behave identically", {
   expect_equal(v_expit, v_sigmoid, tolerance = 1e-10)
   expect_equal(v_pow, raw^2, tolerance = 1e-8)
 })
+
+test_that("simulate_joinme functional transform supports unary minus", {
+  sim <- simulate_joinme(
+    n_id = 3,
+    families = c("gaussian", "gaussian"),
+    n_obs_per_marker_per_id = 3,
+    times_obs = seq(0, 2, length.out = 4),
+    seed = 1303,
+    assoc = c("cv_mean"),
+    assoc_coefs = c(cv_mean = 0),
+    transforms = list(cv_mean = list(type = "functional", expr = ~ -x))
+  )
+
+  t0 <- 0.9
+  raw <- sim$helpers$assoc_components_raw(1, t0)$cv_mean
+  tf <- sim$helpers$assoc_components(1, t0)$cv_mean
+
+  expect_equal(tf, -raw, tolerance = 1e-10)
+})

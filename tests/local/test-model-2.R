@@ -4,7 +4,7 @@ truth_cv_mean <-  0.1
 truth_cv_marker <- 0.3
 
 sim <- simulate_joinme(
-  n_id = 500,
+  n_id = 800,
   formulaLong = y ~ 1 + time + x1 + (1 + time | id) + (0 + x1 + (1 + time | id) | marker),
   formulaEvent = survival::Surv(time, event) ~ x2,
   families = rep("gaussian", 3),

@@ -1,0 +1,480 @@
+---
+title: "simulate_joinme Cookbook"
+output-dir: ../docs/tutorials
+format:
+  html:
+    toc: true
+    number-sections: true
+    code-fold: false
+    embed-resources: true
+    theme: cosmo
+execute:
+  eval: false
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r setup}
+#| include: false
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 7,
+  fig.height = 5,
+  collapse = TRUE,
+  comment = "#>"
+)
+library(joinme)
+library(survival)
+```
+
+# Purpose
+
+This cookbook gives practical, copy-paste patterns for `simulate_joinme()`.
+It is organized by common simulation goals:
+
+- selecting association channels (`assoc`, `formulaAssoc`, `assoc_coefs`),
+- configuring random effects (`re_params`),
+- controlling marker-by-id covariance regression (`formulaCorr` + `re_params$id_marker_cov`),
+- defining distributional regressions (`formulaDist`) with family-scoped coefficients (`dist_coefs`),
+- generating event-level covariates (`covariate_formulas`),
+- checking outputs and truth objects.
+
+The examples intentionally mirror the `joinme()` fitting syntax so your simulation and fitting pipelines stay aligned.
+
+# Quick mental model
+
+At a high level, `simulate_joinme()` does this:
+
+1. Parse formulas (`formulaLong`, `formulaEvent`, optional `formulaDist`, `formulaCorr`).
+2. Simulate event-level covariates from `covariate_formulas`.
+3. Draw random effects from `re_params`.
+4. Build longitudinal trajectories.
+5. Build hazard from baseline + association channels.
+6. Draw event/censoring times.
+7. Draw marker outcomes by `families` and distributional parameters.
+
+Returned object:
+
+- `sim$dataLong`: longitudinal table,
+- `sim$dataEvent`: event table,
+- `sim$truth`: parameters and configs used in generation,
+- `sim$helpers`: helper functions (e.g., hazard and association component probes),
+- `sim$tmax`: scaling horizon.
+
+# Minimal baseline recipe
+
+```{r}
+set.seed(1)
+
+sim <- simulate_joinme(
+  n_id = 40,
+  families = c("gaussian", "student_t", "skew_normal"),
+  n_obs_per_marker_per_id = 6,
+  times_obs = seq(0, 5, length.out = 8),
+  assoc = c("cv_total"),
+  assoc_coefs = c(cv_total = 0.5),
+  seed = 1
+)
+
+str(sim$dataLong)
+str(sim$dataEvent)
+names(sim$truth)
+```
+
+# Association cookbook (`assoc`, `formulaAssoc`, `assoc_coefs`)
+
+## Channel meaning
+
+Available channels:
+
+- `cv_mean`: mean current value across markers,
+- `cv_marker`: marker-weighted marker-level current value,
+- `cv_total`: marker-level total current value,
+- `cs_mean`: mean current slope across markers,
+- `cs_marker`: marker-weighted marker-level current slope,
+- `cs_total`: marker-level total current slope,
+- `corr`: off-diagonal correlation features from marker-by-id random effects.
+
+## Named vector/list coefficient syntax
+
+```{r}
+sim <- simulate_joinme(
+  n_id = 60,
+  families = c("gaussian", "gaussian", "gaussian"),
+  assoc = c("cv_total", "cs_mean", "corr"),
+  assoc_coefs = list(
+    cv_total = 0.4,
+    cs_mean = -0.2,
+    corr = c(0.15, -0.10, 0.05)
+  ),
+  seed = 2
+)
+```
+
+## `formulaAssoc` overrides `assoc`
+
+```{r}
+sim <- simulate_joinme(
+  n_id = 50,
+  families = c("gaussian", "gaussian"),
+  assoc = c("cv_total", "cs_total"),
+  formulaAssoc = ~ cv_mean + corr,
+  assoc_coefs = c(cv_mean = 0.3, corr = 0.2),
+  seed = 3
+)
+```
+
+## Functional transforms on association channels
+
+```{r}
+sim <- simulate_joinme(
+  n_id = 30,
+  families = c("gaussian", "gaussian"),
+  assoc = c("cv_mean", "corr"),
+  assoc_coefs = c(cv_mean = 0.2, corr = -0.15),
+  transforms = list(
+    cv_mean = list(type = "functional", expr = ~ log1p_exp(x)),
+    corr = list(type = "functional", expr = ~ -x)
+  ),
+  seed = 4
+)
+```
+
+## I-spline and penalized I-spline arguments (`x`, `y`, `lambda`)
+
+For monotone spline transforms, there are two modes:
+
+- `type = "ispline"`: you provide the spline shape directly via
+  `knots` + `coeff` (+ optional `degree`).
+- `type = "ispline_penalized"`: you provide training pairs `x`, `y`, and the
+  package fits monotone spline coefficients for you.
+
+Meaning of arguments in `ispline_penalized`:
+
+- `x`: input values on the raw association-feature scale (for example raw
+  `cv_total` values).
+- `y`: desired transformed output at those `x` values (same length as `x`).
+- `lambda`: smoothness penalty strength for the fitted spline coefficients.
+
+Interpretation of `lambda`:
+
+- smaller `lambda` (e.g., `0` to `0.1`) = more flexible curve,
+- larger `lambda` (e.g., `1` to `10`) = smoother, less wiggly curve.
+
+```{r}
+# Direct I-spline: shape is fully user-specified by knots + coeff
+tf_ispline <- list(
+  cv_total = list(
+    type = "ispline",
+    knots = c(-1, 0, 1),
+    coeff = c(0, 0.2, 0.5, 0.9, 1.2),
+    degree = 3
+  )
+)
+
+# Penalized I-spline: shape is estimated from (x, y) with smoothness lambda
+tf_ispline_pen <- list(
+  cv_total = list(
+    type = "ispline_penalized",
+    x = c(-2, -1, 0, 1, 2),
+    y = c(0.0, 0.2, 0.5, 0.9, 1.1),
+    n_knots = 6,
+    degree = 3,
+    lambda = 1.0
+  )
+)
+```
+
+# Random-effects cookbook (`re_params`)
+
+`re_params` contains simulation controls for all random-effect blocks:
+
+- `id`: from top-level `( ... | id)` terms,
+- `marker`: from marker-level terms,
+- `id_marker_cov$latent`: latent marker-by-id random effects from nested terms,
+- `id_marker_cov`: subject-specific covariance regression for marker-by-id latents,
+- `dist`: random effects in distributional regression formulas.
+
+## `id`, `marker`, `id_marker_cov$latent`
+
+Each uses:
+
+- `sd`: scalar or vector (length = block dimension),
+- `corr`: square correlation matrix.
+
+For `id_marker_cov$latent` specifically:
+
+- this is the **base** marker-by-id latent random effect draw (before covariance regression),
+- think of it as a standard RE block with covariance built from `sd` and `corr`,
+- then `id_marker_cov` (`alpha`, `beta`, `lambda`, `sd_u`, `diag_link`) builds subject-specific `L_i` and transforms that base latent draw,
+- so `latent` sets baseline scale/correlation, while `id_marker_cov` controls how that structure changes across subjects.
+
+```{r}
+re_cfg <- list(
+  id = list(
+    sd = c(0.6, 0.3),
+    corr = matrix(c(1, 0.25,
+                    0.25, 1), 2, 2)
+  ),
+  marker = list(sd = 0.4),
+  id_marker_cov = list(
+    latent = list(
+      sd = c(0.7, 0.2),
+      corr = diag(2)
+    )
+  )
+)
+
+sim <- simulate_joinme(
+  n_id = 50,
+  families = c("gaussian", "gaussian", "gaussian"),
+  re_params = re_cfg,
+  seed = 5
+)
+```
+
+## `id_marker_cov` explained
+
+This block controls the subject-specific lower-triangular matrix `L_i` used to scale marker-by-id latent random effects.
+
+Pipeline view:
+
+1. Draw base latent effects from `id_marker_cov$latent`.
+2. Build subject-specific `L_i` from `alpha`, `beta`, `lambda`, `sd_u`, `diag_link`.
+3. Produce final marker-by-id effects by multiplying latent effects with `L_i`.
+
+So if `latent` is near zero, changing `alpha/beta/lambda/sd_u` has little practical impact, because there is almost no base latent signal to reshape.
+
+Mathematically (two-stage form):
+
+$$
+z_{id} \sim \mathcal{N}(0, \Sigma_{\text{latent}}),
+$$
+
+where $z_{id}$ is the base latent marker-by-id random-effect vector for subject $i$ and marker $d$, and $\Sigma_{\text{latent}}$ is defined by `id_marker_cov$latent` (`sd`, `corr`).
+
+For each subject $i$ and lower-triangular element index $m$ (one diagonal or off-diagonal entry), simulation builds
+
+$$
+\eta_{im} = \alpha_m + x_i^\top \beta_m + \lambda_m u_{im}, \quad u_{im} \sim \mathcal{N}(0, \mathrm{sd\_u}_m^2),
+$$
+
+then maps diagonal entries through `diag_link` (`softplus` or `exp`) so diagonals are positive. Off-diagonals are left on identity scale.
+
+Then final marker-by-id effects are
+
+$$
+b_{id} = L_i z_{id}
+$$
+
+so `latent` governs the baseline distribution of $z_{id}$, while `alpha`/`beta`/`lambda`/`sd_u` govern how $L_i$ reshapes that latent signal by subject.
+
+Fields:
+
+- `alpha`: baseline level of each covariance element when `formulaCorr` covariates are zero and random perturbation is zero. Larger diagonal `alpha` means larger typical within-subject latent SD after diagonal link.
+- `beta`: covariate effects from `formulaCorr`; shifts covariance elements systematically across subjects by observed covariates (`x1`, `x2`, ...).
+- `lambda`: multiplier on the latent subject perturbation; controls how strongly unobserved subject heterogeneity affects each covariance element.
+- `sd_u` (or `tau_u`): SD of latent perturbation `u`; controls the raw spread of latent perturbations before `lambda` scaling.
+- `diag_link`: link for diagonal elements (`"softplus"` or `"exp"`).
+
+Practical interpretation of variability:
+
+- Effective random spread contributed by latent perturbation is approximately `|lambda| * sd_u` (element-wise if vectors).
+- Increase `lambda` with fixed `sd_u` to amplify heterogeneity.
+- Increase `sd_u` with fixed `lambda` to amplify heterogeneity.
+- Set either near zero to make covariance elements mostly deterministic from `alpha + X beta`.
+
+Dimension rule:
+
+- full covariance: $M = Q_{idm}(Q_{idm}+1)/2$ elements,
+- diagonal covariance (`||` in nested marker-id term): $M = Q_{idm}$ elements.
+
+```{r}
+sim <- simulate_joinme(
+  n_id = 80,
+  families = c("gaussian", "gaussian", "gaussian"),
+  formulaCorr = ~ x1 + x2,
+  re_params = list(
+    id = list(sd = c(0.5, 0.2)),
+    marker = list(sd = 0.3),
+    id_marker_cov = list(
+      latent = list(sd = c(0.6, 0.25)),
+      alpha = c(-0.2, 0.1, -0.05),
+      beta = matrix(c(0.20, 0.00,
+                      0.05, 0.05,
+                      0.10, -0.05), nrow = 3, byrow = TRUE),
+      lambda = c(0.4, 0.4, 0.4),
+      sd_u = 0.6,
+      diag_link = "softplus"
+    )
+  ),
+  assoc = c("corr"),
+  assoc_coefs = list(corr = c(0.2)),
+  seed = 6
+)
+```
+
+# Distributional regression cookbook (`formulaDist`, `dist_coefs`, `re_params$dist`)
+
+## Family-scoped formulas
+
+```{r}
+form_dist <- list(
+  sigma[family = gaussian] ~ 1 + x1,
+  sigma[family = student_t] ~ 1 + time,
+  nu[family = student_t] ~ 1,
+  alpha_skew[family = skew_normal] ~ 1
+)
+```
+
+## Family-specific fixed coefficients in `dist_coefs`
+
+You can assign different fixed coefficients by family for the same parameter.
+
+```{r}
+dist_beta <- list(
+  sigma = list(
+    gaussian = c("(Intercept)" = log(0.2), x1 = 0.3),
+    student_t = c("(Intercept)" = log(0.8), time = 0.4)
+  ),
+  nu = c("(Intercept)" = log(6 - 2))
+)
+
+sim <- simulate_joinme(
+  n_id = 80,
+  families = c("gaussian", "student_t", "skew_normal"),
+  formulaDist = form_dist,
+  dist_coefs = dist_beta,
+  seed = 7
+)
+```
+
+Alternative alias keys are also accepted:
+
+```{r}
+dist_beta_alias <- list(
+  "sigma[family='gaussian']" = c("(Intercept)" = log(0.2), x1 = 0.3),
+  "sigma[family='student_t']" = c("(Intercept)" = log(0.8), time = 0.4)
+)
+```
+
+## Distributional random effects via `re_params$dist`
+
+Use `re_params$dist[[param]]` to control random effects in distributional formulas.
+
+```{r}
+sim <- simulate_joinme(
+  n_id = 60,
+  families = c("student_t", "student_t"),
+  formulaDist = list(
+    sigma ~ 1 + (1 | id),
+    nu ~ 1
+  ),
+  re_params = list(
+    id = list(sd = c(0.4, 0.2)),
+    marker = list(sd = 0.2),
+    id_marker_cov = list(latent = list(sd = c(0.4, 0.2))),
+    dist = list(
+      sigma = list(sd = 0.7)
+    )
+  ),
+  seed = 8
+)
+```
+
+Term-specific controls:
+
+```{r}
+re_dist <- list(
+  sigma = list(
+    terms = list(
+      list(sd = 0.5),
+      list(sd = 0.2)
+    )
+  )
+)
+```
+
+# Covariate generation cookbook (`covariate_formulas`)
+
+`covariate_formulas` are evaluated once per subject and merged into both event and longitudinal rows.
+
+```{r}
+sim <- simulate_joinme(
+  n_id = 50,
+  covariate_formulas = list(
+    x1 ~ rnorm(n_id, 0, 1),
+    x2 ~ rt(n_id, df = 5),
+    trt ~ rbinom(n_id, size = 1, prob = 0.5)
+  ),
+  formulaEvent = survival::Surv(time, event) ~ x1 + x2 + trt,
+  seed = 9
+)
+```
+
+# End-to-end reproducible template
+
+```{r}
+set.seed(2026)
+
+sim <- simulate_joinme(
+  formulaLong = y ~ 1 + time + x1 + (1 + time | id) + (0 + x1 + (1 + time | id) | marker),
+  formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
+  formulaCorr = ~ x1 + x2,
+  formulaDist = list(
+    sigma[family = gaussian] ~ 1 + x1,
+    sigma[family = student_t] ~ 1 + time,
+    nu[family = student_t] ~ 1
+  ),
+  families = c("gaussian", "student_t", "student_t"),
+  n_id = 100,
+  n_obs_per_marker_per_id = 8,
+  times_obs = seq(0, 6, length.out = 10),
+  assoc = c("cv_total", "corr"),
+  assoc_coefs = list(cv_total = 0.35, corr = c(0.1)),
+  transforms = list(corr = list(type = "functional", expr = ~ -x)),
+  dist_coefs = list(
+    sigma = list(
+      gaussian = c("(Intercept)" = log(0.25), x1 = 0.2),
+      student_t = c("(Intercept)" = log(0.9), time = 0.3)
+    ),
+    nu = c("(Intercept)" = log(7 - 2))
+  ),
+  re_params = list(
+    id = list(sd = c(0.6, 0.3)),
+    marker = list(sd = 0.25),
+    id_marker_cov = list(
+      latent = list(sd = c(0.7, 0.3)),
+      alpha = c(-0.2, 0.0, -0.1),
+      lambda = 0.35,
+      sd_u = 0.5
+    ),
+    dist = list(sigma = list(sd = 0.4))
+  ),
+  seed = 2026
+)
+
+# Basic checks
+head(sim$dataLong)
+head(sim$dataEvent)
+names(sim$truth)
+```
+
+# Troubleshooting
+
+- **`corr` has no effect**: ensure nested marker-by-id random effects exist in `formulaLong`.
+- **`id_marker_cov` length mismatch**: check `Q_idm` and required element count `M`.
+- **family-scoped `dist_coefs` ignored**: verify family names are canonical (`gaussian`, `student_t`, `skew_normal`, ...).
+- **transform errors**: for functional transforms, use supported function names (`power`, not `pow`).
+- **parallel differences**: keep `seed` fixed; `simulate_joinme` uses deterministic worker seeding.
+
+# Mapping to `joinme()`
+
+Use this rule:
+
+- Keep `formulaLong`, `formulaEvent`, `formulaDist`, `assoc`, `transforms` as close as possible between simulation and fit.
+- Encode your intended heterogeneity in simulation (`dist_coefs`, `re_params`) before fitting.
+- Compare fitted summaries against `sim$truth` for calibration and recovery diagnostics.

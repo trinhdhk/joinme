@@ -55,7 +55,7 @@ test_that("summary reports family-aware distributional parameters with marker la
     req <- .family_distrib_params(family_long[d])
     mk <- marker_levels[d]
 
-    sigma_term <- paste0("sigma_marker[", mk, "]")
+    sigma_term <- paste0("sigma[", mk, "]")
     nu_term <- paste0("nu_marker[", mk, "]")
     phi_term <- paste0("phi_nb_marker[", mk, "]")
     alpha_term <- paste0("alpha_skew_marker[", mk, "]")

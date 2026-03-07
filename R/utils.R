@@ -20,6 +20,157 @@ suppressPackageStartupMessages({
   library(posterior)
 })
 
+#' Resolve longitudinal response column name from formula LHS
+#'
+#' @description
+#' Determine the response column used by the longitudinal model by reading the
+#' left-hand side of `formulaLong` and validating it against `dataLong`.
+#'
+#' @param formulaLong Longitudinal formula.
+#' @param dataLong Longitudinal dataset.
+#' @param context Character label for error messages.
+#'
+#' @return Character scalar naming the resolved response column.
+#' @keywords internal
+.resolve_response_var <- function(formulaLong, dataLong, context = "joinme") {
+  if (!inherits(formulaLong, "formula") || length(formulaLong) < 3) {
+    cli::cli_abort(c(
+      x = "{context}: {.arg formulaLong} must be a two-sided formula with a response on the left-hand side.",
+      i = "Example: {.code y ~ time + x1 + (1 + time | id)}"
+    ))
+  }
+
+  lhs_vars <- all.vars(formulaLong[[2]])
+  if (length(lhs_vars) != 1L || !nzchar(lhs_vars[[1]])) {
+    cli::cli_abort(c(
+      x = "{context}: could not uniquely determine the longitudinal response variable from formula LHS.",
+      i = "Use a single response variable on the left-hand side, e.g. {.code vol ~ ...}."
+    ))
+  }
+
+  response_var <- lhs_vars[[1]]
+  if (!(response_var %in% names(dataLong))) {
+    cli::cli_abort(c(
+      x = "{context}: formulaLong response column {.val {response_var}} was not found in {.arg dataLong}.",
+      i = "Available columns include: {paste(utils::head(names(dataLong), 20), collapse = ', ')}{if (ncol(dataLong) > 20) ', ...' else ''}."
+    ))
+  }
+
+  response_var
+}
+
+#' Resolve event outcomes from formulaEvent via Surv model response
+#'
+#' @param formulaEvent Event formula with `Surv(...)` on the left-hand side.
+#' @param dataEvent Event dataset.
+#' @param context Character label for error messages.
+#'
+#' @return Named list with extracted `event_time`, `event_status`, and `surv_type`.
+#' @keywords internal
+.resolve_event_model_vars <- function(formulaEvent, dataEvent, context = "joinme") {
+  if (!inherits(formulaEvent, "formula") || length(formulaEvent) < 3) {
+    cli::cli_abort(c(
+      x = "{context}: {.arg formulaEvent} must be a two-sided survival formula.",
+      i = "Example: {.code survival::Surv(event_time, event_status) ~ x1 + x2}."
+    ))
+  }
+
+  mf <- tryCatch(
+    stats::model.frame(formulaEvent, data = dataEvent, na.action = stats::na.pass),
+    error = function(e) {
+      cli::cli_abort(c(
+        x = "{context}: failed to evaluate {.arg formulaEvent} on {.arg dataEvent}.",
+        i = "Error: {e$message}"
+      ))
+    }
+  )
+  y <- stats::model.response(mf)
+  if (!inherits(y, "Surv")) {
+    cli::cli_abort(c(
+      x = "{context}: {.arg formulaEvent} response must evaluate to a {.code Surv} object.",
+      i = "Use {.code survival::Surv(time, status)} or {.code survival::Surv(start, stop, status)} on the left-hand side."
+    ))
+  }
+
+  surv_mat <- unclass(y)
+  if (!is.matrix(surv_mat) || ncol(surv_mat) < 2L) {
+    cli::cli_abort(c(
+      x = "{context}: unsupported {.code Surv} response format.",
+      i = "Expected at least time and status columns from survival::Surv()."
+    ))
+  }
+
+  if (ncol(surv_mat) == 2L) {
+    event_time <- surv_mat[, 1]
+    event_status <- surv_mat[, 2]
+  } else {
+    event_time <- surv_mat[, 2]
+    event_status <- surv_mat[, 3]
+  }
+
+  list(
+    event_time = as.numeric(event_time),
+    event_status = event_status,
+    surv_type = as.character(attr(y, "type") %||% "right")
+  )
+}
+
+#' Decode event status into event indicator and cause/type index
+#'
+#' @param status_raw Raw event-status vector.
+#' @param context Character label for error messages.
+#'
+#' @return Named list with `d_event`, `event_type`, and `K_event`.
+#' @keywords internal
+.derive_event_outcomes <- function(status_raw, context = "joinme") {
+  n <- length(status_raw)
+
+  if (is.numeric(status_raw) || is.integer(status_raw) || is.logical(status_raw)) {
+    status_num <- suppressWarnings(as.numeric(status_raw))
+    status_chr <- as.character(status_raw)
+    numeric_like <- TRUE
+  } else {
+    status_chr <- trimws(as.character(status_raw))
+    status_num <- suppressWarnings(as.numeric(status_chr))
+    numeric_like <- all(is.na(status_chr) == is.na(status_num))
+  }
+
+  if (numeric_like) {
+    d_event <- as.integer(!is.na(status_num) & status_num != 0)
+    event_type_raw <- status_num
+  } else {
+    status_chr_norm <- trimws(tolower(status_chr))
+    is_censored <- status_chr_norm %in% c("", "0", "false", "no", "censor", "censored", "none", "na")
+    d_event <- as.integer(!is.na(status_raw) & !is_censored)
+    event_type_raw <- status_chr
+  }
+
+  event_type <- rep.int(1L, n)
+  observed_types <- unique(event_type_raw[d_event == 1L & !is.na(event_type_raw)])
+  observed_types <- observed_types[nzchar(as.character(observed_types))]
+
+  if (length(observed_types) > 1L) {
+    observed_types_chr <- as.character(observed_types)
+    event_type[d_event == 1L] <- match(as.character(event_type_raw[d_event == 1L]), observed_types_chr)
+    K_event <- length(observed_types_chr)
+  } else {
+    K_event <- 1L
+  }
+
+  if (any(!is.finite(d_event))) {
+    cli::cli_abort(c(
+      x = "{context}: failed to derive finite event indicators from status values.",
+      i = "Ensure event status encodes censoring as 0/FALSE and events as non-zero values."
+    ))
+  }
+
+  list(
+    d_event = as.integer(d_event),
+    event_type = as.integer(event_type),
+    K_event = as.integer(K_event)
+  )
+}
+
 #' Gauss-Kronrod quadrature grid helper
 #'
 #' Build a quadrature grid on `[0, 1]` for survival integration.
@@ -1560,12 +1711,8 @@ gk_quadrature <- function(nodes = 15L) {
   if (has_progressr && show_progress) {
     with_progress_f <- get("with_progress", envir = asNamespace("progressr"))
     args <- list(expr = substitute(expr))
-    fm <- tryCatch(formals(with_progress_f), error = function(e) NULL)
-    if (!is.null(fm) && "show_progress" %in% names(fm)) {
-      args$show_progress <- show_progress
-    }
     do.call(with_progress_f, args, envir = parent.frame())
   } else {
-    expr
+    eval(expr, envir = parent.frame())
   }
 }

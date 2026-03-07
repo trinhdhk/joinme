@@ -21,11 +21,11 @@ NULL
 #' integer link codes.
 #'
 #' Supported links / inverse-links:
-#' - `"identity"` : $g^{-1}(x)=x$
-#' - `"log"`      : $g^{-1}(x)=\log(x)$
-#' - `"logit"`    : $g^{-1}(x)=\operatorname{logit}^{-1}(x)$
-#' - `"probit"`   : $g^{-1}(x)=\Phi(x)$
-#' - `"exp"`      : $g^{-1}(x)=\exp(x)$
+#' - `"identity"` : \eqn{g^{-1}(x)=x}
+#' - `"log"`      : \eqn{g^{-1}(x)=\log(x)}
+#' - `"logit"`    : \eqn{g^{-1}(x)=\operatorname{logit}^{-1}(x)}
+#' - `"probit"`   : \eqn{g^{-1}(x)=\Phi(x)}
+#' - `"exp"`      : \eqn{g^{-1}(x)=\exp(x)}
 #'
 #' @param name Character scalar family name, e.g. `"student_t"`, `"bernoulli"`.
 #' @param link Optional character scalar naming the inverse-link.

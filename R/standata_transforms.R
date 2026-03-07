@@ -223,6 +223,8 @@ validate_transforms <- function(standata) {
 ##' )
 ##'
 ##' # Example 3: I-spline (monotonic)
+##' # - knots define basis locations (first/last are boundary knots)
+##' # - coeff defines the monotone shape directly
 ##' spec_corr <- list(
 ##'   type = "ispline",
 ##'   knots = c(-1, 0, 1),
@@ -231,6 +233,9 @@ validate_transforms <- function(standata) {
 ##' )
 ##'
 ##' # Example 4: Penalized monotone I-spline (fit in R)
+##' # - x is the input scale of the raw association feature
+##' # - y is the desired transformed output at each x
+##' # - lambda controls smoothness (higher = smoother)
 ##' spec_corr_pen <- list(
 ##'   type = "ispline_penalized",
 ##'   x = seq(-2, 2, length.out = 50),
@@ -257,13 +262,15 @@ example_transform_spec <- function() {
 ##' Fits a monotone I-spline transformation with a smoothness penalty and
 ##' returns a transform specification compatible with `build_standata_transforms()`.
 ##'
-##' @param x Numeric vector of input values.
-##' @param y Numeric vector of target values (same length as x).
+##' @param x Numeric vector of input values on the raw feature scale to transform.
+##' @param y Numeric vector of target transformed values at `x` (same length as `x`).
 ##' @param knots Optional numeric vector of knots (including boundary knots).
 ##' @param n_knots Integer. If knots are not provided, number of knots to use
 ##'   (including boundary knots). Default 6.
 ##' @param degree Integer spline degree (default 3).
-##' @param lambda Non-negative penalty weight (default 1.0).
+##' @param lambda Non-negative smoothness penalty weight (default 1.0).
+##'   Larger values produce smoother fitted transforms; smaller values allow
+##'   more local curvature.
 ##' @param weights Optional non-negative weights (same length as x).
 ##' @param diff_order Integer difference order for penalty (default 2).
 ##'
