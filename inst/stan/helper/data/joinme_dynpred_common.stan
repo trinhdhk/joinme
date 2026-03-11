@@ -197,19 +197,19 @@
   int<lower=0> n_knots_cv;                     // knots for total CV spline
   vector[n_knots_cv] knots_cv;                 // knot locations
   int<lower=0> n_coeff_cv;                     // coeff count for total CV spline
-  vector[n_coeff_cv] coeff_cv;                 // coefficients for total CV spline
+  array[n_draws] vector[n_coeff_cv] coeff_cv;  // coefficients for total CV spline by draw
   int<lower=1, upper=5> spline_degree_cv;      // spline degree for total CV
 
   int<lower=0> n_knots_cs;                     // knots for total CS spline
   vector[n_knots_cs] knots_cs;                 // knot locations
   int<lower=0> n_coeff_cs;                     // coeff count for total CS spline
-  vector[n_coeff_cs] coeff_cs;                 // coefficients for total CS spline
+  array[n_draws] vector[n_coeff_cs] coeff_cs;  // coefficients for total CS spline by draw
   int<lower=1, upper=5> spline_degree_cs;      // spline degree for total CS
 
   int<lower=0> n_knots_corr;                   // knots for corr spline
   vector[n_knots_corr] knots_corr;             // knot locations
   int<lower=0> n_coeff_corr;                   // coeff count for corr spline
-  vector[n_coeff_corr] coeff_corr;             // coefficients for corr spline
+  array[n_draws] vector[n_coeff_corr] coeff_corr; // coefficients for corr spline by draw
   int<lower=1, upper=5> spline_degree_corr;    // spline degree for corr
 
   int<lower=0> n_functional_ops_cv_mean;        // op count for mean CV
@@ -235,23 +235,23 @@
   int<lower=0> n_knots_cv_mean;                 // knots for mean CV spline
   vector[n_knots_cv_mean] knots_cv_mean;         // knot locations
   int<lower=0> n_coeff_cv_mean;                  // coeff count for mean CV spline
-  vector[n_coeff_cv_mean] coeff_cv_mean;         // coefficients for mean CV spline
+  array[n_draws] vector[n_coeff_cv_mean] coeff_cv_mean; // coefficients for mean CV spline by draw
   int<lower=1, upper=5> spline_degree_cv_mean;   // spline degree for mean CV
 
   int<lower=0> n_knots_cv_marker;               // knots for marker CV spline
   vector[n_knots_cv_marker] knots_cv_marker;    // knot locations
   int<lower=0> n_coeff_cv_marker;               // coeff count for marker CV spline
-  vector[n_coeff_cv_marker] coeff_cv_marker;    // coefficients for marker CV spline
+  array[n_draws] vector[n_coeff_cv_marker] coeff_cv_marker; // coefficients for marker CV spline by draw
   int<lower=1, upper=5> spline_degree_cv_marker; // spline degree for marker CV
 
   int<lower=0> n_knots_cs_mean;                 // knots for mean CS spline
   vector[n_knots_cs_mean] knots_cs_mean;         // knot locations
   int<lower=0> n_coeff_cs_mean;                  // coeff count for mean CS spline
-  vector[n_coeff_cs_mean] coeff_cs_mean;         // coefficients for mean CS spline
+  array[n_draws] vector[n_coeff_cs_mean] coeff_cs_mean; // coefficients for mean CS spline by draw
   int<lower=1, upper=5> spline_degree_cs_mean;   // spline degree for mean CS
 
   int<lower=0> n_knots_cs_marker;               // knots for marker CS spline
   vector[n_knots_cs_marker] knots_cs_marker;    // knot locations
   int<lower=0> n_coeff_cs_marker;               // coeff count for marker CS spline
-  vector[n_coeff_cs_marker] coeff_cs_marker;    // coefficients for marker CS spline
+  array[n_draws] vector[n_coeff_cs_marker] coeff_cs_marker; // coefficients for marker CS spline by draw
   int<lower=1, upper=5> spline_degree_cs_marker; // spline degree for marker CS

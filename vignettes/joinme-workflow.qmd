@@ -1,5 +1,5 @@
 ---
-title: "A Scientifically Rigorous Workflow for Joint Modeling"
+title: "A Scientifically Rigorous Workflow for Joint Modelling"
 output-dir: ../docs/articles
 format:
   html:
@@ -67,15 +67,15 @@ The `joinme` workflow follows a fixed sequence that mirrors the Stan program:
 5. **Generated quantities (Stan)**: compute per-observation log-likelihoods,
   fitted values, and prediction summaries for posterior diagnostics.
 
-This sequence is important because it clarifies where each modeling choice
+This sequence is important because it clarifies where each modelling choice
 enters the inference: formula parsing happens in R, while all probability
 calculations occur in Stan.
 
 # Simulation and Data Exploration
 
-Before analyzing real data, it is highly recommended to perform a **parameter recovery simulation**. This confirms that the model is identifiable given your sample size and sampling frequency.
+Before analysing real data, it is highly recommended to perform a **parameter recovery simulation**. This confirms that the model is identifiable given your sample size and sampling frequency.
 
-We use the built-in generalized simulator `simulate_joinme` to generate a dataset where the hazard depends on the "Total Current Value" of the biomarkers.
+We use the built-in generalised simulator `simulate_joinme` to generate a dataset where the hazard depends on the "Total Current Value" of the biomarkers.
 
 ```{r simulate}
 set.seed(2025)
@@ -113,10 +113,10 @@ head(dataLong)
 head(dataEvent)
 ```
 
-**Scientific Check**: Always visualize your longitudinal trajectories and survival distribution before modeling.
+**Scientific Check**: Always visualise your longitudinal trajectories and survival distribution before modelling.
 
 ```{r explore-plot}
-# Visualize trajectories for a subset of IDs
+# Visualise trajectories for a subset of IDs
 subset_ids <- base::sample(unique(dataLong$id), 6)
 
 ggplot(dataLong %>% filter(id %in% subset_ids), aes(x = time, y = y, color = marker, group = marker)) +
@@ -144,7 +144,7 @@ We specify a joint model where:
 Each marker can follow a distinct family (for example Gaussian, Student-$t$,
 Poisson, negative binomial, Bernoulli, beta, or ordinal). When a family includes
 additional parameters (for example $\sigma$, $\nu$, or $\phi$), those parameters
-can be modeled through `formulaDist`. This allows heteroscedasticity or
+can be modelled through `formulaDist`. This allows heteroscedasticity or
 covariate-dependent dispersion while keeping the mean structure aligned across
 markers.
 
@@ -311,7 +311,7 @@ preds <- tryCatch(
 if (!is.null(preds)) head(preds$survival)
 ```
 
-Finally, we visualize the predicted survival curve. The shaded area represents the 95% credible interval, accounting for uncertainty in both the parameters and the random effects.
+Finally, we visualise the predicted survival curve. The shaded area represents the 95% credible interval, accounting for uncertainty in both the parameters and the random effects.
 
 ```{r predict-plot}
 if (!is.null(preds)) {
@@ -331,4 +331,4 @@ By following this workflow:
 4.  **Validate** using posterior predictive checks.
 5.  **Predict** to demonstrate clinical utility.
 
-You ensure that your joint modeling analysis is scientifically sound and robust against common pitfalls in Bayesian inference.
+You ensure that your joint modelling analysis is scientifically sound and robust against common pitfalls in Bayesian inference.

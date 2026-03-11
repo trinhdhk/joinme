@@ -18,7 +18,7 @@ Named list with \code{indep_id_re}, \code{indep_marker_re}, and \code{indep_idma
 }
 \description{
 Uses lme4-style \code{||} parsing to determine which random-effects blocks should
-be modeled with diagonal covariance structures. The resolution rules are:
+be modelled with diagonal covariance structures. The resolution rules are:
 \itemize{
 \item Top-level \code{(... || id)} sets \code{indep_id_re = 1}.
 \item \code{(... || marker)} sets \code{indep_marker_re = 1}.

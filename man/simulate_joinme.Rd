@@ -94,14 +94,34 @@ Functional transforms support arithmetic and common nonlinear functions,
 including \code{inv_logit}/\code{expit}/\code{sigmoid}, \code{exp}, \code{log}, \code{sqrt}, \code{power},
 \code{cbrt}, \code{softplus}/\code{log1p_exp}, trigonometric and hyperbolic functions.
 
-For monotone spline transforms:
+Quick parameterisation reference:
 \itemize{
-\item \code{type = "ispline"}: provide \code{knots} + \code{coeff} (+ optional \code{degree}) directly; \code{x}/\code{y}/\code{lambda} are not used.
-\item \code{type = "ispline_penalized"}: provide training pairs \code{x} and \code{y} (same length), and a smoothness penalty \code{lambda}.
-\item \code{x}: raw association-feature input scale; \code{y}: desired transformed output at those \code{x} points.
-\item \code{lambda}: smoothness strength (higher = smoother, lower = more flexible).
+\item \code{list(type = "identity")} or omitted term: identity transform (default).
+\item \code{list(type = "functional", expr = ~ log1p(x))}: functional transform;
+\code{expr} is required.
+\item \code{list(type = "ispline", knots = c(-1, 0, 1), coeff = c(0, 0.3, 0.8, 1.1, 1.3), degree = 3)}:
+direct monotone I-spline; \code{degree} defaults to \code{3} if omitted.
+\item \code{list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), y = exp(seq(-2, 2, length.out = 50)), n_knots = 6, degree = 3, lambda = 1)}:
+penalised monotone I-spline; defaults are \code{n_knots = 6}, \code{degree = 3},
+and \code{lambda = 1} when omitted.
+\item \code{list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))}:
+piecewise-linear transform; \code{x} and \code{y} are required.
 }
+
+For monotone spline transforms during simulation:
+\itemize{
+\item \code{type = "ispline"}: provide \code{knots} and \code{coeff} directly (plus optional
+\code{degree}).
+\item \code{type = "ispline_penalised"} (alias: \code{"ispline_penalized"}): provide
+training pairs \code{x} and \code{y}, plus
+smoothness penalty \code{lambda}. The simulator fits the monotone spline in R
+before evaluating the transformed association. The fitted plug-in spline
+uses anchored endpoint coefficients matching the Stan-estimated path
+(first coefficient \code{0}, last coefficient \code{1}).
 }
+
+In other words, simulation currently uses the legacy plug-in spline mode;
+it does not estimate spline coefficients jointly inside Stan.}
 
 \item{n_id}{Number of subjects.}
 
@@ -173,7 +193,7 @@ For each parameter, coefficients can be:
 Family-scoped list syntax examples:
 \itemize{
 \item \code{dist_coefs = list(sigma = list(default = c("(Intercept)" = -0.3), gaussian = c(...), student_t = c(...)))}
-\item alias keys like \code{"sigma[family='student_t']"} are also recognized and
+\item alias keys like \code{"sigma[family='student_t']"} are also recognised and
 mapped to the matching family scope.
 }}
 
@@ -294,7 +314,7 @@ Numeric vector on response scale.
 List with family codes, link names, and inverse-link bytecode per marker.
 }
 \description{
-Generalized simulator for \code{joinme} that mirrors the fitting syntax as closely as
+Generalised simulator for \code{joinme} that mirrors the fitting syntax as closely as
 possible. The simulator supports:
 \itemize{
 \item multivariate outcomes via marker-level families,

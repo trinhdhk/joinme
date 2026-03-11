@@ -4,8 +4,8 @@
 #' @importFrom dplyr %>% all_of
 #'
 #' @description
-#' Produces publication-ready ggplot2 visualizations of dynamic predictions from
-#' a joint model with flexible customization of longitudinal trajectories and
+#' Produces publication-ready ggplot2 visualisations of dynamic predictions from
+#' a joint model with flexible customisation of longitudinal trajectories and
 #' conditional survival curves.
 #'
 #' @param x An object of class `JoinMeDynPred` returned by the [predict] method.
@@ -404,7 +404,7 @@ plot.JoinMeDynPred <- function(
     # - separates observed history from prediction horizon
     t_cond <- .conditioning_time_for_id(x, id)
 
-    # Initialize plot data
+    # Initialise plot data
     df_pred <- quant_df |>
         dplyr::mutate(
             type = "prediction",
@@ -491,7 +491,7 @@ plot.JoinMeDynPred <- function(
         stop("No valid data to plot for subject ", id)
     }
     
-    # Initialize plot - don't set y in base aes since different layers use different y columns
+    # Initialise plot - don't set y in base aes since different layers use different y columns
     p <- ggplot2::ggplot(data = df_pred, ggplot2::aes(x = time, fill = marker, color = marker))
 
     # Add observed region background (if requested)
@@ -690,7 +690,7 @@ plot.JoinMeDynPred <- function(
         return(NULL)
     }
 
-    # Initialize plot with data and base aesthetics (use q50 as y for survival)
+    # Initialise plot with data and base aesthetics (use q50 as y for survival)
     median_col <- .quantile_name_from_prob(0.5)
     if (median_col %in% names(quant_df)) {
         p <- ggplot2::ggplot(data = quant_df, ggplot2::aes(x = time, y = .data[[median_col]]))

@@ -9,7 +9,7 @@ NULL
 
 # File overview:
 # - Build subject-specific Stan data for dynamic prediction.
-# - Run the dynpred model and summarize longitudinal/survival draws.
+# - Run the dynpred model and summarise longitudinal/survival draws.
 
 #' Dynamic prediction for a fitted `JoinMeFit` model
 #'
@@ -77,8 +77,8 @@ NULL
 #'     `31`, `41`, `51`, and `61`. Only the node count is passed to Stan; GK
 #'     nodes/weights are fixed in the Stan code.
 #'   - progress: logical; show sampling progress bar (default TRUE).
-#'   - initialization fallback (cmdstanr): if a subject-level dynamic prediction
-#'     chain fails to initialize, prediction automatically retries that subject
+#'   - initialisation fallback (cmdstanr): if a subject-level dynamic prediction
+#'     chain fails to initialise, prediction automatically retries that subject
 #'     with a narrower random init range (`init = 0.1`).
 #' @param seed Integer. Random seed for reproducibility of random effect sampling.
 #' @importFrom stats predict median sd quantile na.omit optim terms
@@ -133,7 +133,7 @@ predict.JoinMeFit <- function(object,
     ci_levels <- .validate_ci_levels(ci_levels)
     quantile_probs <- .quantile_probs_from_ci(ci_levels)
 
-    # Workflow: recover metadata -> build prediction data -> run dynpred -> summarize
+    # Workflow: recover metadata -> build prediction data -> run dynpred -> summarise
     # 1. Recover Metadata
     meta <- .recover_metadata(object, tmax)
     tmax_val <- meta$tmax
@@ -568,7 +568,7 @@ predict.JoinMeFit <- function(object,
                     retry_args <- sample_args
                     retry_args$init <- 0.1
                     cli::cli_warn(c(
-                        x = "Prediction sampling failed to initialize for subject {id}.",
+                        x = "Prediction sampling failed to initialise for subject {id}.",
                         i = "Retrying with narrower random init range ({.code init = 0.1})."
                     ))
                     fit_pred <- do.call(mod$sample, retry_args)
@@ -1269,6 +1269,22 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         rep(default, n)
     }
 
+    get_transform_coeff_draws <- function(eff_prefix, base_coeff, n_coeff) {
+        n_coeff <- as.integer(n_coeff %||% 0L)
+        if (n_coeff < 1L) {
+            return(matrix(0, n, 0))
+        }
+        eff_names <- paste0(eff_prefix, "[", seq_len(n_coeff), "]")
+        if (all(eff_names %in% colnames(dmat))) {
+            return(get_mat(eff_names))
+        }
+        base_coeff <- as.numeric(base_coeff %||% rep(0, n_coeff))
+        if (length(base_coeff) < n_coeff) {
+            base_coeff <- c(base_coeff, rep(0, n_coeff - length(base_coeff)))
+        }
+        matrix(rep(base_coeff[seq_len(n_coeff)], times = n), nrow = n, byrow = TRUE)
+    }
+
     # Prep Arrays (Renamed map)
     # beta -> beta_fixed
     beta_fixed <- get_mat(paste0("beta[", 1:sd$P, "]"))
@@ -1488,6 +1504,13 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         coeff_assoc_cv_marker = get_col("alpha_cv_marker"),
         coeff_assoc_cs_marker = get_col("alpha_cs_marker"),
         coeff_assoc_corr = corr_coef_padded,
+        coeff_cv = get_transform_coeff_draws("coeff_cv_eff", sd$coeff_cv, sd$n_coeff_cv),
+        coeff_cs = get_transform_coeff_draws("coeff_cs_eff", sd$coeff_cs, sd$n_coeff_cs),
+        coeff_corr = get_transform_coeff_draws("coeff_corr_eff", sd$coeff_corr, sd$n_coeff_corr),
+        coeff_cv_mean = get_transform_coeff_draws("coeff_cv_mean_eff", sd$coeff_cv_mean, sd$n_coeff_cv_mean),
+        coeff_cv_marker = get_transform_coeff_draws("coeff_cv_marker_eff", sd$coeff_cv_marker, sd$n_coeff_cv_marker),
+        coeff_cs_mean = get_transform_coeff_draws("coeff_cs_mean_eff", sd$coeff_cs_mean, sd$n_coeff_cs_mean),
+        coeff_cs_marker = get_transform_coeff_draws("coeff_cs_marker_eff", sd$coeff_cs_marker, sd$n_coeff_cs_marker),
         cutpoints_ord = if (!is.null(sd$K_ord) && sd$K_ord > 1 && "cutpoints_ord[1]" %in% colnames(dmat)) {
             get_mat(paste0("cutpoints_ord[", 1:(sd$K_ord - 1), "]"))
         } else {
@@ -1957,27 +1980,27 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         n_functional_ops_corr = sd$n_functional_ops_corr, functional_ops_corr = sd$functional_ops_corr,
         n_const_corr = sd$n_const_corr, const_data_corr = sd$const_data_corr,
         n_knots_cv = sd$n_knots_cv, knots_cv = sd$knots_cv,
-        n_coeff_cv = sd$n_coeff_cv, coeff_cv = sd$coeff_cv, spline_degree_cv = sd$spline_degree_cv,
+        n_coeff_cv = sd$n_coeff_cv, coeff_cv = draws_list$coeff_cv, spline_degree_cv = sd$spline_degree_cv,
         n_knots_cs = sd$n_knots_cs, knots_cs = sd$knots_cs,
-        n_coeff_cs = sd$n_coeff_cs, coeff_cs = sd$coeff_cs, spline_degree_cs = sd$spline_degree_cs,
+        n_coeff_cs = sd$n_coeff_cs, coeff_cs = draws_list$coeff_cs, spline_degree_cs = sd$spline_degree_cs,
         n_knots_corr = sd$n_knots_corr, knots_corr = sd$knots_corr,
-        n_coeff_corr = sd$n_coeff_corr, coeff_corr = sd$coeff_corr, spline_degree_corr = sd$spline_degree_corr,
+        n_coeff_corr = sd$n_coeff_corr, coeff_corr = draws_list$coeff_corr, spline_degree_corr = sd$spline_degree_corr,
         n_functional_ops_cv_mean = sd$n_functional_ops_cv_mean, functional_ops_cv_mean = sd$functional_ops_cv_mean,
         n_const_cv_mean = sd$n_const_cv_mean, const_data_cv_mean = sd$const_data_cv_mean,
         n_knots_cv_mean = sd$n_knots_cv_mean, knots_cv_mean = sd$knots_cv_mean,
-        n_coeff_cv_mean = sd$n_coeff_cv_mean, coeff_cv_mean = sd$coeff_cv_mean, spline_degree_cv_mean = sd$spline_degree_cv_mean,
+        n_coeff_cv_mean = sd$n_coeff_cv_mean, coeff_cv_mean = draws_list$coeff_cv_mean, spline_degree_cv_mean = sd$spline_degree_cv_mean,
         n_functional_ops_cv_marker = sd$n_functional_ops_cv_marker, functional_ops_cv_marker = sd$functional_ops_cv_marker,
         n_const_cv_marker = sd$n_const_cv_marker, const_data_cv_marker = sd$const_data_cv_marker,
         n_knots_cv_marker = sd$n_knots_cv_marker, knots_cv_marker = sd$knots_cv_marker,
-        n_coeff_cv_marker = sd$n_coeff_cv_marker, coeff_cv_marker = sd$coeff_cv_marker, spline_degree_cv_marker = sd$spline_degree_cv_marker,
+        n_coeff_cv_marker = sd$n_coeff_cv_marker, coeff_cv_marker = draws_list$coeff_cv_marker, spline_degree_cv_marker = sd$spline_degree_cv_marker,
         n_functional_ops_cs_mean = sd$n_functional_ops_cs_mean, functional_ops_cs_mean = sd$functional_ops_cs_mean,
         n_const_cs_mean = sd$n_const_cs_mean, const_data_cs_mean = sd$const_data_cs_mean,
         n_knots_cs_mean = sd$n_knots_cs_mean, knots_cs_mean = sd$knots_cs_mean,
-        n_coeff_cs_mean = sd$n_coeff_cs_mean, coeff_cs_mean = sd$coeff_cs_mean, spline_degree_cs_mean = sd$spline_degree_cs_mean,
+        n_coeff_cs_mean = sd$n_coeff_cs_mean, coeff_cs_mean = draws_list$coeff_cs_mean, spline_degree_cs_mean = sd$spline_degree_cs_mean,
         n_functional_ops_cs_marker = sd$n_functional_ops_cs_marker, functional_ops_cs_marker = sd$functional_ops_cs_marker,
         n_const_cs_marker = sd$n_const_cs_marker, const_data_cs_marker = sd$const_data_cs_marker,
         n_knots_cs_marker = sd$n_knots_cs_marker, knots_cs_marker = sd$knots_cs_marker,
-        n_coeff_cs_marker = sd$n_coeff_cs_marker, coeff_cs_marker = sd$coeff_cs_marker, spline_degree_cs_marker = sd$spline_degree_cs_marker,
+        n_coeff_cs_marker = sd$n_coeff_cs_marker, coeff_cs_marker = draws_list$coeff_cs_marker, spline_degree_cs_marker = sd$spline_degree_cs_marker,
         flag_indep_id_re = sd$indep_id_re, flag_indep_marker_re = sd$indep_marker_re,
         flag_indep_marker_byid_latent_re = sd$indep_marker_byid_latent_re,
         flag_indep_idmarker_cov = sd$indep_idmarker_cov, flag_allow_marker_crosscorr = sd$allow_marker_crosscorr,
@@ -2069,7 +2092,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     }, numeric(1))
 }
 
-# Summarize one draw vector with fit-style diagnostics columns.
+# Summarise one draw vector with fit-style diagnostics columns.
 .summarize_draw_vector_with_diagnostics <- function(draw_values) {
     draw_values <- as.numeric(draw_values)
     draw_values <- draw_values[is.finite(draw_values)]
@@ -2298,16 +2321,16 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     TRUE
 }
 
-#' Summarize dynamic prediction outputs
+#' Summarise dynamic prediction outputs
 #'
 #' @description
-#' Summarizes a `JoinMeDynPred` object with detailed subject-level prediction
+#' Summarises a `JoinMeDynPred` object with detailed subject-level prediction
 #' summaries and diagnostics.
 #'
 #' The summary includes:
 #' - an overview table of row/subject counts by process,
 #' - median survival time per subject (draw-wise crossing of `S(t)=0.5`,
-#'   summarized with estimate, uncertainty, and diagnostics),
+#'   summarised with estimate, uncertainty, and diagnostics),
 #' - predicted id-level random effects per subject (estimate, uncertainty,
 #'   interval, and diagnostics),
 #' - predicted marker-by-id random effects and covariance per subject when
@@ -2641,7 +2664,7 @@ print.JoinMeDynPred <- function(x, ...) {
         cat("tmax: ", x$tmax, "\n", sep = "")
     }
     cat("Use summary() for prediction summaries.\n")
-    cat("Use plot() for trajectory and interval visualization.\n")
+    cat("Use plot() for trajectory and interval visualisation.\n")
     invisible(x)
 }
 

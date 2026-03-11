@@ -34,14 +34,25 @@ spec_corr <- list(
   degree = 3
 )
 
-# Example 4: Penalized monotone I-spline (fit in R)
+# Example 4: Penalised monotone I-spline (fit in R)
 # - x is the input scale of the raw association feature
 # - y is the desired transformed output at each x
 # - lambda controls smoothness (higher = smoother)
 spec_corr_pen <- list(
-  type = "ispline_penalized",
+  type = "ispline_penalised",
   x = seq(-2, 2, length.out = 50),
   y = exp(seq(-2, 2, length.out = 50)),
+  n_knots = 6,
+  degree = 3,
+  lambda = 1.0
+)
+
+# Example 5: Penalised monotone I-spline (Stan-estimated coefficients)
+# - omit y so Stan learns the monotone shape directly
+# - if knots are omitted, n_knots = 6 and x quantiles define them
+spec_corr_pen_stan <- list(
+  type = "ispline_penalised",
+  x = seq(-2, 2, length.out = 50),
   n_knots = 6,
   degree = 3,
   lambda = 1.0

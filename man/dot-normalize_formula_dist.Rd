@@ -2,11 +2,11 @@
 % Please edit documentation in R/utils.R
 \name{.normalize_formula_dist}
 \alias{.normalize_formula_dist}
-\title{Normalize distributional formula input}
+\title{Normalise distributional formula input}
 \usage{
 .normalize_formula_dist(formulaDist)
 }
 \description{
-Normalize distributional formula input
+Normalise distributional formula input
 }
 \keyword{internal}

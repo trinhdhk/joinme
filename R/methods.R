@@ -26,7 +26,7 @@ corr <- function(object, ...) {
 
 #' @keywords internal
 .summarise_draws_diag <- function(fit, variables, draws = NULL, seed = 1) {
-  # Summarize draws with point estimates + diagnostics in one table
+  # Summarise draws with point estimates + diagnostics in one table
   if (length(variables) == 0) {
     return(data.frame(variable = character(0)))
   }
@@ -78,7 +78,8 @@ corr <- function(object, ...) {
   if (spec$type == "functional") {
     return(.format_transform_expr(spec$expr))
   }
-  if (spec$type %in% c("ispline", "ispline_penalized", "pmonospline", "pmono")) {
+  spec$type <- .canonicalise_transform_type(spec$type)
+  if (spec$type %in% c("ispline", "ispline_penalised", "pmonospline", "pmono")) {
     knots <- spec$knots %||% spec$x
     degree <- spec$degree %||% 3L
     if (!is.null(knots)) {
@@ -541,7 +542,7 @@ print.JoinMeFit <- function(x, ...) {
   invisible(x)
 }
 
-#' Summarize a joinme object
+#' Summarise a joinme object
 #'
 #' @description
 #' Builds posterior summaries for the longitudinal process, survival process,
@@ -835,17 +836,25 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
 
       reg_rows <- list()
 
-      .summarize_block_parameters <- function(var_names, block_labels, term_labels) {
+      .summarize_block_parameters <- function(var_names,
+                                             block_labels,
+                                             term_labels,
+                                             row_labels = rep(NA_integer_, length(var_names)),
+                                             col_labels = rep(NA_integer_, length(var_names))) {
         keep <- var_names %in% all_vars
         var_names <- var_names[keep]
         block_labels <- block_labels[keep]
         term_labels <- term_labels[keep]
+        row_labels <- row_labels[keep]
+        col_labels <- col_labels[keep]
         if (length(var_names) == 0) return(NULL)
         out <- as.data.frame(.summarise_draws_diag(fit, var_names, draws = draws, seed = seed))
         idx <- match(out$variable, var_names)
         out$block <- block_labels[idx]
+        out$row <- row_labels[idx]
+        out$col <- col_labels[idx]
         out$term <- term_labels[idx]
-        out <- out[, c("block", "term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
+        out <- out[, c("block", "row", "col", "term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
         out$Estimate <- round(out$Estimate, digits)
         out$Est.Error <- round(out$Est.Error, digits)
         out$Q2.5 <- round(out$Q2.5, digits)
@@ -901,11 +910,13 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
       latent_tbl <- summarize_latent_cov_matrix()
 
       alpha_vars <- paste0("alpha_L[", seq_len(m_cov), "]")
-      alpha_blocks <- vapply(seq_len(m_cov), function(m) paste0("L[", rc_map[m, 1], ",", rc_map[m, 2], "]"), character(1))
+      alpha_blocks <- rep("L", m_cov)
       alpha_tbl <- .summarize_block_parameters(
         alpha_vars,
         block_labels = alpha_blocks,
-        term_labels = rep("(Intercept)", m_cov)
+        term_labels = rep("(Intercept)", m_cov),
+        row_labels = rc_map[, 1],
+        col_labels = rc_map[, 2]
       )
       if (!is.null(alpha_tbl)) reg_rows[[length(reg_rows) + 1L]] <- alpha_tbl
 
@@ -916,26 +927,30 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
           cov_labels <- paste0("k", seq_len(k_cov))
         }
         beta_vars <- as.vector(outer(seq_len(m_cov), seq_len(k_cov), function(m, k) paste0("beta_L[", m, ",", k, "]")))
-        beta_blocks <- as.vector(outer(seq_len(m_cov), seq_len(k_cov), function(m, k) {
-          paste0("L[", rc_map[m, 1], ",", rc_map[m, 2], "]")
-        }))
+        beta_blocks <- rep("L", length(beta_vars))
+        beta_rows <- as.vector(outer(seq_len(m_cov), seq_len(k_cov), function(m, k) rc_map[m, 1]))
+        beta_cols <- as.vector(outer(seq_len(m_cov), seq_len(k_cov), function(m, k) rc_map[m, 2]))
         beta_terms <- as.vector(outer(seq_len(m_cov), seq_len(k_cov), function(m, k) {
           cov_labels[k]
         }))
         beta_tbl <- .summarize_block_parameters(
           beta_vars,
           block_labels = beta_blocks,
-          term_labels = beta_terms
+          term_labels = beta_terms,
+          row_labels = beta_rows,
+          col_labels = beta_cols
         )
         if (!is.null(beta_tbl)) reg_rows[[length(reg_rows) + 1L]] <- beta_tbl
       }
 
       lambda_vars <- paste0("lambda_L[", seq_len(m_cov), "]")
-      lambda_blocks <- vapply(seq_len(m_cov), function(m) paste0("L[", rc_map[m, 1], ",", rc_map[m, 2], "]"), character(1))
+      lambda_blocks <- rep("L", m_cov)
       lambda_tbl <- .summarize_block_parameters(
         lambda_vars,
         block_labels = lambda_blocks,
-        term_labels = rep("lambda", m_cov)
+        term_labels = rep("lambda", m_cov),
+        row_labels = rc_map[, 1],
+        col_labels = rc_map[, 2]
       )
       if (!is.null(lambda_tbl)) reg_rows[[length(reg_rows) + 1L]] <- lambda_tbl
 
@@ -945,7 +960,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
       reg_rows <- Filter(Negate(is.null), reg_rows)
       regression_tbl <- if (length(reg_rows) > 0) do.call(rbind, reg_rows) else NULL
       if (!is.null(regression_tbl)) {
-        regression_tbl <- regression_tbl[, c("block", "term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
+        regression_tbl <- regression_tbl[, c("block", "row", "col", "term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
       }
       id_marker_cov_tables <- list(
         latent = latent_tbl,
@@ -961,10 +976,43 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     )
   }
 
+  transform_param_specs <- list(
+    cv_total = list(prefix = "coeff_cv_eff", n = sd$n_coeff_cv %||% 0L),
+    cs_total = list(prefix = "coeff_cs_eff", n = sd$n_coeff_cs %||% 0L),
+    corr = list(prefix = "coeff_corr_eff", n = sd$n_coeff_corr %||% 0L),
+    cv_mean = list(prefix = "coeff_cv_mean_eff", n = sd$n_coeff_cv_mean %||% 0L),
+    cv_marker = list(prefix = "coeff_cv_marker_eff", n = sd$n_coeff_cv_marker %||% 0L),
+    cs_mean = list(prefix = "coeff_cs_mean_eff", n = sd$n_coeff_cs_mean %||% 0L),
+    cs_marker = list(prefix = "coeff_cs_marker_eff", n = sd$n_coeff_cs_marker %||% 0L)
+  )
+  transform_param_tables <- list()
+  for (channel in names(transform_param_specs)) {
+    spec <- transform_param_specs[[channel]]
+    var_names <- paste0(spec$prefix, "[", seq_len(as.integer(spec$n)), "]")
+    var_names <- var_names[var_names %in% all_vars]
+    if (length(var_names) == 0) next
+    tmp <- as.data.frame(.summarise_draws_diag(fit, var_names, draws = draws, seed = seed))
+    idx <- match(tmp$variable, var_names)
+    tmp$channel <- channel
+    tmp$term <- paste0("basis_", idx)
+    tmp <- tmp[, c("channel", "term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
+    tmp$Estimate <- round(tmp$Estimate, digits)
+    tmp$Est.Error <- round(tmp$Est.Error, digits)
+    tmp$Q2.5 <- round(tmp$Q2.5, digits)
+    tmp$Q97.5 <- round(tmp$Q97.5, digits)
+    tmp$Rhat <- round(tmp$Rhat, 3)
+    transform_param_tables[[channel]] <- tmp
+  }
+  transform_params <- if (length(transform_param_tables) > 0) {
+    do.call(rbind, unname(transform_param_tables))
+  } else {
+    NULL
+  }
+
   transform_specs <- cfg$transforms_spec %||% object$call$transforms
   transform_formulas <- .transform_formulas_from_specs(transform_specs)
 
-  term_diag <- .term_diagnostics_from_tables(list(s_beta, s_surv, s_a, s_d, s_dr, corr_tables, id_marker_cov_tables))
+  term_diag <- .term_diagnostics_from_tables(list(s_beta, s_surv, s_a, transform_params, s_d, s_dr, corr_tables, id_marker_cov_tables))
   diag_table <- .build_common_diagnostics_table(
     draws = as.numeric(diag$draws %||% NA_real_),
     divergences = as.numeric(diag$divergences %||% NA_real_),
@@ -985,6 +1033,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
       fixef = s_beta,
       survival_process = s_surv,
       assoc = s_a,
+      transform_parameters = transform_params,
       distributional = s_d,
       distributional_regression = s_dr,
       corr = corr_tables,
@@ -1200,6 +1249,11 @@ print.summary_JoinMeFit <- function(x, ...) {
     cat("-----------------------\n")
     print(x$tables$assoc, row.names = FALSE)
   }
+  if (!is.null(x$tables$transform_parameters)) {
+    cat("\nTransform parameters\n")
+    cat("--------------------\n")
+    print(x$tables$transform_parameters, row.names = FALSE)
+  }
   if (!is.null(x$tables$distributional)) {
     cat("\nDistributional parameters\n")
     cat("---------------------------\n")
@@ -1319,7 +1373,7 @@ fixef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
 #' @return A nested list with top-level entries `formulaLong` and `formulaDist`.
 #'   `formulaLong` contains random-effect summaries for longitudinal model
 #'   components (`id`, `marker`, `marker_by_id_latent`, when present).
-#'   `formulaDist` contains distributional random-effect summaries organized by
+#'   `formulaDist` contains distributional random-effect summaries organised by
 #'   parameter and family scope (e.g., `sigma$student_t`, `nu$allFamilies`).
 #' @importFrom lme4 ranef
 #' @export

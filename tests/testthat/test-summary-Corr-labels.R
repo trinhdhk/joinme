@@ -24,7 +24,9 @@ test_that("print.summary_JoinMeFit uses bespoke covariance labels", {
           ess_tail = rep(100, 2)
         ),
         regression = data.frame(
-          block = c("L[1,1]", "L[1,1]", "L[1,1]", "global"),
+          block = c("L", "L", "L", "global"),
+          row = c(1L, 1L, 1L, NA_integer_),
+          col = c(1L, 1L, 1L, NA_integer_),
           term = c("(Intercept)", "x1", "lambda", "sd_u"),
           Estimate = c(-0.2, 0.05, 0.3, 0.6),
           Est.Error = c(0.1, 0.03, 0.1, 0.08),
@@ -47,6 +49,9 @@ test_that("print.summary_JoinMeFit uses bespoke covariance labels", {
   expect_true(grepl("latent covariance matrix", txt, fixed = TRUE))
   expect_true(grepl("covariance regression coefficients", txt, fixed = TRUE))
   expect_true(grepl("sigma_latent", txt, fixed = TRUE))
+  expect_true(grepl("block", txt, fixed = TRUE))
+  expect_true(grepl("row", txt, fixed = TRUE))
+  expect_true(grepl("col", txt, fixed = TRUE))
   expect_true(grepl("\\(Intercept\\)", txt))
   expect_true(grepl("x1", txt, fixed = TRUE))
   expect_true(grepl("lambda", txt, fixed = TRUE))

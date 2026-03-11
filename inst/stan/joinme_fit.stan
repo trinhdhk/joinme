@@ -8,7 +8,7 @@
  * but executes serially (grainsize = n_id).
  *
  * Key components:
- * - Longitudinal submodel: Generalized linear mixed effects with flexible distributions.
+ * - Longitudinal submodel: Generalised linear mixed effects with flexible distributions.
  * - Survival submodel: Proportional hazards with spline-based baseline hazard.
  * - Association: Random effects and their transformations link the submodels.
  *
@@ -66,7 +66,7 @@ model {
 
   // Reuse the shared partial log-likelihood so the threaded and non-threaded
   // programs stay in perfect sync. Using grainsize=n_id yields a single chunk
-  // (serial behavior) while still keeping the same code path as reduce_sum.
+  // (serial behaviour) while still keeping the same code path as reduce_sum.
   target += reduce_sum(
     partial_joinme,
     id_seq,
@@ -240,37 +240,37 @@ model {
     functional_ops_cv,
     const_data_cv,
     knots_cv,
-    coeff_cv,
+    coeff_cv_eff,
     spline_degree_cv,
     functional_ops_cs,
     const_data_cs,
     knots_cs,
-    coeff_cs,
+    coeff_cs_eff,
     spline_degree_cs,
     functional_ops_corr,
     const_data_corr,
     knots_corr,
-    coeff_corr,
+    coeff_corr_eff,
     spline_degree_corr,
     functional_ops_cv_mean,
     const_data_cv_mean,
     knots_cv_mean,
-    coeff_cv_mean,
+    coeff_cv_mean_eff,
     spline_degree_cv_mean,
     functional_ops_cv_marker,
     const_data_cv_marker,
     knots_cv_marker,
-    coeff_cv_marker,
+    coeff_cv_marker_eff,
     spline_degree_cv_marker,
     functional_ops_cs_mean,
     const_data_cs_mean,
     knots_cs_mean,
-    coeff_cs_mean,
+    coeff_cs_mean_eff,
     spline_degree_cs_mean,
     functional_ops_cs_marker,
     const_data_cs_marker,
     knots_cs_marker,
-    coeff_cs_marker,
+    coeff_cs_marker_eff,
     spline_degree_cs_marker,
     /* Subject ranges + time scaling */
     id_start,

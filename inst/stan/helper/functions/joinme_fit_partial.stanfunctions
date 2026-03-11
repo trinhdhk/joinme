@@ -1,6 +1,6 @@
 /**
  * @file joinme_fit_partial.stanfunctions
- * @brief Subject-specific joint log-likelihood for reduce_sum parallelization.
+ * @brief Subject-specific joint log-likelihood for reduce_sum parallelisation.
  *
  * @details This function computes the combined longitudinal and survival log-likelihood
  * for a slice of subjects (from `start` to `end` indices in `id_seq`). It is designed
@@ -103,7 +103,7 @@
  *     b. Apply cumhaz() function with hardcoded GK weights to numerically integrate
  *     c. Add survival contribution: log S(S_i) = -Lambda(S_i)
  *
- * ## PARALLELIZATION STRATEGY:
+ * ## PARALLELISATION STRATEGY:
  *   - This function processes subjects [start:end] independently
  *   - `reduce_sum()` splits subjects into chunks, each calling this function
  *   - Results are summed across chunks to get total log-likelihood
@@ -193,7 +193,7 @@
  * @param u_id Random effects (subject-level).
  * @param v_marker Random effects (marker-level).
  * @param w_idscaled Random effects (scaled subject-marker).
- * @param wbar_i Mean of random effects per subject (for centering).
+ * @param wbar_i Mean of random effects per subject (for centring).
  * @param sigma_y Base residual standard deviation.
  * @param sigma_marker Marker-specific residual scales.
  * @param nu_marker Marker-specific degrees of freedom (t-dist).
@@ -592,7 +592,7 @@ real partial_joinme(
         // sig: residual scale
         
         // --- Compute nu (degrees of freedom) ---
-        // Parameterization: nu = 2 + exp(eta_nu) to ensure nu > 2 (finite variance)
+        // Parameterisation: nu = 2 + exp(eta_nu) to ensure nu > 2 (finite variance)
         real eta_nu = 0; // nu linear predictor
         if (P_nu > 0) eta_nu += dot_product(X_nu[n], beta_nu);
         if (n_re_nu > 0) {
@@ -700,7 +700,7 @@ real partial_joinme(
         
       // FAMILY 8: SKEW-DOUBLE-EXPONENTIAL (ASYMMETRIC LAPLACE)
       // p(y | eta, sigma, tau) = SkewDE(y | eta, sigma, tau)
-      // Heavy-tailed distribution with separate left/right tail behavior
+      // Heavy-tailed distribution with separate left/right tail behaviour
       // tau in (0,1): asymmetry parameter (0.5 = symmetric Laplace)
       } else if (family_long[d] == 8) {
         // Compute sigma (scale parameter)
@@ -758,7 +758,7 @@ real partial_joinme(
       // p(y | eta, phi) = Beta(y | a, b), where y in (0, 1)
       // Mean: mu = logit^-1(eta) in (0,1)
       // Precision: phi > 0 (larger phi -> lower variance)
-      // Parameterization: a = mu * phi, b = (1 - mu) * phi
+      // Parameterisation: a = mu * phi, b = (1 - mu) * phi
       // Variance: Var(y) = mu * (1 - mu) / (phi + 1)
       } else if (family_long[d] == 10) {
         // Compute phi (precision parameter)
@@ -814,7 +814,7 @@ real partial_joinme(
     //   Step B: compute marker-specific slopes via finite differences.
     //   Step C: apply per-marker transforms for CV/CS total+marker channels.
     //   Step D: aggregate transformed marker channels with signed weights.
-    //   Step E: normalize by D_mkrs to keep scale stable across marker counts.
+    //   Step E: normalise by D_mkrs to keep scale stable across marker counts.
     for (j in 1 : n_gk) {
       // CURRENT VALUE - MEAN COMPONENT
       // cvm(t) = X(t)*beta + Z_id(t)*u_i
@@ -1000,7 +1000,7 @@ real partial_joinme(
       // Event-time marker pipeline:
       //   Step A: rebuild marker-specific CV/CS pieces at S_event.
       //   Step B: apply transforms per marker.
-      //   Step C: aggregate with weights and normalize.
+      //   Step C: aggregate with weights and normalise.
       for (d in 1 : D_mkrs) {
         real mk_part_S_d = 0;
         real mk_part_S_fwd_d = 0;
@@ -1035,7 +1035,7 @@ real partial_joinme(
                                      knots_cs_marker, coeff_cs_marker, spline_degree_cs_marker);
         }
       }
-      // Step C: normalize aggregated marker channels.
+      // Step C: normalise aggregated marker channels.
       cv_S_tot_tf /= D_mkrs;
       cv_S_marker_tf /= D_mkrs;
       cs_S_tot_tf /= D_mkrs;

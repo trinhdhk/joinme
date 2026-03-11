@@ -18,7 +18,7 @@ A data frame with \code{metric} and \code{value} columns.
 Returns a compact diagnostics table for fitted (\code{JoinMeFit}) and dynamic
 prediction (\code{JoinMeDynPred}) objects.
 
-For \code{JoinMeFit}, diagnostics summarize the Stan sampler run. For
-\code{JoinMeDynPred}, diagnostics summarize posterior-draw quality for predicted
+For \code{JoinMeFit}, diagnostics summarise the Stan sampler run. For
+\code{JoinMeDynPred}, diagnostics summarise posterior-draw quality for predicted
 quantities and are aligned to the same metric schema used for \code{JoinMeFit}.
 }

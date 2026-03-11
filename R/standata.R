@@ -68,7 +68,7 @@
 #' @param alpha_prior Prior specification for association parameters.
 #' @param lkj_prior Prior specification for correlation structures.
 #' @param allow_marker_crosscorr Integer flag; 1 allows cross-marker correlation in marker RE.
-#' @param shrinkage Integer flag controlling shrinkage behavior for marker-by-id effects.
+#' @param shrinkage Integer flag controlling shrinkage behaviour for marker-by-id effects.
 #' @param marker_weights Optional numeric vector of length D giving base weights
 #'   for marker-specific association components. These are used as prior offsets
 #'   for latent marker intensities and are used directly in Stan, where
@@ -84,7 +84,7 @@
 #' @param n_knots Number of internal knots for spline baseline hazards.
 #' @param basehaz_degree Degree of spline basis for baseline hazard.
 #' @param basehaz_formula Formula for baseline hazard when `basehaz = "formula"`.
-#' @param tau_spline Prior scale for spline coefficients (penalized spline).
+#' @param tau_spline Prior scale for spline coefficients (penalised spline).
 #' @param quadrature_nodes Optional positive integer target for total quadrature
 #'   points. Allowed values are exactly `7`, `15`, `31`, `41`, `51`, and `61`.
 #'   Only the node count is passed to Stan; GK nodes/weights are fixed in Stan.

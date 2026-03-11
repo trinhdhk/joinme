@@ -21,7 +21,7 @@
 A nested list with top-level entries \code{formulaLong} and \code{formulaDist}.
 \code{formulaLong} contains random-effect summaries for longitudinal model
 components (\code{id}, \code{marker}, \code{marker_by_id_latent}, when present).
-\code{formulaDist} contains distributional random-effect summaries organized by
+\code{formulaDist} contains distributional random-effect summaries organised by
 parameter and family scope (e.g., \code{sigma$student_t}, \code{nu$allFamilies}).
 }
 \description{

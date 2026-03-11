@@ -1,49 +1,83 @@
-##' Transform Specification Helper
-##'
-##' Provides utilities to build and manage transformation specifications
-##' for the joinme Stan model's association term.
-##'
-##' @description
-##' Transform can be specified in three modes:
-##'   - Mode 0: Identity (no transformation)
-##'   - Mode 1: Functional (arbitrary nested functions via parser)
-##'   - Mode 2: I-spline basis (monotonic, smooth)
-##'   - Mode 2 (penalized): I-spline coefficients estimated with smoothness penalty
-##'   - Mode 3: Piecewise-linear (user-defined interpolation)
-##'
-##' Each transformation term (CV_total, CS_total, CV_mean, CS_mean, CV_marker,
-##' CS_marker, corr) can have its own independent specification, enabling
-##' flexibility in model building.
-##'
-##' @section Usage:
-##' Use `build_standata_transforms()` to construct the data list entries,
-##' and `validate_transforms()` to verify consistency before sampling.
-##'
+# Transform Specification Helper
+#
+# Provides utilities to build and manage transformation specifications
+# for the joinme Stan model's association term.
 # File overview:
 # - Map user transform specs into Stan-friendly bytecode/spline data.
 # - Validate functional bytecode and spline shapes before sampling.
+.canonicalise_transform_type <- function(type) {
+  type <- as.character(type %||% "identity")[1]
+  if (identical(type, "ispline_penalized")) {
+    return("ispline_penalised")
+  }
+  type
+}
+
+#' Transform Specification Helper
+#'
+#' Provides utilities to build and manage transformation specifications
+#' for the joinme Stan model's association term.
+#'
+#' @description
+#' Transform can be specified in three modes:
+#'   - Mode 0: Identity (no transformation)
+#'   - Mode 1: Functional (arbitrary nested functions via parser)
+#'   - Mode 2: I-spline basis (monotonic, smooth)
+#'   - Mode 2 (penalised): I-spline coefficients estimated with smoothness penalty
+#'   - Mode 3: Piecewise-linear (user-defined interpolation)
+#'
+#' Each transformation term (CV_total, CS_total, CV_mean, CS_mean, CV_marker,
+#' CS_marker, corr) can have its own independent specification, enabling
+#' flexibility in model building.
+#'
+#' @param transform_list List with elements cv_total, cs_total, cv_mean, cs_mean,
+#'   cv_marker, cs_marker, corr, each specifying a transformation. See details.
+#' @param default_mode Default transformation mode if not specified.
+#'
+#' @details
+#' Each element of transform_list should be a list with:
+#'   - type: "identity", "functional", "ispline", "ispline_penalised" (or alias
+#'     "ispline_penalized"), or "pwlin"
+#'   - Additional fields depend on type:
+#'     - functional: expr (quosure, formula, quoted expression, or string)
+#'     - ispline: knots (vector), coeff (vector), degree (int)
+#'     - ispline_penalised: knots or n_knots, degree, lambda, optional x, optional y, optional weights
+#'       * if y is supplied, joinme fits the monotone spline to the training pairs (x, y) in R
+#'         using the same anchored endpoint convention as the Stan-estimated path
+#'         (first coefficient = 0, last coefficient = 1)
+#'       * if y is omitted, Stan estimates the monotone spline coefficients directly and lambda controls smoothness
+#'     - pwlin: x (vector), y (vector)
+#'
+#' Defaults and minimal examples:
+#'   - identity (default if term omitted): `list(type = "identity")`
+#'   - functional: `list(type = "functional", expr = ~ log1p(x))`
+#'   - ispline: `list(type = "ispline", knots = c(-1, 0, 1), coeff = c(0, 0.3, 0.8, 1.1, 1.3))`
+#'     with `degree = 3` by default when omitted.
+#'   - ispline_penalised (plug-in fit):
+#'     `list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), y = exp(seq(-2, 2, length.out = 50)), n_knots = 6, degree = 3, lambda = 1)`
+#'   - ispline_penalised (Stan-estimated):
+#'     `list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), n_knots = 6, degree = 3, lambda = 1)`
+#'   - pwlin:
+#'     `list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))`
+#'
+#' Default values used internally:
+#'   - omitted term -> identity mode (`default_mode = 0`),
+#'   - `ispline`: `degree = 3` if omitted,
+#'   - `ispline_penalised`: `n_knots = 6`, `degree = 3`, `lambda = 1` if omitted,
+#'   - `pwlin` and `functional`: no additional defaults beyond their required fields.
+#'
+#' @return List of standata entries for transformation parameters:
+#'   - tf_mode_*
+#'   - functional_ops_* and const_data_* (if mode 1)
+#'   - knots_* and coeff_* and spline_degree_* (if mode 2 or 3)
+#'
+#' @section Usage:
+#' Use `build_standata_transforms()` to construct the data list entries,
+#' and `validate_transforms()` to verify consistency before sampling.
 build_standata_transforms <- function(
   transform_list = NULL,
   default_mode = 0  # 0 = identity
 ) {
-  ##' @param transform_list List with elements cv_total, cs_total, cv_mean, cs_mean,
-  ##'   cv_marker, cs_marker, corr, each specifying a transformation. See details.
-  ##' @param default_mode Default transformation mode if not specified.
-  ##'
-  ##' @details
-  ##' Each element of transform_list should be a list with:
-  ##'   - type: "identity", "functional", "ispline", "ispline_penalized", or "pwlin"
-  ##'   - Additional fields depend on type:
-  ##'     - functional: expr (quosure, formula, quoted expression, or string)
-  ##'     - ispline: knots (vector), coeff (vector), degree (int)
-  ##'     - ispline_penalized: x, y, knots or n_knots, degree, lambda, weights
-  ##'     - pwlin: x (vector), y (vector)
-  ##'
-  ##' @return List of standata entries for transformation parameters:
-  ##'   - tf_mode_*
-  ##'   - functional_ops_* and const_data_* (if mode 1)
-  ##'   - knots_* and coeff_* and spline_degree_* (if mode 2 or 3)
-  
   # Output list to be merged into the main standata object
   standata <- list()
   
@@ -71,6 +105,9 @@ build_standata_transforms <- function(
     standata[[paste0("n_coeff_", short_suffix)]] <- 0
     standata[[paste0("coeff_", short_suffix)]] <- numeric()
     standata[[paste0("spline_degree_", short_suffix)]] <- 1L
+    standata[[paste0("estimate_spline_", short_suffix)]] <- 0L
+    standata[[paste0("lambda_spline_", short_suffix)]] <- 0.0
+    standata[[paste0("n_free_spline_", short_suffix)]] <- 0L
   }
   
   # Override with user specifications
@@ -81,6 +118,7 @@ build_standata_transforms <- function(
       term_info <- .resolve_transform_term(term_name)
       mode_suffix <- term_info$mode_suffix
       short_suffix <- term_info$short_suffix
+      spec$type <- .canonicalise_transform_type(spec$type)
       
       if (is.null(spec) || spec$type == "identity") {
         standata[[paste0("tf_mode_", mode_suffix)]] <- 0
@@ -92,9 +130,24 @@ build_standata_transforms <- function(
         standata[[paste0("functional_ops_", short_suffix)]] <- ops
         standata[[paste0("n_const_", short_suffix)]] <- bc$n_const
         standata[[paste0("const_data_", short_suffix)]] <- bc$const_data
-      } else if (spec$type %in% c("ispline", "ispline_penalized", "pmonospline", "pmono")) {
-        if (spec$type %in% c("ispline_penalized", "pmonospline", "pmono")) {
-          spec <- .fit_penalized_ispline_spec(spec)
+      } else if (spec$type %in% c("ispline", "ispline_penalised", "pmonospline", "pmono")) {
+        if (spec$type %in% c("ispline_penalised", "pmonospline", "pmono")) {
+          # Two supported semantics:
+          # 1) legacy plug-in mode: user supplies x/y and we fit coefficients in R,
+          # 2) Stan-estimated mode: user omits y and Stan estimates spline shape
+          #    with a smoothness penalty controlled by lambda.
+          if (!is.null(spec$y)) {
+            spec <- .make_penalised_ispline_transform(spec)
+            spec$estimate_spline <- 0L
+            spec$lambda_spline <- 0.0
+            spec$n_free_spline <- 0L
+          } else {
+            spec <- .make_stan_penalised_ispline_transform(spec)
+          }
+        } else {
+          spec$estimate_spline <- 0L
+          spec$lambda_spline <- 0.0
+          spec$n_free_spline <- 0L
         }
         standata[[paste0("tf_mode_", mode_suffix)]] <- 2
         standata[[paste0("n_knots_", short_suffix)]] <- length(spec$knots)
@@ -102,6 +155,9 @@ build_standata_transforms <- function(
         standata[[paste0("n_coeff_", short_suffix)]] <- length(spec$coeff)
         standata[[paste0("coeff_", short_suffix)]] <- spec$coeff
         standata[[paste0("spline_degree_", short_suffix)]] <- spec$degree %||% 3L
+        standata[[paste0("estimate_spline_", short_suffix)]] <- as.integer(spec$estimate_spline %||% 0L)
+        standata[[paste0("lambda_spline_", short_suffix)]] <- as.numeric(spec$lambda_spline %||% 0.0)
+        standata[[paste0("n_free_spline_", short_suffix)]] <- as.integer(spec$n_free_spline %||% 0L)
       } else if (spec$type == "pwlin") {
         standata[[paste0("tf_mode_", mode_suffix)]] <- 3
         standata[[paste0("n_knots_", short_suffix)]] <- length(spec$x)
@@ -111,7 +167,7 @@ build_standata_transforms <- function(
       } else {
         cli::cli_abort(c(
           x = "Unknown transformation type: {spec$type}.",
-          i = "Use one of: identity, functional, ispline, ispline_penalized, pwlin."
+          i = "Use one of: identity, functional, ispline, ispline_penalised (alias: ispline_penalized), pwlin."
         ))
       }
     }
@@ -232,14 +288,25 @@ validate_transforms <- function(standata) {
 ##'   degree = 3
 ##' )
 ##'
-##' # Example 4: Penalized monotone I-spline (fit in R)
+##' # Example 4: Penalised monotone I-spline (fit in R)
 ##' # - x is the input scale of the raw association feature
 ##' # - y is the desired transformed output at each x
 ##' # - lambda controls smoothness (higher = smoother)
 ##' spec_corr_pen <- list(
-##'   type = "ispline_penalized",
+##'   type = "ispline_penalised",
 ##'   x = seq(-2, 2, length.out = 50),
 ##'   y = exp(seq(-2, 2, length.out = 50)),
+##'   n_knots = 6,
+##'   degree = 3,
+##'   lambda = 1.0
+##' )
+##'
+##' # Example 5: Penalised monotone I-spline (Stan-estimated coefficients)
+##' # - omit y so Stan learns the monotone shape directly
+##' # - if knots are omitted, n_knots = 6 and x quantiles define them
+##' spec_corr_pen_stan <- list(
+##'   type = "ispline_penalised",
+##'   x = seq(-2, 2, length.out = 50),
 ##'   n_knots = 6,
 ##'   degree = 3,
 ##'   lambda = 1.0
@@ -256,11 +323,20 @@ example_transform_spec <- function() {
   cat("See docstring for examples\n")
 }
 
-##' Penalized Monotone I-spline Transform Spec
+##' Penalised Monotone I-spline Transform Spec
 ##'
 ##' @description
 ##' Fits a monotone I-spline transformation with a smoothness penalty and
 ##' returns a transform specification compatible with `build_standata_transforms()`.
+##'
+##' This helper is the legacy plug-in constructor for `type = "ispline_penalised"`.
+##' Its defaults are `n_knots = 6`, `degree = 3`, `lambda = 1.0`,
+##' `weights = NULL` (equal weights), and `diff_order = 2`.
+##' Returned coefficients follow the same anchored convention as the Stan-
+##' estimated path: the first coefficient is fixed at `0`, the last coefficient
+##' is fixed at `1`, and interior coefficients are monotone increasing.
+##' Example:
+##' `penalised_ispline_transform(x = seq(-2, 2, length.out = 50), y = exp(seq(-2, 2, length.out = 50)))`
 ##'
 ##' @param x Numeric vector of input values on the raw feature scale to transform.
 ##' @param y Numeric vector of target transformed values at `x` (same length as `x`).
@@ -277,7 +353,7 @@ example_transform_spec <- function() {
 ##' @return A list suitable for `build_standata_transforms()`.
 ##'
 ##' @export
-penalized_ispline_transform <- function(
+penalised_ispline_transform <- function(
   x,
   y,
   knots = NULL,
@@ -288,7 +364,7 @@ penalized_ispline_transform <- function(
   diff_order = 2
 ) {
   spec <- list(
-    type = "ispline_penalized",
+    type = "ispline_penalised",
     x = x,
     y = y,
     knots = knots,
@@ -298,15 +374,90 @@ penalized_ispline_transform <- function(
     weights = weights,
     diff_order = diff_order
   )
-  .fit_penalized_ispline_spec(spec)
+  .make_penalised_ispline_transform(spec)
 }
 
 ##' @keywords internal
-.fit_penalized_ispline_spec <- function(spec) {
+##' @rdname penalised_ispline_transform
+##' @export
+# American alias for `penalised_ispline_transform()`.
+penalized_ispline_transform <- function(...) {
+  penalised_ispline_transform(...)
+}
+
+##' @keywords internal
+.make_stan_penalised_ispline_transform <- function(spec) {
+  degree <- as.integer(spec$degree %||% 3L)
+  if (degree < 1L) {
+    cli::cli_abort(c(
+      x = "{.arg degree} must be >= 1.",
+      i = "Typical choice: degree = 3 (cubic)."
+    ))
+  }
+
+  lambda <- spec$lambda %||% 1.0
+  if (!is.numeric(lambda) || length(lambda) != 1L || !is.finite(lambda) || lambda < 0) {
+    cli::cli_abort(c(
+      x = "{.arg lambda} must be a non-negative numeric scalar.",
+      i = "Example: lambda = 1.0."
+    ))
+  }
+
+  knots <- spec$knots
+  if (is.null(knots)) {
+    if (!is.null(spec$x)) {
+      x <- as.numeric(spec$x)
+      n_knots <- as.integer(spec$n_knots %||% 6L)
+      if (length(x) < 2L || n_knots < 2L) {
+        cli::cli_abort(c(
+          x = "Stan-estimated penalised I-spline needs either explicit {.arg knots} or enough {.arg x} values to derive them.",
+          i = "Supply knots directly, or pass x with n_knots >= 2."
+        ))
+      }
+      probs <- seq(0, 1, length.out = n_knots)
+      knots <- as.numeric(stats::quantile(x, probs = probs, names = FALSE))
+    } else {
+      cli::cli_abort(c(
+        x = "Stan-estimated penalised I-spline requires {.arg knots} when {.arg y} is omitted.",
+        i = "Either provide knots directly, or provide x so knots can be derived from quantiles."
+      ))
+    }
+  } else {
+    knots <- as.numeric(knots)
+  }
+
+  if (length(knots) < 2L || any(diff(knots) <= 0)) {
+    cli::cli_abort(c(
+      x = "{.arg knots} must be a strictly increasing vector with at least 2 values.",
+      i = "Include boundary knots at the ends."
+    ))
+  }
+
+  n_coeff <- as.integer(spec$n_coeff %||% (length(knots) + degree - 1L))
+  if (n_coeff < 2L) {
+    cli::cli_abort(c(
+      x = "Penalised I-spline needs at least 2 coefficients.",
+      i = "Increase the number of knots or spline degree."
+    ))
+  }
+
+  list(
+    type = "ispline",
+    knots = knots,
+    coeff = rep(0, n_coeff),
+    degree = degree,
+    estimate_spline = 1L,
+    lambda_spline = as.numeric(lambda),
+    n_free_spline = as.integer(max(0L, n_coeff - 1L))
+  )
+}
+
+##' @keywords internal
+.make_penalised_ispline_transform <- function(spec) {
   # Validate and coerce input pairs for monotone spline fitting
   if (is.null(spec$x) || is.null(spec$y)) {
     cli::cli_abort(c(
-      x = "Penalized I-spline requires {.arg x} and {.arg y}.",
+      x = "Penalised I-spline requires {.arg x} and {.arg y}.",
       i = "Provide input-output pairs for the monotone transform."
     ))
   }
@@ -357,10 +508,10 @@ penalized_ispline_transform <- function(
   internal_knots <- if (length(knots) > 2) knots[2:(length(knots) - 1)] else numeric(0)
   boundary_knots <- c(knots[1], knots[length(knots)])
 
-  # splines2 provides the iSpline basis used for penalized fitting
+  # splines2 provides the iSpline basis used for penalised fitting
   if (!requireNamespace("splines2", quietly = TRUE)) {
     cli::cli_abort(c(
-      x = "Package {.pkg splines2} is required for penalized I-splines.",
+      x = "Package {.pkg splines2} is required for penalised I-splines.",
       i = "Install splines2 or provide explicit coeff/knots for type = 'ispline'."
     ))
   }
@@ -395,40 +546,63 @@ penalized_ispline_transform <- function(
   }
 
   n_coef <- ncol(basis)
+  if (n_coef < 2L) {
+    cli::cli_abort(c(
+      x = "Penalised I-spline basis must have at least 2 coefficients.",
+      i = "Increase the number of knots or the spline degree."
+    ))
+  }
   Dmat <- diff(diag(n_coef), differences = diff_order)
 
   w_sqrt <- sqrt(weights)
   B_w <- basis * w_sqrt
   y_w <- y * w_sqrt
 
-  init <- tryCatch(
+  init_raw <- tryCatch(
     as.numeric(qr.solve(crossprod(B_w), crossprod(B_w, y_w))),
     error = function(e) rep(0, n_coef)
   )
-  init <- pmax(0, init)
 
-  fn <- function(b) {
+  .anchored_coeff_from_z <- function(z) {
+    z <- as.numeric(z)
+    z <- z - max(z)
+    delta <- exp(z)
+    delta <- delta / sum(delta)
+    c(0, cumsum(delta))
+  }
+
+  init_coeff <- pmax(0, init_raw)
+  init_coeff <- init_coeff - init_coeff[1]
+  if (!is.finite(init_coeff[n_coef]) || init_coeff[n_coef] <= 0) {
+    init_coeff <- seq(0, 1, length.out = n_coef)
+  } else {
+    init_coeff <- init_coeff / init_coeff[n_coef]
+  }
+  init_coeff <- cummax(pmin(pmax(init_coeff, 0), 1))
+  init_coeff[1] <- 0
+  init_coeff[n_coef] <- 1
+  delta_init <- diff(init_coeff)
+  delta_init <- pmax(delta_init, .Machine$double.eps)
+  delta_init <- delta_init / sum(delta_init)
+  z_init <- log(delta_init)
+
+  fn <- function(z) {
+    b <- .anchored_coeff_from_z(z)
     r <- y_w - B_w %*% b
     pen <- if (lambda > 0 && nrow(Dmat) > 0) Dmat %*% b else 0
     0.5 * sum(r ^ 2) + 0.5 * lambda * sum(pen ^ 2)
   }
-  gr <- function(b) {
-    r <- y_w - B_w %*% b
-    grad <- -crossprod(B_w, r)
-    if (lambda > 0 && nrow(Dmat) > 0) {
-      grad <- grad + lambda * crossprod(Dmat, Dmat %*% b)
-    }
-    as.numeric(grad)
-  }
 
-  opt <- optim(init, fn, gr,
-    method = "L-BFGS-B",
-    lower = rep(0, n_coef)
+  opt <- optim(
+    z_init,
+    fn,
+    method = "BFGS",
+    control = list(maxit = 1000)
   )
 
   if (opt$convergence != 0) {
     cli::cli_warn(c(
-      x = "Penalized I-spline optimization did not fully converge.",
+      x = "Penalised I-spline optimisation did not fully converge.",
       i = "Consider increasing lambda or adjusting knots."
     ))
   }
@@ -436,7 +610,7 @@ penalized_ispline_transform <- function(
   list(
     type = "ispline",
     knots = knots,
-    coeff = as.numeric(opt$par),
+    coeff = as.numeric(.anchored_coeff_from_z(opt$par)),
     degree = degree
   )
 }

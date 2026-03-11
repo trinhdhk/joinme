@@ -362,7 +362,7 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #' Simulate joint model data with formula-driven multistructure support
 #'
 #' @description
-#' Generalized simulator for `joinme` that mirrors the fitting syntax as closely as
+#' Generalised simulator for `joinme` that mirrors the fitting syntax as closely as
 #' possible. The simulator supports:
 #' - multivariate outcomes via marker-level families,
 #' - multi-structure random effects from `formulaLong` (id, marker, marker-by-id),
@@ -408,6 +408,31 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   Functional transforms support arithmetic and common nonlinear functions,
 #'   including `inv_logit`/`expit`/`sigmoid`, `exp`, `log`, `sqrt`, `power`,
 #'   `cbrt`, `softplus`/`log1p_exp`, trigonometric and hyperbolic functions.
+#'
+#'   Quick parameterisation reference:
+#'   - `list(type = "identity")` or omitted term: identity transform (default).
+#'   - `list(type = "functional", expr = ~ log1p(x))`: functional transform;
+#'     `expr` is required.
+#'   - `list(type = "ispline", knots = c(-1, 0, 1), coeff = c(0, 0.3, 0.8, 1.1, 1.3), degree = 3)`:
+#'     direct monotone I-spline; `degree` defaults to `3` if omitted.
+#'   - `list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), y = exp(seq(-2, 2, length.out = 50)), n_knots = 6, degree = 3, lambda = 1)`:
+#'     penalised monotone I-spline; defaults are `n_knots = 6`, `degree = 3`,
+#'     and `lambda = 1` when omitted.
+#'   - `list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))`:
+#'     piecewise-linear transform; `x` and `y` are required.
+#'
+#'   For monotone spline transforms during simulation:
+#'   - `type = "ispline"`: provide `knots` and `coeff` directly (plus optional
+#'     `degree`).
+#'   - `type = "ispline_penalised"` (alias: `"ispline_penalized"`): provide
+#'     training pairs `x` and `y`, plus
+#'     smoothness penalty `lambda`. The simulator fits the monotone spline in R
+#'     before evaluating the transformed association. The fitted plug-in spline
+#'     uses anchored endpoint coefficients matching the Stan-estimated path
+#'     (first coefficient `0`, last coefficient `1`).
+#'
+#'   In other words, simulation currently uses the legacy plug-in spline mode;
+#'   it does not estimate spline coefficients jointly inside Stan.
 #' @param marker_weights Optional base marker weights used as prior offsets for
 #'   association aggregation. Effective weights are computed as
 #'   `w_raw` and used for marker-averaged CV/CS terms.
@@ -459,7 +484,7 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'
 #'   Family-scoped list syntax examples:
 #'   - `dist_coefs = list(sigma = list(default = c("(Intercept)" = -0.3), gaussian = c(...), student_t = c(...)))`
-#'   - alias keys like `"sigma[family='student_t']"` are also recognized and
+#'   - alias keys like `"sigma[family='student_t']"` are also recognised and
 #'     mapped to the matching family scope.
 #' @param re_params Random-effects simulation controls.
 #'
@@ -949,7 +974,7 @@ simulate_joinme <- function(
   #' @param D Number of markers.
   #' @return List with family codes, link names, and inverse-link bytecode per marker.
   .sim_parse_family_specs <- function(families, D) {
-    # Normalize family/link specs to a per-marker list of bytecode maps.
+    # Normalise family/link specs to a per-marker list of bytecode maps.
     if (length(families) == 1L && !is.list(families)) {
       families <- rep(list(families), D)
     } else if (!is.list(families)) {
@@ -1010,7 +1035,7 @@ simulate_joinme <- function(
       return(function(x) x)
     }
 
-    tf_type <- as.character(spec$type)[1]
+    tf_type <- .canonicalise_transform_type(spec$type)
 
     if (identical(tf_type, "functional")) {
       bc <- parse_transform_expr(spec$expr)
@@ -1023,9 +1048,16 @@ simulate_joinme <- function(
       })
     }
 
-    if (tf_type %in% c("ispline", "ispline_penalized", "pmonospline", "pmono")) {
-      if (tf_type %in% c("ispline_penalized", "pmonospline", "pmono")) {
-        spec <- .fit_penalized_ispline_spec(spec)
+    if (tf_type %in% c("ispline", "ispline_penalised", "pmonospline", "pmono")) {
+      if (tf_type %in% c("ispline_penalised", "pmonospline", "pmono")) {
+        if (is.null(spec$y)) {
+          cli::cli_abort(c(
+            x = "Simulation currently requires both {.arg x} and {.arg y} for {.val ispline_penalised} transforms.",
+            i = "Use legacy plug-in mode in {.fn simulate_joinme} by supplying x/y pairs, or provide an explicit {.val ispline} transform instead.",
+            i = "Stan-estimated penalised splines without y are supported in {.fn joinme}, not in simulation."
+          ))
+        }
+        spec <- .make_penalised_ispline_transform(spec)
       }
       if (!requireNamespace("splines2", quietly = TRUE)) {
         cli::cli_abort(c(
@@ -1081,7 +1113,7 @@ simulate_joinme <- function(
 
     cli::cli_abort(c(
       x = "Unsupported transform type for {.val {term_name}}: {.val {tf_type}}.",
-      i = "Use one of identity, functional, ispline, ispline_penalized, pwlin."
+      i = "Use one of identity, functional, ispline, ispline_penalised (alias: ispline_penalized), pwlin."
     ))
   }
 

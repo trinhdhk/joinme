@@ -2,7 +2,7 @@
 % Please edit documentation in R/transform_bytecode.R
 \name{.normalize_bytecode_program}
 \alias{.normalize_bytecode_program}
-\title{Normalize bytecode program inputs}
+\title{Normalise bytecode program inputs}
 \usage{
 .normalize_bytecode_program(
   bytecode = NULL,
@@ -18,9 +18,9 @@
 \item{const_data}{Numeric constant payload.}
 }
 \value{
-List with normalized \code{bytecode} and \code{const_data}.
+List with normalised \code{bytecode} and \code{const_data}.
 }
 \description{
-Normalize bytecode program inputs
+Normalise bytecode program inputs
 }
 \keyword{internal}

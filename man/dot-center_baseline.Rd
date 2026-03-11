@@ -2,11 +2,11 @@
 % Please edit documentation in R/utils.R
 \name{.center_baseline}
 \alias{.center_baseline}
-\title{Center baseline hazard basis columns}
+\title{Centre baseline hazard basis columns}
 \usage{
 .center_baseline(Bs_event_raw, Bs_gk_raw)
 }
 \description{
-Center baseline hazard basis columns
+Centre baseline hazard basis columns
 }
 \keyword{internal}

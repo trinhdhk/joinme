@@ -97,7 +97,7 @@ formulaDist <- list(
 
 This means:
 
-- `sigma` is modeled through regression (fixed/random effects if included),
+- `sigma` is modelled through regression (fixed/random effects if included),
 - `nu` is regression-driven with an intercept-only structure,
 - other distributional parameters without formulas continue using family-shared
   baselines when applicable.
@@ -208,7 +208,7 @@ fit <- joinme(
 )
 ```
 
-### Step 5: Summarize fixed effects and associations
+### Step 5: Summarise fixed effects and associations
 
 ```{r intro-summaries}
 summary(fit)
@@ -265,6 +265,6 @@ marker covariance is configured to depend on id.
 
 ## Next steps
 
-- See the modeling workflow in `joinme-workflow`.
+- See the modelling workflow in `joinme-workflow`.
 - Explore association structures in `joinme-associations`.
 - Review the statistical details in `joinme-model` and `joinme-theory`.

@@ -4,7 +4,7 @@
 \alias{joinme_stan_cache}
 \title{Stan Model Caching Helpers}
 \description{
-These helpers centralize compiled Stan model caching for both CmdStanR
+These helpers centralise compiled Stan model caching for both CmdStanR
 and RStan. The goal is to keep compilation deterministic, reusable, and
 aggressively documented for maintenance and debugging.
 }

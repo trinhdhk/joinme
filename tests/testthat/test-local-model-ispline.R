@@ -15,7 +15,7 @@ test_that("joinme fits with ispline assoc", {
     times_obs = seq(0, 5, length.out = 5),
     assoc = c("cv_total"),
     assoc_coefs = c(cv_total = 0.3),
-    transforms = list(cv_total = list(type = "ispline_penalized", knots = c(0, 1), degree = 3)),
+    transforms = list(cv_total = list(type = "ispline_penalised", knots = c(0, 1), degree = 3)),
     seed = 123
   )
 
@@ -38,7 +38,7 @@ test_that("joinme fits with ispline assoc", {
       formulaLong = y ~ time + (1 + time || id) + (1 || marker),
       formulaEvent = survival::Surv(time, event) ~ 1,
       assoc = c("cv_total"),
-      transforms = list(cv_total = list(type = "ispline_penalized", knots = c(0, 1), degree = 3)),
+      transforms = list(cv_total = list(type = "ispline_penalised", knots = c(0, 1), degree = 3)),
       control = control
     ),
     error = function(e) skip(paste("fit failed:", conditionMessage(e)))

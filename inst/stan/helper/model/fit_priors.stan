@@ -117,7 +117,7 @@
     bs_gamma_c[k_ev][1] ~ normal(-3, alpha_scale);
     if (Kbs > 1)
       bs_gamma_c[k_ev][2:Kbs] ~ normal(0, alpha_scale);
-    if (Kbs >= 4) // penalized spline second differences (exclude intercept)
+    if (Kbs >= 4) // penalised spline second differences (exclude intercept)
       for (k in 4 : Kbs)
         target += normal_lpdf(
                               bs_gamma_c[k_ev][k] - 2 * bs_gamma_c[k_ev][k - 1]
@@ -166,4 +166,51 @@
     z_alpha_cs_marker ~ std_normal();
     // if (estimate_marker_weights == 1 && use_marker_weight_assoc == 1)
     z_marker_weights ~ std_normal();
+  }
+
+  /* Penalised monotone spline shape priors */
+  // Tight prior on the latent increment logits:
+  // - z = 0 implies equal increments,
+  // - softmax(z) gives positive increments summing to 1,
+  // - smaller prior scale keeps the learned shape close to a smooth default
+  //   unless the data clearly support bends.
+  if (n_free_spline_cv > 0) z_spline_cv ~ normal(0, 0.35);
+  if (n_free_spline_cs > 0) z_spline_cs ~ normal(0, 0.35);
+  if (n_free_spline_corr > 0) z_spline_corr ~ normal(0, 0.35);
+  if (n_free_spline_cv_mean > 0) z_spline_cv_mean ~ normal(0, 0.35);
+  if (n_free_spline_cv_marker > 0) z_spline_cv_marker ~ normal(0, 0.35);
+  if (n_free_spline_cs_mean > 0) z_spline_cs_mean ~ normal(0, 0.35);
+  if (n_free_spline_cs_marker > 0) z_spline_cs_marker ~ normal(0, 0.35);
+
+  // Layman's view:
+  // - first differences control monotone increase,
+  // - second differences control wiggliness,
+  // - lambda says how strongly we discourage bends.
+  if (estimate_spline_cv == 1 && n_coeff_cv > 2 && lambda_spline_cv > 0) {
+    for (j in 3:n_coeff_cv)
+      target += -0.5 * lambda_spline_cv * square(coeff_cv_eff[j] - 2 * coeff_cv_eff[j - 1] + coeff_cv_eff[j - 2]);
+  }
+  if (estimate_spline_cs == 1 && n_coeff_cs > 2 && lambda_spline_cs > 0) {
+    for (j in 3:n_coeff_cs)
+      target += -0.5 * lambda_spline_cs * square(coeff_cs_eff[j] - 2 * coeff_cs_eff[j - 1] + coeff_cs_eff[j - 2]);
+  }
+  if (estimate_spline_corr == 1 && n_coeff_corr > 2 && lambda_spline_corr > 0) {
+    for (j in 3:n_coeff_corr)
+      target += -0.5 * lambda_spline_corr * square(coeff_corr_eff[j] - 2 * coeff_corr_eff[j - 1] + coeff_corr_eff[j - 2]);
+  }
+  if (estimate_spline_cv_mean == 1 && n_coeff_cv_mean > 2 && lambda_spline_cv_mean > 0) {
+    for (j in 3:n_coeff_cv_mean)
+      target += -0.5 * lambda_spline_cv_mean * square(coeff_cv_mean_eff[j] - 2 * coeff_cv_mean_eff[j - 1] + coeff_cv_mean_eff[j - 2]);
+  }
+  if (estimate_spline_cv_marker == 1 && n_coeff_cv_marker > 2 && lambda_spline_cv_marker > 0) {
+    for (j in 3:n_coeff_cv_marker)
+      target += -0.5 * lambda_spline_cv_marker * square(coeff_cv_marker_eff[j] - 2 * coeff_cv_marker_eff[j - 1] + coeff_cv_marker_eff[j - 2]);
+  }
+  if (estimate_spline_cs_mean == 1 && n_coeff_cs_mean > 2 && lambda_spline_cs_mean > 0) {
+    for (j in 3:n_coeff_cs_mean)
+      target += -0.5 * lambda_spline_cs_mean * square(coeff_cs_mean_eff[j] - 2 * coeff_cs_mean_eff[j - 1] + coeff_cs_mean_eff[j - 2]);
+  }
+  if (estimate_spline_cs_marker == 1 && n_coeff_cs_marker > 2 && lambda_spline_cs_marker > 0) {
+    for (j in 3:n_coeff_cs_marker)
+      target += -0.5 * lambda_spline_cs_marker * square(coeff_cs_marker_eff[j] - 2 * coeff_cs_marker_eff[j - 1] + coeff_cs_marker_eff[j - 2]);
   }

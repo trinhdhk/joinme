@@ -182,7 +182,7 @@ suppressPackageStartupMessages({
 #' \\describe{
 #'   \\item{n_gk}{Integer total node count.}
 #'   \\item{nodes}{Numeric vector of nodes on `[0, 1]`.}
-#'   \\item{weights}{Numeric vector of normalized weights summing to `1`.}
+#'   \\item{weights}{Numeric vector of normalised weights summing to `1`.}
 #'   \\item{panels}{Always `1L` (single fixed rule).}
 #'   \\item{rule}{Character rule label (`"gk7"`, `"gk15"`, `"gk31"`, `"gk41"`, `"gk51"`, or `"gk61"`).}
 #' }
@@ -624,10 +624,10 @@ gk_quadrature <- function(nodes = 15L) {
   list(param = param, family = family_name)
 }
 
-#' Normalize distributional formula input
+#' Normalise distributional formula input
 #' @keywords internal
 .normalize_formula_dist <- function(formulaDist) {
-  # Normalize list input to named distributional formulas
+  # Normalise list input to named distributional formulas
   if (is.null(formulaDist)) return(list())
   if (is.list(formulaDist) && length(formulaDist) > 0 &&
       all(vapply(formulaDist, .is_dist_scope, logical(1)))) {
@@ -1120,7 +1120,7 @@ gk_quadrature <- function(nodes = 15L) {
   do.call(cbind, mats)
 }
 
-#' Center baseline hazard basis columns
+#' Centre baseline hazard basis columns
 #' @keywords internal
 .center_baseline <- function(Bs_event_raw, Bs_gk_raw) {
   n_id <- nrow(Bs_event_raw)
@@ -1131,7 +1131,7 @@ gk_quadrature <- function(nodes = 15L) {
     matrix(aperm(Bs_gk_raw, c(1, 3, 2)), nrow = n_id * n_gk, ncol = Kbs)
   )
   colm <- colMeans(big)
-  # Keep constant (intercept) columns uncentered so the baseline level is preserved.
+  # Keep constant (intercept) columns uncentred so the baseline level is preserved.
   col_sd <- apply(big, 2, stats::sd)
   center_mask <- !(col_sd < 1e-8 | !is.finite(col_sd))
   colm_use <- ifelse(center_mask, colm, 0)
@@ -1255,7 +1255,7 @@ gk_quadrature <- function(nodes = 15L) {
 #'
 #' @description
 #' Uses lme4-style `||` parsing to determine which random-effects blocks should
-#' be modeled with diagonal covariance structures. The resolution rules are:
+#' be modelled with diagonal covariance structures. The resolution rules are:
 #' - Top-level `(... || id)` sets `indep_id_re = 1`.
 #' - `(... || marker)` sets `indep_marker_re = 1`.
 #' - Nested `(... || id)` inside a marker block sets `indep_idmarker_cov = 1`.
@@ -1520,7 +1520,7 @@ gk_quadrature <- function(nodes = 15L) {
   posterior::as_draws_df(d)
 }
 
-#' Summarize a numeric vector of draws
+#' Summarise a numeric vector of draws
 #' @keywords internal
 .summarize_draw_col <- function(x) {
   c(

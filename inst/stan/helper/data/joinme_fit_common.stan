@@ -147,11 +147,11 @@
   int<lower=1> K_cov;            // number of covariates in covariance regression
   matrix[n_id, K_cov] Xcov;      // covariate matrix for covariance regression
 
-  /* Baseline hazard spline (centered basis) */
+  /* Baseline hazard spline (centred basis) */
   int<lower=1> Kbs;              // number of baseline hazard basis functions
-  matrix[n_id, Kbs] Bs_event_c;  // event-time basis per subject (centered)
+  matrix[n_id, Kbs] Bs_event_c;  // event-time basis per subject (centred)
   int<lower=1> n_gk;             // quadrature node count (nodes/weights hardcoded in Stan)
-  array[n_id] matrix[n_gk, Kbs] Bs_gk_c; // quadrature-node basis per subject (centered)
+  array[n_id] matrix[n_gk, Kbs] Bs_gk_c; // quadrature-node basis per subject (centred)
   real<lower=0> tau_spline;      // spline penalty scale for baseline hazard
 
   /* Survival outcomes */
@@ -265,39 +265,60 @@
   int<lower=0> n_coeff_cv;        // coefficient count for total CV spline
   vector[n_coeff_cv] coeff_cv;    // coefficients for total CV spline
   int<lower=1, upper=5> spline_degree_cv; // spline degree for total CV
+  int<lower=0, upper=1> estimate_spline_cv; // 1 if total CV spline coeffs are estimated in Stan
+  real<lower=0> lambda_spline_cv;  // smoothness penalty strength for total CV spline
+  int<lower=0> n_free_spline_cv;   // free monotone increments for total CV spline
 
   int<lower=0> n_knots_cs;        // knot count for total CS spline
   vector[n_knots_cs] knots_cs;    // knot locations for total CS spline
   int<lower=0> n_coeff_cs;        // coefficient count for total CS spline
   vector[n_coeff_cs] coeff_cs;    // coefficients for total CS spline
   int<lower=1, upper=5> spline_degree_cs; // spline degree for total CS
+  int<lower=0, upper=1> estimate_spline_cs; // 1 if total CS spline coeffs are estimated in Stan
+  real<lower=0> lambda_spline_cs;  // smoothness penalty strength for total CS spline
+  int<lower=0> n_free_spline_cs;   // free monotone increments for total CS spline
 
   int<lower=0> n_knots_corr;      // knot count for corr spline
   vector[n_knots_corr] knots_corr; // knot locations for corr spline
   int<lower=0> n_coeff_corr;      // coefficient count for corr spline
   vector[n_coeff_corr] coeff_corr; // coefficients for corr spline
   int<lower=1, upper=5> spline_degree_corr; // spline degree for corr
+  int<lower=0, upper=1> estimate_spline_corr; // 1 if corr spline coeffs are estimated in Stan
+  real<lower=0> lambda_spline_corr; // smoothness penalty strength for corr spline
+  int<lower=0> n_free_spline_corr;  // free monotone increments for corr spline
 
   int<lower=0> n_knots_cv_mean;   // knot count for mean CV spline
   vector[n_knots_cv_mean] knots_cv_mean; // knot locations for mean CV spline
   int<lower=0> n_coeff_cv_mean;   // coefficient count for mean CV spline
   vector[n_coeff_cv_mean] coeff_cv_mean; // coefficients for mean CV spline
   int<lower=1, upper=5> spline_degree_cv_mean; // spline degree for mean CV
+  int<lower=0, upper=1> estimate_spline_cv_mean; // 1 if mean CV spline coeffs are estimated in Stan
+  real<lower=0> lambda_spline_cv_mean; // smoothness penalty strength for mean CV spline
+  int<lower=0> n_free_spline_cv_mean;  // free monotone increments for mean CV spline
 
   int<lower=0> n_knots_cv_marker; // knot count for marker CV spline
   vector[n_knots_cv_marker] knots_cv_marker; // knot locations for marker CV spline
   int<lower=0> n_coeff_cv_marker; // coefficient count for marker CV spline
   vector[n_coeff_cv_marker] coeff_cv_marker; // coefficients for marker CV spline
   int<lower=1, upper=5> spline_degree_cv_marker; // spline degree for marker CV
+  int<lower=0, upper=1> estimate_spline_cv_marker; // 1 if marker CV spline coeffs are estimated in Stan
+  real<lower=0> lambda_spline_cv_marker; // smoothness penalty strength for marker CV spline
+  int<lower=0> n_free_spline_cv_marker;  // free monotone increments for marker CV spline
 
   int<lower=0> n_knots_cs_mean;   // knot count for mean CS spline
   vector[n_knots_cs_mean] knots_cs_mean; // knot locations for mean CS spline
   int<lower=0> n_coeff_cs_mean;   // coefficient count for mean CS spline
   vector[n_coeff_cs_mean] coeff_cs_mean; // coefficients for mean CS spline
   int<lower=1, upper=5> spline_degree_cs_mean; // spline degree for mean CS
+  int<lower=0, upper=1> estimate_spline_cs_mean; // 1 if mean CS spline coeffs are estimated in Stan
+  real<lower=0> lambda_spline_cs_mean; // smoothness penalty strength for mean CS spline
+  int<lower=0> n_free_spline_cs_mean;  // free monotone increments for mean CS spline
 
   int<lower=0> n_knots_cs_marker; // knot count for marker CS spline
   vector[n_knots_cs_marker] knots_cs_marker; // knot locations for marker CS spline
   int<lower=0> n_coeff_cs_marker; // coefficient count for marker CS spline
   vector[n_coeff_cs_marker] coeff_cs_marker; // coefficients for marker CS spline
   int<lower=1, upper=5> spline_degree_cs_marker; // spline degree for marker CS
+  int<lower=0, upper=1> estimate_spline_cs_marker; // 1 if marker CS spline coeffs are estimated in Stan
+  real<lower=0> lambda_spline_cs_marker; // smoothness penalty strength for marker CS spline
+  int<lower=0> n_free_spline_cs_marker;  // free monotone increments for marker CS spline

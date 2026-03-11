@@ -232,7 +232,7 @@
       functional_ops_cv_mean,
       const_data_cv_mean,
       knots_cv_mean,
-      coeff_cv_mean,
+      coeff_cv_mean_eff,
       spline_degree_cv_mean
     );
     vector[n_gk] cv_marker_tf;
@@ -257,11 +257,11 @@
         acc_cv_tot_tf += marker_weights_eff[d]
           * apply_transform_scalar(cv_tot_now_d, tf_mode_cv_tot,
                                    functional_ops_cv, const_data_cv,
-                                   knots_cv, coeff_cv, spline_degree_cv);
+                                   knots_cv, coeff_cv_eff, spline_degree_cv);
         acc_cv_marker_tf += marker_weights_eff[d]
           * apply_transform_scalar(cvk_now_d, tf_mode_cv_marker,
                                    functional_ops_cv_marker, const_data_cv_marker,
-                                   knots_cv_marker, coeff_cv_marker, spline_degree_cv_marker);
+                                   knots_cv_marker, coeff_cv_marker_eff, spline_degree_cv_marker);
         {
           real csk_raw_d = ((cvk_fwd_d - cvk_now_d) / eps_fd) / tmax;
           real cs_tot_raw_d = csm_raw[j] + csk_raw_d;
@@ -270,11 +270,11 @@
           acc_cs_tot_tf += marker_weights_eff[d]
             * apply_transform_scalar(cs_tot_raw_d, tf_mode_cs_tot,
                                      functional_ops_cs, const_data_cs,
-                                     knots_cs, coeff_cs, spline_degree_cs);
+                                     knots_cs, coeff_cs_eff, spline_degree_cs);
           acc_cs_marker_tf += marker_weights_eff[d]
             * apply_transform_scalar(csk_raw_d, tf_mode_cs_marker,
                                      functional_ops_cs_marker, const_data_cs_marker,
-                                     knots_cs_marker, coeff_cs_marker, spline_degree_cs_marker);
+                                     knots_cs_marker, coeff_cs_marker_eff, spline_degree_cs_marker);
         }
       }
       cv_tot_tf[j] = acc_cv_tot_tf / D_mkrs;
@@ -290,7 +290,7 @@
       functional_ops_cs_mean,
       const_data_cs_mean,
       knots_cs_mean,
-      coeff_cs_mean,
+      coeff_cs_mean_eff,
       spline_degree_cs_mean
     );
     vector[M_corr_local] corr_terms_tf = apply_transform_vector(
@@ -299,7 +299,7 @@
       functional_ops_corr,
       const_data_corr,
       knots_corr,
-      coeff_corr,
+      coeff_corr_eff,
       spline_degree_corr
     );
     real corr_assoc_scalar = dot_product(a_corr, corr_terms_tf);
@@ -353,7 +353,7 @@
         functional_ops_cv_mean,
         const_data_cv_mean,
         knots_cv_mean,
-        coeff_cv_mean,
+        coeff_cv_mean_eff,
         spline_degree_cv_mean
       );
       real cv_S_marker_tf = 0;
@@ -373,11 +373,11 @@
         cv_S_tot_tf += marker_weights_eff[d]
           * apply_transform_scalar(cv_S_tot_d, tf_mode_cv_tot,
                                    functional_ops_cv, const_data_cv,
-                                   knots_cv, coeff_cv, spline_degree_cv);
+                                   knots_cv, coeff_cv_eff, spline_degree_cv);
         cv_S_marker_tf += marker_weights_eff[d]
           * apply_transform_scalar(cvk_S_d, tf_mode_cv_marker,
                                    functional_ops_cv_marker, const_data_cv_marker,
-                                   knots_cv_marker, coeff_cv_marker, spline_degree_cv_marker);
+                                   knots_cv_marker, coeff_cv_marker_eff, spline_degree_cv_marker);
         {
           real csk_S_raw_d = ((cvk_S_fwd_d - cvk_S_d) / eps_fd) / tmax;
           real cs_S_tot_raw_d = csm_S_raw + csk_S_raw_d;
@@ -386,11 +386,11 @@
           cs_S_tot_tf += marker_weights_eff[d]
             * apply_transform_scalar(cs_S_tot_raw_d, tf_mode_cs_tot,
                                      functional_ops_cs, const_data_cs,
-                                     knots_cs, coeff_cs, spline_degree_cs);
+                                     knots_cs, coeff_cs_eff, spline_degree_cs);
           cs_S_marker_tf += marker_weights_eff[d]
             * apply_transform_scalar(csk_S_raw_d, tf_mode_cs_marker,
                                      functional_ops_cs_marker, const_data_cs_marker,
-                                     knots_cs_marker, coeff_cs_marker, spline_degree_cs_marker);
+                                     knots_cs_marker, coeff_cs_marker_eff, spline_degree_cs_marker);
         }
       }
       cv_S_tot_tf /= D_mkrs;
@@ -405,7 +405,7 @@
         functional_ops_cs_mean,
         const_data_cs_mean,
         knots_cs_mean,
-        coeff_cs_mean,
+        coeff_cs_mean_eff,
         spline_degree_cs_mean
       );
       real eta_assoc_S = a_cv_total * cv_S_tot_tf

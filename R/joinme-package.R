@@ -4,7 +4,7 @@
 #'
 #' @details
 #' Key entry points are `joinme()` for model fitting, `predict()` for dynamic
-#' prediction, and `plot()` for visualization of predicted trajectories and
+#' prediction, and `plot()` for visualisation of predicted trajectories and
 #' survival curves.
 #'
 #' @name joinme-package

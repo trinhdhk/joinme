@@ -2,7 +2,7 @@
 % Please edit documentation in R/predict.R
 \name{summary.JoinMeDynPred}
 \alias{summary.JoinMeDynPred}
-\title{Summarize dynamic prediction outputs}
+\title{Summarise dynamic prediction outputs}
 \usage{
 \method{summary}{JoinMeDynPred}(object, ...)
 }
@@ -15,14 +15,14 @@
 A \code{summary_JoinMeDynPred} object containing tabular summaries.
 }
 \description{
-Summarizes a \code{JoinMeDynPred} object with detailed subject-level prediction
+Summarises a \code{JoinMeDynPred} object with detailed subject-level prediction
 summaries and diagnostics.
 
 The summary includes:
 \itemize{
 \item an overview table of row/subject counts by process,
 \item median survival time per subject (draw-wise crossing of \code{S(t)=0.5},
-summarized with estimate, uncertainty, and diagnostics),
+summarised with estimate, uncertainty, and diagnostics),
 \item predicted id-level random effects per subject (estimate, uncertainty,
 interval, and diagnostics),
 \item predicted marker-by-id random effects and covariance per subject when

@@ -26,7 +26,7 @@ articles:
   - joinme-model
   - joinme-theory
 reference:
-- title: Core modeling
+- title: Core modelling
   contents:
   - joinme-package
   - joinme
@@ -62,7 +62,7 @@ reference:
   contents:
   - parse_transform_expr
   - example_transform_spec
-  - penalized_ispline_transform
+  - penalised_ispline_transform
 - title: Misc
   contents:
   - bayes_factor

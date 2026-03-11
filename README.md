@@ -34,7 +34,7 @@ If you specify `formulaDist` for a distributional parameter (for example
 constant family-shared baseline for that parameter. In that case, summaries
 report regression terms (fixed/random effects) for the distributional model.
 
-This behavior is applied consistently across fitting, standata/stancode,
+This behaviour is applied consistently across fitting, standata/stancode,
 prediction, and summary extraction methods.
 
 ## Family-scoped `formulaDist` syntax

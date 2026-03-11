@@ -18,7 +18,7 @@
   * transformations where monotonicity is desired.
   *
   * Pre-computed I-spline basis coefficients are expected from R; this function
-  * evaluates a linear combination of basis functions (including penalized fits).
+  * evaluates a linear combination of basis functions (including penalised fits).
    *
    * @param x Input scalar
    * @param knots Sorted vector of internal knots in [x_min, x_max]

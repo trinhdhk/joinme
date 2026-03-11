@@ -2,7 +2,7 @@
 % Please edit documentation in R/methods.R
 \name{summary.JoinMeFit}
 \alias{summary.JoinMeFit}
-\title{Summarize a joinme object}
+\title{Summarise a joinme object}
 \usage{
 \method{summary}{JoinMeFit}(object, draws = NULL, seed = 1, digits = 3, include_corr = TRUE, ...)
 }

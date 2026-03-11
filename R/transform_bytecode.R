@@ -68,10 +68,10 @@
 ##' @export
 # File overview:
 # - Parse R expressions into portable bytecode programs.
-# - Validate bytecode stack behavior before handing programs to Stan.
+# - Validate bytecode stack behaviour before handing programs to Stan.
 # - Evaluate bytecode in R (shared by inverse-link and association transforms).
 parse_transform_expr <- function(expr) {
-  # Step 1: normalize any supported expression input into a language object.
+  # Step 1: normalise any supported expression input into a language object.
   expr_call <- .coerce_transform_expr(expr)
 
   # Step 2: emit bytecode instructions and constant payload.
@@ -96,7 +96,7 @@ parse_transform_expr <- function(expr) {
 ##' @keywords internal
 ##' Coerce input to a language object using base R parsing.
 .coerce_transform_expr <- function(expr) {
-  # Normalize input to a single language object
+  # Normalise input to a single language object
   if (rlang::is_quosure(expr)) {
     rhs <- rlang::expr_text(rlang::get_expr(expr))
     expr <- stats::as.formula(paste0("~ ", rhs))
@@ -316,17 +316,17 @@ verify_opcodes <- function(opcodes, const_data) {
 #' @return Numeric scalar result.
 #' @keywords internal
 eval_bytecode_scalar <- function(x, bytecode = NULL, const_data = numeric(), opcodes = NULL) {
-  # Step 1: normalize inputs and resolve legacy naming aliases.
+  # Step 1: normalise inputs and resolve legacy naming aliases.
   program <- .normalize_bytecode_program(bytecode = bytecode, opcodes = opcodes, const_data = const_data)
   code <- program$bytecode
   constants <- program$const_data
 
-  # Identity behavior for empty programs keeps backward compatibility.
+  # Identity behaviour for empty programs keeps backward compatibility.
   if (length(code) == 0L) {
     return(as.numeric(x))
   }
 
-  # Step 2: validate stack behavior before execution for reproducibility.
+  # Step 2: validate stack behaviour before execution for reproducibility.
   verify_opcodes(code, constants)
 
   # Step 3: execute the bytecode stack machine instruction by instruction.
@@ -419,12 +419,12 @@ eval_bytecode_vector <- function(x, bytecode = NULL, const_data = numeric(), opc
   vapply(as.numeric(x), eval_bytecode_scalar, numeric(1), bytecode = program$bytecode, const_data = program$const_data)
 }
 
-#' Normalize bytecode program inputs
+#' Normalise bytecode program inputs
 #'
 #' @param bytecode Integer bytecode sequence or `NULL`.
 #' @param opcodes Legacy alias for bytecode.
 #' @param const_data Numeric constant payload.
-#' @return List with normalized `bytecode` and `const_data`.
+#' @return List with normalised `bytecode` and `const_data`.
 #' @keywords internal
 .normalize_bytecode_program <- function(bytecode = NULL, opcodes = NULL, const_data = numeric()) {
   code <- bytecode

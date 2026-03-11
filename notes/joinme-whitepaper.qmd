@@ -1,5 +1,5 @@
 ---
-title: "The JoinME Framework: High-Dimensional Joint Modeling of Longitudinal and Time-to-Event Data"
+title: "The JoinME Framework: High-Dimensional Joint Modelling of Longitudinal and Time-to-Event Data"
 subtitle: "Methodological Foundations and Implementation Strategy"
 author: "JoinME Development Team"
 date: last-modified
@@ -18,18 +18,18 @@ format:
 
 # Executive Summary
 
-The **JoinME** (Joint Modeling Estimation) package represents a new generation of Bayesian joint models designed for the era of high-dimensional biomarkers. While traditional joint models typically handle one or two longitudinal markers, modern clinical datasets often feature dozens of biomarkers, competing risks, and complex nonlinear associations. Bridging this gap requires not just a statistical extension, but a fundamental re-architecting of the computational approach.
+The **JoinME** (Joint Modelling Estimation) package represents a new generation of Bayesian joint models designed for the era of high-dimensional biomarkers. While traditional joint models typically handle one or two longitudinal markers, modern clinical datasets often feature dozens of biomarkers, competing risks, and complex nonlinear associations. Bridging this gap requires not just a statistical extension, but a fundamental re-architecting of the computational approach.
 
 This white paper details the mathematical and algorithmic foundations of `joinme`. We describe a modular architecture that separates the longitudinal observation process from the survival mechanism, linked via a flexible association structure. Key innovations include:
 
-**High-Dimensional Random Effects**: A factor-analytic approach to covariance modeling (`joinme` covariance regression) that scales to many markers.
-**Regularized Association**: Hierarchical shrinkage priors (Ridge/Lasso type) that automatically select relevant markers from a large candidate set.
-**Computational Efficiency**: A massive parallelization strategy using `reduce_sum` for subject-level likelihood evaluations and efficient Gauss-Kronrod quadrature for survival integrals.
+**High-Dimensional Random Effects**: A factor-analytic approach to covariance modelling (`joinme` covariance regression) that scales to many markers.
+**Regularised Association**: Hierarchical shrinkage priors (Ridge/Lasso type) that automatically select relevant markers from a large candidate set.
+**Computational Efficiency**: A massive parallelisation strategy using `reduce_sum` for subject-level likelihood evaluations and efficient Gauss-Kronrod quadrature for survival integrals.
 **Flexible Semantics**: A domain-specific language for non-linear transformations (splines, functional compositions) defined at runtime without recompiling the Stan model.
 
 # Introduction
 
-Joint models for longitudinal and time-to-event data are the gold standard for analyzing clinical trials and cohorts where bio-markers are measured repeatedly over time (Rizopoulos 2012). By simultaneously modeling the longitudinal trajectory and the survival process, these models correct for measurement error and informative dropout, providing unbiased estimates of association and dynamic individual-level predictions.
+Joint models for longitudinal and time-to-event data are the gold standard for analysing clinical trials and cohorts where bio-markers are measured repeatedly over time (Rizopoulos 2012). By simultaneously modelling the longitudinal trajectory and the survival process, these models correct for measurement error and informative dropout, providing unbiased estimates of association and dynamic individual-level predictions.
 
 However, scaling these models challenges standard implementations:
 *   **The Curse of Dimensionality**: The number of random effects grows linearly with the number of markers ($D$), making the covariance matrix of size $(R \cdot D)^2$ computationally intractable to estimate.
@@ -40,7 +40,7 @@ However, scaling these models challenges standard implementations:
 
 # Methodological Framework
 
-The joint probability density for subject $i$ with longitudinal outcomes $\mathbf{y}_i$, event time $T_i$, and event indicator $\delta_i$ is factorized as:
+The joint probability density for subject $i$ with longitudinal outcomes $\mathbf{y}_i$, event time $T_i$, and event indicator $\delta_i$ is factorised as:
 
 $$ p(\mathbf{y}_i, T_i, \delta_i | \mathbf{\theta}) = \int p(\mathbf{y}_i | \mathbf{b}_i, \mathbf{\theta}_y) \cdot p(T_i, \delta_i | \mathbf{b}_i, \mathbf{\theta}_t) \cdot p(\mathbf{b}_i | \mathbf{\theta}_b) \, d\mathbf{b}_i $$
 
@@ -48,7 +48,7 @@ where $\mathbf{b}_i$ represents the latent random effects sharing information be
 
 ## The Multivariate Longitudinal Submodel
 
-We support a generalized linear mixed model (GLMM) framework allowing diverse distributions (Gaussian, Student-$t$, Bernoulli, Negative Binomial, etc.) for different markers. For observation $j$ of marker $d$ on subject $i$ at time $t_{ij}$:
+We support a generalised linear mixed model (GLMM) framework allowing diverse distributions (Gaussian, Student-$t$, Bernoulli, Negative Binomial, etc.) for different markers. For observation $j$ of marker $d$ on subject $i$ at time $t_{ij}$:
 
 $$ g(\mathbb{E}[y_{idj}]) = \eta_{id}(t_{ij}) = \mathbf{x}_{id}(t_{ij})^\top \beta + \mathbf{z}_{id}(t_{ij})^\top \mathbf{b}_{id} $$
 
@@ -87,7 +87,7 @@ fitted and predicted objects:
 
 ## Family-Scoped Distributional Regression
 
-Distributional parameters can be modeled with family-scoped formulas. A formula
+Distributional parameters can be modelled with family-scoped formulas. A formula
 without scope (for example, `sigma ~ 1 + time`) applies to all rows where
 `sigma` is defined. A scoped formula using brackets,
 `sigma[family=student_t] ~ 1 + time`, applies only to rows belonging to that
@@ -104,12 +104,12 @@ family.
 
 ## The Survival Submodel with Competing Risks
 
-The hazard function for the $k$-th competing risk is modeled as:
+The hazard function for the $k$-th competing risk is modelled as:
 
 $$ \lambda_k(t | \mathcal{H}_i(t)) = h_{0k}(t) \exp\left( \mathbf{Î³}_k^\top \mathbf{W}_i + \sum_{q=1}^Q f_q(\mathcal{A}_{iq}(t), \alpha_{kq}) \right) $$
 
 where:
-*   $h_{0k}(t)$: Baseline hazard, modeled flexibly using B-splines.
+*   $h_{0k}(t)$: Baseline hazard, modelled flexibly using B-splines.
 *   $\mathbf{W}_i$: Baseline covariates.
 *   $\mathcal{A}_{iq}(t)$: Association features derived from the longitudinal history.
 *   $f_q(\cdot)$: Transformation function (possibly nonlinear).
@@ -148,12 +148,12 @@ $$
 This avoids conflating aggregation and nonlinearity, and is equivalent to
 transforming an already-averaged marker value only when $f$ is linear.
 
-# Bayesian Implementation and Regularization
+# Bayesian Implementation and Regularisation
 
-Valid inference in high dimensions requires principled priors. `JoinME` employs a hierarchy of regularization:
+Valid inference in high dimensions requires principled priors. `JoinME` employs a hierarchy of regularisation:
 
 ## Sparse Association Priors
-When $D$ is large, we use shrinkage priors on non-centered association latents
+When $D$ is large, we use shrinkage priors on non-centred association latents
 $z_{\alpha,d}$, with $\alpha_d = z_{\alpha,d}\,\sigma_{\alpha,d}$:
 
 *   **Bayesian Lasso (Laplace)**: $z_{\alpha,d} \sim \text{Laplace}(0, \lambda)$. Promotes sparsity (shrinking irrelevant markers toward zero).
@@ -162,7 +162,7 @@ $z_{\alpha,d}$, with $\alpha_d = z_{\alpha,d}\,\sigma_{\alpha,d}$:
 This allows the model to "select" relevant biomarkers automatically.
 
 For marker-weight-involving channels (`cv_total`, `cs_total`, `cv_marker`,
-`cs_marker`), identifiability is stabilized by constraining only the first
+`cs_marker`), identifiability is stabilised by constraining only the first
 active latent in that order to be non-negative; remaining active channels remain
 signed.
 
@@ -185,10 +185,10 @@ $$
 $$
 
 The $\omega^{(0)}$ offsets act as priors that shift the latent weight distribution,
-and no additional normalization is applied.
+and no additional normalisation is applied.
 
-## Regularizing Smoothness
-For B-spline baseline hazards and penalized I-spline associations, we impose a second-order random walk prior on spline coefficients (excluding the intercept):
+## Regularising Smoothness
+For B-spline baseline hazards and penalised I-spline associations, we impose a second-order random walk prior on spline coefficients (excluding the intercept):
 
 $$ \gamma_j - 2\gamma_{j-1} + \gamma_{j-2} \sim \mathcal{N}(0, \sigma_{smooth}) $$
 
@@ -203,7 +203,7 @@ inside $\gamma_{bs}$; there is no separate baseline-intercept parameter.
 
 # Advanced Architecture: Covariance Regression
 
-A unique feature of `joinme` is the model for the covariance matrix itself. The Cholesky factor $L_i$ of the random effect covariance $\Sigma_{idm}$ is not static but modeled as a function of covariates and a latent volatility effect $u_{L,i}$:
+A unique feature of `joinme` is the model for the covariance matrix itself. The Cholesky factor $L_i$ of the random effect covariance $\Sigma_{idm}$ is not static but modelled as a function of covariates and a latent volatility effect $u_{L,i}$:
 
 $$ L_{i}[r,c] = \begin{cases} \text{softplus}(\mu_{r,c} + \beta_{r,c}^\top X_i + \lambda_{r,c} u_{L,i}) & \text{if } r=c \\ \mu_{r,c} + \beta_{r,c}^\top X_i + \lambda_{r,c} u_{L,i} & \text{if } r \neq c \end{cases} $$
 
@@ -240,7 +240,7 @@ Under competing risks, this procedure yields the **overall event-free survival**
 
 # Conclusion
 
-`JoinME` transforms joint modeling from a specialized technique for single-marker analysis into a robust, scalable engine for high-dimensional biomedical data. By combining factor-analytic random effects, shrinkage priors, and modern parallel computing, it enables researchers to discover complex associations in dense longitudinal datasets that were previously computationally inaccessible.
+`JoinME` transforms joint modelling from a specialised technique for single-marker analysis into a robust, scalable engine for high-dimensional biomedical data. By combining factor-analytic random effects, shrinkage priors, and modern parallel computing, it enables researchers to discover complex associations in dense longitudinal datasets that were previously computationally inaccessible.
 
 ***
 

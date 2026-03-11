@@ -113,11 +113,11 @@
   // Goal:
   // - Allow positive and negative marker contributions.
   // - Keep perturbation model simple and directly interpretable.
-  // - No normalization is applied; raw weights are used directly.
+  // - No normalisation is applied; raw weights are used directly.
   // Rule:
   // - Start from signed base weights (provided from standata) as a prior offset.
   // - If estimation is enabled, add a signed standard-normal perturbation z.
-  // - Map to effective weights via w_raw (no normalization).
+  // - Map to effective weights via w_raw (no normalisation).
   // - Interpret marker_weights_eff as marker-intensity multipliers for association.
   vector[D] marker_weights_eff; // effective signed marker weights
   {
@@ -126,6 +126,62 @@
     } else {
       marker_weights_eff = marker_weights;
     }
+  }
+
+  /* -------------------- effective spline coefficients for transforms */
+  // For Stan-estimated penalised splines, we estimate only the SHAPE here.
+  // We anchor the transform so:
+  // - the first coefficient is 0,
+  // - the last coefficient is 1,
+  // - all intermediate coefficients are monotone increasing.
+  // This avoids confounding transform scale with the association coefficient.
+  // Implementation detail:
+  // - we build positive increments with `softmax()`,
+  // - those increments sum to 1 exactly,
+  // - cumulative sums therefore give a stable unit-span monotone curve
+  //   without any divide-by-a-nearly-zero normalisation step.
+  vector[n_coeff_cv] coeff_cv_eff = coeff_cv;
+  vector[n_coeff_cs] coeff_cs_eff = coeff_cs;
+  vector[n_coeff_corr] coeff_corr_eff = coeff_corr;
+  vector[n_coeff_cv_mean] coeff_cv_mean_eff = coeff_cv_mean;
+  vector[n_coeff_cv_marker] coeff_cv_marker_eff = coeff_cv_marker;
+  vector[n_coeff_cs_mean] coeff_cs_mean_eff = coeff_cs_mean;
+  vector[n_coeff_cs_marker] coeff_cs_marker_eff = coeff_cs_marker;
+
+  if (estimate_spline_cv == 1 && n_coeff_cv > 1 && n_free_spline_cv == n_coeff_cv - 1) {
+    vector[n_coeff_cv - 1] delta = softmax(z_spline_cv);
+    coeff_cv_eff[1] = 0;
+    for (j in 2:n_coeff_cv) coeff_cv_eff[j] = coeff_cv_eff[j - 1] + delta[j - 1];
+  }
+  if (estimate_spline_cs == 1 && n_coeff_cs > 1 && n_free_spline_cs == n_coeff_cs - 1) {
+    vector[n_coeff_cs - 1] delta = softmax(z_spline_cs);
+    coeff_cs_eff[1] = 0;
+    for (j in 2:n_coeff_cs) coeff_cs_eff[j] = coeff_cs_eff[j - 1] + delta[j - 1];
+  }
+  if (estimate_spline_corr == 1 && n_coeff_corr > 1 && n_free_spline_corr == n_coeff_corr - 1) {
+    vector[n_coeff_corr - 1] delta = softmax(z_spline_corr);
+    coeff_corr_eff[1] = 0;
+    for (j in 2:n_coeff_corr) coeff_corr_eff[j] = coeff_corr_eff[j - 1] + delta[j - 1];
+  }
+  if (estimate_spline_cv_mean == 1 && n_coeff_cv_mean > 1 && n_free_spline_cv_mean == n_coeff_cv_mean - 1) {
+    vector[n_coeff_cv_mean - 1] delta = softmax(z_spline_cv_mean);
+    coeff_cv_mean_eff[1] = 0;
+    for (j in 2:n_coeff_cv_mean) coeff_cv_mean_eff[j] = coeff_cv_mean_eff[j - 1] + delta[j - 1];
+  }
+  if (estimate_spline_cv_marker == 1 && n_coeff_cv_marker > 1 && n_free_spline_cv_marker == n_coeff_cv_marker - 1) {
+    vector[n_coeff_cv_marker - 1] delta = softmax(z_spline_cv_marker);
+    coeff_cv_marker_eff[1] = 0;
+    for (j in 2:n_coeff_cv_marker) coeff_cv_marker_eff[j] = coeff_cv_marker_eff[j - 1] + delta[j - 1];
+  }
+  if (estimate_spline_cs_mean == 1 && n_coeff_cs_mean > 1 && n_free_spline_cs_mean == n_coeff_cs_mean - 1) {
+    vector[n_coeff_cs_mean - 1] delta = softmax(z_spline_cs_mean);
+    coeff_cs_mean_eff[1] = 0;
+    for (j in 2:n_coeff_cs_mean) coeff_cs_mean_eff[j] = coeff_cs_mean_eff[j - 1] + delta[j - 1];
+  }
+  if (estimate_spline_cs_marker == 1 && n_coeff_cs_marker > 1 && n_free_spline_cs_marker == n_coeff_cs_marker - 1) {
+    vector[n_coeff_cs_marker - 1] delta = softmax(z_spline_cs_marker);
+    coeff_cs_marker_eff[1] = 0;
+    for (j in 2:n_coeff_cs_marker) coeff_cs_marker_eff[j] = coeff_cs_marker_eff[j - 1] + delta[j - 1];
   }
 
   /* -------------------- marker averages for survival association (unweighted mean across markers) */
@@ -157,7 +213,7 @@
     wbar_i[i] = L_i[i] * zbar[i];
   
   /* -------------------- Effective association coefficients (flags applied) */
-  // Non-centered association construction with flexible sign constraints:
+  // Non-centred association construction with flexible sign constraints:
   // if any marker-weight-involving association is active, only the first
   // active latent in the order (cv_total, cs_total, cv_marker, cs_marker)
   // is constrained positive; all others remain unconstrained.

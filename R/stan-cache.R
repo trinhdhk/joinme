@@ -2,7 +2,7 @@
 #' @title Stan Model Caching Helpers
 #'
 #' @description
-#' These helpers centralize compiled Stan model caching for both CmdStanR
+#' These helpers centralise compiled Stan model caching for both CmdStanR
 #' and RStan. The goal is to keep compilation deterministic, reusable, and
 #' aggressively documented for maintenance and debugging.
 #'
@@ -120,7 +120,7 @@ NULL
 #' @keywords internal
 .stan_cache_dir <- function() {
   # Canonical per-user cache directory for compiled Stan models
-  # Use the standardized per-package cache location for portability.
+  # Use the standardised per-package cache location for portability.
   dir <- tools::R_user_dir("joinme", "cache")
   # Ensure the directory exists before we return it.
   if (!dir.exists(dir)) {

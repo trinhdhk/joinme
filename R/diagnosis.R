@@ -19,8 +19,8 @@ NULL
 #' Returns a compact diagnostics table for fitted (`JoinMeFit`) and dynamic
 #' prediction (`JoinMeDynPred`) objects.
 #'
-#' For `JoinMeFit`, diagnostics summarize the Stan sampler run. For
-#' `JoinMeDynPred`, diagnostics summarize posterior-draw quality for predicted
+#' For `JoinMeFit`, diagnostics summarise the Stan sampler run. For
+#' `JoinMeDynPred`, diagnostics summarise posterior-draw quality for predicted
 #' quantities and are aligned to the same metric schema used for `JoinMeFit`.
 #'
 #' @param object A joinme object.
@@ -239,7 +239,7 @@ bayes_factor <- function(fit1, fit2, ...) {
 #' @return A list with observation-level summaries and overall diagnostics.
 #' @export
 pp_check.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, ci_level = 0.95, n_samples = 200, seed = 123, plot = FALSE,...) {
-	# Workflow: run posterior_epred -> summarize coverage and RMSE
+	# Workflow: run posterior_epred -> summarise coverage and RMSE
 	assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
 	if (is.null(newdataLong) && is.null(newdataEvent)) {
 		if (!is.null(object$dataLong) && !is.null(object$dataEvent)) {

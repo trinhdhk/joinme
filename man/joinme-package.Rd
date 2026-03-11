@@ -10,7 +10,7 @@ Joint Mixed-Effects (JoinME) Model for Multivariate Longitudinal and Survival Da
 }
 \details{
 Key entry points are \code{joinme()} for model fitting, \code{predict()} for dynamic
-prediction, and \code{plot()} for visualization of predicted trajectories and
+prediction, and \code{plot()} for visualisation of predicted trajectories and
 survival curves.
 }
 \references{

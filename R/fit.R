@@ -27,7 +27,7 @@
 #' `fixed_marker_weights = FALSE`, signed perturbations are estimated around base
 #' weights using `marker_weights + z_marker_weights` with
 #' `z_marker_weights ~ N(0, 1)`. The effective marker intensities are used directly
-#' from `w_raw` without additional normalization and scale the association contributions.
+#' from `w_raw` without additional normalisation and scale the association contributions.
 #'
 #' Formula-scoped subject weighting is supported in random-effect grouping terms via
 #' `weighted(group, weights = <column>)`. For example:
@@ -42,7 +42,7 @@
 #' Association coefficients are denoted with the `alpha_` prefix to match joint-model
 #' conventions and to avoid confusion with the linear predictor eta used throughout
 #' the longitudinal and survival submodels. Total, marker, and mean associations use
-#' a positive non-centered parameterization: `alpha = z_alpha * sd_alpha`, which
+#' a positive non-centred parameterisation: `alpha = z_alpha * sd_alpha`, which
 #' stabilizes sampling while preserving the intended sign structure via marker weights.
 #'
 #' The typical workflow is:
@@ -56,6 +56,40 @@
 #' `list(cv_total = list(type = "functional", expr = ~ log1p(x)),
 #'      cs_total = list(type = "identity"),
 #'      corr = list(type = "pwlin", x = c(-2, 0, 2), y = c(0.2, 1, 0.2)))`
+#'
+#' Transformation parameterisation cheat sheet:
+#' - Omitted term, `NULL`, or `list(type = "identity")`:
+#'   identity transform (default).
+#' - `list(type = "functional", expr = ~ log1p(x))`:
+#'   functional transform; `expr` is required and has no additional defaults.
+#' - `list(type = "ispline", knots = c(-1, 0, 1), coeff = c(0, 0.3, 0.8, 1.1, 1.3), degree = 3)`:
+#'   monotone I-spline; `knots` and `coeff` are required, `degree` defaults to `3`.
+#' - `list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), y = exp(seq(-2, 2, length.out = 50)), n_knots = 6, degree = 3, lambda = 1)`:
+#'   penalised monotone I-spline in legacy plug-in mode; defaults are
+#'   `n_knots = 6`, `degree = 3`, `lambda = 1` when those values are omitted.
+#' - `list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), n_knots = 6, degree = 3, lambda = 1)`:
+#'   penalised monotone I-spline with Stan-estimated coefficients; if `knots`
+#'   are omitted they are derived from `x` quantiles using `n_knots = 6` by default.
+#' - `list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))`:
+#'   piecewise-linear transform; both `x` and `y` are required and there are no
+#'   additional defaults.
+#'
+#' For monotone spline transforms:
+#' - `type = "ispline"`: provide `knots` and `coeff` directly (plus optional
+#'   `degree`); `x`/`y`/`lambda` are not used.
+#' - `type = "ispline_penalised"` (alias: `"ispline_penalized"`): provide
+#'   spline structure through `knots` (or `n_knots`) and smoothness penalty `lambda`.
+#'   - If `y` is supplied, `joinme` first fits the monotone spline to training
+#'     pairs `(x, y)` in R and passes fixed coefficients to Stan. These plug-in
+#'     coefficients use the same anchored convention as the Stan-estimated path:
+#'     first coefficient `0`, last coefficient `1`.
+#'   - If `y` is omitted, Stan estimates the monotone spline coefficients
+#'     directly.
+#' - `x`: raw association-feature values used either to define training pairs or
+#'   to help derive knot locations.
+#' - `y`: optional target transformed values at those `x` points. Supplying `y`
+#'   activates the legacy plug-in fit; omitting it activates Stan estimation.
+#' - `lambda`: smoothness control (larger = smoother transform).
 #'
 #' Additional arguments are forwarded to `joinme_standata()` (e.g., `assoc`,
 #' `basehaz`, `basehaz_degree`, `n_knots`, `time_var`, and `shrinkage`). Use
@@ -121,7 +155,8 @@
 #'   Supported links/inverse-links: `identity`, `log`, `logit`, `probit`, `exp`.
 #' @param transforms Transformation specifications for association terms
 #'   (cv_total, cs_total, corr). Each entry is a list with a `type` and fields
-#'   required by that type.
+#'   required by that type. See Details for `ispline` and
+#'   `ispline_penalised` semantics.
 #' @param priors Named list for priors: list(beta = ..., alpha = ..., lkj = ...).
 #' @param fixed_marker_weights Logical; if TRUE, marker weights are fixed at
 #'   provided `marker_weights` (or defaults). If FALSE, marker-weight perturbations

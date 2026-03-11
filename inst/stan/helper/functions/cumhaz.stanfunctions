@@ -34,7 +34,7 @@ vector gk_expand_weights(vector wi_half) {
     wi_full[n_half - 1 + j] = wi_half[j];
   }
 
-  // Scale to [0, 1] and normalize so weights sum to 1.
+  // Scale to [0, 1] and normalise so weights sum to 1.
   wi_full = 0.5 * wi_full;
   return wi_full / sum(wi_full);
 }

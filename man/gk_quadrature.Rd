@@ -15,7 +15,7 @@ A named list with components:
 \\describe{
 \\item{n_gk}{Integer total node count.}
 \\item{nodes}{Numeric vector of nodes on \verb{[0, 1]}.}
-\\item{weights}{Numeric vector of normalized weights summing to \code{1}.}
+\\item{weights}{Numeric vector of normalised weights summing to \code{1}.}
 \\item{panels}{Always \code{1L} (single fixed rule).}
 \\item{rule}{Character rule label (\code{"gk7"}, \code{"gk15"}, \code{"gk31"}, \code{"gk41"}, \code{"gk51"}, or \code{"gk61"}).}
 }

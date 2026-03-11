@@ -106,8 +106,8 @@ If multiple outcomes: list with "longitudinal", "survival", and/or "cumhaz" elem
 or a single combined plot if \code{combined = TRUE}.
 }
 \description{
-Produces publication-ready ggplot2 visualizations of dynamic predictions from
-a joint model with flexible customization of longitudinal trajectories and
+Produces publication-ready ggplot2 visualisations of dynamic predictions from
+a joint model with flexible customisation of longitudinal trajectories and
 conditional survival curves.
 }
 \details{

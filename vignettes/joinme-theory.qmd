@@ -46,8 +46,8 @@ and the main likelihood is evaluated with reduce_sum for within-chain parallelis
 
 # Introduction
 
-Joint modeling of longitudinal and survival data is a standard approach for
-analyzing time-dependent covariates measured with error [1]. In many clinical and
+Joint modelling of longitudinal and survival data is a standard approach for
+analysing time-dependent covariates measured with error [1]. In many clinical and
 observational settings, subject status is monitored via multiple biomarkers
 (for example, blood pressure, bilirubin, cognitive scores) alongside a terminal
 event (for example, death, dropout). Standard approaches often face two
@@ -60,11 +60,11 @@ limitations:
 linear predictor and a flexible distributional regression framework. This
 vignette outlines the statistical theory underpinning the package, using
 notation and narrative that are intended to be accessible to applied
-researchers without extensive prior exposure to joint modeling.
+researchers without extensive prior exposure to joint modelling.
 
 # The Multivariate Longitudinal Submodel
 
-Let $\mathcal{D}_i = \{y_{id}(t_{ij}) : j = 1, \dots, n_{id}, d = 1, \dots, D\}$ denote the observed longitudinal data for subject $i$, where $y_{id}(t)$ is the response for marker $d$ at time $t$. We assume generalized linear mixed models (GLMMs) for each marker, linked via a shared latent structure.
+Let $\mathcal{D}_i = \{y_{id}(t_{ij}) : j = 1, \dots, n_{id}, d = 1, \dots, D\}$ denote the observed longitudinal data for subject $i$, where $y_{id}(t)$ is the response for marker $d$ at time $t$. We assume generalised linear mixed models (GLMMs) for each marker, linked via a shared latent structure.
 
 ## Structural Decomposition of the Linear Predictor
 
@@ -100,7 +100,7 @@ $$
 -   **Cumulative Logit**: For ordinal outcomes.
 
 Furthermore, distributional parameters (for example, residual scale $\sigma$)
-can themselves be modeled as functions of covariates (distributional
+can themselves be modelled as functions of covariates (distributional
 regression):
 $$
 \log(\sigma_{id}(t)) = \mathbf{x}_{\sigma, id}(t)^\top \boldsymbol{\beta}_\sigma
@@ -127,7 +127,7 @@ where $\log(\boldsymbol{\tau}_i) = \mathbf{X}_{cov, i} \boldsymbol{\beta}_{\tau}
 
 In the Stan implementation, the subject-specific covariance matrix is built from
 its Cholesky factor $L_i$. Each unique lower-triangular element of $L_i$ is
-modeled through a regression with a subject-level latent effect:
+modelled through a regression with a subject-level latent effect:
 
 $$
 \ell_{im} = \alpha_m + \mathbf{x}_{cov,i}^\top \boldsymbol{\beta}_m + \lambda_m u_{L,i},
@@ -147,7 +147,7 @@ latent variability in the marker-by-subject covariance structure.
 
 # The Survival Submodel
 
-The risk of the terminal event is modeled using a proportional hazards structure. Let $T_i^*$ be the true event time and $C_i$ the censoring time; we observe $T_i = \min(T_i^*, C_i)$ and $\delta_i = \mathbb{I}(T_i^* \le C_i)$.
+The risk of the terminal event is modelled using a proportional hazards structure. Let $T_i^*$ be the true event time and $C_i$ the censoring time; we observe $T_i = \min(T_i^*, C_i)$ and $\delta_i = \mathbb{I}(T_i^* \le C_i)$.
 
 The hazard function $\lambda_i(t)$ at time $t$ is given by:
 
@@ -156,7 +156,7 @@ $$
 $$
 
 ## Baseline Hazard $\lambda_0(t)$
-The baseline hazard is modeled flexibly using B-splines (or P-splines):
+The baseline hazard is modelled flexibly using B-splines (or P-splines):
 $$
 \log \lambda_0(t) = \sum_{l=1}^L \phi_l B_l(t)
 $$
@@ -164,7 +164,7 @@ where $B_l(t)$ are B-spline basis functions.
 
 ## Association Structure
 The term $\mathcal{H}_{i}(t) = \{ \eta_{id}(s) : s \le t, d=1\dots D \}$
-represents the history of the longitudinal processes. `joinme` summarizes this
+represents the history of the longitudinal processes. `joinme` summarises this
 history using a small set of interpretable features:
 
 - **Current value (CV)**: the value of the latent longitudinal linear predictor
@@ -218,7 +218,7 @@ overfitting when $D$ is large.
 - **Marker weights**: when estimated, `joinme` uses latent additive perturbations
   $\,w^{raw} = w^{(0)} + z_w$ with $z_w \sim \mathcal{N}(0, I)$ and uses the
   resulting weights directly in marker-aggregated association terms.
-- **CV/CS total and marker coefficients**: non-centered priors
+- **CV/CS total and marker coefficients**: non-centred priors
   $\alpha = z_{\alpha} \cdot sd_{\alpha}$ with a single sign anchor for
   identifiability when marker-weight channels are active. Specifically, only the
   first active latent in the order `cv_total`, `cs_total`, `cv_marker`,
@@ -260,7 +260,7 @@ $$
 `joinme` compiles this model to a Stan program. Key efficiency features include:
 
 1.  **Analytic Gradient of the Log-Likelihood**: Stan's autodiff engine handles the complex chain rule derivatives required for the joint likelihood.
-2.  **Multithreading via `reduce_sum`**: The likelihood calculation is parallelized over subjects ("grainsize"). This allows linear scaling with the number of available CPU cores.
+2.  **Multithreading via `reduce_sum`**: The likelihood calculation is parallelised over subjects ("grainsize"). This allows linear scaling with the number of available CPU cores.
 3.  **Gauss-Kronrod Quadrature**: The survival integral
   $\int_0^{T_i} \lambda_i(s) ds$ is approximated using a Gauss-Kronrod rule
   (default 15-point, configurable) for high accuracy at modest computational cost.
@@ -270,29 +270,29 @@ Default priors are weakly informative and aligned with the Stan implementation:
 
 - **Fixed effects and distributional regressions**: regression coefficients for
   longitudinal and survival covariates use Student-$t$ priors with 6 degrees of
-  freedom, centered at 0, with user-specified or default scales. The heavier
-  tails stabilize inference while keeping weak regularization.
+  freedom, centred at 0, with user-specified or default scales. The heavier
+  tails stabilise inference while keeping weak regularisation.
 - **Association coefficients**: CV/CS total, mean, and marker coefficients use
-  a non-centered parameterization $\alpha = z_{\alpha} \cdot sd_{\alpha}$. For
+  a non-centred parameterisation $\alpha = z_{\alpha} \cdot sd_{\alpha}$. For
   marker-weight-involving channels (`cv_total`, `cs_total`, `cv_marker`,
   `cs_marker`), only the first active latent is sign-anchored non-negative to
   improve identifiability; other channels remain free to be positive or negative.
 - **Marker weights**: when estimated, marker-weight perturbations use
   standard normal priors in additive latent form around user-supplied base
   weights, and the resulting weights enter marker-aggregated association terms
-  without additional normalization.
+  without additional normalisation.
 - **Random-effect scales**: subject, marker, and marker-by-subject standard
   deviations use half-normal priors on the original scale for weakly informative
   positivity constraints.
 - **Random-effect correlations**: correlation matrices use an LKJ-Cholesky prior
-  with concentration parameter $\eta$, allowing mild regularization toward
+  with concentration parameter $\eta$, allowing mild regularisation toward
   identity while remaining flexible.
 - **Baseline hazard**: the baseline level is encoded by the intercept basis
   column in `bs_gamma_c` (there is no standalone `log_h0_intercept` parameter).
-  Spline coefficients are penalized via second-difference priors excluding that
+  Spline coefficients are penalised via second-difference priors excluding that
   intercept-basis column, providing smoothness control for the baseline hazard.
-- **Penalized transformations**: when `type = "ispline_penalized"`, the I-spline
-  coefficients use a smoothness penalty (second differences) to stabilize
+- **Penalised transformations**: when `type = "ispline_penalised"`, the I-spline
+  coefficients use a smoothness penalty (second differences) to stabilise
   nonlinear association transforms in sparse time regions.
 - **Family-specific parameters**: scale parameters use exponential priors,
   Student-$t$ degrees of freedom use gamma priors, and skewness parameters on

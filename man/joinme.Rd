@@ -98,7 +98,8 @@ Supported links/inverse-links: \code{identity}, \code{log}, \code{logit}, \code{
 
 \item{transforms}{Transformation specifications for association terms
 (cv_total, cs_total, corr). Each entry is a list with a \code{type} and fields
-required by that type.}
+required by that type. See Details for \code{ispline} and
+\code{ispline_penalised} semantics.}
 
 \item{priors}{Named list for priors: list(beta = ..., alpha = ..., lkj = ...).}
 
@@ -120,14 +121,6 @@ Transformations are provided through a single \code{transforms} argument.
 Each element (cv_total, cs_total, corr) is defined as a list specifying a type
 and type-specific fields (see \code{build_standata_transforms()} for details).
 
-For monotone spline transforms:
-\itemize{
-\item \code{type = "ispline"}: provide \code{knots} and \code{coeff} directly (plus optional \code{degree}); \code{x}/\code{y}/\code{lambda} are not used.
-\item \code{type = "ispline_penalized"}: provide training pairs \code{x} and \code{y}, and smoothness penalty \code{lambda}.
-\item \code{x}: raw association-feature values; \code{y}: target transformed values at those \code{x} points.
-\item \code{lambda}: smoothness control (larger = smoother transform).
-}
-
 Distributional regression can be specified in two equivalent forms:
 \enumerate{
 \item A named list with RHS-only formulas, e.g. \code{list(sigma = ~ 1 + time)}.
@@ -142,7 +135,7 @@ for both current value (CV) and current slope (CS) association components. When
 \code{fixed_marker_weights = FALSE}, signed perturbations are estimated around base
 weights using \code{marker_weights + z_marker_weights} with
 \code{z_marker_weights ~ N(0, 1)}. The effective marker intensities are used directly
-from \code{w_raw} without additional normalization and scale the association contributions.
+from \code{w_raw} without additional normalisation and scale the association contributions.
 
 Formula-scoped subject weighting is supported in random-effect grouping terms via
 \verb{weighted(group, weights = <column>)}. For example:
@@ -159,7 +152,7 @@ survival contributions. Weight columns must be finite and strictly positive.
 Association coefficients are denoted with the \code{alpha_} prefix to match joint-model
 conventions and to avoid confusion with the linear predictor eta used throughout
 the longitudinal and survival submodels. Total, marker, and mean associations use
-a positive non-centered parameterization: \code{alpha = z_alpha * sd_alpha}, which
+a positive non-centred parameterisation: \code{alpha = z_alpha * sd_alpha}, which
 stabilizes sampling while preserving the intended sign structure via marker weights.
 
 The typical workflow is:
@@ -173,6 +166,46 @@ The typical workflow is:
 
 Example:
 \code{list(cv_total = list(type = "functional", expr = ~ log1p(x)), cs_total = list(type = "identity"), corr = list(type = "pwlin", x = c(-2, 0, 2), y = c(0.2, 1, 0.2)))}
+
+Transformation parameterisation cheat sheet:
+\itemize{
+\item Omitted term, \code{NULL}, or \code{list(type = "identity")}:
+identity transform (default).
+\item \code{list(type = "functional", expr = ~ log1p(x))}:
+functional transform; \code{expr} is required and has no additional defaults.
+\item \code{list(type = "ispline", knots = c(-1, 0, 1), coeff = c(0, 0.3, 0.8, 1.1, 1.3), degree = 3)}:
+monotone I-spline; \code{knots} and \code{coeff} are required, \code{degree} defaults to \code{3}.
+\item \code{list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), y = exp(seq(-2, 2, length.out = 50)), n_knots = 6, degree = 3, lambda = 1)}:
+penalised monotone I-spline in legacy plug-in mode; defaults are
+\code{n_knots = 6}, \code{degree = 3}, \code{lambda = 1} when those values are omitted.
+\item \code{list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), n_knots = 6, degree = 3, lambda = 1)}:
+penalised monotone I-spline with Stan-estimated coefficients; if \code{knots}
+are omitted they are derived from \code{x} quantiles using \code{n_knots = 6} by default.
+\item \code{list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))}:
+piecewise-linear transform; both \code{x} and \code{y} are required and there are no
+additional defaults.
+}
+
+For monotone spline transforms:
+\itemize{
+\item \code{type = "ispline"}: provide \code{knots} and \code{coeff} directly (plus optional
+\code{degree}); \code{x}/\code{y}/\code{lambda} are not used.
+\item \code{type = "ispline_penalised"} (alias: \code{"ispline_penalized"}): provide
+spline structure through \code{knots} (or \code{n_knots}) and smoothness penalty \code{lambda}.
+\itemize{
+\item If \code{y} is supplied, \code{joinme} first fits the monotone spline to training
+pairs \verb{(x, y)} in R and passes fixed coefficients to Stan. These plug-in
+coefficients use the same anchored convention as the Stan-estimated path:
+first coefficient \code{0}, last coefficient \code{1}.
+\item If \code{y} is omitted, Stan estimates the monotone spline coefficients
+directly.
+}
+\item \code{x}: raw association-feature values used either to define training pairs or
+to help derive knot locations.
+\item \code{y}: optional target transformed values at those \code{x} points. Supplying \code{y}
+activates the legacy plug-in fit; omitting it activates Stan estimation.
+\item \code{lambda}: smoothness control (larger = smoother transform).
+}
 
 Additional arguments are forwarded to \code{joinme_standata()} (e.g., \code{assoc},
 \code{basehaz}, \code{basehaz_degree}, \code{n_knots}, \code{time_var}, and \code{shrinkage}). Use

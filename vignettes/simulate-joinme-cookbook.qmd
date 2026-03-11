@@ -33,7 +33,7 @@ library(survival)
 # Purpose
 
 This cookbook gives practical, copy-paste patterns for `simulate_joinme()`.
-It is organized by common simulation goals:
+It is organised by common simulation goals:
 
 - selecting association channels (`assoc`, `formulaAssoc`, `assoc_coefs`),
 - configuring random effects (`re_params`),
@@ -143,20 +143,34 @@ sim <- simulate_joinme(
 )
 ```
 
-## I-spline and penalized I-spline arguments (`x`, `y`, `lambda`)
+## I-spline and penalised I-spline arguments (`x`, `y`, `lambda`)
+
+### Quick defaults by transformation type
+
+- `identity`: `list(type = "identity")`, or omit the term entirely.
+- `functional`: `list(type = "functional", expr = ~ log1p(x))`; `expr` is required.
+- `ispline`: `list(type = "ispline", knots = ..., coeff = ..., degree = 3)`;
+  default `degree = 3`.
+- `ispline_penalised`: `list(type = "ispline_penalised", ..., n_knots = 6, degree = 3, lambda = 1)`;
+  defaults are `n_knots = 6`, `degree = 3`, `lambda = 1`.
+- `pwlin`: `list(type = "pwlin", x = ..., y = ...)`; no additional defaults.
 
 For monotone spline transforms, there are two modes:
 
 - `type = "ispline"`: you provide the spline shape directly via
   `knots` + `coeff` (+ optional `degree`).
-- `type = "ispline_penalized"`: you provide training pairs `x`, `y`, and the
-  package fits monotone spline coefficients for you.
+- `type = "ispline_penalised"`: you provide `knots` (or `n_knots`) and
+  `lambda`. If you also provide `y`, the package fits a monotone spline to the
+  training pairs `(x, y)` in R. If you omit `y`, Stan estimates the monotone
+  spline coefficients directly.
 
-Meaning of arguments in `ispline_penalized`:
+Meaning of arguments in `ispline_penalised`:
 
 - `x`: input values on the raw association-feature scale (for example raw
-  `cv_total` values).
-- `y`: desired transformed output at those `x` values (same length as `x`).
+  `cv_total` values). These are used either as training inputs or to help pick
+  knot locations.
+- `y`: optional desired transformed output at those `x` values. Supplying `y`
+  uses the legacy plug-in fit; omitting it uses Stan estimation.
 - `lambda`: smoothness penalty strength for the fitted spline coefficients.
 
 Interpretation of `lambda`:
@@ -165,6 +179,19 @@ Interpretation of `lambda`:
 - larger `lambda` (e.g., `1` to `10`) = smoother, less wiggly curve.
 
 ```{r}
+# Identity: default when omitted
+tf_identity <- list(
+  cv_total = list(type = "identity")
+)
+
+# Functional: expr is required
+tf_functional <- list(
+  cv_total = list(
+    type = "functional",
+    expr = ~ log1p(x)
+  )
+)
+
 # Direct I-spline: shape is fully user-specified by knots + coeff
 tf_ispline <- list(
   cv_total = list(
@@ -175,15 +202,35 @@ tf_ispline <- list(
   )
 )
 
-# Penalized I-spline: shape is estimated from (x, y) with smoothness lambda
+# Penalised I-spline: legacy plug-in mode using (x, y) and smoothness lambda
 tf_ispline_pen <- list(
   cv_total = list(
-    type = "ispline_penalized",
+    type = "ispline_penalised",
     x = c(-2, -1, 0, 1, 2),
     y = c(0.0, 0.2, 0.5, 0.9, 1.1),
     n_knots = 6,
     degree = 3,
     lambda = 1.0
+  )
+)
+
+# Penalised I-spline: Stan-estimated mode (omit y)
+tf_ispline_pen_stan <- list(
+  cv_total = list(
+    type = "ispline_penalised",
+    x = c(-2, -1, 0, 1, 2),
+    n_knots = 6,
+    degree = 3,
+    lambda = 1.0
+  )
+)
+
+# Piecewise-linear: x and y are both required
+tf_pwlin <- list(
+  cv_total = list(
+    type = "pwlin",
+    x = c(-2, -1, 0, 1, 2),
+    y = c(0.2, 0.5, 1.0, 0.5, 0.2)
   )
 )
 ```

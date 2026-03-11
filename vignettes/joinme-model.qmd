@@ -50,7 +50,7 @@ The joint model consists of two linked submodels: a multivariate longitudinal mi
 
 ## Longitudinal Submodel
 
-We assume the observed outcomes $y_{ijk}$ follow a distribution from the exponential family (e.g., Gaussian, Student-t) centered at a linear predictor $\eta_{ijk}(t)$.
+We assume the observed outcomes $y_{ijk}$ follow a distribution from the exponential family (e.g., Gaussian, Student-t) centred at a linear predictor $\eta_{ijk}(t)$.
 
 $$
 y_{ijk} \sim \mathcal{D}(\eta_{id}(t_{ijk}), \sigma_y, \nu)
@@ -75,7 +75,7 @@ This decomposition allows capturing correlations within subjects across markers,
 
 ## Survival Submodel
 
-The hazard function $h_i(t)$ for subject $i$ at time $t$ is modeled as:
+The hazard function $h_i(t)$ for subject $i$ at time $t$ is modelled as:
 
 $$
 h_i(t) = h_0(t) \exp\left( \mathbf{w}_i^\top \boldsymbol{\gamma} + \sum_{k=1}^K g_k(\mathcal{M}_i(t), \boldsymbol{\alpha}_k) \right)
@@ -83,7 +83,7 @@ $$
 
 where:
 
--   $h_0(t)$: Baseline hazard function modeled via spline basis or a user-specified
+-   $h_0(t)$: Baseline hazard function modelled via spline basis or a user-specified
   baseline hazard formula.
 -   $\mathbf{w}_i$: Baseline covariates (baseline age, sex, treatment).
 -   $\mathcal{M}_i(t) = \{ \eta_{i1}(t), \dots, \eta_{iD}(t), \eta'_{i1}(t), \dots \}$: The collection of longitudinal trajectories and their derivatives (slopes) at time $t$.
@@ -107,12 +107,12 @@ after transformation and before association scaling.
 When marker-weight estimation is enabled, latent perturbations are added to base
 weights and the resulting weights are used directly before aggregation.
 Marker weights and association coefficients are regularized with Normal or Laplace
-priors depending on the `shrinkage` setting, using a positive non-centered
-parameterization $\alpha = z_{\alpha} \cdot sd_{\alpha}$.
+priors depending on the `shrinkage` setting, using a positive non-centred
+parameterisation $\alpha = z_{\alpha} \cdot sd_{\alpha}$.
 
 # Implementation
 
-The model is implemented in Stan, utilizing Hamiltonian Monte Carlo (HMC) for efficient posterior sampling.
+The model is implemented in Stan, utilising Hamiltonian Monte Carlo (HMC) for efficient posterior sampling.
 
 ## Time Scaling
 
@@ -177,9 +177,9 @@ The functional bytecode evaluator implements the following operations:
 - 24: SOFTPLUS
 - 25: CBRT
 
-## Parallelization
+## Parallelisation
 
-The model supports `reduce_sum` for within-chain parallelization. The likelihood evaluation is sharded by subject $i$.
+The model supports `reduce_sum` for within-chain parallelisation. The likelihood evaluation is sharded by subject $i$.
 
 -   **Longitudinal Likelihood**: Calculated independently for each block of subjects.
 -   **Survival Likelihood**: Calculated independently for each block of subjects.

@@ -29,7 +29,7 @@ Additional implementation details that are central to the interpretation:
 
 - Marker-weighted contributions are formed as weighted means across markers.
   Base weights act as prior offsets and are used directly as effective intensities
-  (no additional normalization).
+  (no additional normalisation).
 - The CORR association depends on an id-level latent effect that drives a
   covariance regression, producing subject-specific Cholesky factors.
 - Non-linear transforms are applied to CV, CS, and CORR before they enter the
@@ -53,7 +53,7 @@ fit and prediction objects:
 
 - `diagnosis()` returns a common diagnostics table schema for both
   `JoinMeFit` and `JoinMeDynPred`.
-- `ranef()` and `corr()` on `JoinMeFit` return nested structures organized by
+- `ranef()` and `corr()` on `JoinMeFit` return nested structures organised by
   `formulaLong` and `formulaDist` (including family-scoped distributional
   random-effect blocks).
 - `ranef()` and `corr()` on `JoinMeDynPred` are enabled only when marker
@@ -374,7 +374,7 @@ $$ u_{id}[i] \sim \text{MVN}(0, \Sigma_{id}) $$
 $$ v_{marker}[d] \sim \text{MVN}(0, \Sigma_{marker}) $$
 $$ w_{id \times m}[i,d] \sim \text{MVN}(0, \Sigma_{idm}) $$
 
-Covariance matrices parameterized via Cholesky:
+Covariance matrices parameterised via Cholesky:
 $$ \Sigma_{id} = \text{diag}(\tau_{id}) \cdot L_{id}^{corr} (L_{id}^{corr})' \cdot \text{diag}(\tau_{id}) $$
 $$ \Sigma_{marker} = \text{diag}(\tau_{mk}) \cdot L_{mk}^{corr} (L_{mk}^{corr})' \cdot \text{diag}(\tau_{mk}) $$
 $$ \Sigma_{idm} = L_i L_i' $$
@@ -478,7 +478,7 @@ graph TB
     subgraph GenQuant["Generated Quantities"]
         PredLong["Predict y_future<br/>at each t_future"]
         PredSurv["Predict S(t | T_cond)<br/>at each t_surv"]
-        Summarize["Aggregate over draws<br/>Mean, Median, CrI"]
+      Summarise["Aggregate over draws<br/>Mean, Median, CrI"]
     end
     
     PostDraws --> Model
@@ -494,7 +494,7 @@ graph TB
     SurvCond -.-> GenQuant
     GenQuant --> PredLong
     GenQuant --> PredSurv
-    GenQuant --> Summarize
+    GenQuant --> Summarise
     
     style PartialDraw fill:#fff0e6
     style SampleRE fill:#e6f7ff
@@ -783,7 +783,7 @@ For example `PUSH_X, PUSH_1, ADD, LOG` computes $\log(x+1)$.
 
 # Computational Considerations
 
-## Threading and Parallelization
+## Threading and Parallelisation
 
 ### `reduce_sum()` in `joinme_fit.stan`
 
@@ -871,7 +871,7 @@ All times scaled to $[0, 1]$ via division by $t_{max}$:
 
 **Remedies**:
 - Increase `adapt_delta` (e.g., 0.95 or 0.99) â†’ smaller step sizes
-- Reparameterize: Use non-centered parameterization for REs if not already
+- Reparameterise: Use non-centred parameterisation for REs if not already
 - Tighten priors on poorly identified parameters
 - Simplify model: Remove weak associations or unnecessary REs
 
@@ -922,7 +922,7 @@ All times scaled to $[0, 1]$ via division by $t_{max}$:
 
 ## Covariance Regression
 
-Subject-specific Cholesky factor $L_i$ is modeled via regression. For each unique entry $(r,c)$ of $L_i$:
+Subject-specific Cholesky factor $L_i$ is modelled via regression. For each unique entry $(r,c)$ of $L_i$:
 
 $$ \eta_{r,c} = \alpha[r,c] + X_{cov}[i] \beta[r,c] + \lambda[r,c] u_L[i] $$
 
@@ -951,7 +951,7 @@ With identity transforms, this reduces to weighted averaging of marker-level
 random-effects contributions.
 
 **Weights** $\omega_d$:
-- Fixed: User-specified latent weights (e.g., equal latent initialization).
+- Fixed: User-specified latent weights (e.g., equal latent initialisation).
 - Estimated: Latent additive perturbation of base weights,
   i.e., $\omega^{lat} = \omega^{(0)} + z$ with shrinkage prior on $z$.
 - Aggregation weights: $\omega = \omega^{lat}$ used directly as signed
@@ -1049,9 +1049,9 @@ plot(pred, type = "longitudinal", marker = "CD4")
 ```
 
 
-# Priors and Regularization Strategy
+# Priors and Regularisation Strategy
 
-This section provides the definitive technical specification and rationale for the prior ecosystem within `joinme`. The prior choices strike a balance between **weakly informative defaults** (allowing data to drive inference) and **principled regularization** (preventing pathological behavior in complex joint likelihood surfaces).
+This section provides the definitive technical specification and rationale for the prior ecosystem within `joinme`. The prior choices strike a balance between **weakly informative defaults** (allowing data to drive inference) and **principled regularisation** (preventing pathological behaviour in complex joint likelihood surfaces).
 
 ## Longitudinal Submodel
 
@@ -1062,7 +1062,7 @@ This section provides the definitive technical specification and rationale for t
 
 ### Random Effect Scales ($\tau_{id}, \tau_{mk}$)
 - **Prior**: Half-Normal($0, \sigma$).
-- **Rationale**: The half-normal prior provides regularization toward zero (parsimony) while strictly enforcing positivity. Unlike the Half-Cauchy (often recommended in older literature), the Half-Normal has lighter tails, which reduces the risk of the "funnel" pathology where the sampler gets stuck in regions of extremely high variance where the data provide little information. This is crucial for convergence in high-dimensional random effects structures.
+- **Rationale**: The half-normal prior provides regularisation toward zero (parsimony) while strictly enforcing positivity. Unlike the Half-Cauchy (often recommended in older literature), the Half-Normal has lighter tails, which reduces the risk of the "funnel" pathology where the sampler gets stuck in regions of extremely high variance where the data provide little information. This is crucial for convergence in high-dimensional random effects structures.
 
 ### Random Effect Correlations ($\Omega$)
 - **Prior**: LKJ-Correlation($\eta$).
@@ -1075,7 +1075,7 @@ This section provides the definitive technical specification and rationale for t
 Family-specific auxiliary parameters require constraints matching their support:
 - **Scales ($\sigma_y$)**: Exponential($\lambda$). The maximum entropy prior for positive continuous variables with a known mean.
 - **Degrees of Freedom ($\nu$)**: Gamma($\alpha, \beta$). Prior constraints $\nu > 2$, soft-bounded to avoid infinite variance regimes while allowing normality ($\nu \to \infty$).
-- **Skew/Quantile Parameters**: Beta($\alpha, \beta$). Natural conjugate for bounded $(0,1)$ parameters, defaulting to Uniform(0,1) or centered symmetric Beta(2,2).
+- **Skew/Quantile Parameters**: Beta($\alpha, \beta$). Natural conjugate for bounded $(0,1)$ parameters, defaulting to Uniform(0,1) or centred symmetric Beta(2,2).
 
 ## Survival Submodel
 
@@ -1088,7 +1088,7 @@ Family-specific auxiliary parameters require constraints matching their support:
 
 ### Hazard Covariates ($\gamma_w$)
 - **Prior**: Student-$t(\nu=6, \mu=0, \sigma=2.5)$.
-- **Rationale**: Consistent with fixed effects; robust regularization.
+- **Rationale**: Consistent with fixed effects; robust regularisation.
 
 ## Association and Link Functions
 
@@ -1098,7 +1098,7 @@ The association module is the most complex component and requires hierarchical s
 The total association is often a sum of a mean term, a marker-specific deviation, and interactions.
 - **Base Effect ($\alpha_{mean}$)**: Normal($0, 1$). Weakly informative.
 - **CV/CS total + marker effects**:
-  - Non-centered latent form: $\alpha_d = z_d \cdot \sigma_d$.
+  - Non-centred latent form: $\alpha_d = z_d \cdot \sigma_d$.
   - Latent: $z_d \sim \mathcal{N}(0, 1)$ (or Laplace under shrinkage mode).
   - Scale: $\sigma_d > 0$ with weakly informative half-normal prior.
   - **Sign anchor**: when any marker-weight-involving channel is active
@@ -1108,13 +1108,13 @@ The total association is often a sum of a mean term, a marker-specific deviation
 - **Rationale**: This keeps one anchored direction for identifiability while preserving signed effects in other channels, improving geometry without forcing all associations to be positive.
 
 ### Marker Weights ($\omega_d$)
-When estimating a composite score (e.g., weighted sum of current values), weights are modeled as signed perturbations around base weights.
+When estimating a composite score (e.g., weighted sum of current values), weights are modelled as signed perturbations around base weights.
 - **Prior**: Standard normal perturbations $z_d \sim \mathcal{N}(0,1)$ in
   $\omega_d = \omega_d^{(0)} + z_d$.
 - **Rationale**: Allows protective and harmful marker contributions (negative/positive weights) while regularizing perturbations in high dimensions.
 
 ### Nonlinear Transformations
-When `type = "ispline_penalized"`, the association function $f(x)$ is modeled via Monotone I-splines.
+When `type = "ispline_penalised"`, the association function $f(x)$ is modelled via Monotone I-splines.
 - **Prior**: Second-order difference penalty strictly on the I-spline coefficients.
 - **Constraint**: Coefficients must be positive to ensure monotonicity.
 - **Rationale**: Nonlinear associations (e.g., risk increases only after a threshold) are powerful but prone to overfitting in sparse data regions. The penalty forces the function toward linearity in the absence of strong evidence for curvature.

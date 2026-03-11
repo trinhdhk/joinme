@@ -325,37 +325,37 @@ real partial_draw(
     array[] int functional_ops_cv,
     vector const_data_cv,
     vector knots_cv,
-    vector coeff_cv,
+    array[] vector coeff_cv,
     int spline_degree_cv,
     array[] int functional_ops_cs,
     vector const_data_cs,
     vector knots_cs,
-    vector coeff_cs,
+    array[] vector coeff_cs,
     int spline_degree_cs,
     array[] int functional_ops_corr,
     vector const_data_corr,
     vector knots_corr,
-    vector coeff_corr,
+    array[] vector coeff_corr,
     int spline_degree_corr,
     array[] int functional_ops_cv_mean,
     vector const_data_cv_mean,
     vector knots_cv_mean,
-    vector coeff_cv_mean,
+    array[] vector coeff_cv_mean,
     int spline_degree_cv_mean,
     array[] int functional_ops_cv_marker,
     vector const_data_cv_marker,
     vector knots_cv_marker,
-    vector coeff_cv_marker,
+    array[] vector coeff_cv_marker,
     int spline_degree_cv_marker,
     array[] int functional_ops_cs_mean,
     vector const_data_cs_mean,
     vector knots_cs_mean,
-    vector coeff_cs_mean,
+    array[] vector coeff_cs_mean,
     int spline_degree_cs_mean,
     array[] int functional_ops_cs_marker,
     vector const_data_cs_marker,
     vector knots_cs_marker,
-    vector coeff_cs_marker,
+    array[] vector coeff_cs_marker,
     int spline_degree_cs_marker,
     int flag_indep_id_re,
     int flag_indep_marker_re,
@@ -639,14 +639,14 @@ real partial_draw(
     //   2) Build marker-specific slopes via finite differences.
     //   3) Apply transforms per marker channel.
     //   4) Aggregate transformed marker channels with signed marker weights.
-    //   5) Normalize by marker count for scale stability.
+    //   5) Normalise by marker count for scale stability.
     // CV total and CV marker are transformed per marker, then weighted-averaged.
     array[n_marker_types] vector[n_random_marker_id] w_draw;
     for (d in 1 : n_marker_types)
       w_draw[d] = Li * z_w[d];
 
     vector[n_gk] cv_tot_tf;
-    vector[n_gk] cv_mean_tf = apply_transform_vector(cvm, tf_mode_cv_mean, functional_ops_cv_mean, const_data_cv_mean, knots_cv_mean, coeff_cv_mean, spline_degree_cv_mean);
+    vector[n_gk] cv_mean_tf = apply_transform_vector(cvm, tf_mode_cv_mean, functional_ops_cv_mean, const_data_cv_mean, knots_cv_mean, coeff_cv_mean[k], spline_degree_cv_mean);
     vector[n_gk] cv_marker_tf;
     vector[n_gk] cs_tot_tf;
     vector[n_gk] cs_marker_tf;
@@ -671,11 +671,11 @@ real partial_draw(
         acc_cv_tot_tf += marker_weights_k[d]
           * apply_transform_scalar(cv_tot_d, tf_mode_cv_tot,
                                    functional_ops_cv, const_data_cv,
-                                   knots_cv, coeff_cv, spline_degree_cv);
+                                   knots_cv, coeff_cv[k], spline_degree_cv);
         acc_cv_marker_tf += marker_weights_k[d]
           * apply_transform_scalar(cvk_d, tf_mode_cv_marker,
                                    functional_ops_cv_marker, const_data_cv_marker,
-                                   knots_cv_marker, coeff_cv_marker, spline_degree_cv_marker);
+                                   knots_cv_marker, coeff_cv_marker[k], spline_degree_cv_marker);
         {
           // Marker-resolved slope channels at GK node j:
           //   csk_raw_d for cs_marker
@@ -686,11 +686,11 @@ real partial_draw(
           acc_cs_tot_tf += marker_weights_k[d]
             * apply_transform_scalar(cs_tot_raw_d, tf_mode_cs_tot,
                                      functional_ops_cs, const_data_cs,
-                                     knots_cs, coeff_cs, spline_degree_cs);
+                                     knots_cs, coeff_cs[k], spline_degree_cs);
           acc_cs_marker_tf += marker_weights_k[d]
             * apply_transform_scalar(csk_raw_d, tf_mode_cs_marker,
                                      functional_ops_cs_marker, const_data_cs_marker,
-                                     knots_cs_marker, coeff_cs_marker, spline_degree_cs_marker);
+                                     knots_cs_marker, coeff_cs_marker[k], spline_degree_cs_marker);
         }
       }
       // Final marker-aggregated channels at GK node j.
@@ -700,8 +700,8 @@ real partial_draw(
       cs_marker_tf[j] = acc_cs_marker_tf / n_marker_types;
     }
 
-    vector[n_gk] cs_mean_tf = apply_transform_vector(csm_raw, tf_mode_cs_mean, functional_ops_cs_mean, const_data_cs_mean, knots_cs_mean, coeff_cs_mean, spline_degree_cs_mean);
-    vector[M_corr_local] corr_terms_tf = apply_transform_vector(corr_terms_raw, tf_mode_corr, functional_ops_corr, const_data_corr, knots_corr, coeff_corr, spline_degree_corr);
+    vector[n_gk] cs_mean_tf = apply_transform_vector(csm_raw, tf_mode_cs_mean, functional_ops_cs_mean, const_data_cs_mean, knots_cs_mean, coeff_cs_mean[k], spline_degree_cs_mean);
+    vector[M_corr_local] corr_terms_tf = apply_transform_vector(corr_terms_raw, tf_mode_corr, functional_ops_corr, const_data_corr, knots_corr, coeff_corr[k], spline_degree_corr);
     real corr_assoc_scalar = dot_product(flag_assoc_corr * coeff_assoc_corr[k], corr_terms_tf);
     vector[n_gk] corr_assoc = rep_vector(corr_assoc_scalar, n_gk);
 

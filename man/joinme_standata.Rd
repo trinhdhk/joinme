@@ -96,7 +96,7 @@ required by that type (see \code{build_standata_transforms()}).}
 
 \item{allow_marker_crosscorr}{Integer flag; 1 allows cross-marker correlation in marker RE.}
 
-\item{shrinkage}{Integer flag controlling shrinkage behavior for marker-by-id effects.}
+\item{shrinkage}{Integer flag controlling shrinkage behaviour for marker-by-id effects.}
 
 \item{marker_weights}{Optional numeric vector of length D giving base weights
 for marker-specific association components. These are used as prior offsets
@@ -120,7 +120,7 @@ via signed additive perturbations,
 
 \item{basehaz_formula}{Formula for baseline hazard when \code{basehaz = "formula"}.}
 
-\item{tau_spline}{Prior scale for spline coefficients (penalized spline).}
+\item{tau_spline}{Prior scale for spline coefficients (penalised spline).}
 
 \item{quadrature_nodes}{Optional positive integer target for total quadrature
 points. Allowed values are exactly \code{7}, \code{15}, \code{31}, \code{41}, \code{51}, and \code{61}.

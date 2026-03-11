@@ -2,11 +2,11 @@
 % Please edit documentation in R/utils.R
 \name{.summarize_draw_col}
 \alias{.summarize_draw_col}
-\title{Summarize a numeric vector of draws}
+\title{Summarise a numeric vector of draws}
 \usage{
 .summarize_draw_col(x)
 }
 \description{
-Summarize a numeric vector of draws
+Summarise a numeric vector of draws
 }
 \keyword{internal}

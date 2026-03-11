@@ -61,7 +61,7 @@ available.
 
 # Marker-weighted CV and CS
 
-When multiple biomarkers are modeled, `joinme` constructs marker-average association
+When multiple biomarkers are modelled, `joinme` constructs marker-average association
 components using weights $\omega_d$ (one per marker). For marker-aggregated
 terms (`cv_total`, `cv_marker`, `cs_total`, `cs_marker`), transforms are applied
 at the marker level first and then averaged with weights. This matters whenever
@@ -99,7 +99,7 @@ marker-aggregated association terms. The simulator reports them in
 Association coefficients are denoted with the $\alpha$ prefix (e.g., `alpha_cv_total`).
 This follows joint-model conventions and avoids confusion with the linear predictor
 $\eta$ used throughout the longitudinal and survival submodels.
-Total, mean, and marker associations use a positive non-centered parameterization
+Total, mean, and marker associations use a positive non-centred parameterisation
 $\alpha = z_{\alpha} \cdot sd_{\alpha}$ for stable sampling.
 
 When an association component is not selected in `assoc`, its coefficient is
@@ -113,9 +113,38 @@ components to keep interpretation focused on the fitted association structure.
 - **Identity** (`type = "identity"`): no transformation.
 - **Functional** (`type = "functional"`): a user-defined expression converted
   into a fixed bytecode program.
-- **Monotone I-spline** (`type = "ispline"` or `"ispline_penalized"`): a smooth
+- **Monotone I-spline** (`type = "ispline"` or `"ispline_penalised"`): a smooth
   monotone mapping.
 - **Piecewise linear** (`type = "pwlin"`): linear interpolation across knots.
+
+## Default values and minimal parameterisations
+
+- **Identity**:
+  - Minimal form: `list(type = "identity")`
+  - Default when a transform term is omitted or set to `NULL`.
+  - No other parameters are used.
+- **Functional**:
+  - Minimal form: `list(type = "functional", expr = ~ log1p(x))`
+  - Required field: `expr`.
+  - No other defaults beyond the supplied expression.
+- **I-spline**:
+  - Minimal form:
+    `list(type = "ispline", knots = c(-1, 0, 1), coeff = c(0, 0.3, 0.8, 1.1, 1.3))`
+  - Required fields: `knots`, `coeff`.
+  - Default: `degree = 3` if omitted.
+- **Penalised I-spline**:
+  - Legacy plug-in mode:
+    `list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), y = exp(seq(-2, 2, length.out = 50)), n_knots = 6, degree = 3, lambda = 1)`
+  - Stan-estimated mode:
+    `list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), n_knots = 6, degree = 3, lambda = 1)`
+  - Defaults: `n_knots = 6`, `degree = 3`, `lambda = 1`.
+  - If `knots` are omitted in Stan-estimated mode, they are derived from `x`
+    quantiles.
+- **Piecewise linear**:
+  - Minimal form:
+    `list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))`
+  - Required fields: `x`, `y`.
+  - No additional defaults.
 
 # Functional Transform
 
@@ -137,6 +166,11 @@ transforms <- list(
 The functional evaluator supports common arithmetic and functions such as
 `log`, `exp`, `sqrt`, `sin`, `cos`, `tanh`, plus aliases `sigmoid`/`expit`,
 `softplus`/`log1p_exp`, and helpers like `cbrt` and `power`.
+
+Defaults:
+
+- Required field: `expr`.
+- No automatic defaults beyond the expression you provide.
 
 ```{r functional-transform-mixed-demo, eval=FALSE}
 transforms <- list(
@@ -164,6 +198,11 @@ shape directly:
 
 In this mode, `x`, `y`, and `lambda` are **not used**.
 
+Defaults:
+
+- `degree = 3` if omitted.
+- `knots` and `coeff` must be supplied explicitly.
+
 ```{r monotone-ispline, eval=FALSE}
 transforms <- list(
   cv_total = list(
@@ -185,19 +224,36 @@ transforms <- list(
 
 - You want monotone, smooth effects with constrained shape.
 
-# Penalized Monotone I-Spline
+# Penalised Monotone I-Spline
 
-For `type = "ispline_penalized"`, the package learns spline coefficients from
-input-output training pairs:
+For `type = "ispline_penalised"`, there are now two supported modes:
 
-- `x`: raw association-feature values,
-- `y`: desired transformed values at those `x` points,
+- **Legacy plug-in mode**: provide `x` and `y`, and the package first learns a
+  monotone spline in R before passing fixed coefficients into Stan.
+- **Stan-estimated mode**: omit `y`, keep `knots` (or `n_knots`) plus `lambda`,
+  and Stan estimates the monotone spline coefficients jointly with the rest of
+  the model.
+
+Meaning of the arguments:
+
+- `x`: raw association-feature values, used either as training inputs or to
+  help choose knots.
+- `y`: optional target transformed values at those `x` points. If present, you
+  are telling the package the shape you want to approximate.
 - `lambda`: smoothness penalty weight (higher = smoother, lower = more flexible).
+
+Defaults:
+
+- `n_knots = 6` if `knots` are omitted.
+- `degree = 3` if omitted.
+- `lambda = 1.0` if omitted.
+- In helper-based plug-in fitting, `weights = NULL` means equal weights and
+  `diff_order = 2` is the default penalty order.
 
 Practical tip: start with `lambda = 1.0`, then decrease if too flat or increase
 if too wiggly.
 
-```{r penalized-ispline, eval=FALSE}
+```{r penalised-ispline, eval=FALSE}
 transforms <- list(
   cv_total = list(
     type = "identity"
@@ -206,7 +262,7 @@ transforms <- list(
     type = "identity"
   ),
   corr = list(
-    type = "ispline_penalized",
+    type = "ispline_penalised",
     x = seq(-2, 2, length.out = 40),
     y = exp(seq(-2, 2, length.out = 40)),
     n_knots = 6,
@@ -216,10 +272,23 @@ transforms <- list(
 )
 ```
 
+```{r penalised-ispline-stan, eval=FALSE}
+transforms <- list(
+  corr = list(
+    type = "ispline_penalised",
+    x = seq(-2, 2, length.out = 40),
+    n_knots = 6,
+    degree = 3,
+    lambda = 1.0
+  )
+)
+```
+
 **When to use**
 
-- You want a monotone transform learned from (x, y) pairs with smoothing.
-- Penalization avoids overfitting when knot counts are moderate.
+- You want a monotone transform with smoothing, either anchored by `(x, y)` or
+  estimated jointly in Stan.
+- Penalisation avoids overfitting when knot counts are moderate.
 
 # Piecewise-Linear
 
@@ -238,6 +307,11 @@ transforms <- list(
   )
 )
 ```
+
+Defaults:
+
+- `x` and `y` must both be supplied.
+- No additional defaults are added.
 
 **When to use**
 

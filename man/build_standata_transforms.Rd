@@ -26,7 +26,7 @@ Transform can be specified in three modes:
 \item Mode 0: Identity (no transformation)
 \item Mode 1: Functional (arbitrary nested functions via parser)
 \item Mode 2: I-spline basis (monotonic, smooth)
-\item Mode 2 (penalized): I-spline coefficients estimated with smoothness penalty
+\item Mode 2 (penalised): I-spline coefficients estimated with smoothness penalty
 \item Mode 3: Piecewise-linear (user-defined interpolation)
 }
 
@@ -40,14 +40,43 @@ for the joinme Stan model's association term.
 
 Each element of transform_list should be a list with:
 \itemize{
-\item type: "identity", "functional", "ispline", "ispline_penalized", or "pwlin"
+\item type: "identity", "functional", "ispline", "ispline_penalised" (or alias
+"ispline_penalized"), or "pwlin"
 \item Additional fields depend on type:
 \itemize{
 \item functional: expr (quosure, formula, quoted expression, or string)
-\item ispline: knots (vector), coeff (vector), degree (int). Here you provide the transform shape directly; x/y/lambda are not used.
-\item ispline_penalized: x, y, knots or n_knots, degree, lambda, weights. Here x is input feature scale, y is target transformed output at x, and lambda controls smoothness (higher = smoother).
+\item ispline: knots (vector), coeff (vector), degree (int)
+\item ispline_penalised: knots or n_knots, degree, lambda, optional x, optional y, optional weights
+\itemize{
+\item if y is supplied, joinme fits the monotone spline to the training pairs (x, y) in R
+using the same anchored endpoint convention as the Stan-estimated path
+(first coefficient = 0, last coefficient = 1)
+\item if y is omitted, Stan estimates the monotone spline coefficients directly and lambda controls smoothness
+}
 \item pwlin: x (vector), y (vector)
 }
+}
+
+Defaults and minimal examples:
+\itemize{
+\item identity (default if term omitted): \code{list(type = "identity")}
+\item functional: \code{list(type = "functional", expr = ~ log1p(x))}
+\item ispline: \code{list(type = "ispline", knots = c(-1, 0, 1), coeff = c(0, 0.3, 0.8, 1.1, 1.3))}
+with \code{degree = 3} by default when omitted.
+\item ispline_penalised (plug-in fit):
+\code{list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), y = exp(seq(-2, 2, length.out = 50)), n_knots = 6, degree = 3, lambda = 1)}
+\item ispline_penalised (Stan-estimated):
+\code{list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), n_knots = 6, degree = 3, lambda = 1)}
+\item pwlin:
+\code{list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))}
+}
+
+Default values used internally:
+\itemize{
+\item omitted term -> identity mode (\code{default_mode = 0}),
+\item \code{ispline}: \code{degree = 3} if omitted,
+\item \code{ispline_penalised}: \code{n_knots = 6}, \code{degree = 3}, \code{lambda = 1} if omitted,
+\item \code{pwlin} and \code{functional}: no additional defaults beyond their required fields.
 }
 }
 \section{Usage}{
@@ -55,3 +84,4 @@ Each element of transform_list should be a list with:
 Use \code{build_standata_transforms()} to construct the data list entries,
 and \code{validate_transforms()} to verify consistency before sampling.
 }
+

@@ -1,8 +1,30 @@
-## Local script mirroring tests/local/test-model.R
 devtools::load_all()
 library(dplyr)
 
-set.seed(1234)
+# Simulation uses the plug-in penalised spline constructor, which now matches
+# the Stan-estimated fit convention:
+# - 6 knots including boundaries
+# - degree 2
+# - 7 spline coefficients (= length(knots) + degree - 1)
+# - first/last coefficients anchored at 0 and 1
+sim_cv_tf <- penalised_ispline_transform(
+  x = c(0, 0.25, 0.5, 0.6, 0.8, 1),
+  y = c(0, 0.5, 0.6, 0.75, 0.85, 1),
+  knots = seq(0, 1, 0.2),
+  degree = 2,
+  lambda = 1.5
+)
+
+
+
+# Fitting can use the Stan-estimated penalised spline path by omitting y.
+fit_cv_tf <- list(
+  type = "ispline_penalised",
+  knots = seq(0, 1, 0.1),
+  degree = 2,
+  lambda = 1
+)
+
 sim <- simulate_joinme(
   formulaLong = y ~ 1 + time + x1 + (1 + time | id) + (0 + x1 + (1 + time | id) | marker),
   formulaEvent = survival::Surv(time, event) ~ x2,
@@ -14,9 +36,10 @@ sim <- simulate_joinme(
   assoc = c("cv_total", "corr"),
   beta_long = c('(Intercept)' = 0.5, time = 0.3, x1 = -0.2),
   beta_event = c(x2 = 0.2),
-  assoc_coefs = list(cv_total = 0.30, corr = c(0.12)),
-  transforms = list(cv_total = list(type = "ispline_penalized", knots = c(0, 1), degree = 2, x = c(0, 0.5, 1), y = c(0, 0.2, 0.6), lambda = 1.0),
-                    corr = list(type = "functional", expr = ~ -x)),
+  assoc_coefs = list(cv_total = 0.25, corr = c(0.12)),
+  transforms = list(
+    cv_total = list(type = "ispline", knots = seq(0, 1, 0.2), coefs = c(0.3, -0.25, 0.1, 0.5), degree = 2),
+    corr = list(type = "functional", expr = ~ expit(-x))),
   re_params = list(
     id = list(sd = c(0.5, 0.25)),
     marker = list(sd = 0.3),
@@ -27,6 +50,8 @@ sim <- simulate_joinme(
       sd_u = 0.4
     )
   ),
+  use_mirai = TRUE,
+  n_workers = 8,
   seed = 2026
 )
 
@@ -35,11 +60,11 @@ control <- list(
   engine = engine,
   chains = 2,
   iter_warmup = 1000,
-  iter_sampling = 1000,
+  iter_sampling = 2500,
   parallel_chains = 2,
   threads_per_chain = 6,
   adapt_delta = 0.8,
-  max_treedepth = 13,
+  max_treedepth = 12,
   seed = 421
 )
 
@@ -51,8 +76,8 @@ fit <- joinme(
   dataLong = sim$dataLong,
   dataEvent = sim$dataEvent,
   assoc = c("cv_total", "corr"),
-  transforms = list(cv_total = list(type = "ispline_penalized", knots = c(0,1), degree = 3, x = c(0, 0.5, 1), y = c(0, 0.2, 0.6), lambda = 1.0),
-                    corr = list(type = "functional", expr = ~ -x)),
+  transforms = list(cv_total = fit_cv_tf,
+                    corr = list(type = "functional", expr = ~ expit(-x))),
   control = control
 )
 

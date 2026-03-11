@@ -61,7 +61,7 @@
   /* Ordinal cutpoints (shared across ordinal markers) */
   ordered[K_ord - 1] cutpoints_ord;     // cumulative-logit cutpoints
 
-  /* association coefficients (non-centered for totals/mean/marker) */
+  /* association coefficients (non-centred for totals/mean/marker) */
   real z_alpha_cv_total;               // latent for total CV association
   real z_alpha_cs_total;               // latent for total CS association
   real z_alpha_cv_mean;               // latent for mean CV association
@@ -72,6 +72,15 @@
 
   /* marker-weight perturbations (global across ids) */
   vector[D * estimate_marker_weights * use_marker_weight_assoc] z_marker_weights; // latent signed perturbations (active only when needed)
+
+  /* Stan-estimated monotone spline increments for association transforms */
+  vector[n_free_spline_cv] z_spline_cv;               // free increments for total CV spline
+  vector[n_free_spline_cs] z_spline_cs;               // free increments for total CS spline
+  vector[n_free_spline_corr] z_spline_corr;           // free increments for corr spline
+  vector[n_free_spline_cv_mean] z_spline_cv_mean;     // free increments for mean CV spline
+  vector[n_free_spline_cv_marker] z_spline_cv_marker; // free increments for marker CV spline
+  vector[n_free_spline_cs_mean] z_spline_cs_mean;     // free increments for mean CS spline
+  vector[n_free_spline_cs_marker] z_spline_cs_marker; // free increments for marker CS spline
 
   /* association scales */
   real<lower=0> sd_alpha_cv_total;     // scale for total CV association

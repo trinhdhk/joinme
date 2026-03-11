@@ -8,7 +8,7 @@
 #' @return A list with `fit` and `sim` entries.
 #' @export
 run_joinme_example <- function() {
-  # End-to-end smoke test: simulate -> fit -> summarize
+  # End-to-end smoke test: simulate -> fit -> summarise
   sim <- simulate_joinme(
     n_id = 50,
     families = rep("student_t", 10),
