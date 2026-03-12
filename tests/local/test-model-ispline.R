@@ -20,7 +20,7 @@ sim_cv_tf <- penalised_ispline_transform(
 # Fitting can use the Stan-estimated penalised spline path by omitting y.
 fit_cv_tf <- list(
   type = "ispline_penalised",
-  knots = seq(0, 1, 0.1),
+  knots = seq(0, 1, 0.2),
   degree = 2,
   lambda = 1
 )
@@ -37,9 +37,10 @@ sim <- simulate_joinme(
   beta_long = c('(Intercept)' = 0.5, time = 0.3, x1 = -0.2),
   beta_event = c(x2 = 0.2),
   assoc_coefs = list(cv_total = 0.25, corr = c(0.12)),
-  transforms = list(
-    cv_total = list(type = "ispline", knots = seq(0, 1, 0.2), coefs = c(0.3, -0.25, 0.1, 0.5), degree = 2),
-    corr = list(type = "functional", expr = ~ expit(-x))),
+  transforms = joinme_tf(
+    cv_total = sim_cv_tf,
+    corr = ~ expit(-x)
+  ),
   re_params = list(
     id = list(sd = c(0.5, 0.25)),
     marker = list(sd = 0.3),
@@ -60,7 +61,7 @@ control <- list(
   engine = engine,
   chains = 2,
   iter_warmup = 1000,
-  iter_sampling = 2500,
+  iter_sampling = 1500,
   parallel_chains = 2,
   threads_per_chain = 6,
   adapt_delta = 0.8,
@@ -76,8 +77,10 @@ fit <- joinme(
   dataLong = sim$dataLong,
   dataEvent = sim$dataEvent,
   assoc = c("cv_total", "corr"),
-  transforms = list(cv_total = fit_cv_tf,
-                    corr = list(type = "functional", expr = ~ expit(-x))),
+  transforms = joinme_tf(
+    cv_total = fit_cv_tf,
+    corr = ~ expit(-x)
+  ),
   control = control
 )
 

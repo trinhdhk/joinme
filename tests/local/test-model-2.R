@@ -15,9 +15,7 @@ sim <- simulate_joinme(
   assoc = c("cv_mean", "cv_marker"),
   assoc_coefs = c(cv_mean = truth_cv_mean, cv_marker = truth_cv_marker),
   marker_weights = c(-1,2,1),
-  transforms = list(
-    cv_marker = list(type = "functional", expr = ~ expit(x))
-  ),
+  transforms = joinme_tf(cv_marker = ~ expit(x)),
   baseline_hazard = list(
     type='weibull',
     shape = 1.1,

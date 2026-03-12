@@ -36,12 +36,12 @@ run_joinme_example <- function() {
     tau_spline = 0.4,
     eps_fd = 1e-3,
     assoc = c("cv_total"),
-    transforms = list(
-      cv_total = list(type = "identity"),
-      corr = list(type = "identity")
+    transforms = joinme_tf(
+      cv_total = "identity",
+      corr = "identity"
     ),
     formulaDist = list(sigma = sigma ~ 1 + time),
-    priors = list(beta = list(scale = 2.5), alpha = list(scale = 1.0), lkj = 2),
+    priors = joinme_priors(beta = list(scale = 2.5), alpha = list(scale = 1.0), lkj = 2),
     control = list(
       parallel_chains = 2,
       iter_warmup = 200,

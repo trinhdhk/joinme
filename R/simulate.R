@@ -1012,22 +1012,7 @@ simulate_joinme <- function(
   }
 
   .sim_normalize_transform_list <- function(transform_list) {
-    if (is.null(transform_list)) return(list())
-    if (!is.list(transform_list)) {
-      cli::cli_abort(c(
-        x = "{.arg transforms} must be a named list.",
-        i = "Use entries such as transforms = list(cv_total = list(type='functional', expr = ~ log1p(x)))."
-      ))
-    }
-    allowed <- c("cv_total", "cv_mean", "cv_marker", "cs_total", "cs_mean", "cs_marker", "corr")
-    bad <- setdiff(names(transform_list), allowed)
-    if (length(bad) > 0) {
-      cli::cli_abort(c(
-        x = "Unknown transform terms in {.arg transforms}: {paste(bad, collapse = ', ')}.",
-        i = "Allowed terms: cv_total, cv_mean, cv_marker, cs_total, cs_mean, cs_marker, corr."
-      ))
-    }
-    transform_list
+    unclass(.normalise_joinme_tf_input(transform_list, validate = FALSE))
   }
 
   .sim_make_assoc_transform <- function(spec, term_name) {

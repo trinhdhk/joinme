@@ -72,6 +72,11 @@ Formula-scoped weighting can be declared directly on grouping terms using
 random-effects priors; when used on subject-level groupings they also scale
 subject contributions in the longitudinal and survival likelihood.
 
+For user-facing model specification, `JoinME` exposes `joinme_tf(...)` and
+`joinme_priors(...)` as validated wrappers around transformation and prior
+declarations. These wrappers improve transparency while still compiling to the
+same Stan-ready payloads used internally.
+
 Prediction plots separate fitted history from forecast intervals and surface multiple credible bands for longitudinal, survival, and cumulative hazard outputs.
 
 Model diagnostics and extraction methods follow a consistent interface across

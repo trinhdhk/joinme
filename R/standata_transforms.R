@@ -66,6 +66,9 @@
 #'   - `ispline_penalised`: `n_knots = 6`, `degree = 3`, `lambda = 1` if omitted,
 #'   - `pwlin` and `functional`: no additional defaults beyond their required fields.
 #'
+#' For user-facing declarations, prefer `joinme_tf(...)`, which validates and
+#' normalises channel specifications before they are passed here.
+#'
 #' @return List of standata entries for transformation parameters:
 #'   - tf_mode_*
 #'   - functional_ops_* and const_data_* (if mode 1)
@@ -313,7 +316,7 @@ validate_transforms <- function(standata) {
 ##' )
 ##'
 ##' # Combine and build standata
-##' transforms <- list(
+##' transforms <- joinme_tf(
 ##'   cv_total = spec_cv,
 ##'   cs_total = spec_cs,
 ##'   corr = spec_corr

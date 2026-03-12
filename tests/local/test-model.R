@@ -14,7 +14,7 @@ sim <- simulate_joinme(
   beta_long = c('(Intercept)' = 0.5, time = 0.3, x1 = -0.2),
   beta_event = c(x2 = 0.4),
   assoc_coefs = list(cv_total = 0.35, corr = c(0.1)),
-  transforms = list(corr = list(type = "functional", expr = ~ -x)),
+  transforms = joinme_tf(corr = ~ -x),
   re_params = list(
     id = list(sd = c(0.6, 0.3)),
     marker = list(sd = 0.25),
@@ -39,7 +39,7 @@ fit <- joinme(
   dataLong = sim$dataLong,
   dataEvent = sim$dataEvent,
   assoc = c("cv_total", "corr"),
-  transforms = list(corr = list(type = "functional", expr = ~ -x)),
+  transforms = joinme_tf(corr = ~ -x),
   # transforms = list(cv_mean = list(type = "functional", expr =  ~ expit(x))),
   # fixed_marker_weights = TRUE,
   # marker_weights = sim$truth$marker_weights,

@@ -153,11 +153,11 @@
 #'   Can be a character vector of family names aligned to marker order, or a
 #'   list of `jm_family(...)` entries with per-marker links.
 #'   Supported links/inverse-links: `identity`, `log`, `logit`, `probit`, `exp`.
-#' @param transforms Transformation specifications for association terms
-#'   (cv_total, cs_total, corr). Each entry is a list with a `type` and fields
-#'   required by that type. See Details for `ispline` and
-#'   `ispline_penalised` semantics.
-#' @param priors Named list for priors: list(beta = ..., alpha = ..., lkj = ...).
+#' @param transforms Transformation specifications for association terms.
+#'   Prefer declaring them with `joinme_tf(...)`; raw named lists remain
+#'   supported. See Details for `ispline` and `ispline_penalised` semantics.
+#' @param priors Prior declaration. Prefer `joinme_priors(...)`; raw named lists
+#'   with components `beta`, `alpha`, and `lkj` remain supported.
 #' @param fixed_marker_weights Logical; if TRUE, marker weights are fixed at
 #'   provided `marker_weights` (or defaults). If FALSE, marker-weight perturbations
 #'   are estimated.
@@ -192,7 +192,7 @@ joinme <- function(
   draws = NULL,
   families = NULL,
   transforms = NULL,
-  priors = list(beta = NULL, alpha = NULL, lkj = NULL),
+  priors = joinme_priors(),
   fixed_marker_weights = FALSE,
   ...
 ) {
@@ -202,12 +202,8 @@ joinme <- function(
       i = "Provide list(threads_per_chain=..., grainsize=..., adapt_delta=..., max_treedepth=...)."
     ))
   }
-  if (!is.list(priors)) {
-    cli::cli_abort(c(
-      x = "{.arg priors} must be a named list.",
-      i = "Example: list(beta = NULL, alpha = NULL, lkj = NULL)."
-    ))
-  }
+  transforms <- unclass(.normalise_joinme_tf_input(transforms, validate = FALSE))
+  priors <- unclass(.normalise_joinme_priors_input(priors, validate = TRUE))
 
   if (length(control) > 0 && is.null(names(control))) {
     cli::cli_abort(c(

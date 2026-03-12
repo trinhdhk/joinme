@@ -171,7 +171,7 @@ formulaLong_marker_only <- y ~ time + x1 +
 ```{r priors}
 # Define explicit priors for transparency (optional but recommended)
 # Note: joinme exposes beta (fixed effects), alpha (associations), and lkj
-priors <- list(
+priors <- joinme_priors(
   beta = list(scale = 2.5),       # Fixed effects (Student-t, df = 6)
   alpha = list(scale = 1.0),      # Association coefficients
   lkj = 2.0                       # Correlation matrices (regularizing)
@@ -206,7 +206,7 @@ fit <- joinme(
   formulaEvent = survival::Surv(time, event) ~ x1 + x2,
   # Association structure: Link hazard to the total current value of markers
   assoc = c("cv_total"),
-  transforms = list(cv_total = list(type = "identity")),
+  transforms = joinme_tf(cv_total = "identity"),
   priors = priors,
   control = control
 )

@@ -15,7 +15,7 @@ joinme(
   draws = NULL,
   families = NULL,
   transforms = NULL,
-  priors = list(beta = NULL, alpha = NULL, lkj = NULL),
+  priors = joinme_priors(),
   fixed_marker_weights = FALSE,
   ...
 )
@@ -96,12 +96,12 @@ Can be a character vector of family names aligned to marker order, or a
 list of \code{jm_family(...)} entries with per-marker links.
 Supported links/inverse-links: \code{identity}, \code{log}, \code{logit}, \code{probit}, \code{exp}.}
 
-\item{transforms}{Transformation specifications for association terms
-(cv_total, cs_total, corr). Each entry is a list with a \code{type} and fields
-required by that type. See Details for \code{ispline} and
-\code{ispline_penalised} semantics.}
+\item{transforms}{Transformation specifications for association terms.
+Prefer declaring them with \code{joinme_tf(...)}; raw named lists remain
+supported. See Details for \code{ispline} and \code{ispline_penalised} semantics.}
 
-\item{priors}{Named list for priors: list(beta = ..., alpha = ..., lkj = ...).}
+\item{priors}{Prior declaration. Prefer \code{joinme_priors(...)}; raw named lists
+with components \code{beta}, \code{alpha}, and \code{lkj} remain supported.}
 
 \item{fixed_marker_weights}{Logical; if TRUE, marker weights are fixed at
 provided \code{marker_weights} (or defaults). If FALSE, marker-weight perturbations

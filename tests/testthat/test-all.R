@@ -23,7 +23,7 @@ test_that("all", {
     dataEvent = sim$dataEvent,
     assoc = c("cv_total"),
     families = "student_t",
-    transforms = list(cv_total = list(type = "identity")),
+    transforms = joinme_tf(cv_total = "identity"),
     fixed_marker_weights = FALSE,
     control = list(
       # engine = "rstan",

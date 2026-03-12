@@ -59,7 +59,7 @@ spec_corr_pen_stan <- list(
 )
 
 # Combine and build standata
-transforms <- list(
+transforms <- joinme_tf(
   cv_total = spec_cv,
   cs_total = spec_cs,
   corr = spec_corr

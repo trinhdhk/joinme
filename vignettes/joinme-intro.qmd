@@ -194,7 +194,7 @@ fit <- joinme(
   dataEvent = sim$dataEvent,
   assoc = c("cv_total"),
   families = rep("student_t", 2),
-  transforms = list(cv_total = list(type = "identity")),
+  transforms = joinme_tf(cv_total = "identity"),
   control = list(
     engine = "rstan",
     chains = 1,

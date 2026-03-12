@@ -78,6 +78,9 @@ Default values used internally:
 \item \code{ispline_penalised}: \code{n_knots = 6}, \code{degree = 3}, \code{lambda = 1} if omitted,
 \item \code{pwlin} and \code{functional}: no additional defaults beyond their required fields.
 }
+
+For user-facing declarations, prefer \code{joinme_tf(...)}, which validates and
+normalises channel specifications before they are passed here.
 }
 \section{Usage}{
 
