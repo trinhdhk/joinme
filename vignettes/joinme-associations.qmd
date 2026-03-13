@@ -94,6 +94,21 @@ weights via `marker_weights + z_marker_weights` with
 marker-aggregated association terms. The simulator reports them in
 `truth$marker_weights`.
 
+## Plotting fitted association curves
+
+`plot(fit, type = "association")` uses a compact association plotting payload
+stored on the fitted `JoinMeFit` object. The payload keeps only the posterior
+quantities needed for plotting: active association coefficients, marker weights,
+transform coefficients, and cached model-implied raw support ranges.
+
+This has two practical consequences:
+
+- association plots remain usable after serializing a fitted object without
+  depending on transient CmdStan CSV files for this feature,
+- default x-axis grids are taken from model-implied feature support when
+  available, with spline plots falling back to knot support only when the fitted
+  spline support is narrower than the model-implied raw range.
+
 # Association coefficients and naming
 
 Association coefficients are denoted with the $\alpha$ prefix (e.g., `alpha_cv_total`).

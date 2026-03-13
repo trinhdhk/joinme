@@ -15,6 +15,13 @@ For marker-aggregated association terms (`cv_total`, `cv_marker`, `cs_total`,
 `cs_marker`), transforms are applied at marker level before weighted averaging
 in simulation, fitting, and prediction.
 
+Association plotting now follows the fitted model more closely: `plot(fit,
+type = "association")` uses a compact payload stored on the fitted object with
+the posterior association coefficients, marker weights, spline coefficients,
+and cached model-implied raw support ranges. This avoids relying on transient
+CmdStan CSV files just to recover association curves and reduces unsupported
+support extrapolation for nonlinear transforms.
+
 ## Family-shared distributional parameters
 
 When you fit mixed longitudinal families, `joinme` now uses **family-shared**

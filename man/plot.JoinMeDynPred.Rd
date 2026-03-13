@@ -8,6 +8,7 @@
   x,
   which = c("cumhaz", "longitudinal", "survival"),
   subject = NULL,
+  marker = NA,
   trajectory_type = c("id_marker", "marker_pop", "overall_pop", "all_types"),
   scale = NULL,
   smooth_trajectory = TRUE,
@@ -37,6 +38,9 @@
 
 \item{subject}{Integer/Character vector. Which subject(s) to plot. If NULL,
 plots all subjects in separate panels or returns a list.}
+
+\item{marker}{Optional marker subset for longitudinal plots. Use a specific
+marker level to plot only that marker, or \code{NA} to plot all markers.}
 
 \item{trajectory_type}{Character. Which trajectory to show:
 "id_marker" (default), "marker_pop" (marker-level average),

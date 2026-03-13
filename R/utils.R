@@ -1463,6 +1463,22 @@ gk_quadrature <- function(nodes = 15L) {
   inherits(fit, "stanfit")
 }
 
+#' Materialize CmdStanR fit data in memory
+#' @keywords internal
+.materialize_cmdstanr_fit <- function(fit) {
+  if (!.is_cmdstanr_fit(fit)) {
+    return(fit)
+  }
+
+  # Mirror cmdstanr::save_object() so a later saveRDS() does not depend on the
+  # original CSV files still being present.
+  fit$draws()
+  tryCatch(fit$sampler_diagnostics(), error = function(e) NULL)
+  tryCatch(fit$init(), error = function(e) NULL)
+  tryCatch(fit$profiles(), error = function(e) NULL)
+  fit
+}
+
 #' Unified draws object helper
 #' @keywords internal
 .get_draws_obj <- function(fit, variables = NULL, draws = NULL, seed = 1, keep_chains = FALSE) {

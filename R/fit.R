@@ -29,6 +29,17 @@
 #' `z_marker_weights ~ N(0, 1)`. The effective marker intensities are used directly
 #' from `w_raw` without additional normalisation and scale the association contributions.
 #'
+#' The returned `JoinMeFit` object stores a compact association plotting payload
+#' containing only the posterior quantities needed to draw association curves
+#' (`alpha_*`, marker weights, spline coefficients, and cached model-implied raw
+#' support ranges). This keeps association plotting usable after serialization
+#' without needing the full transient CmdStan CSV outputs.
+#'
+#' For CmdStanR fits, `joinme()` also eagerly materializes the CSV-backed fit
+#' contents in memory before returning. This mirrors the loading step used by
+#' `cmdstanr::save_object()` so later `saveRDS()` calls do not rely on the
+#' original CmdStan CSV files remaining on disk.
+#'
 #' Formula-scoped subject weighting is supported in random-effect grouping terms via
 #' `weighted(group, weights = <column>)`. For example:
 #' - `(1 + time | weighted(id, weights = id_w))`
@@ -431,6 +442,7 @@ joinme <- function(
     allowed <- names(formals(mod$sample))
     args <- args[names(args) %in% allowed]
     fit <- do.call(mod$sample, args)
+    fit <- .materialize_cmdstanr_fit(fit)
   } else {
     control_list <- list()
     if (!is.null(args$adapt_delta)) control_list$adapt_delta <- args$adapt_delta
@@ -513,7 +525,7 @@ joinme <- function(
   )
   cfg$engine <- engine
 
-  JoinMeFit$new(
+  fit_obj <- JoinMeFit$new(
     fit = fit,
     stan_data = sd,
     formulaLong = formulaLong,
@@ -525,4 +537,19 @@ joinme <- function(
     dataLong = dataLong,
     dataEvent = dataEvent
   )
+
+  # Store a compact, self-contained plotting payload so association plots remain
+  # usable even when cmdstanr CSV outputs are no longer available.
+  fit_obj$config$association_plot_payload <- tryCatch(
+    .build_joinmefit_association_plot_payload(
+      fit = fit,
+      stan_data = sd,
+      config = fit_obj$config,
+      dataLong = dataLong,
+      seed = args$seed %||% defaults$seed
+    ),
+    error = function(e) NULL
+  )
+
+  fit_obj
 }

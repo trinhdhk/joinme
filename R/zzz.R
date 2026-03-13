@@ -10,6 +10,7 @@ utils::globalVariables(c(
   # Avoid NOTES for NSE variables used in dplyr/pipeline helpers
   # dplyr NSE variables used in predict and plot functions
   "time", "marker", "id", 
+  "variable", "metric", "iteration", "value", "chain", "stat",
   "Estimate", "Median", "Est.Error", "L95", "U95",
   # Additional variables used in internal functions
   ".data"

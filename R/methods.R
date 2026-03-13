@@ -392,6 +392,40 @@ corr <- function(object, ...) {
 }
 
 #' @keywords internal
+.format_common_diagnostics_for_print <- function(diag_tbl) {
+  # Prepare the diagnostics table for console printing.
+  #
+  # R stores the `value` column as numeric so downstream code can keep using
+  # arithmetic on the table. For printing, a subset of metrics are counts and
+  # should be displayed as integers rather than floating-point values.
+  if (is.null(diag_tbl) || !is.data.frame(diag_tbl) || !all(c("metric", "value") %in% names(diag_tbl))) {
+    return(diag_tbl)
+  }
+
+  int_metrics <- c(
+    "draws",
+    "divergences",
+    "treedepth_hits",
+    "n_terms_total",
+    "n_terms_bad_rhat",
+    "n_terms_low_ess_bulk",
+    "n_terms_low_ess_tail"
+  )
+
+  out <- diag_tbl[, c("metric", "value"), drop = FALSE]
+  out$value <- vapply(seq_len(nrow(out)), function(i) {
+    metric_i <- as.character(out$metric[i])
+    value_i <- out$value[i]
+    if (!is.finite(value_i)) return(NA_character_)
+    if (metric_i %in% int_metrics) {
+      return(as.character(as.integer(round(value_i))))
+    }
+    trimws(format(round(value_i, 3), nsmall = 0, scientific = FALSE))
+  }, character(1))
+  out
+}
+
+#' @keywords internal
 .diagnostics_table_from_sampler <- function(diag) {
   .build_common_diagnostics_table(
     draws = as.numeric(diag$draws %||% NA_real_),
@@ -910,7 +944,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
       latent_tbl <- summarize_latent_cov_matrix()
 
       alpha_vars <- paste0("alpha_L[", seq_len(m_cov), "]")
-      alpha_blocks <- rep("L", m_cov)
+      alpha_blocks <- rep("L[id:marker]", m_cov)
       alpha_tbl <- .summarize_block_parameters(
         alpha_vars,
         block_labels = alpha_blocks,
@@ -927,7 +961,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
           cov_labels <- paste0("k", seq_len(k_cov))
         }
         beta_vars <- as.vector(outer(seq_len(m_cov), seq_len(k_cov), function(m, k) paste0("beta_L[", m, ",", k, "]")))
-        beta_blocks <- rep("L", length(beta_vars))
+        beta_blocks <- rep("L[id:marker]", length(beta_vars))
         beta_rows <- as.vector(outer(seq_len(m_cov), seq_len(k_cov), function(m, k) rc_map[m, 1]))
         beta_cols <- as.vector(outer(seq_len(m_cov), seq_len(k_cov), function(m, k) rc_map[m, 2]))
         beta_terms <- as.vector(outer(seq_len(m_cov), seq_len(k_cov), function(m, k) {
@@ -944,7 +978,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
       }
 
       lambda_vars <- paste0("lambda_L[", seq_len(m_cov), "]")
-      lambda_blocks <- rep("L", m_cov)
+      lambda_blocks <- rep("L[id:marker]", m_cov)
       lambda_tbl <- .summarize_block_parameters(
         lambda_vars,
         block_labels = lambda_blocks,
@@ -954,8 +988,10 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
       )
       if (!is.null(lambda_tbl)) reg_rows[[length(reg_rows) + 1L]] <- lambda_tbl
 
-      sd_u_tbl <- .summarize_block_parameters("tau_L", "global", "sd_u")
-      if (!is.null(sd_u_tbl)) reg_rows[[length(reg_rows) + 1L]] <- sd_u_tbl
+      hyperparameter_tbl <- .summarize_block_parameters("tau_L", "id:marker", "sd_u")
+      if (!is.null(hyperparameter_tbl)) {
+        hyperparameter_tbl <- hyperparameter_tbl[, c("block", "term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
+      }
 
       reg_rows <- Filter(Negate(is.null), reg_rows)
       regression_tbl <- if (length(reg_rows) > 0) do.call(rbind, reg_rows) else NULL
@@ -964,7 +1000,8 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
       }
       id_marker_cov_tables <- list(
         latent = latent_tbl,
-        regression = regression_tbl
+        regression = regression_tbl,
+        hyperparameters = hyperparameter_tbl
       )
       id_marker_cov_tables <- id_marker_cov_tables[!vapply(id_marker_cov_tables, is.null, logical(1))]
       if (length(id_marker_cov_tables) == 0) id_marker_cov_tables <- NULL
@@ -1227,7 +1264,7 @@ print.summary_JoinMeFit <- function(x, ...) {
   if (!is.null(diag_tbl)) {
     cat("Sampler diagnostics\n")
     cat("-------------------\n")
-    print(diag_tbl, row.names = FALSE)
+    print(.format_common_diagnostics_for_print(diag_tbl), row.names = FALSE)
   }
   if (!is.null(x$metadata$transform_formulas)) {
     cat("\nTransformations\n")
@@ -1286,6 +1323,10 @@ print.summary_JoinMeFit <- function(x, ...) {
     if (!is.null(x$tables$id_marker_cov$regression)) {
       cat("\ncovariance regression coefficients\n")
       print(x$tables$id_marker_cov$regression, row.names = FALSE)
+    }
+    if (!is.null(x$tables$id_marker_cov$hyperparameters)) {
+      cat("\ncovariance regression hyperparameters\n")
+      print(x$tables$id_marker_cov$hyperparameters, row.names = FALSE)
     }
   } else if (!is.null(x$tables$corr) && !is.null(x$tables$corr$id_marker)) {
     cat("\nid:marker covariance parameters\n")

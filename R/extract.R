@@ -19,8 +19,8 @@ extract <- function(object, ...) {
 #'
 #' @param object A `JoinMeFit` object.
 #' @param what Character component selector. One of
-#'   `"fixef"`, `"gamma_w"`, `"assoc"`, `"distributional"`,
-#'   `"distributional_regression"`, or `"raw"`.
+#'   `"fixef"`, `"gamma_w"`, `"assoc"`, `"association_plot"`,
+#'   `"distributional"`, `"distributional_regression"`, or `"raw"`.
 #' @param term Optional character vector of friendly term names (summary-style)
 #'   to subset extracted columns.
 #' @param variable Optional character vector of raw Stan variable names. This is
@@ -33,11 +33,15 @@ extract <- function(object, ...) {
 #'
 #' @return A list with fields:
 #'   - `draws`: numeric array when `keep_chains = TRUE` (iteration x chain x term),
-#'     otherwise a numeric matrix (rows = draws, cols = requested terms)
+#'     otherwise a numeric matrix (rows = draws, cols = requested terms). For
+#'     `what = "association_plot"`, this is a named list of compact draw
+#'     matrices keyed by association term.
 #'   - `term_map`: data.frame mapping `term` to Stan `variable`
+#'   - `support`: for `what = "association_plot"`, cached model-implied raw
+#'     support ranges used by association plotting.
 #' @export
 extract.JoinMeFit <- function(object,
-                              what = c("fixef", "gamma_w", "assoc", "distributional", "distributional_regression", "raw"),
+                              what = c("fixef", "gamma_w", "assoc", "association_plot", "distributional", "distributional_regression", "raw"),
                               term = NULL,
                               variable = NULL,
                               draws = NULL,
@@ -48,6 +52,36 @@ extract.JoinMeFit <- function(object,
   fit <- object$fit
   sd <- object$stan_data
   cfg <- object$config
+
+  if (what == "association_plot") {
+    payload <- .joinmefit_get_association_plot_payload(object, seed = seed)
+    if (is.null(payload)) {
+      cli::cli_abort(c(
+        x = "No association plotting payload is available.",
+        i = "Fit a model with association terms or refit with posterior draws available."
+      ))
+    }
+
+    keep_terms <- term %||% names(payload$coeff_draws %||% list())
+    keep_terms <- intersect(keep_terms, names(payload$coeff_draws %||% list()))
+    term_map <- payload$term_map %||% data.frame(term = character(0), variable = character(0), stringsAsFactors = FALSE)
+    if (!is.null(term)) {
+      term_map <- term_map[term_map$term %in% keep_terms, , drop = FALSE]
+    }
+    support <- payload$support %||% data.frame()
+    if (!is.null(term) && nrow(support) > 0) {
+      support <- support[support$term %in% keep_terms, , drop = FALSE]
+    }
+
+    return(list(
+      draws = payload$coeff_draws[keep_terms],
+      term_map = term_map,
+      support = support,
+      marker_weight_draws = payload$marker_weight_draws,
+      transform_coeff_draws = payload$transform_coeff_draws,
+      transform_specs = payload$transform_specs
+    ))
+  }
 
   all_vars <- tryCatch(posterior::variables(.get_draws_obj(fit)), error = function(e) character(0))
 
@@ -95,8 +129,8 @@ extract.JoinMeFit <- function(object,
     mw_vars <- paste0("marker_weights_eff[", seq_len(sd$D %||% 0L), "]")
     mw_vars <- mw_vars[mw_vars %in% all_vars]
     if (length(mw_vars) > 0) {
-      marker_terms <- sd$marker_levels %||% paste0("marker_", seq_len(length(mw_vars)))
-      if (length(marker_terms) != length(mw_vars)) marker_terms <- paste0("marker_", seq_len(length(mw_vars)))
+      marker_terms <- sd$marker_levels %||% paste0("marker_", seq_along(mw_vars))
+      if (length(marker_terms) != length(mw_vars)) marker_terms <- paste0("marker_", seq_along(mw_vars))
       mw_map <- data.frame(
         term = paste0("weight: ", marker_terms),
         variable = as.character(mw_vars),

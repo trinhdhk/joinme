@@ -6,7 +6,7 @@
 \usage{
 \method{extract}{JoinMeFit}(
   object,
-  what = c("fixef", "gamma_w", "assoc", "distributional", "distributional_regression",
+  what = c("fixef", "gamma_w", "assoc", "association_plot", "distributional", "distributional_regression",
     "raw"),
   term = NULL,
   variable = NULL,
@@ -20,7 +20,7 @@
 \item{object}{A \code{JoinMeFit} object.}
 
 \item{what}{Character component selector. One of
-\code{"fixef"}, \code{"gamma_w"}, \code{"assoc"}, \code{"distributional"},
+\code{"fixef"}, \code{"gamma_w"}, \code{"assoc"}, \code{"association_plot"}, \code{"distributional"},
 \code{"distributional_regression"}, or \code{"raw"}.}
 
 \item{term}{Optional character vector of friendly term names (summary-style)
@@ -41,8 +41,12 @@ draws-by-term matrix.}
 A list with fields:
 \itemize{
 \item \code{draws}: numeric array when \code{keep_chains = TRUE} (iteration x chain x term),
-otherwise a numeric matrix (rows = draws, cols = requested terms)
+otherwise a numeric matrix (rows = draws, cols = requested terms). For
+\code{what = "association_plot"}, this is a named list of compact draw matrices
+keyed by association term.
 \item \code{term_map}: data.frame mapping \code{term} to Stan \code{variable}
+\item \code{support}: for \code{what = "association_plot"}, cached model-implied raw
+support ranges used by association plotting.
 }
 }
 \description{

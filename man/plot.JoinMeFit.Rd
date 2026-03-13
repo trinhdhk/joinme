@@ -2,43 +2,123 @@
 % Please edit documentation in R/plot.R
 \name{plot.JoinMeFit}
 \alias{plot.JoinMeFit}
-\title{Diagnostic plots for JoinMe model fits}
+\title{Plot diagnostics, fitted trajectories, and association curves for JoinMe fits}
 \usage{
 \method{plot}{JoinMeFit}(
   x,
   type = c("rhat", "ess_bulk", "ess_tail", "mcse_mean", "mcse_sd", "running_mean",
     "running_quantile"),
+  which = NULL,
   pars = NULL,
   regex_pars = NULL,
   draws = NULL,
   seed = 1,
   max_vars = 4,
   quantile_probs = c(0.1, 0.5, 0.9),
+  subject = NULL,
+  marker = NA,
+  scale = NULL,
+  conditioning = c("auto", "last", "origin"),
+  time_start = NULL,
+  times = NULL,
+  time_horizon = NULL,
+  pred_control = list(n_samples = 100),
+  smooth_trajectory = TRUE,
+  smooth_method = c("loess", "spline"),
+  smooth_span = 0.3,
+  ci_levels = c(0.5, 0.95),
+  ci_type = c("ribbon", "line", "both"),
+  observed_first = TRUE,
+  facet_by = c("marker", "none"),
+  facet_scales = "free_y",
+  combined = TRUE,
+  show_data = TRUE,
+  show_observed_line = TRUE,
+  observed_style = list(color = "black", shape = 21, size = 2, alpha = 0.6),
+  prediction_style = list(color = "steelblue", fill = "steelblue", linewidth = 0.8, alpha
+    = 0.2),
+  theme_fn = ggplot2::theme_bw,
+  palette_marker = NULL,
+  association_term = NULL,
+  association_grid = NULL,
+  association_points = 200,
+  association_metric = c("hazard", "transform"),
   ...
 )
 }
 \arguments{
 \item{x}{A fitted object of class \code{JoinMeFit}.}
 
-\item{type}{Diagnostic plot type.}
+\item{type}{Plot type. Diagnostic types are \code{"rhat"}, \code{"ess_bulk"},
+\code{"ess_tail"}, \code{"mcse_mean"}, \code{"mcse_sd"}, \code{"running_mean"}, and
+\code{"running_quantile"}. Fitted-data types are \code{"longitudinal"},
+\code{"survival"}, \code{"cumhaz"}, and \code{"association"}.}
 
-\item{pars}{Optional character vector of parameter names to include.}
+\item{which}{Optional alias for fitted-data plot selection.}
 
-\item{regex_pars}{Optional regular expression for parameter selection.}
+\item{pars}{Optional character vector of parameter names to include for
+diagnostic plots.}
 
-\item{draws}{Optional number of posterior draws to subset.}
+\item{regex_pars}{Optional regular expression for parameter selection for
+diagnostic plots.}
 
-\item{seed}{Random seed for draw subsetting.}
+\item{draws}{Optional number of posterior draws to subset for diagnostics.}
+
+\item{seed}{Random seed for draw subsetting and fitted plotting.}
 
 \item{max_vars}{Maximum number of parameters for running diagnostics.}
 
-\item{quantile_probs}{Numeric vector of quantile probabilities for running quantile plots.}
+\item{quantile_probs}{Numeric vector of quantile probabilities for running
+quantile plots.}
+
+\item{subject}{Optional vector of subject ids for fitted-data plots.}
+
+\item{marker}{Optional marker subset for longitudinal and association plots.
+Use a specific marker level to plot only that marker, or \code{NA} to plot all
+markers.}
+
+\item{scale}{Longitudinal scale for fitted-data plots. One of \code{"epred"},
+\code{"linpred"}, or \code{"predict"}.}
+
+\item{conditioning}{Conditioning-time convention when \code{time_start} is not
+supplied. \code{"last"} uses each subject's last observed longitudinal time,
+\code{"origin"} uses the first observed time, and \code{"auto"} chooses \code{"last"}
+when longitudinal curves are requested and \code{"origin"} otherwise.}
+
+\item{time_start}{Optional conditioning time passed to fitted-data
+predictions. Can be scalar numeric, named numeric vector, or an event-data
+column name.}
+
+\item{times}{Optional time grid for fitted-data prediction.}
+
+\item{time_horizon}{Optional prediction horizon for fitted-data prediction.}
+
+\item{pred_control}{Named list passed to \code{predict.JoinMeFit()} for fitted-data
+plotting. By default this uses a modest draw count for plotting.}
+
+\item{smooth_trajectory, smooth_method, smooth_span, ci_levels, ci_type, }{observed_first,facet_by,facet_scales,combined,show_data,
+show_observed_line,observed_style,prediction_style,theme_fn,
+palette_marker Passed to \code{plot.JoinMeDynPred()} for fitted-data plots.}
+
+\item{association_term}{Optional association term subset for
+\code{type = "association"}.}
+
+\item{association_grid}{Optional numeric grid for association plots.}
+
+\item{association_points}{Number of grid points when \code{association_grid} is
+not supplied. When omitted, \code{plot.JoinMeFit()} uses cached model-implied
+raw support from the fitted association channels and only falls back to
+knot support or observed-data heuristics when that cache is unavailable.}
+
+\item{association_metric}{Quantity to plot for association curves:
+\code{"hazard"} plots the posterior contribution $\alpha \times f(x)$ and
+\code{"transform"} plots the transform $f(x)$ alone.}
 
 \item{...}{Unused.}
 }
 \value{
-A \code{ggplot} object.
+A \code{ggplot} object, a combined plot, or a named list of plots.
 }
 \description{
-Diagnostic plots for JoinMe model fits
+Plot diagnostics, fitted trajectories, and association curves for JoinMe fits
 }

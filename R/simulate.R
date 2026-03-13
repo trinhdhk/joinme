@@ -1614,15 +1614,29 @@ simulate_joinme <- function(
     # optional transform, so simulation matches Stan semantics:
     #   sum_j a_corr[j] * transform(corr_raw[j])
     if (K_idm < 2) return(numeric(0))
-    if (D < 2) return(rep(0.0, M_corr))
+    Li <- matrix(L_i[i, , ], nrow = K_idm, ncol = K_idm)
+    if (!all(is.finite(Li))) return(rep(0.0, M_corr))
 
-    re_mat <- matrix(re_idm_scaled[i, , ], nrow = D, ncol = K_idm)
-    cov_re <- stats::cov(re_mat)
-    if (!all(is.finite(cov_re))) return(rep(0.0, M_corr))
-
-    sd_re <- sqrt(pmax(diag(cov_re), 1e-12))
-    corr_re <- cov_re / (outer(sd_re, sd_re) + 1e-12)
-    corr_re[!is.finite(corr_re)] <- 0
+    sigma_i <- Li %*% t(Li)
+    corr_re <- matrix(0.0, nrow = K_idm, ncol = K_idm)
+    for (r in seq_len(K_idm)) {
+      var_r <- sigma_i[r, r]
+      if (!is.finite(var_r) || var_r <= 0) next
+      corr_re[r, r] <- 1.0
+      if (r > 1L) {
+        for (c in seq_len(r - 1L)) {
+          var_c <- sigma_i[c, c]
+          if (!is.finite(var_c) || var_c <= 0) next
+          denom <- sqrt(var_r * var_c)
+          if (!is.finite(denom) || denom <= 0) next
+          val <- sigma_i[r, c] / denom
+          if (!is.finite(val)) next
+          val <- max(-0.999999, min(0.999999, val))
+          corr_re[r, c] <- val
+          corr_re[c, r] <- val
+        }
+      }
+    }
 
     out <- numeric(M_corr)
     m <- 1L

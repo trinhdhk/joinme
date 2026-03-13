@@ -19,10 +19,10 @@ test_that("simulate_joinme corr uses off-diagonal correlation features", {
   expect_length(raw$corr_vals, 3)
   expect_true(all(is.finite(raw$corr_vals)))
   expect_true(all(abs(raw$corr_vals) <= 1))
-  expect_equal(raw$corr, sum(abs(vc) * raw$corr_vals), tolerance = 1e-10)
+  expect_equal(raw$corr, sum(vc * raw$corr_vals), tolerance = 1e-10)
 
   vc_names <- paste0("corr[", seq_along(vc), "]")
-  expect_equal(unname(sim$truth$assoc_coefs[vc_names]), abs(vc))
+  expect_equal(unname(sim$truth$assoc_coefs[vc_names]), vc)
 })
 
 test_that("simulate_joinme corr coefficient parsing truncates to M_corr", {
@@ -44,3 +44,22 @@ test_that("simulate_joinme corr coefficient parsing truncates to M_corr", {
   expect_equal(raw$corr, 0.7 * raw$corr_vals[1], tolerance = 1e-10)
 })
 
+test_that("simulate_joinme corr is available with one marker and multiple id-marker terms", {
+  sim <- simulate_joinme(
+    formulaLong = y ~ 1 + time + (1 + time | id) + (0 + (1 + time | id) | marker),
+    n_id = 4,
+    families = "gaussian",
+    n_obs_per_marker_per_id = 5,
+    times_obs = seq(0, 2, length.out = 5),
+    seed = 3303,
+    assoc = "corr",
+    assoc_coefs = list(corr = 0.35),
+    transforms = list(corr = list(type = "identity"))
+  )
+
+  raw <- sim$helpers$assoc_components_raw(1, 0.9)
+
+  expect_length(raw$corr_vals, 1)
+  expect_true(is.finite(raw$corr_vals[1]))
+  expect_equal(raw$corr, 0.35 * raw$corr_vals[1], tolerance = 1e-10)
+})

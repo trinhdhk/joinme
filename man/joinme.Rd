@@ -137,6 +137,17 @@ weights using \code{marker_weights + z_marker_weights} with
 \code{z_marker_weights ~ N(0, 1)}. The effective marker intensities are used directly
 from \code{w_raw} without additional normalisation and scale the association contributions.
 
+The returned \code{JoinMeFit} object stores a compact association plotting payload
+containing only the posterior quantities needed to draw association curves
+(\code{alpha_*}, marker weights, spline coefficients, and cached model-implied raw
+support ranges). This keeps association plotting usable after serialization
+without needing the full transient CmdStan CSV outputs.
+
+For CmdStanR fits, \code{joinme()} also eagerly materializes the CSV-backed fit
+contents in memory before returning. This mirrors the loading step used by
+\code{cmdstanr::save_object()} so later \code{saveRDS()} calls do not rely on the
+original CmdStan CSV files remaining on disk.
+
 Formula-scoped subject weighting is supported in random-effect grouping terms via
 \verb{weighted(group, weights = <column>)}. For example:
 \itemize{
