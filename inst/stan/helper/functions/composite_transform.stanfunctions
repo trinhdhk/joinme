@@ -8,6 +8,7 @@
  *   - Mode 1: Functional bytecode evaluator (stack-based)
  *   - Mode 2: I-spline basis (monotone smooth)
  *   - Mode 3: Piecewise-linear interpolation
+ *   - Mode 4: I-spline basis evaluated on inv_logit(x)
  *
  * Modes 1-3 are fully data-driven, allowing transformations to be updated
  * without recompiling the Stan model.
@@ -17,7 +18,7 @@
    * @brief Dispatch scalar transformation evaluation.
    *
    * @param x Input scalar
-  * @param mode Transformation mode (0=identity, 1=functional bytecode, 2=ispline, 3=pwlin)
+  * @param mode Transformation mode (0=identity, 1=functional bytecode, 2=ispline, 3=pwlin, 4=ispline(inv_logit(x)))
   * @param opcodes Functional bytecode instructions (for mode 1)
   * @param const_data Functional bytecode constants (for mode 1)
   * @param spline_knots Knot vector (for modes 2-3)
@@ -45,6 +46,9 @@
     } else if (mode == 3) {
       // Piecewise-linear interpolation
       return pwlin_eval(spline_knots, spline_coeff, x);
+    } else if (mode == 4) {
+      // I-spline evaluation on the bounded inv_logit(x) domain.
+      return ispline_eval(inv_logit(x), spline_knots, spline_degree, spline_coeff);
     } else {
       reject("Unknown transformation mode: ", mode);
     }
@@ -54,7 +58,7 @@
    * @brief Dispatch vector transformation evaluation.
    *
    * @param x Vector of input values
-  * @param mode Transformation mode (0=identity, 1=functional bytecode, 2=ispline, 3=pwlin)
+  * @param mode Transformation mode (0=identity, 1=functional bytecode, 2=ispline, 3=pwlin, 4=ispline(inv_logit(x)))
   * @param opcodes Functional bytecode instructions (for mode 1)
   * @param const_data Functional bytecode constants (for mode 1)
   * @param spline_knots Knot vector (for modes 2-3)
@@ -82,6 +86,9 @@
     } else if (mode == 3) {
       // Piecewise-linear interpolation (element-wise)
       return pwlin_eval_vec(spline_knots, spline_coeff, x);
+    } else if (mode == 4) {
+      // Bounded-domain I-spline evaluation after mapping x through inv_logit.
+      return ispline_eval_vec(inv_logit(x), spline_knots, spline_degree, spline_coeff);
     } else {
       reject("Unknown transformation mode: ", mode);
     }

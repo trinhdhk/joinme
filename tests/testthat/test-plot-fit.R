@@ -506,6 +506,114 @@ test_that("plot.JoinMeFit association curves use fitted spline coefficients", {
   expect_equal(p$data[[median_col]], expected, tolerance = 1e-8)
 })
 
+test_that("plot.JoinMeFit association curves evaluate expit splines on the transformed basis scale", {
+  skip_if_not_installed("splines2")
+
+  testthat::local_mocked_bindings(
+    extract.JoinMeFit = function(object, what = c("fixef", "gamma_w", "assoc", "distributional", "distributional_regression", "raw"),
+                                 term = NULL, variable = NULL, draws = NULL, seed = 1, keep_chains = TRUE, ...) {
+      vals <- matrix(rep(1, 8), ncol = 1)
+      colnames(vals) <- "corr"
+      list(
+        draws = vals,
+        term_map = data.frame(term = "corr", variable = "alpha_corr", stringsAsFactors = FALSE)
+      )
+    },
+    .get_draws_matrix = function(fit, variables, draws = NULL, seed = 1, ...) {
+      out <- matrix(rep(c(0, 1, 1), each = 8), nrow = 8)
+      colnames(out) <- variables
+      out
+    },
+    .package = "joinme"
+  )
+
+  fit <- joinme::JoinMeFit$new(
+    fit = NULL,
+    stan_data = list(
+      n_coeff_corr = 3L,
+      knots_corr = c(0.2, 0.5, 0.8),
+      spline_degree_corr = 1L
+    ),
+    formulaLong = y ~ 1 + time,
+    formulaEvent = survival::Surv(time, event) ~ 1,
+    formulaCorr = NULL,
+    config = list(
+      transforms = list(),
+      transforms_spec = list(
+        corr = list(type = "ispline_expit_penalised")
+      )
+    ),
+    call = quote(joinme::joinme(formulaLong = y ~ 1 + time)),
+    tmax = 1,
+    dataLong = data.frame(id = c(1, 1), time = c(0, 1), marker = "m1", y = c(1, 2)),
+    dataEvent = data.frame(id = 1, time = 1.2, event = 0L)
+  )
+
+  x_grid <- seq(-2, 2, length.out = 5)
+  p <- plot(
+    fit,
+    type = "association",
+    association_term = "corr",
+    association_metric = "transform",
+    association_grid = x_grid
+  )
+
+  basis_x <- pmin(pmax(stats::plogis(x_grid), 0.2), 0.8)
+  basis <- splines2::iSpline(
+    basis_x,
+    knots = 0.5,
+    degree = 1,
+    intercept = TRUE,
+    Boundary.knots = c(0.2, 0.8)
+  )
+  expected <- as.numeric(as.matrix(basis) %*% c(0, 1, 1))
+  median_col <- joinme:::.quantile_name_from_prob(0.5)
+
+  expect_equal(p$data$x, x_grid, tolerance = 1e-8)
+  expect_equal(p$data[[median_col]], expected, tolerance = 1e-8)
+})
+
+test_that("plot.JoinMeFit defaults expit-spline fallback grids on the raw scale", {
+  testthat::local_mocked_bindings(
+    extract.JoinMeFit = function(object, what = c("fixef", "gamma_w", "assoc", "distributional", "distributional_regression", "raw"),
+                                 term = NULL, variable = NULL, draws = NULL, seed = 1, keep_chains = TRUE, ...) {
+      vals <- matrix(rep(1, 8), ncol = 1)
+      colnames(vals) <- "cv_total"
+      list(
+        draws = vals,
+        term_map = data.frame(term = "cv_total", variable = "alpha_cv_total", stringsAsFactors = FALSE)
+      )
+    },
+    .package = "joinme"
+  )
+
+  fit <- joinme::JoinMeFit$new(
+    fit = NULL,
+    stan_data = list(marker_levels = c("m1"), marker_weights = 1),
+    formulaLong = y ~ 1 + time,
+    formulaEvent = survival::Surv(time, event) ~ 1,
+    formulaCorr = NULL,
+    config = list(
+      transforms = list(),
+      transforms_spec = list(
+        cv_total = list(type = "ispline_expit_penalised", knots = c(0.2, 0.5, 0.8), degree = 1)
+      )
+    ),
+    call = quote(joinme::joinme(formulaLong = y ~ 1 + time)),
+    tmax = 1,
+    dataLong = data.frame(id = c(1, 1, 2, 2), time = c(0, 1, 0, 1), marker = "m1", y = c(10, 12, 20, 22)),
+    dataEvent = data.frame(id = c(1, 2), time = c(1.2, 1.3), event = c(0L, 1L))
+  )
+
+  expect_warning({
+    p <- plot(fit, type = "association", association_term = "cv_total", association_metric = "transform")
+  }, "extends beyond the fitted spline knot range")
+
+  expect_lt(min(p$data$x), 0)
+  expect_gt(max(p$data$x), 0)
+  expect_equal(range(p$data$x), stats::qlogis(c(0.2, 0.8)), tolerance = 1e-6)
+})
+
 test_that("plot.JoinMeFit uses cached association plotting payload when available", {
   fit <- joinme::JoinMeFit$new(
     fit = NULL,

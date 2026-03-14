@@ -81,6 +81,14 @@
 #' - `list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), n_knots = 6, degree = 3, lambda = 1)`:
 #'   penalised monotone I-spline with Stan-estimated coefficients; if `knots`
 #'   are omitted they are derived from `x` quantiles using `n_knots = 6` by default.
+#' - `list(type = "ispline_expit", knots = c(0.05, 0.5, 0.95), coeff = c(0, 0.25, 0.8, 1.0, 1.1), degree = 3)`:
+#'   monotone I-spline evaluated on `plogis(x)`; explicit `knots` are specified
+#'   on the expit scale because the spline basis itself lives on that bounded
+#'   `expit(x)` domain.
+#' - `list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), y = seq(0.02, 0.98, length.out = 50)^0.8, n_knots = 6, degree = 3, lambda = 1)`:
+#'   penalised monotone I-spline on `plogis(x)` in legacy plug-in mode.
+#' - `list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), n_knots = 6, degree = 3, lambda = 1)`:
+#'   penalised monotone I-spline on `plogis(x)` with Stan-estimated coefficients.
 #' - `list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))`:
 #'   piecewise-linear transform; both `x` and `y` are required and there are no
 #'   additional defaults.
@@ -101,6 +109,12 @@
 #' - `y`: optional target transformed values at those `x` points. Supplying `y`
 #'   activates the legacy plug-in fit; omitting it activates Stan estimation.
 #' - `lambda`: smoothness control (larger = smoother transform).
+#' - `type = "ispline_expit"` / `"ispline_expit_penalised"`:
+#'   same semantics as the I-spline variants above, except the spline basis is
+#'   built on `plogis(x)`. This keeps the spline input on the bounded interval
+#'   $(0, 1)$ and is often more numerically stable when the raw association
+#'   feature spans a wide range. Explicit `knots` and training `x` values must
+#'   be specified on that expit scale.
 #'
 #' Additional arguments are forwarded to `joinme_standata()` (e.g., `assoc`,
 #' `basehaz`, `basehaz_degree`, `n_knots`, `time_var`, and `shrinkage`). Use

@@ -418,6 +418,11 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   - `list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), y = exp(seq(-2, 2, length.out = 50)), n_knots = 6, degree = 3, lambda = 1)`:
 #'     penalised monotone I-spline; defaults are `n_knots = 6`, `degree = 3`,
 #'     and `lambda = 1` when omitted.
+#'   - `list(type = "ispline_expit", knots = c(0.05, 0.5, 0.95), coeff = c(0, 0.25, 0.8, 1.0, 1.1), degree = 3)`:
+#'     monotone I-spline evaluated on `plogis(x)`; explicit knots are supplied
+#'     on the expit scale.
+#'   - `list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), y = seq(0.02, 0.98, length.out = 50)^0.8, n_knots = 6, degree = 3, lambda = 1)`:
+#'     penalised monotone I-spline on `plogis(x)` in legacy plug-in mode.
 #'   - `list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))`:
 #'     piecewise-linear transform; `x` and `y` are required.
 #'
@@ -430,6 +435,12 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'     before evaluating the transformed association. The fitted plug-in spline
 #'     uses anchored endpoint coefficients matching the Stan-estimated path
 #'     (first coefficient `0`, last coefficient `1`).
+#'   - `type = "ispline_expit"` / `"ispline_expit_penalised"`: same semantics
+#'     as the ordinary I-spline variants above, except the spline basis is built
+#'     on `plogis(x)` for a bounded-domain representation. Training `x` values
+#'     and explicit `knots` for these transform types are specified on that
+#'     bounded expit scale. This is useful when the raw association feature has
+#'     long tails or steep nonlinear effects.
 #'
 #'   In other words, simulation currently uses the legacy plug-in spline mode;
 #'   it does not estimate spline coefficients jointly inside Stan.
@@ -1015,12 +1026,239 @@ simulate_joinme <- function(
     unclass(.normalise_joinme_tf_input(transform_list, validate = FALSE))
   }
 
+  .sim_canonicalise_transform_type <- function(type) {
+    type <- as.character(type %||% "identity")[1]
+    if (identical(type, "ispline_penalized")) {
+      return("ispline_penalised")
+    }
+    if (identical(type, "ispline_expit_penalized")) {
+      return("ispline_expit_penalised")
+    }
+    if (identical(type, "ispline_exp_penalised")) {
+      return("ispline_expit_penalised")
+    }
+    if (identical(type, "ispline_exp_penalized")) {
+      return("ispline_expit_penalised")
+    }
+    type
+  }
+
+  .sim_is_ispline_transform_type <- function(spec_or_type) {
+    type <- if (is.list(spec_or_type)) spec_or_type$type %||% "identity" else spec_or_type
+    .sim_canonicalise_transform_type(type) %in% c(
+      "ispline",
+      "ispline_penalised",
+      "pmonospline",
+      "pmono",
+      "ispline_expit",
+      "ispline_expit_penalised"
+    )
+  }
+
+  .sim_transform_uses_expit_input <- function(spec_or_type) {
+    type <- if (is.list(spec_or_type)) spec_or_type$type %||% "identity" else spec_or_type
+    .sim_canonicalise_transform_type(type) %in% c("ispline_expit", "ispline_expit_penalised")
+  }
+
+  .sim_validate_expit_domain_values <- function(values, arg_name) {
+    values <- as.numeric(values)
+    if (!length(values)) {
+      return(values)
+    }
+    if (any(!is.finite(values))) {
+      cli::cli_abort(c(
+        x = "{.arg {arg_name}} must contain only finite numeric values.",
+        i = "For {.val ispline_expit} and {.val ispline_expit_penalised}, provide spline inputs on the expit scale in [0, 1]."
+      ))
+    }
+    if (any(values < 0 | values > 1)) {
+      cli::cli_abort(c(
+        x = "{.arg {arg_name}} must lie on the expit scale for expit-based spline transforms.",
+        i = "Supply values in [0, 1]; {.fn simulate_joinme} applies {.fn plogis} only to the raw association feature being transformed."
+      ))
+    }
+    values
+  }
+
+  .sim_transform_input_for_spec <- function(x, spec_or_type) {
+    x <- as.numeric(x)
+    if (.sim_transform_uses_expit_input(spec_or_type)) {
+      return(stats::plogis(x))
+    }
+    x
+  }
+
+  .sim_make_penalised_ispline_transform <- function(spec) {
+    if (is.null(spec$x) || is.null(spec$y)) {
+      cli::cli_abort(c(
+        x = "Penalised I-spline requires {.arg x} and {.arg y}.",
+        i = "Provide input-output pairs for the monotone transform."
+      ))
+    }
+
+    x <- as.numeric(spec$x)
+    if (.sim_transform_uses_expit_input(spec)) {
+      x <- .sim_validate_expit_domain_values(x, "x")
+    }
+    y <- as.numeric(spec$y)
+    if (length(x) != length(y) || length(x) < 2L) {
+      cli::cli_abort(c(
+        x = "{.arg x} and {.arg y} must have the same length >= 2.",
+        i = "Check the transform training data."
+      ))
+    }
+
+    lambda <- as.numeric(spec$lambda %||% 1.0)
+    if (!is.numeric(lambda) || length(lambda) != 1L || !is.finite(lambda) || lambda < 0) {
+      cli::cli_abort(c(
+        x = "{.arg lambda} must be a non-negative numeric scalar.",
+        i = "Example: lambda = 1.0."
+      ))
+    }
+
+    degree <- as.integer(spec$degree %||% 3L)
+    if (degree < 1L) {
+      cli::cli_abort(c(
+        x = "{.arg degree} must be >= 1.",
+        i = "Typical choice: degree = 3 (cubic)."
+      ))
+    }
+
+    knots_raw <- spec$knots
+    if (is.null(knots_raw)) {
+      n_knots <- as.integer(spec$n_knots %||% 6L)
+      if (n_knots < 2L) {
+        cli::cli_abort(c(
+          x = "{.arg n_knots} must be >= 2.",
+          i = "Include boundary knots at the ends."
+        ))
+      }
+      probs <- seq(0, 1, length.out = n_knots)
+      knots <- as.numeric(stats::quantile(x, probs = probs, names = FALSE))
+    } else {
+      knots <- as.numeric(knots_raw)
+      if (.sim_transform_uses_expit_input(spec)) {
+        knots <- .sim_validate_expit_domain_values(knots, "knots")
+      }
+    }
+
+    if (length(knots) < 2L || any(diff(knots) <= 0)) {
+      cli::cli_abort(c(
+        x = "{.arg knots} must be a strictly increasing vector with at least 2 values.",
+        i = "Include boundary knots at the ends."
+      ))
+    }
+
+    if (!requireNamespace("splines2", quietly = TRUE)) {
+      cli::cli_abort(c(
+        x = "Package {.pkg splines2} is required for penalised I-splines.",
+        i = "Install splines2 or provide explicit coeff/knots for type = 'ispline'."
+      ))
+    }
+
+    internal_knots <- if (length(knots) > 2L) knots[2:(length(knots) - 1L)] else numeric(0)
+    boundary_knots <- c(knots[1], knots[length(knots)])
+    basis <- splines2::iSpline(
+      x,
+      knots = internal_knots,
+      degree = degree,
+      intercept = TRUE,
+      Boundary.knots = boundary_knots
+    )
+    basis <- as.matrix(basis)
+
+    weights <- spec$weights
+    if (!is.null(weights)) {
+      weights <- as.numeric(weights)
+      if (length(weights) != length(x) || any(weights < 0)) {
+        cli::cli_abort(c(
+          x = "{.arg weights} must be non-negative and the same length as {.arg x}.",
+          i = "Remove weights or provide a valid vector."
+        ))
+      }
+    } else {
+      weights <- rep(1, length(x))
+    }
+
+    diff_order <- as.integer(spec$diff_order %||% 2L)
+    if (diff_order < 1L) {
+      cli::cli_abort(c(
+        x = "{.arg diff_order} must be >= 1.",
+        i = "Typical choice: diff_order = 2."
+      ))
+    }
+
+    n_coef <- ncol(basis)
+    if (n_coef < 2L) {
+      cli::cli_abort(c(
+        x = "Penalised I-spline basis must have at least 2 coefficients.",
+        i = "Increase the number of knots or the spline degree."
+      ))
+    }
+    Dmat <- diff(diag(n_coef), differences = diff_order)
+
+    w_sqrt <- sqrt(weights)
+    B_w <- basis * w_sqrt
+    y_w <- y * w_sqrt
+
+    init_raw <- tryCatch(
+      as.numeric(qr.solve(crossprod(B_w), crossprod(B_w, y_w))),
+      error = function(e) rep(0, n_coef)
+    )
+
+    .sim_anchored_coeff_from_z <- function(z) {
+      z <- as.numeric(z)
+      z <- z - max(z)
+      delta <- exp(z)
+      delta <- delta / sum(delta)
+      c(0, cumsum(delta))
+    }
+
+    init_coeff <- pmax(0, init_raw)
+    init_coeff <- init_coeff - init_coeff[1]
+    if (!is.finite(init_coeff[n_coef]) || init_coeff[n_coef] <= 0) {
+      init_coeff <- seq(0, 1, length.out = n_coef)
+    } else {
+      init_coeff <- init_coeff / init_coeff[n_coef]
+    }
+    init_coeff <- cummax(pmin(pmax(init_coeff, 0), 1))
+    init_coeff[1] <- 0
+    init_coeff[n_coef] <- 1
+    delta_init <- diff(init_coeff)
+    delta_init <- pmax(delta_init, .Machine$double.eps)
+    delta_init <- delta_init / sum(delta_init)
+    z_init <- log(delta_init)
+
+    fn <- function(z) {
+      b <- .sim_anchored_coeff_from_z(z)
+      r <- y_w - B_w %*% b
+      pen <- if (lambda > 0 && nrow(Dmat) > 0) Dmat %*% b else 0
+      0.5 * sum(r^2) + 0.5 * lambda * sum(pen^2)
+    }
+
+    opt <- optim(z_init, fn, method = "BFGS", control = list(maxit = 1000))
+    if (opt$convergence != 0) {
+      cli::cli_warn(c(
+        x = "Penalised I-spline optimisation did not fully converge.",
+        i = "Consider increasing lambda or adjusting knots."
+      ))
+    }
+
+    list(
+      type = if (.sim_transform_uses_expit_input(spec)) "ispline_expit" else "ispline",
+      knots = knots,
+      raw_knots = if (is.null(knots_raw)) NULL else as.numeric(knots_raw),
+      coeff = as.numeric(.sim_anchored_coeff_from_z(opt$par)),
+      degree = degree
+    )
+  }
+
   .sim_make_assoc_transform <- function(spec, term_name) {
     if (is.null(spec) || is.null(spec$type) || identical(spec$type, "identity")) {
       return(function(x) x)
     }
 
-    tf_type <- .canonicalise_transform_type(spec$type)
+    tf_type <- .sim_canonicalise_transform_type(spec$type)
 
     if (identical(tf_type, "functional")) {
       bc <- parse_transform_expr(spec$expr)
@@ -1033,16 +1271,16 @@ simulate_joinme <- function(
       })
     }
 
-    if (tf_type %in% c("ispline", "ispline_penalised", "pmonospline", "pmono")) {
-      if (tf_type %in% c("ispline_penalised", "pmonospline", "pmono")) {
+    if (.sim_is_ispline_transform_type(tf_type)) {
+      if (tf_type %in% c("ispline_penalised", "pmonospline", "pmono", "ispline_expit_penalised")) {
         if (is.null(spec$y)) {
           cli::cli_abort(c(
-            x = "Simulation currently requires both {.arg x} and {.arg y} for {.val ispline_penalised} transforms.",
+            x = "Simulation currently requires both {.arg x} and {.arg y} for penalised spline transforms.",
             i = "Use legacy plug-in mode in {.fn simulate_joinme} by supplying x/y pairs, or provide an explicit {.val ispline} transform instead.",
             i = "Stan-estimated penalised splines without y are supported in {.fn joinme}, not in simulation."
           ))
         }
-        spec <- .make_penalised_ispline_transform(spec)
+        spec <- .sim_make_penalised_ispline_transform(spec)
       }
       if (!requireNamespace("splines2", quietly = TRUE)) {
         cli::cli_abort(c(
@@ -1054,7 +1292,7 @@ simulate_joinme <- function(
       coeff <- as.numeric(spec$coeff)
       degree <- as.integer(spec$degree %||% 3L)
       return(function(x) {
-        x <- as.numeric(x)
+        x <- .sim_transform_input_for_spec(x, spec)
         if (length(knots) < 2) {
           cli::cli_abort(c(
             x = "I-spline transform for {.val {term_name}} requires at least 2 knots.",
@@ -1098,7 +1336,7 @@ simulate_joinme <- function(
 
     cli::cli_abort(c(
       x = "Unsupported transform type for {.val {term_name}}: {.val {tf_type}}.",
-      i = "Use one of identity, functional, ispline, ispline_penalised (alias: ispline_penalized), pwlin."
+      i = "Use one of identity, functional, ispline, ispline_penalised, ispline_expit, ispline_expit_penalised, pwlin."
     ))
   }
 

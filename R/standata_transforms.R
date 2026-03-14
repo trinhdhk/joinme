@@ -10,7 +10,65 @@
   if (identical(type, "ispline_penalized")) {
     return("ispline_penalised")
   }
+  if (identical(type, "ispline_expit_penalized")) {
+    return("ispline_expit_penalised")
+  }
+  if (identical(type, "ispline_exp_penalised")) {
+    return("ispline_expit_penalised")
+  }
+  if (identical(type, "ispline_exp_penalized")) {
+    return("ispline_expit_penalised")
+  }
   type
+}
+
+#' @keywords internal
+.transform_uses_expit_input <- function(spec_or_type) {
+  type <- if (is.list(spec_or_type)) spec_or_type$type %||% "identity" else spec_or_type
+  .canonicalise_transform_type(type) %in% c("ispline_expit", "ispline_expit_penalised")
+}
+
+#' @keywords internal
+.is_ispline_transform_type <- function(spec_or_type) {
+  type <- if (is.list(spec_or_type)) spec_or_type$type %||% "identity" else spec_or_type
+  .canonicalise_transform_type(type) %in% c(
+    "ispline",
+    "ispline_penalised",
+    "pmonospline",
+    "pmono",
+    "ispline_expit",
+    "ispline_expit_penalised"
+  )
+}
+
+#' @keywords internal
+.transform_input_for_spec <- function(x, spec_or_type) {
+  x <- as.numeric(x)
+  if (.transform_uses_expit_input(spec_or_type)) {
+    return(stats::plogis(x))
+  }
+  x
+}
+
+#' @keywords internal
+.validate_expit_domain_values <- function(values, arg_name) {
+  values <- as.numeric(values)
+  if (!length(values)) {
+    return(values)
+  }
+  if (any(!is.finite(values))) {
+    cli::cli_abort(c(
+      x = "{.arg {arg_name}} must contain only finite numeric values.",
+      i = "For {.val ispline_expit} and {.val ispline_expit_penalised}, provide spline inputs on the expit scale in [0, 1]."
+    ))
+  }
+  if (any(values < 0 | values > 1)) {
+    cli::cli_abort(c(
+      x = "{.arg {arg_name}} must lie on the expit scale for expit-based spline transforms.",
+      i = "Supply values in [0, 1]; {.fn joinme} applies {.fn plogis} only to the raw association feature being transformed."
+    ))
+  }
+  values
 }
 
 #' Transform Specification Helper
@@ -19,11 +77,13 @@
 #' for the joinme Stan model's association term.
 #'
 #' @description
-#' Transform can be specified in three modes:
+#' Transform can be specified in four modes:
 #'   - Mode 0: Identity (no transformation)
 #'   - Mode 1: Functional (arbitrary nested functions via parser)
 #'   - Mode 2: I-spline basis (monotonic, smooth)
 #'   - Mode 2 (penalised): I-spline coefficients estimated with smoothness penalty
+#'   - Mode 4: I-spline basis evaluated on `expit(x)` for a bounded, numerically
+#'     stable spline input domain
 #'   - Mode 3: Piecewise-linear (user-defined interpolation)
 #'
 #' Each transformation term (CV_total, CS_total, CV_mean, CS_mean, CV_marker,
@@ -37,7 +97,9 @@
 #' @details
 #' Each element of transform_list should be a list with:
 #'   - type: "identity", "functional", "ispline", "ispline_penalised" (or alias
-#'     "ispline_penalized"), or "pwlin"
+#'     "ispline_penalized"), "ispline_expit", "ispline_expit_penalised" (aliases
+#'     `"ispline_exp_penalised"`, `"ispline_exp_penalized"`,
+#'     `"ispline_expit_penalized"`), or "pwlin"
 #'   - Additional fields depend on type:
 #'     - functional: expr (quosure, formula, quoted expression, or string)
 #'     - ispline: knots (vector), coeff (vector), degree (int)
@@ -46,6 +108,12 @@
 #'         using the same anchored endpoint convention as the Stan-estimated path
 #'         (first coefficient = 0, last coefficient = 1)
 #'       * if y is omitted, Stan estimates the monotone spline coefficients directly and lambda controls smoothness
+#'     - ispline_expit / ispline_expit_penalised: identical to the I-spline
+#'       variants above, except the raw association feature is first mapped
+#'       through `plogis(x)` and the spline basis is then evaluated on that
+#'       bounded expit-scale input. User-supplied training `x` values and
+#'       explicit `knots` for these transform types must therefore already be
+#'       specified on the expit scale in `[0, 1]`.
 #'     - pwlin: x (vector), y (vector)
 #'
 #' Defaults and minimal examples:
@@ -57,6 +125,12 @@
 #'     `list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), y = exp(seq(-2, 2, length.out = 50)), n_knots = 6, degree = 3, lambda = 1)`
 #'   - ispline_penalised (Stan-estimated):
 #'     `list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), n_knots = 6, degree = 3, lambda = 1)`
+#'   - ispline_expit:
+#'     `list(type = "ispline_expit", knots = c(0.05, 0.5, 0.95), coeff = c(0, 0.25, 0.8, 1.0, 1.1))`
+#'   - ispline_expit_penalised (plug-in fit):
+#'     `list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), y = seq(0, 1, length.out = 50), n_knots = 6, degree = 3, lambda = 1)`
+#'   - ispline_expit_penalised (Stan-estimated):
+#'     `list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), n_knots = 6, degree = 3, lambda = 1)`
 #'   - pwlin:
 #'     `list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))`
 #'
@@ -66,13 +140,20 @@
 #'   - `ispline_penalised`: `n_knots = 6`, `degree = 3`, `lambda = 1` if omitted,
 #'   - `pwlin` and `functional`: no additional defaults beyond their required fields.
 #'
+#' For `ispline_expit*` declarations, the internal spline basis lives on the
+#' bounded interval $(0, 1)$ after applying `plogis()` to the raw association
+#' feature. User-supplied training `x` values and explicit `knots` should be on
+#' that same bounded scale so the fitted spline domain matches the runtime basis.
+#' This often yields better-conditioned knot placement and smoother optimisation
+#' for steep nonlinear transforms.
+#'
 #' For user-facing declarations, prefer `joinme_tf(...)`, which validates and
 #' normalises channel specifications before they are passed here.
 #'
 #' @return List of standata entries for transformation parameters:
 #'   - tf_mode_*
 #'   - functional_ops_* and const_data_* (if mode 1)
-#'   - knots_* and coeff_* and spline_degree_* (if mode 2 or 3)
+#'   - knots_* and coeff_* and spline_degree_* (if mode 2, 3, or 4)
 #'
 #' @section Usage:
 #' Use `build_standata_transforms()` to construct the data list entries,
@@ -133,8 +214,8 @@ build_standata_transforms <- function(
         standata[[paste0("functional_ops_", short_suffix)]] <- ops
         standata[[paste0("n_const_", short_suffix)]] <- bc$n_const
         standata[[paste0("const_data_", short_suffix)]] <- bc$const_data
-      } else if (spec$type %in% c("ispline", "ispline_penalised", "pmonospline", "pmono")) {
-        if (spec$type %in% c("ispline_penalised", "pmonospline", "pmono")) {
+      } else if (.is_ispline_transform_type(spec$type)) {
+        if (spec$type %in% c("ispline_penalised", "pmonospline", "pmono", "ispline_expit_penalised")) {
           # Two supported semantics:
           # 1) legacy plug-in mode: user supplies x/y and we fit coefficients in R,
           # 2) Stan-estimated mode: user omits y and Stan estimates spline shape
@@ -151,8 +232,11 @@ build_standata_transforms <- function(
           spec$estimate_spline <- 0L
           spec$lambda_spline <- 0.0
           spec$n_free_spline <- 0L
+          if (.transform_uses_expit_input(spec$type) && !is.null(spec$knots)) {
+            spec$knots <- .validate_expit_domain_values(spec$knots, "knots")
+          }
         }
-        standata[[paste0("tf_mode_", mode_suffix)]] <- 2
+        standata[[paste0("tf_mode_", mode_suffix)]] <- if (.transform_uses_expit_input(spec$type)) 4L else 2L
         standata[[paste0("n_knots_", short_suffix)]] <- length(spec$knots)
         standata[[paste0("knots_", short_suffix)]] <- spec$knots
         standata[[paste0("n_coeff_", short_suffix)]] <- length(spec$coeff)
@@ -170,7 +254,7 @@ build_standata_transforms <- function(
       } else {
         cli::cli_abort(c(
           x = "Unknown transformation type: {spec$type}.",
-          i = "Use one of: identity, functional, ispline, ispline_penalised (alias: ispline_penalized), pwlin."
+          i = "Use one of: identity, functional, ispline, ispline_penalised, ispline_expit, ispline_expit_penalised, pwlin."
         ))
       }
     }
@@ -226,7 +310,7 @@ validate_transforms <- function(standata) {
       functional_ops <- standata[[paste0("functional_ops_", short_suffix)]]
       const_data <- standata[[paste0("const_data_", short_suffix)]]
       verify_opcodes(functional_ops, const_data)
-    } else if (mode %in% c(2, 3)) {
+    } else if (mode %in% c(2, 3, 4)) {
       # Spline validation
       knots <- standata[[paste0("knots_", short_suffix)]]
       coeff <- standata[[paste0("coeff_", short_suffix)]]
@@ -240,6 +324,12 @@ validate_transforms <- function(standata) {
       
       if (any(diff(knots) <= 0)) {
         cli::cli_abort(c(x = "Knots not strictly increasing for {short_suffix}.", i = "Ensure knots are sorted and unique."))
+      }
+      if (mode == 4 && any(knots < 0 | knots > 1)) {
+        cli::cli_abort(c(
+          x = "Expit-spline knots must lie in [0, 1] for {short_suffix}.",
+          i = "Provide explicit expit-scale knots, or provide expit-scale x values so knots can be derived from them."
+        ))
       }
       
       if (mode == 2) {
@@ -310,6 +400,16 @@ validate_transforms <- function(standata) {
 ##' spec_corr_pen_stan <- list(
 ##'   type = "ispline_penalised",
 ##'   x = seq(-2, 2, length.out = 50),
+##'   n_knots = 6,
+##'   degree = 3,
+##'   lambda = 1.0
+##' )
+##'
+##' # Example 6: Penalised monotone I-spline on expit(x)
+##' spec_corr_expit <- list(
+##'   type = "ispline_expit_penalised",
+##'   x = seq(0.02, 0.98, length.out = 50),
+##'   y = seq(0.02, 0.98, length.out = 50)^0.75,
 ##'   n_knots = 6,
 ##'   degree = 3,
 ##'   lambda = 1.0
@@ -406,10 +506,14 @@ penalized_ispline_transform <- function(...) {
     ))
   }
 
-  knots <- spec$knots
+  knots_raw <- spec$knots
+  knots <- knots_raw
   if (is.null(knots)) {
     if (!is.null(spec$x)) {
       x <- as.numeric(spec$x)
+      if (.transform_uses_expit_input(spec)) {
+        x <- .validate_expit_domain_values(x, "x")
+      }
       n_knots <- as.integer(spec$n_knots %||% 6L)
       if (length(x) < 2L || n_knots < 2L) {
         cli::cli_abort(c(
@@ -427,6 +531,9 @@ penalized_ispline_transform <- function(...) {
     }
   } else {
     knots <- as.numeric(knots)
+    if (.transform_uses_expit_input(spec)) {
+      knots <- .validate_expit_domain_values(knots, "knots")
+    }
   }
 
   if (length(knots) < 2L || any(diff(knots) <= 0)) {
@@ -445,8 +552,9 @@ penalized_ispline_transform <- function(...) {
   }
 
   list(
-    type = "ispline",
+    type = if (.transform_uses_expit_input(spec)) "ispline_expit" else "ispline",
     knots = knots,
+    raw_knots = if (is.null(knots_raw)) NULL else as.numeric(knots_raw),
     coeff = rep(0, n_coeff),
     degree = degree,
     estimate_spline = 1L,
@@ -465,6 +573,9 @@ penalized_ispline_transform <- function(...) {
     ))
   }
   x <- as.numeric(spec$x)
+  if (.transform_uses_expit_input(spec)) {
+    x <- .validate_expit_domain_values(x, "x")
+  }
   y <- as.numeric(spec$y)
   if (length(x) != length(y) || length(x) < 2) {
     cli::cli_abort(c(
@@ -488,6 +599,7 @@ penalized_ispline_transform <- function(...) {
   }
 
   # Resolve knot locations (explicit or quantile-based)
+  knots_raw <- spec$knots
   if (is.null(spec$knots)) {
     n_knots <- as.integer(spec$n_knots %||% 6L)
     if (n_knots < 2) {
@@ -500,6 +612,9 @@ penalized_ispline_transform <- function(...) {
     knots <- as.numeric(stats::quantile(x, probs = probs, names = FALSE))
   } else {
     knots <- as.numeric(spec$knots)
+    if (.transform_uses_expit_input(spec)) {
+      knots <- .validate_expit_domain_values(knots, "knots")
+    }
   }
   if (length(knots) < 2 || any(diff(knots) <= 0)) {
     cli::cli_abort(c(
@@ -611,8 +726,9 @@ penalized_ispline_transform <- function(...) {
   }
 
   list(
-    type = "ispline",
+    type = if (.transform_uses_expit_input(spec)) "ispline_expit" else "ispline",
     knots = knots,
+    raw_knots = if (is.null(knots_raw)) NULL else as.numeric(knots_raw),
     coeff = as.numeric(.anchored_coeff_from_z(opt$par)),
     degree = degree
   )

@@ -11,7 +11,9 @@
 #'
 #' Supported shorthands per channel:
 #' - `"identity"`, `"ispline"`, `"ispline_penalised"`, `"ispline_penalized"`,
-#'   `"pwlin"`, `"functional"`
+#'   `"ispline_expit"`, `"ispline_expit_penalised"`, `"ispline_expit_penalized"`,
+#'   `"ispline_exp_penalised"`, `"ispline_exp_penalized"`, `"pwlin"`,
+#'   `"functional"`
 #' - a formula such as `~ log1p(x)`, which is interpreted as
 #'   `list(type = "functional", expr = ~ log1p(x))`
 #' - a full named list specification such as
@@ -54,7 +56,7 @@ print.joinme_tf <- function(x, ...) {
       expr_txt <- tryCatch(paste(deparse(spec$expr), collapse = ""), error = function(e) "<expr>")
       return(paste0(type, " (", expr_txt, ")"))
     }
-    if (type %in% c("ispline", "ispline_penalised")) {
+    if (type %in% c("ispline", "ispline_penalised", "ispline_expit", "ispline_expit_penalised")) {
       knot_txt <- if (!is.null(spec$knots)) paste0("knots=", length(spec$knots)) else paste0("n_knots=", spec$n_knots %||% "?")
       return(paste(type, knot_txt, paste0("degree=", spec$degree %||% 3L), sep = ", "))
     }
@@ -181,7 +183,19 @@ print.joinme_priors <- function(x, ...) {
 
 #' @keywords internal
 .normalise_joinme_tf_spec <- function(spec, term_name = "transform") {
-  allowed_types <- c("identity", "functional", "ispline", "ispline_penalised", "ispline_penalized", "pwlin")
+  allowed_types <- c(
+    "identity",
+    "functional",
+    "ispline",
+    "ispline_penalised",
+    "ispline_penalized",
+    "ispline_expit",
+    "ispline_expit_penalised",
+    "ispline_expit_penalized",
+    "ispline_exp_penalised",
+    "ispline_exp_penalized",
+    "pwlin"
+  )
 
   if (is.null(spec)) {
     return(list(type = "identity"))

@@ -1,6 +1,8 @@
 devtools::load_all()
 library(dplyr)
 
+expit_grid <- stats::plogis(seq(-4, 4, length.out = 31))
+
 # Simulation uses the plug-in penalised spline constructor, which now matches
 # the Stan-estimated fit convention:
 # - 6 knots including boundaries
@@ -39,7 +41,14 @@ sim <- simulate_joinme(
   assoc_coefs = list(cv_total = 0.25, corr = c(0.12)),
   transforms = joinme_tf(
     # cv_total = ~ expit(x), #sim_cv_tf,
-    corr = ~ expit(-3*x)
+    corr = list(
+      type = "ispline_expit_penalised",
+      x = expit_grid,
+      y = stats::plogis(-3 * qlogis(expit_grid)),
+      n_knots = 6,
+      degree = 3,
+      lambda = 1
+    )
   ),
   re_params = list(
     id = list(sd = c(0.5, 0.25)),
@@ -80,10 +89,9 @@ fit <- joinme(
   transforms = joinme_tf(
     # cv_total = fit_cv_tf,
     # cv_total = ~ expit(x),
-    # corr = ~ expit(-3*x)
     corr = list(
-      type = "ispline_penalised",
-      knots = seq(-4, 4, 0.5),
+      type = "ispline_expit_penalised",
+      x = expit_grid,
       degree = 3,
       lambda = 1
     )
@@ -103,10 +111,11 @@ ndE <- sim$dataEvent %>%
   left_join(lastTime, by = "id") %>%
   mutate(time_start = as.numeric(last_time))
 
-pred <- posterior_predict(
+pred <- predict(
   fit,
   newdataLong = sim$dataLong |> filter(id %in% c(5,6,7,8)),
   newdataEvent = ndE |> filter(id %in% c(5,6,7,8)),
+  process = c("longitudinal", "event"),
   time_start = "time_start",
   time_horizon = 10,
   control = list(

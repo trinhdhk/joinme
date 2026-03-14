@@ -79,14 +79,15 @@ corr <- function(object, ...) {
     return(.format_transform_expr(spec$expr))
   }
   spec$type <- .canonicalise_transform_type(spec$type)
-  if (spec$type %in% c("ispline", "ispline_penalised", "pmonospline", "pmono")) {
-    knots <- spec$knots %||% spec$x
+  if (spec$type %in% c("ispline", "ispline_penalised", "pmonospline", "pmono", "ispline_expit", "ispline_expit_penalised")) {
+    knots <- spec$raw_knots %||% spec$knots %||% spec$x
     degree <- spec$degree %||% 3L
+    label <- if (spec$type %in% c("ispline_expit", "ispline_expit_penalised")) "ispline_expit" else "ispline"
     if (!is.null(knots)) {
       knot_text <- paste(format(knots, digits = 3, trim = TRUE), collapse = ", ")
-      return(paste0("ispline(knots = c(", knot_text, "), degree = ", degree, ")"))
+      return(paste0(label, "(knots = c(", knot_text, "), degree = ", degree, ")"))
     }
-    return(paste0("ispline(degree = ", degree, ")"))
+    return(paste0(label, "(degree = ", degree, ")"))
   }
   if (spec$type == "pwlin") {
     x_vals <- spec$x

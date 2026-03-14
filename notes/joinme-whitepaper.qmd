@@ -141,6 +141,7 @@ Raw biomarkers often affect survival nonlinearly (e.g., only extremely high valu
 
 *   **Functional Opcodes**: A stack-based evaluator allows users to specify compositions like $\log(1 + \exp(x))$ or $\sqrt{\max(0, x)}$ which are evaluated inside the Stan leapfrog integrator.
 *   **Monotone I-Splines**: For data-driven shapes, we use Integrated Splines (I-splines) with non-negative coefficients, ensuring the association is monotonic but nonlinear.
+*   **Expit-Domain I-Splines**: For wide or poorly scaled association features, we also support I-splines evaluated on $\operatorname{expit}(x)$, which moves the spline basis to the bounded interval $(0,1)$ while preserving the raw association feature outside the spline map.
 
 For marker-aggregated association terms (`cv_total`, `cv_marker`, `cs_total`,
 `cs_marker`), `joinme` uses transform-before-averaging semantics. Let

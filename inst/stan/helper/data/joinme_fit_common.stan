@@ -215,13 +215,13 @@
   array[n_time_widm] int<lower=0, upper=Q_idm> idx_time_widm; // indices in tau_w to scale
 
   /* Transform configuration */
-  int<lower=0, upper=3> tf_mode_cv_tot;     // transform mode for total CV
-  int<lower=0, upper=3> tf_mode_cs_tot;     // transform mode for total CS
-  int<lower=0, upper=3> tf_mode_corr;       // transform mode for corr term
-  int<lower=0, upper=3> tf_mode_cv_mean;    // transform mode for mean CV
-  int<lower=0, upper=3> tf_mode_cv_marker;  // transform mode for marker CV
-  int<lower=0, upper=3> tf_mode_cs_mean;    // transform mode for mean CS
-  int<lower=0, upper=3> tf_mode_cs_marker;  // transform mode for marker CS
+  int<lower=0, upper=4> tf_mode_cv_tot;     // transform mode for total CV
+  int<lower=0, upper=4> tf_mode_cs_tot;     // transform mode for total CS
+  int<lower=0, upper=4> tf_mode_corr;       // transform mode for corr term
+  int<lower=0, upper=4> tf_mode_cv_mean;    // transform mode for mean CV
+  int<lower=0, upper=4> tf_mode_cv_marker;  // transform mode for marker CV
+  int<lower=0, upper=4> tf_mode_cs_mean;    // transform mode for mean CS
+  int<lower=0, upper=4> tf_mode_cs_marker;  // transform mode for marker CS
 
   /* Functional bytecode specifications */
   int<lower=0> n_functional_ops_cv;         // op count for total CV

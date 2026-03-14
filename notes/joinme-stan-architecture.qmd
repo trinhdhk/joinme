@@ -15,6 +15,13 @@ format:
 
 The **JoinME** package implements a sophisticated joint model for multivariate longitudinal and time-to-event data using Stan. This document provides an in-depth technical explanation of the Stan model architecture, data flow, and computational algorithms.
 
+Association splines now have a dedicated bounded-domain path: `ispline_expit`
+and `ispline_expit_penalised` evaluate the raw association feature on
+`inv_logit(x)` in Stan, while expecting user-supplied spline `knots` and
+training `x` values to already be expressed on that bounded expit scale. This
+adds a new transform mode without changing the coefficient payload shape used by
+the existing I-spline machinery.
+
 ## Core Capabilities
 
 **Multivariate Longitudinal Submodel**: Handles multiple markers measured repeatedly over time with flexible distribution families (Gaussian, Student-t, Bernoulli, Poisson, negative binomial, beta, ordinal, skew-normal, double exponential)
@@ -37,8 +44,8 @@ Additional implementation details that are central to the interpretation:
 - The CORR association depends on an id-level latent effect that drives a
   covariance regression, producing subject-specific Cholesky factors.
 - Non-linear transforms are applied to CV, CS, and CORR before they enter the
-  hazard, using identity, functional opcodes, monotone I-splines, or piecewise
-  linear rules.
+  hazard, using identity, functional opcodes, monotone I-splines,
+  expit-domain monotone I-splines, or piecewise linear rules.
 - Random-effects independence follows lme4-style `||` syntax in `formulaLong`,
   mapping to diagonal covariance structures for id, marker, and nested marker-by-id blocks.
 - Formula-scoped random-effects weighting is supported via
@@ -418,6 +425,7 @@ Association features can be transformed before entering survival predictor. Tran
 - **1**: Functional opcodes (log, exp, sqrt, compositions)
 - **2**: I-spline basis (for monotonic smooth transforms)
 - **3**: Piecewise linear
+- **4**: I-spline basis evaluated on $\operatorname{inv\_logit}(x)$
 
 Example: If CV exhibits nonlinear association with hazard:
 $$ \eta_{assoc} += \alpha \cdot f(CV) $$
@@ -776,6 +784,12 @@ Returns a constant vector of length $K$.
 4. **Piecewise Linear** (`mode = 3`):
    - Linear interpolation between knot points.
 
+5. **Expit-Domain I-Spline** (`mode = 4`):
+  - Applies `inv_logit(x)` first and then evaluates the same monotone
+    I-spline basis as mode 2.
+  - Keeps the spline basis on a bounded domain while preserving the raw
+    association feature everywhere else in the model.
+
 **Algorithm** (functional opcodes):
 Evaluates reverse polish notation Opcodes on a stack.
 For example `PUSH_X, PUSH_1, ADD, LOG` computes $\log(x+1)$.
@@ -1122,6 +1136,13 @@ When `type = "ispline_penalised"`, the association function $f(x)$ is modelled v
 - **Prior**: Second-order difference penalty strictly on the I-spline coefficients.
 - **Constraint**: Coefficients must be positive to ensure monotonicity.
 - **Rationale**: Nonlinear associations (e.g., risk increases only after a threshold) are powerful but prone to overfitting in sparse data regions. The penalty forces the function toward linearity in the absence of strong evidence for curvature.
+
+When `type = "ispline_expit_penalised"`, the same monotone I-spline machinery is
+used, but it is evaluated on $\operatorname{expit}(x)$ instead of directly on
+$x$. This keeps the spline basis on $(0, 1)$, which can substantially improve
+numerical conditioning for wide or heavy-tailed association features. The
+associated training `x` values and explicit `knots` are therefore interpreted on
+that same expit scale.
 
 ### Covariance Regression (CORR)
 - **Latent Effect ($u_L$)**: Normal(0, $\tau_L$).

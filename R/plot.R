@@ -1645,6 +1645,33 @@ plot.JoinMeFit <- function(x,
     x$config$transforms_spec %||% x$call$transforms %||% list()
 }
 
+.joinmefit_plot_raw_knot_range <- function(tf_spec) {
+    knots <- as.numeric(tf_spec$knots %||% tf_spec$x %||% numeric(0))
+    if (!length(knots) || !all(is.finite(knots))) {
+        return(NULL)
+    }
+    if (.transform_uses_expit_input(tf_spec)) {
+        eps <- sqrt(.Machine$double.eps)
+        knots <- stats::qlogis(pmin(pmax(knots, eps), 1 - eps))
+    }
+    if (!all(is.finite(knots))) {
+        return(NULL)
+    }
+    range(knots)
+}
+
+.joinmefit_support_outside_spline_range <- function(support, tf_spec) {
+    knots <- as.numeric(tf_spec$knots %||% numeric(0))
+    if (length(support) != 2L || length(knots) < 2L) {
+        return(FALSE)
+    }
+    boundary <- c(knots[1], knots[length(knots)])
+    if (.transform_uses_expit_input(tf_spec)) {
+        support <- .transform_input_for_spec(support, tf_spec)
+    }
+    any(support < boundary[1] | support > boundary[2])
+}
+
 .default_joinmefit_association_grid <- function(x, term_key, marker = NULL, n = 200) {
     if (identical(term_key, "corr")) {
         support <- .joinmefit_association_support_range(x, term_key = term_key, marker = marker)
@@ -1658,9 +1685,9 @@ plot.JoinMeFit <- function(x,
     tf_type <- .canonicalise_transform_type(tf_spec$type %||% "identity")
     support <- .joinmefit_association_support_range(x, term_key = term_key, marker = marker)
     if (!is.null(support)) {
-        if (tf_type %in% c("ispline", "ispline_penalised", "pmonospline", "pmono") && !is.null(tf_spec$knots)) {
-            kr <- range(as.numeric(tf_spec$knots), finite = TRUE)
-            if (all(is.finite(kr)) && diff(kr) > 0 && (support[1] < kr[1] || support[2] > kr[2])) {
+        if (.is_ispline_transform_type(tf_type) && !is.null(tf_spec$knots)) {
+            kr <- .joinmefit_plot_raw_knot_range(tf_spec)
+            if (!is.null(kr) && diff(kr) > 0 && .joinmefit_support_outside_spline_range(support, tf_spec)) {
                 cli::cli_warn(c(
                     x = "Model-implied support for {.val {term_key}} extends beyond the fitted spline knot range.",
                     i = "Using knot support [{format(signif(kr[1], 4), scientific = FALSE)}, {format(signif(kr[2], 4), scientific = FALSE)}] to avoid unsupported spline extrapolation."
@@ -1697,16 +1724,14 @@ plot.JoinMeFit <- function(x,
     if (term_key %in% c("cv_total", "cv_mean", "cv_marker") && length(y_obs) > 1L) {
         xr <- stats::quantile(y_obs, probs = c(0.02, 0.98), na.rm = TRUE, names = FALSE)
         if (all(is.finite(xr)) && diff(xr) > 0) {
-            if (tf_type %in% c("ispline", "ispline_penalised", "pmonospline", "pmono") && !is.null(tf_spec$knots)) {
-                kr <- range(as.numeric(tf_spec$knots), finite = TRUE)
-                if (all(is.finite(kr)) && diff(kr) > 0) {
-                    if (xr[1] < kr[1] || xr[2] > kr[2]) {
-                        cli::cli_warn(c(
-                            x = "Observed support for {.val {term_key}} extends beyond the fitted spline knot range.",
-                            i = "Using knot support [{format(signif(kr[1], 4), scientific = FALSE)}, {format(signif(kr[2], 4), scientific = FALSE)}] to avoid unsupported spline extrapolation."
-                        ))
-                        return(seq(kr[1], kr[2], length.out = n))
-                    }
+            if (.is_ispline_transform_type(tf_type) && !is.null(tf_spec$knots)) {
+                kr <- .joinmefit_plot_raw_knot_range(tf_spec)
+                if (!is.null(kr) && diff(kr) > 0 && .joinmefit_support_outside_spline_range(xr, tf_spec)) {
+                    cli::cli_warn(c(
+                        x = "Observed support for {.val {term_key}} extends beyond the fitted spline knot range.",
+                        i = "Using knot support [{format(signif(kr[1], 4), scientific = FALSE)}, {format(signif(kr[2], 4), scientific = FALSE)}] to avoid unsupported spline extrapolation."
+                    ))
+                    return(seq(kr[1], kr[2], length.out = n))
                 }
             }
             return(seq(xr[1], xr[2], length.out = n))
@@ -1714,13 +1739,13 @@ plot.JoinMeFit <- function(x,
     }
 
     if (!is.null(tf_spec$x)) {
-        xr <- range(as.numeric(tf_spec$x), finite = TRUE)
+        xr <- .joinmefit_plot_raw_knot_range(list(type = tf_type, x = tf_spec$x))
         if (all(is.finite(xr)) && diff(xr) > 0) {
             return(seq(xr[1], xr[2], length.out = n))
         }
     }
     if (!is.null(tf_spec$knots)) {
-        xr <- range(as.numeric(tf_spec$knots), finite = TRUE)
+        xr <- .joinmefit_plot_raw_knot_range(tf_spec)
         if (all(is.finite(xr)) && diff(xr) > 0) {
             return(seq(xr[1], xr[2], length.out = n))
         }
@@ -1888,7 +1913,7 @@ plot.JoinMeFit <- function(x,
         return(matrix(rep(vals, each = n_draws), nrow = n_draws))
     }
 
-    if (tf_type %in% c("ispline", "ispline_penalised", "pmonospline", "pmono")) {
+    if (.is_ispline_transform_type(tf_type)) {
         return(.joinmefit_ispline_transform_matrix(x, term_key, x_grid, n_draws = n_draws, seed = seed, payload = payload))
     }
 
@@ -1931,10 +1956,11 @@ plot.JoinMeFit <- function(x,
     }
 
     boundary <- c(knots[1], knots[length(knots)])
-    x_eval <- pmin(pmax(as.numeric(x_grid), boundary[1]), boundary[2])
     internal_knots <- if (length(knots) > 2L) knots[2:(length(knots) - 1L)] else numeric(0)
+    x_eval_basis <- .transform_input_for_spec(as.numeric(x_grid), tf_spec)
+    x_eval_basis <- pmin(pmax(x_eval_basis, boundary[1]), boundary[2])
     basis <- splines2::iSpline(
-        x_eval,
+        x_eval_basis,
         knots = internal_knots,
         degree = degree,
         intercept = TRUE,
@@ -2075,7 +2101,7 @@ plot.JoinMeFit <- function(x,
 
         tf_spec <- payload$transform_specs[[term_key]] %||% list(type = "identity")
         tf_type <- .canonicalise_transform_type(tf_spec$type %||% "identity")
-        if (tf_type %in% c("ispline", "ispline_penalised", "pmonospline", "pmono")) {
+        if (.is_ispline_transform_type(tf_type)) {
             map <- .joinmefit_assoc_channel_map(term_key)
             n_coeff <- as.integer(stan_data[[map$n_coeff]] %||% length(stan_data[[map$base_coeff]] %||% tf_spec$coeff %||% numeric(0)))
             if (n_coeff > 0L) {
@@ -2265,10 +2291,10 @@ plot.JoinMeFit <- function(x,
         })
     }
 
-    if (tf_type %in% c("ispline", "ispline_penalised", "pmonospline", "pmono")) {
-        if (tf_type %in% c("ispline_penalised", "pmonospline", "pmono") && is.null(spec$y)) {
+    if (.is_ispline_transform_type(tf_type)) {
+        if (tf_type %in% c("ispline_penalised", "pmonospline", "pmono", "ispline_expit_penalised") && is.null(spec$y)) {
             spec <- .make_stan_penalised_ispline_transform(spec)
-        } else if (tf_type %in% c("ispline_penalised", "pmonospline", "pmono")) {
+        } else if (tf_type %in% c("ispline_penalised", "pmonospline", "pmono", "ispline_expit_penalised")) {
             spec <- .make_penalised_ispline_transform(spec)
         }
         if (!requireNamespace("splines2", quietly = TRUE)) {
@@ -2281,7 +2307,7 @@ plot.JoinMeFit <- function(x,
         coeff <- as.numeric(spec$coeff)
         degree <- as.integer(spec$degree %||% 3L)
         return(function(x) {
-            x <- as.numeric(x)
+            x <- .transform_input_for_spec(x, spec)
             boundary <- c(knots[1], knots[length(knots)])
             x_range <- range(x, finite = TRUE)
             boundary[1] <- min(boundary[1], x_range[1])
@@ -2307,7 +2333,7 @@ plot.JoinMeFit <- function(x,
 
     cli::cli_abort(c(
         x = "Unsupported transform type for {.val {term_name}}: {.val {tf_type}}.",
-        i = "Use one of identity, functional, ispline, ispline_penalised, or pwlin."
+        i = "Use one of identity, functional, ispline, ispline_penalised, ispline_expit, ispline_expit_penalised, or pwlin."
     ))
 }
 

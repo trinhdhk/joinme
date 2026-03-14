@@ -17,6 +17,42 @@ test_that("joinme_tf validates and normalises shorthand declarations", {
   expect_identical(sd_tf$tf_mode_cv_marker, 3)
 })
 
+test_that("joinme_tf supports expit-based spline transforms", {
+  expit_grid <- stats::plogis(seq(-4, 4, length.out = 21))
+  tf <- joinme_tf(
+    corr = list(
+      type = "ispline_expit_penalised",
+      x = expit_grid,
+      n_knots = 5,
+      degree = 2,
+      lambda = 0.5
+    )
+  )
+
+  expect_s3_class(tf, "joinme_tf")
+  expect_identical(tf$corr$type, "ispline_expit_penalised")
+
+  sd_tf <- build_standata_transforms(tf)
+  expect_identical(sd_tf$tf_mode_corr, 4L)
+  expect_true(all(sd_tf$knots_corr > 0 & sd_tf$knots_corr < 1))
+  expect_equal(length(sd_tf$coeff_corr), sd_tf$n_coeff_corr)
+})
+
+test_that("joinme_tf rejects raw-scale spline inputs for expit-based transforms", {
+  expect_error(
+    joinme_tf(
+      corr = list(
+        type = "ispline_expit_penalised",
+        x = seq(-4, 4, length.out = 21),
+        n_knots = 5,
+        degree = 2,
+        lambda = 0.5
+      )
+    ),
+    "must lie on the expit scale"
+  )
+})
+
 test_that("joinme_tf rejects unknown channels", {
   expect_error(
     joinme_tf(not_a_channel = "identity"),

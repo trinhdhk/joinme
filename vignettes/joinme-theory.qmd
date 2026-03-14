@@ -44,6 +44,12 @@ transformed by user-defined monotone splines, piecewise linear rules, or functio
 bytecode expressions. Estimation is performed with Hamiltonian Monte Carlo in Stan,
 and the main likelihood is evaluated with reduce_sum for within-chain parallelism.
 
+For monotone spline transforms, `joinme` supports both raw-scale I-splines and
+bounded-domain I-splines evaluated on `plogis(x)`. The bounded-domain variant
+keeps the spline input inside $(0, 1)$, which often yields more stable knot
+placement and smoother optimisation when raw association features are wide or
+heavy-tailed.
+
 # Introduction
 
 Joint modelling of longitudinal and survival data is a standard approach for
