@@ -633,8 +633,7 @@ stan_rhat.JoinMeFit <- function(object, pars = NULL, regex_pars = NULL, draws = 
 		return(data.frame(variable = character(0), rhat = numeric(0)))
 	}
 	draws_obj <- .get_draws_obj(object$fit, variables = vars, draws = draws, seed = seed)
-	rhat_vals <- posterior::rhat(draws_obj)
-	data.frame(variable = names(rhat_vals), rhat = as.numeric(rhat_vals), row.names = NULL)
+	.diag_summary_df(draws_obj, metric = "rhat", vars = vars)
 }
 
 #' @rdname stan_diagnostics.JoinMeFit
@@ -650,8 +649,10 @@ stan_ess.JoinMeFit <- function(object, pars = NULL, regex_pars = NULL, draws = N
 		return(data.frame(variable = character(0), ess = numeric(0)))
 	}
 	draws_obj <- .get_draws_obj(object$fit, variables = vars, draws = draws, seed = seed)
-	ess_vals <- if (type == "bulk") posterior::ess_bulk(draws_obj) else posterior::ess_tail(draws_obj)
-	data.frame(variable = names(ess_vals), ess = as.numeric(ess_vals), row.names = NULL)
+	metric_name <- if (type == "bulk") "ess_bulk" else "ess_tail"
+	metric_df <- .diag_summary_df(draws_obj, metric = metric_name, vars = vars)
+	names(metric_df)[2] <- "ess"
+	metric_df
 }
 
 #' @rdname stan_diagnostics.JoinMeFit
@@ -667,12 +668,41 @@ stan_mcse.JoinMeFit <- function(object, pars = NULL, regex_pars = NULL, draws = 
 		return(data.frame(variable = character(0), mcse = numeric(0)))
 	}
 	draws_obj <- .get_draws_obj(object$fit, variables = vars, draws = draws, seed = seed)
-	mcse_vals <- switch(type,
-		mean = posterior::mcse_mean(draws_obj),
-		sd = posterior::mcse_sd(draws_obj),
-		median = posterior::mcse_quantile(draws_obj, probs = 0.5)
+	metric_name <- switch(type,
+		mean = "mcse_mean",
+		sd = "mcse_sd",
+		median = "mcse_median"
 	)
-	data.frame(variable = names(mcse_vals), mcse = as.numeric(mcse_vals), row.names = NULL)
+	metric_df <- .diag_summary_df(draws_obj, metric = metric_name, vars = vars)
+	names(metric_df)[2] <- "mcse"
+	metric_df
+}
+
+#' @keywords internal
+
+.diag_summary_df <- function(draws_obj, metric, vars) {
+	metric_df <- suppressWarnings(tryCatch(
+		posterior::summarise_draws(draws_obj, metric),
+		error = function(e) NULL
+	))
+	if (is.null(metric_df) || !all(c("variable", metric) %in% names(metric_df))) {
+		cli::cli_abort("Failed to summarise posterior diagnostics for plotting.")
+	}
+	metric_df <- as.data.frame(metric_df[, c("variable", metric), drop = FALSE], row.names = NULL, stringsAsFactors = FALSE)
+	if (nrow(metric_df) == 0L) {
+		out <- data.frame(variable = character(0), value = numeric(0), row.names = NULL)
+		names(out)[2] <- metric
+		return(out)
+	}
+	if (!is.null(vars)) {
+		metric_df <- metric_df[match(vars, metric_df$variable), , drop = FALSE]
+		if (nrow(metric_df) != length(vars) || anyNA(metric_df$variable)) {
+			cli::cli_abort("Posterior diagnostic output does not align with selected parameters.")
+		}
+	}
+	out <- data.frame(variable = metric_df$variable, value = metric_df[[metric]], row.names = NULL)
+	names(out)[2] <- metric
+	out
 }
 
 #' @keywords internal

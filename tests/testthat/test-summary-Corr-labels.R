@@ -50,10 +50,12 @@ test_that("print.summary_JoinMeFit uses bespoke covariance labels", {
       )
     ),
     diagnostics = NULL,
-    metadata = list(family = "student_t", tmax = 1)
+    metadata = list(call = "joinme(formulaLong = y ~ 1 + time)", family = "student_t", tmax = 1)
   )
 
   txt <- paste(capture.output(print(s)), collapse = "\n")
+  expect_true(grepl("Joint mixed effects model summary", txt, fixed = TRUE))
+  expect_true(grepl("Call: joinme(formulaLong = y ~ 1 + time)", txt, fixed = TRUE))
   expect_match(txt, "\\nid\\n")
   expect_match(txt, "\\nmarker\\n")
   expect_true(grepl("id:marker covariance parameters", txt, fixed = TRUE))
@@ -86,11 +88,61 @@ test_that("print.summary_JoinMeFit formats count diagnostics as integers", {
   )
 
   txt <- paste(capture.output(print(s)), collapse = "\n")
+  expect_true(grepl("Sampler diagnostics", txt, fixed = TRUE))
   expect_true(grepl("draws\\s+100(\\D|$)", txt))
   expect_true(grepl("divergences\\s+2(\\D|$)", txt))
   expect_true(grepl("treedepth_hits\\s+1(\\D|$)", txt))
   expect_true(grepl("n_terms_total\\s+17(\\D|$)", txt))
   expect_true(grepl("rhat_max\\s+1\\.003", txt))
+})
+
+test_that("transform formula summaries expand corr and vcov by component", {
+  tf <- joinme_tf(
+    corr = ~ -x,
+    vcov = list(type = "ispline", knots = c(-1, 0, 1), coeff = c(0, 0.5, 1, 1.2), degree = 2)
+  )
+
+  out <- joinme:::.transform_formulas_from_specs(
+    tf,
+    sd = list(Q_idm = 2L, indep_idmarker_cov = 0L)
+  )
+
+  expect_setequal(out$term, c("corr[1]", "vcov[1]", "vcov[2]", "vcov[3]"))
+  expect_true(all(out$formula[out$term %in% c("vcov[1]", "vcov[2]", "vcov[3]")] == out$formula[out$term == "vcov[1]"]))
+})
+
+test_that("transform parameter summaries omit fixed monotone spline endpoints", {
+  tbl <- data.frame(
+    channel = rep("vcov[1]", 7),
+    term = paste0("coeff_", 1:7),
+    Estimate = seq(0, 1, length.out = 7),
+    Est.Error = rep(0.1, 7),
+    Q2.5 = seq(0, 0.6, length.out = 7),
+    Q97.5 = seq(0.4, 1, length.out = 7),
+    Rhat = rep(1, 7),
+    ess_bulk = rep(100, 7),
+    ess_tail = rep(100, 7),
+    stringsAsFactors = FALSE
+  )
+
+  out <- joinme:::.omit_fixed_transform_endpoint_rows(
+    tbl,
+    channel = "vcov",
+    spec = list(n = 7L),
+    sd = list(estimate_spline_vcov = 1L, n_free_spline_vcov = 6L)
+  )
+
+  expect_false(any(out$term %in% c("coeff_1", "coeff_7")))
+  expect_identical(out$term, paste0("coeff_", 2:6))
+
+  kept <- joinme:::.omit_fixed_transform_endpoint_rows(
+    tbl,
+    channel = "vcov",
+    spec = list(n = 7L),
+    sd = list(estimate_spline_vcov = 0L, n_free_spline_vcov = 0L)
+  )
+
+  expect_identical(kept$term, tbl$term)
 })
 
 test_that("print.summary_JoinMeFit prints survival process report only when available", {
@@ -122,6 +174,7 @@ test_that("print.summary_JoinMeFit prints survival process report only when avai
   )
 
   txt_with <- paste(capture.output(print(s_with)), collapse = "\n")
+  expect_true(grepl("Joint mixed effects model summary", txt_with, fixed = TRUE))
   expect_true(grepl("Survival process (non-association covariates)", txt_with, fixed = TRUE))
 
   s_without <- SummaryJoinMeFit$new(

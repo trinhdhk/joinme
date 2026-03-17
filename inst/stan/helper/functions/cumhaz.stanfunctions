@@ -16,7 +16,8 @@
  *   Lambda(S) = S * exp(zmax) * sum
  *
  * @param S Integration endpoint (scaled time in [0, 1]).
- * @param n_gk Quadrature node count (7, 15, 31, 41, 51, 61).
+ * @param n_gk Quadrature node count. Accepted values are exactly 7, 15, 31, 41,
+ *   51, or 61.
  * @param log_h0_nodes Log baseline hazard evaluated at quadrature nodes.
  * @param eta_nodes Linear predictor at quadrature nodes (covariates + associations).
  * @return Cumulative hazard value Lambda(S).

@@ -123,3 +123,25 @@ test_that("simulate_joinme applies cs_marker transform before marker-weight aver
   expect_equal(comp$cs_marker, expected_cs_marker, tolerance = 1e-8)
   expect_false(isTRUE(all.equal(comp$cs_marker, expected_cs_marker_old, tolerance = 1e-8)))
 })
+
+test_that("simulate_joinme rejects expit spline knots outside [0, 1]", {
+  expect_error(
+    simulate_joinme(
+      n_id = 3,
+      families = c("gaussian", "gaussian"),
+      n_obs_per_marker_per_id = 3,
+      times_obs = seq(0, 2, length.out = 4),
+      seed = 1205,
+      assoc = c("cv_total"),
+      assoc_coefs = c(cv_total = 0),
+      transforms = list(
+        cv_total = list(
+          type = "ispline_expit",
+          knots = c(-0.1, 0.5, 1.1),
+          coeff = c(0, 0.5, 1)
+        )
+      )
+    ),
+    "must lie on the expit scale"
+  )
+})

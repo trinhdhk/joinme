@@ -69,7 +69,7 @@ where:
 -   $\mathbf{u}_d \sim N(\mathbf{0}, \Sigma_u)$: Marker-specific random effects (e.g., marker-specific average intercept).
 -   $\mathbf{w}_{id} \sim N(\mathbf{0}, \Sigma_w)$: Subject-marker-specific random effects (the interaction level).
 
-**Optional marker-by-id block.** If the marker block omits the inner `( ... | id )` term, then $\mathbf{w}_{id}$ is removed and the marker-by-id block has dimension $Q_{idm} = 0$. In this case, the covariance-regression association (`corr`) is not available, because there is no subject-specific marker covariance to model.
+**Optional marker-by-id block.** If the marker block omits the inner `( ... | id )` term, then $\mathbf{w}_{id}$ is removed and the marker-by-id block has dimension $Q_{idm} = 0$. In this case, covariance-style associations (`corr`, `vcov`) are not available, because there is no subject-specific marker covariance to model.
 
 This decomposition allows capturing correlations within subjects across markers, within markers across subjects, and the specific deviation of a subject's trajectory for a specific marker.
 
@@ -94,8 +94,11 @@ association summaries, each optionally transformed:
 
 - **Current value (CV)**: the value of the longitudinal linear predictor at time $t$.
 - **Current slope (CS)**: the derivative of the linear predictor at time $t$.
-- **Variance association (CORR)**: a subject-specific, time-constant summary of
-  the marker-by-id covariance structure.
+- **Correlation association (CORR)**: a subject-specific, time-constant summary
+  of off-diagonal marker-by-id correlations.
+- **Variance-covariance association (VCOV)**: a subject-specific,
+  time-constant summary of lower-triangular marker-by-id Cholesky-factor
+  features, taken directly from `L`.
 
 In implementation, CV and CS are evaluated at a default set of 15 Gauss-Kronrod
 nodes on the scaled time interval (configurable via `quadrature_nodes`), and CS

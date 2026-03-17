@@ -134,6 +134,8 @@
   int<lower=0, upper=1> indep_marker_re;
   int<lower=0, upper=1> indep_marker_byid_latent_re;
   int<lower=0, upper=1> indep_idmarker_cov;
+  int<lower=0> M_corr_tf;                    // number of corr transform components
+  int<lower=0> M_vcov_tf;                    // number of vcov transform components
   int<lower=0, upper=1> allow_marker_crosscorr; // 1 allow cross via B_cross
   int<lower=0, upper=1> corr_diag_link;         // 0 softplus, 1 exp for corr diag
   int<lower=0, upper=1> use_tau_sde_fixed;      // 1 use fixed tau for SDE
@@ -194,6 +196,7 @@
   int<lower=0, upper=1> assoc_cs_mean;    // include mean current slope term
   int<lower=0, upper=1> assoc_cs_marker;  // include marker current slope term
   int<lower=0, upper=1> assoc_corr;       // include corr association term
+  int<lower=0, upper=1> assoc_vcov;       // include vcov association term
 
   /* Prior scales */
   vector[P] beta_scale;        // per-coefficient scale for fixed effects
@@ -218,6 +221,7 @@
   int<lower=0, upper=4> tf_mode_cv_tot;     // transform mode for total CV
   int<lower=0, upper=4> tf_mode_cs_tot;     // transform mode for total CS
   int<lower=0, upper=4> tf_mode_corr;       // transform mode for corr term
+  int<lower=0, upper=4> tf_mode_vcov;       // transform mode for vcov term
   int<lower=0, upper=4> tf_mode_cv_mean;    // transform mode for mean CV
   int<lower=0, upper=4> tf_mode_cv_marker;  // transform mode for marker CV
   int<lower=0, upper=4> tf_mode_cs_mean;    // transform mode for mean CS
@@ -238,6 +242,11 @@
   array[n_functional_ops_corr] int<lower=0, upper=26> functional_ops_corr; // bytecode stream
   int<lower=0> n_const_corr;                // constants used by corr bytecode
   vector[n_const_corr] const_data_corr;     // constants used by corr bytecode
+
+  int<lower=0> n_functional_ops_vcov;       // op count for vcov
+  array[n_functional_ops_vcov] int<lower=0, upper=26> functional_ops_vcov; // bytecode stream
+  int<lower=0> n_const_vcov;                // constants used by vcov bytecode
+  vector[n_const_vcov] const_data_vcov;     // constants used by vcov bytecode
 
   int<lower=0> n_functional_ops_cv_mean;    // op count for mean CV
   array[n_functional_ops_cv_mean] int<lower=0, upper=26> functional_ops_cv_mean; // bytecode stream
@@ -281,11 +290,20 @@
   int<lower=0> n_knots_corr;      // knot count for corr spline
   vector[n_knots_corr] knots_corr; // knot locations for corr spline
   int<lower=0> n_coeff_corr;      // coefficient count for corr spline
-  vector[n_coeff_corr] coeff_corr; // coefficients for corr spline
+  matrix[M_corr_tf, n_coeff_corr] coeff_corr; // coefficients for corr spline by component
   int<lower=1, upper=5> spline_degree_corr; // spline degree for corr
   int<lower=0, upper=1> estimate_spline_corr; // 1 if corr spline coeffs are estimated in Stan
   real<lower=0> lambda_spline_corr; // smoothness penalty strength for corr spline
   int<lower=0> n_free_spline_corr;  // free monotone increments for corr spline
+
+  int<lower=0> n_knots_vcov;      // knot count for vcov spline
+  vector[n_knots_vcov] knots_vcov; // knot locations for vcov spline
+  int<lower=0> n_coeff_vcov;      // coefficient count for vcov spline
+  matrix[M_vcov_tf, n_coeff_vcov] coeff_vcov; // coefficients for vcov spline by component
+  int<lower=1, upper=5> spline_degree_vcov; // spline degree for vcov
+  int<lower=0, upper=1> estimate_spline_vcov; // 1 if vcov spline coeffs are estimated in Stan
+  real<lower=0> lambda_spline_vcov; // smoothness penalty strength for vcov spline
+  int<lower=0> n_free_spline_vcov;  // free monotone increments for vcov spline
 
   int<lower=0> n_knots_cv_mean;   // knot count for mean CV spline
   vector[n_knots_cv_mean] knots_cv_mean; // knot locations for mean CV spline

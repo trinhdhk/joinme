@@ -162,6 +162,7 @@
   array[n_draws] real coeff_assoc_cv_marker;    // association coeffs: marker CV
   array[n_draws] real coeff_assoc_cs_marker;    // association coeffs: marker CS
   array[n_draws] vector[(n_random_marker_id * (n_random_marker_id - 1)) %/% 2] coeff_assoc_corr; // corr coeffs (off-diagonal correlations)
+  array[n_draws] vector[num_unique_cov_entries] coeff_assoc_vcov; // vcov coeffs for lower-triangular L entries
 
   int<lower=0, upper=1> flag_assoc_cv_total;    // include total CV association
   int<lower=0, upper=1> flag_assoc_cv_mean;     // include mean CV association
@@ -170,10 +171,14 @@
   int<lower=0, upper=1> flag_assoc_cs_mean;     // include mean CS association
   int<lower=0, upper=1> flag_assoc_cs_marker;   // include marker CS association
   int<lower=0, upper=1> flag_assoc_corr;        // include corr association
+  int<lower=0, upper=1> flag_assoc_vcov;        // include vcov association
+  int<lower=0> M_corr_tf;                       // number of corr transform components
+  int<lower=0> M_vcov_tf;                       // number of vcov transform components
 
   int<lower=0, upper=4> tf_mode_cv_tot;        // transform mode: total CV
   int<lower=0, upper=4> tf_mode_cs_tot;        // transform mode: total CS
   int<lower=0, upper=4> tf_mode_corr;          // transform mode: corr
+  int<lower=0, upper=4> tf_mode_vcov;          // transform mode: vcov
   int<lower=0, upper=4> tf_mode_cv_mean;       // transform mode: mean CV
   int<lower=0, upper=4> tf_mode_cv_marker;     // transform mode: marker CV
   int<lower=0, upper=4> tf_mode_cs_mean;       // transform mode: mean CS
@@ -194,6 +199,11 @@
   int<lower=0> n_const_corr;                   // constants for corr bytecode
   vector[n_const_corr] const_data_corr;        // constants for corr bytecode
 
+  int<lower=0> n_functional_ops_vcov;          // op count for vcov
+  array[n_functional_ops_vcov] int<lower=0, upper=26> functional_ops_vcov; // bytecode stream
+  int<lower=0> n_const_vcov;                   // constants for vcov bytecode
+  vector[n_const_vcov] const_data_vcov;        // constants for vcov bytecode
+
   int<lower=0> n_knots_cv;                     // knots for total CV spline
   vector[n_knots_cv] knots_cv;                 // knot locations
   int<lower=0> n_coeff_cv;                     // coeff count for total CV spline
@@ -209,8 +219,14 @@
   int<lower=0> n_knots_corr;                   // knots for corr spline
   vector[n_knots_corr] knots_corr;             // knot locations
   int<lower=0> n_coeff_corr;                   // coeff count for corr spline
-  array[n_draws] vector[n_coeff_corr] coeff_corr; // coefficients for corr spline by draw
+  array[n_draws] matrix[M_corr_tf, n_coeff_corr] coeff_corr; // coefficients for corr spline by draw and component
   int<lower=1, upper=5> spline_degree_corr;    // spline degree for corr
+
+  int<lower=0> n_knots_vcov;                   // knots for vcov spline
+  vector[n_knots_vcov] knots_vcov;             // knot locations
+  int<lower=0> n_coeff_vcov;                   // coeff count for vcov spline
+  array[n_draws] matrix[M_vcov_tf, n_coeff_vcov] coeff_vcov; // coefficients for vcov spline by draw and component
+  int<lower=1, upper=5> spline_degree_vcov;    // spline degree for vcov
 
   int<lower=0> n_functional_ops_cv_mean;        // op count for mean CV
   array[n_functional_ops_cv_mean] int<lower=0, upper=26> functional_ops_cv_mean; // bytecode stream

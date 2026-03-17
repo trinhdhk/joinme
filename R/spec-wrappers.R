@@ -7,7 +7,9 @@
 #' as the `transforms` argument.
 #'
 #' Supported channels are `cv_total`, `cs_total`, `cv_mean`, `cs_mean`,
-#' `cv_marker`, `cs_marker`, and `corr`.
+#' `cv_marker`, `cs_marker`, `corr`, and `vcov`. The `corr` channel refers to
+#' off-diagonal correlation features, while `vcov` refers to lower-triangular
+#' Cholesky-factor entries from the subject-specific `L` matrix.
 #'
 #' Supported shorthands per channel:
 #' - `"identity"`, `"ispline"`, `"ispline_penalised"`, `"ispline_penalized"`,
@@ -30,6 +32,7 @@
 #' tf <- joinme_tf(
 #'   cv_total = "identity",
 #'   corr = ~ -x,
+#'   vcov = "identity",
 #'   cv_marker = list(type = "pwlin", x = c(-1, 0, 1), y = c(0.2, 1, 0.2))
 #' )
 #' print(tf)
@@ -151,17 +154,17 @@ print.joinme_priors <- function(x, ...) {
   if (!is.list(specs)) {
     cli::cli_abort(c(
       x = "{.arg transforms} must be a named list or a {.fn joinme_tf} object.",
-      i = "Example: joinme_tf(cv_total = 'identity', corr = ~ -x)."
+      i = "Example: joinme_tf(cv_total = 'identity', corr = ~ -x, vcov = 'identity')."
     ))
   }
   if (length(specs) > 0 && (is.null(names(specs)) || any(names(specs) %in% c("", NA_character_)))) {
     cli::cli_abort(c(
       x = "{.arg transforms} must be named by association channel.",
-      i = "Use names such as cv_total, cs_total, cv_mean, cs_mean, cv_marker, cs_marker, corr."
+      i = "Use names such as cv_total, cs_total, cv_mean, cs_mean, cv_marker, cs_marker, corr, vcov."
     ))
   }
 
-  allowed <- c("cv_total", "cs_total", "cv_mean", "cs_mean", "cv_marker", "cs_marker", "corr")
+  allowed <- c("cv_total", "cs_total", "cv_mean", "cs_mean", "cv_marker", "cs_marker", "corr", "vcov")
   bad <- setdiff(names(specs), allowed)
   if (length(bad) > 0) {
     cli::cli_abort(c(

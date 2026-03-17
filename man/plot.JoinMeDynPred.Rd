@@ -6,7 +6,7 @@
 \usage{
 \method{plot}{JoinMeDynPred}(
   x,
-  which = c("cumhaz", "longitudinal", "survival"),
+  type = c("cumhaz", "longitudinal", "survival"),
   subject = NULL,
   marker = NA,
   trajectory_type = c("id_marker", "marker_pop", "overall_pop", "all_types"),
@@ -33,7 +33,7 @@
 \arguments{
 \item{x}{An object of class \code{JoinMeDynPred} returned by the \link{predict} method.}
 
-\item{which}{Character vector indicating what to plot: "cumhaz" (default),
+\item{type}{Character vector indicating what to plot: "cumhaz" (default),
 "longitudinal", or "survival". Multiple values are allowed.}
 
 \item{subject}{Integer/Character vector. Which subject(s) to plot. If NULL,

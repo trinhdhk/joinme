@@ -17,6 +17,7 @@
 functions {
   #include helper/functions/eta_fd.stanfunctions
   #include helper/functions/eta_corr_varonly_weighted_const.stanfunctions
+  #include helper/functions/eta_vcov_weighted_const.stanfunctions
   #include helper/functions/cumhaz.stanfunctions
   #include helper/functions/bytecode_transform.stanfunctions
   #include helper/functions/link_functions.stanfunctions
@@ -170,6 +171,7 @@ model {
     coeff_assoc_cv_marker,
     coeff_assoc_cs_marker,
     coeff_assoc_corr,
+    coeff_assoc_vcov,
     K_ord,
     cutpoints_ord,
     /* Association toggles */
@@ -180,10 +182,12 @@ model {
     flag_assoc_cs_mean,
     flag_assoc_cs_marker,
     flag_assoc_corr,
+    flag_assoc_vcov,
     /* Transform modes (per association channel) */
     tf_mode_cv_tot,
     tf_mode_cs_tot,
     tf_mode_corr,
+    tf_mode_vcov,
     tf_mode_cv_mean,
     tf_mode_cv_marker,
     tf_mode_cs_mean,
@@ -204,6 +208,11 @@ model {
     knots_corr,
     coeff_corr,
     spline_degree_corr,
+    functional_ops_vcov,
+    const_data_vcov,
+    knots_vcov,
+    coeff_vcov,
+    spline_degree_vcov,
     functional_ops_cv_mean,
     const_data_cv_mean,
     knots_cv_mean,
@@ -228,6 +237,7 @@ model {
     flag_indep_id_re,
     flag_indep_marker_re,
     flag_indep_marker_byid_latent_re,
+    flag_indep_idmarker_cov,
     flag_allow_marker_crosscorr,
     z_u,
     z_v,

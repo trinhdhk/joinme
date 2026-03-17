@@ -57,6 +57,6 @@ test_that("all", {
   )
 
   expect_s3_class(pred, "JoinMeDynPred")
-  p <- plot(pred, which = c("longitudinal", "survival"), combined = FALSE)
+  p <- plot(pred, type = c("longitudinal", "survival"), combined = FALSE)
   expect_true(inherits(p, "ggplot") || is.list(p))
 })

@@ -1011,8 +1011,120 @@ gk_quadrature <- function(nodes = 15L) {
     assoc_cs_total  = as.integer("cs_total" %in% assoc),
     assoc_cs_mean   = as.integer("cs_mean" %in% assoc),
     assoc_cs_marker = as.integer("cs_marker" %in% assoc),
-    assoc_corr      = as.integer("corr" %in% assoc)
+    assoc_corr      = as.integer("corr" %in% assoc),
+    assoc_vcov      = as.integer("vcov" %in% assoc)
   )
+}
+
+#' Validate association channel combinations
+#' @keywords internal
+.validate_assoc_channels <- function(assoc, context = "association specification") {
+  assoc <- unique(as.character(assoc %||% character(0)))
+  if (all(c("corr", "vcov") %in% assoc)) {
+    cli::cli_abort(c(
+      x = "{.arg corr} and {.arg vcov} cannot be used together in {.field {context}}.",
+      i = "Choose {.arg corr} for off-diagonal correlation features or {.arg vcov} for lower-triangular Cholesky-factor features from {.arg L}."
+    ))
+  }
+  assoc
+}
+
+#' Covariance-association feature count
+#' @keywords internal
+.assoc_cov_feature_count <- function(q_idm, include_diag = FALSE) {
+  q_idm <- as.integer(q_idm %||% 0L)
+  if (q_idm <= 0L) {
+    return(0L)
+  }
+  if (isTRUE(include_diag)) {
+    return(as.integer((q_idm * (q_idm + 1L)) %/% 2L))
+  }
+  if (q_idm < 2L) {
+    return(0L)
+  }
+  as.integer((q_idm * (q_idm - 1L)) %/% 2L)
+}
+
+#' Association transform component count
+#' @keywords internal
+.assoc_transform_component_count <- function(term_key, q_idm, diagonal_only = FALSE) {
+  term_key <- as.character(term_key %||% "")[1]
+  q_idm <- as.integer(q_idm %||% 0L)
+  diagonal_only <- isTRUE(diagonal_only)
+
+  if (identical(term_key, "corr")) {
+    return(.assoc_cov_feature_count(q_idm, include_diag = FALSE))
+  }
+  if (identical(term_key, "vcov")) {
+    if (q_idm <= 0L) {
+      return(0L)
+    }
+    if (diagonal_only) {
+      return(q_idm)
+    }
+    return(.assoc_cov_feature_count(q_idm, include_diag = TRUE))
+  }
+  1L
+}
+
+#' Association transform component labels
+#' @keywords internal
+.assoc_transform_component_labels <- function(term_key, n_components) {
+  term_key <- as.character(term_key %||% "")[1]
+  n_components <- as.integer(n_components %||% 0L)
+  if (!(term_key %in% c("corr", "vcov")) || n_components <= 0L) {
+    return(term_key)
+  }
+  paste0(term_key, "[", seq_len(n_components), "]")
+}
+
+#' Covariance-association feature map
+#' @keywords internal
+.assoc_cov_feature_map <- function(q_idm, diagonal_only = FALSE, include_diag = TRUE) {
+  q_idm <- as.integer(q_idm %||% 0L)
+  if (q_idm <= 0L) {
+    return(matrix(integer(0), ncol = 2L))
+  }
+  if (isTRUE(diagonal_only)) {
+    idx <- seq_len(q_idm)
+    return(cbind(row = idx, col = idx))
+  }
+
+  rows <- list()
+  pos <- 1L
+  for (r in seq_len(q_idm)) {
+    c_start <- if (isTRUE(include_diag)) 1L else 1L
+    c_end <- if (isTRUE(include_diag)) r else r - 1L
+    if (c_end < c_start) next
+    for (c in seq.int(c_start, c_end)) {
+      rows[[pos]] <- c(r, c)
+      pos <- pos + 1L
+    }
+  }
+  do.call(rbind, rows)
+}
+
+#' Extract raw vcov-association features from a Cholesky factor
+#' @keywords internal
+.assoc_vcov_features_from_chol <- function(L_i, diagonal_only = FALSE) {
+  L_i <- as.matrix(L_i)
+  q_idm <- nrow(L_i)
+  if (!q_idm || ncol(L_i) != q_idm) {
+    return(numeric(0))
+  }
+  if (isTRUE(diagonal_only)) {
+    return(diag(L_i))
+  }
+
+  out <- numeric(.assoc_cov_feature_count(q_idm, include_diag = TRUE))
+  pos <- 1L
+  for (r in seq_len(q_idm)) {
+    for (c in seq_len(r)) {
+      out[pos] <- L_i[r, c]
+      pos <- pos + 1L
+    }
+  }
+  out
 }
 
 #' Validate transform flags
@@ -1022,7 +1134,7 @@ gk_quadrature <- function(nodes = 15L) {
 #'
 #' @keywords internal
 .validate_tf <- function(tf) {
-  nm <- c("cv_mean", "cv_marker", "cs_mean", "cs_marker", "corr")
+  nm <- c("cv_mean", "cv_marker", "cs_mean", "cs_marker", "corr", "vcov")
   tf_map <- c(
     identity = 0L,
     id = 0L,
@@ -1053,11 +1165,11 @@ gk_quadrature <- function(nodes = 15L) {
       ))
     }
   }
-  bad <- c(tf$cv_marker, tf$cs_mean, tf$cs_marker, tf$corr)
+  bad <- c(tf$cv_marker, tf$cs_mean, tf$cs_marker, tf$corr, tf$vcov)
   if (any(bad %in% c(2L, 5L))) {
     cli::cli_abort(c(
       x = "log/sqrt transforms are restricted to cv_mean only.",
-      i = "Use identity or other transforms for cs_mean/cs_marker/corr."
+      i = "Use identity or other transforms for cs_mean/cs_marker/corr/vcov."
     ))
   }
   tf

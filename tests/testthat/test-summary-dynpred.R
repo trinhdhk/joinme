@@ -108,6 +108,42 @@ test_that("summary.JoinMeDynPred reports rich subject-level outputs", {
   expect_no_error(print(sum_pred))
 })
 
+test_that("summary.JoinMeDynPred suppresses off-diagonal covariance output under independence", {
+  pred <- JoinMeDynPred$new(
+    predictions = list(),
+    quantiles = list(),
+    draws = list(
+      random_effects_marker_id = list(
+        "1" = list(
+          matrix = matrix(c(0.3, 0.4, 0.2, 0.1), ncol = 2, dimnames = list(NULL, c("m1::w1", "m1::w2"))),
+          corr = array(c(
+            1.0, 0.2,
+            0.2, 1.1,
+            1.0, 0.3,
+            0.3, 1.2
+          ), dim = c(2, 2, 2)),
+          terms = c("w1", "w2")
+        )
+      )
+    ),
+    data = list(),
+    metadata = list(
+      marker_corr_depends_on_id = TRUE,
+      indep_idmarker_cov = 1L,
+      sampler_diagnostics = list()
+    ),
+    call = quote(posterior_epred(object)),
+    tmax = 1,
+    n_samples = 2
+  )
+
+  sum_pred <- summary(pred)
+  expect_true(all(sum_pred$tables$corr_marker_id$row == sum_pred$tables$corr_marker_id$col))
+  txt <- paste(capture.output(print(sum_pred)), collapse = "\n")
+  expect_true(grepl("Prediction summary", txt, fixed = TRUE))
+  expect_true(grepl("Predicted marker-by-id covariance", txt, fixed = TRUE))
+})
+
 test_that("summary.JoinMeDynPred diagnostics are populated from term and sampler sources", {
   pred <- JoinMeDynPred$new(
     predictions = list(

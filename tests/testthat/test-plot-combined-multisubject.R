@@ -72,7 +72,7 @@ testthat::test_that("combined multi-subject returns per-subject combined plots",
 
   out <- plot(
     pred,
-    which = c("longitudinal", "survival"),
+    type = c("longitudinal", "survival"),
     subject = ids,
     combined = TRUE,
     ci_levels = 0.95,
@@ -162,7 +162,7 @@ testthat::test_that("combined multi-subject fallback preserves per-subject struc
 
   out <- plot(
     pred,
-    which = c("longitudinal", "survival"),
+    type = c("longitudinal", "survival"),
     subject = ids,
     combined = TRUE,
     ci_levels = 0.95,

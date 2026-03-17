@@ -96,7 +96,9 @@ Available channels:
 - `cs_mean`: mean current slope across markers,
 - `cs_marker`: marker-weighted marker-level current slope,
 - `cs_total`: marker-level total current slope,
-- `corr`: off-diagonal correlation features from marker-by-id random effects.
+- `corr`: off-diagonal correlation features from marker-by-id random effects,
+- `vcov`: lower-triangular Cholesky-factor entries from marker-by-id random
+  effects, taken directly from the subject-specific `L` matrix.
 
 ## Named vector/list coefficient syntax
 
@@ -121,8 +123,8 @@ sim <- simulate_joinme(
   n_id = 50,
   families = c("gaussian", "gaussian"),
   assoc = c("cv_total", "cs_total"),
-  formulaAssoc = ~ cv_mean + corr,
-  assoc_coefs = c(cv_mean = 0.3, corr = 0.2),
+  formulaAssoc = ~ cv_mean + vcov,
+  assoc_coefs = c(cv_mean = 0.3, vcov = 0.2),
   seed = 3
 )
 ```
@@ -294,6 +296,15 @@ Pipeline view:
 3. Produce final marker-by-id effects by multiplying latent effects with `L_i`.
 
 So if `latent` is near zero, changing `alpha/beta/lambda/sd_u` has little practical impact, because there is almost no base latent signal to reshape.
+
+Recovery tip:
+
+- If you want to validate coefficient recovery for a covariance-style channel,
+  start with a fixed transform (for example `type = "ispline_expit"` with
+  explicit `coeff`) and a low-dimensional `vcov` setup.
+- Jointly estimating a penalised spline and the association coefficient is a
+  harder inference problem; it is suitable for flexible modelling, but not the
+  cleanest first recovery check.
 
 Mathematically (two-stage form):
 
@@ -480,9 +491,9 @@ sim <- simulate_joinme(
   n_id = 100,
   n_obs_per_marker_per_id = 8,
   times_obs = seq(0, 6, length.out = 10),
-  assoc = c("cv_total", "corr"),
-  assoc_coefs = list(cv_total = 0.35, corr = c(0.1)),
-  transforms = joinme_tf(corr = ~ -x),
+  assoc = c("cv_total", "corr", "vcov"),
+  assoc_coefs = list(cv_total = 0.35, corr = c(0.1), vcov = c(0.3, 0.05, 0.2)),
+  transforms = joinme_tf(corr = ~ -x, vcov = "identity"),
   dist_coefs = list(
     sigma = list(
       gaussian = c("(Intercept)" = log(0.25), x1 = 0.2),

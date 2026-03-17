@@ -13,11 +13,32 @@ NULL
 # - Resolve per-user cache location for compiled Stan models.
 # - Provide CmdStanR/RStan model lookup with deterministic caching.
 
-#' Find cmdstan exe file
-#' @description #' Helper function to find the compiled CmdStanR model executable in the cache. #' This is used internally to ensure we are using the cached model for sampling. #' #' @param stan_file Path to the Stan file. #' #' @return The path to the compiled executable, or NULL if not found.
+#' Find cached CmdStan executable path
 #'
-#' @return A character scalar with the path to the compiled CmdStanR model executable, or NULL if not found. #' @keywords internal .find_cmdstan_exe <- function(stan_file) { cache_dir <- .stan_cache_dir() is_windows <- isTRUE(.Platform$OS.type == "windows") ext <- if (is_windows) ".exe" else "" exe_path <- file.path( cache_dir, paste0(tools::file_path_sans_ext(basename(stan_file)), ext) ) if (file.exists(exe_path)) { return(exe_path) } NULL }
+#' @description
+#' Resolve the expected cached CmdStanR executable path for a Stan program.
+#' This helper only checks the cache naming convention; it does not handle the
+#' Windows-versus-WSL fallback logic used by [.get_cmdstan_exe()].
 #'
+#' @param stan_file Path to the Stan source file used to derive the executable name.
+#'
+#' @return A character scalar with the cached executable path if it exists, or
+#'   `NULL` otherwise.
+#' @keywords internal
+.find_cmdstan_exe <- function(stan_file) {
+  cache_dir <- .stan_cache_dir()
+  is_windows <- isTRUE(.Platform$OS.type == "windows")
+  ext <- if (is_windows) ".exe" else ""
+  exe_path <- file.path(
+    cache_dir,
+    paste0(tools::file_path_sans_ext(basename(stan_file)), ext)
+  )
+  if (file.exists(exe_path)) {
+    return(exe_path)
+  }
+  NULL
+}
+
 #' @keywords internal
 .get_cmdstan_exe <- function(stan_file, cache_dir, warn_missing = TRUE, model_base_name = NULL) {
   # Rip-off from cmdstanr

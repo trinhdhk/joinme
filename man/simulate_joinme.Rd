@@ -82,12 +82,12 @@ If no bracket is used (e.g. \code{sigma ~ 1 + time}), the formula applies to all
 rows where that parameter exists. If a bracket is used, it only applies to
 rows of that family and is estimated separately from other scopes.}
 
-\item{formulaAssoc}{Optional formula for association terms in hazard, e.g. \code{~ cv_total + corr}.
+\item{formulaAssoc}{Optional formula for association terms in hazard, e.g. \code{~ cv_total + corr + vcov}.
 If provided, it overrides \code{assoc}.}
 
 \item{transforms}{Optional transform specifications for association terms.
 Supports the same structure as \code{joinme(..., transforms=...)} for
-\code{cv_total}, \code{cv_mean}, \code{cv_marker}, \code{cs_total}, \code{cs_mean}, \code{cs_marker}, \code{corr}.
+\code{cv_total}, \code{cv_mean}, \code{cv_marker}, \code{cs_total}, \code{cs_mean}, \code{cs_marker}, \code{corr}, \code{vcov}.
 Simulation applies \code{cv_total} and \code{cv_marker} transforms at marker level before
 weighted averaging (aligned with fit/predict Stan semantics).
 Functional transforms support arithmetic and common nonlinear functions,
@@ -148,28 +148,31 @@ as weighted means divided by marker count. Inputs are treated as direct
 signed weights used in association aggregation.}
 
 \item{assoc}{Association components (same names as fit): \code{cv_total}, \code{cv_mean},
-\code{cv_marker}, \code{cs_total}, \code{cs_mean}, \code{cs_marker}, \code{corr}.
+\code{cv_marker}, \code{cs_total}, \code{cs_mean}, \code{cs_marker}, \code{corr}, \code{vcov}.
 
 Meaning of each channel:
 \itemize{
 \item \verb{cv_*}: current-value channels from longitudinal trajectories,
 \item \verb{cs_*}: current-slope channels from finite differences (\code{eps_cs}),
 \item \code{corr}: off-diagonal correlation features from marker-by-id random effects.
+\item \code{vcov}: lower-triangular Cholesky-factor entries from marker-by-id random effects, taken directly from the subject-specific \code{L} matrix.
 }
 
 You can also provide \code{formulaAssoc = ~ ...} to select channels; when present,
 it overrides \code{assoc}.}
 
 \item{assoc_coefs}{Association coefficients for hazard terms.
-Non-\code{corr} terms accept scalar values. The \code{corr} term accepts a vector of
+Non-\code{corr}/\code{vcov} terms accept scalar values. The \code{corr} term accepts a vector of
 off-diagonal correlation coefficients ordered as \verb{(2,1), (3,1), (3,2), ...}
 in lower-triangular row-major order of the marker-by-id random-effect
-covariance dimension.
+covariance dimension. The \code{vcov} term accepts lower-triangular Cholesky-factor entries
+ordered as \verb{(1,1), (2,1), (2,2), ...}; when \code{||} is used in the marker-by-id
+random-effects block, only diagonal \code{L} entries are used.
 
 Accepted input forms:
 \itemize{
 \item named numeric vector, e.g. \code{c(cv_total = 0.4, cs_mean = -0.2)},
-\item named list, e.g. \code{list(cv_total = 0.4, corr = c(0.2, -0.1))}.
+\item named list, e.g. \code{list(cv_total = 0.4, corr = c(0.2, -0.1), vcov = c(0.4, 0.1, 0.5))}.
 Missing channels default to 0.
 }}
 

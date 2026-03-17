@@ -149,13 +149,13 @@ test_that("threaded and non-threaded Stan paths stay aligned", {
   expect_lt(max(abs(long_merge$Estimate_single - long_merge$Estimate_thread)), 0.15)
 
   # Check that plotting works (smoke test)
-  expect_no_error(p_surv_s <- plot(pred_single, which = "survival"))
+  expect_no_error(p_surv_s <- plot(pred_single, type = "survival"))
   expect_true(inherits(p_surv_s, "ggplot"))
-  expect_no_error(p_long_s <- plot(pred_single, which = "longitudinal"))
+  expect_no_error(p_long_s <- plot(pred_single, type = "longitudinal"))
   expect_true(inherits(p_long_s, "ggplot"))
 
-  expect_no_error(p_surv_t <- plot(pred_thread, which = "survival"))
+  expect_no_error(p_surv_t <- plot(pred_thread, type = "survival"))
   expect_true(inherits(p_surv_t, "ggplot"))
-  expect_no_error(p_long_t <- plot(pred_thread, which = "longitudinal"))
+  expect_no_error(p_long_t <- plot(pred_thread, type = "longitudinal"))
   expect_true(inherits(p_long_t, "ggplot"))
 })

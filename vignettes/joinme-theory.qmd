@@ -39,7 +39,8 @@ process is expressed through a layered random-effects decomposition that separat
 subject-level signals, marker-level deviations, and marker-by-subject departures.
 The survival component links risk to summaries of the longitudinal trajectories,
 most notably the current value (CV), current slope (CS), and a variance summary
-of the marker-by-subject covariance structure (CORR). Association summaries can be
+of the marker-by-subject covariance structure through correlation-style (`corr`)
+and covariance-style (`vcov`) channels. Association summaries can be
 transformed by user-defined monotone splines, piecewise linear rules, or functional
 bytecode expressions. Estimation is performed with Hamiltonian Monte Carlo in Stan,
 and the main likelihood is evaluated with reduce_sum for within-chain parallelism.
@@ -177,8 +178,13 @@ history using a small set of interpretable features:
   at time $t$.
 - **Current slope (CS)**: the derivative of the latent longitudinal linear
   predictor at time $t$.
-- **Variance association (CORR)**: a subject-specific, time-constant summary of
-  the marker-by-subject covariance structure.
+- **Correlation association (CORR)**: a subject-specific, time-constant summary
+  of the off-diagonal correlation structure from the marker-by-subject
+  covariance model.
+- **Variance-covariance association (VCOV)**: a subject-specific,
+  time-constant summary of lower-triangular Cholesky-factor entries from the
+  same marker-by-subject covariance model. This channel uses `L_i` directly,
+  rather than the reconstructed covariance matrix `L_i L_i^\\top`.
 
 In implementation, CV and CS are evaluated at a default set of 15 Gauss-Kronrod
 nodes on the scaled time interval $[0, 1]$ (configurable). Only the node count
@@ -245,11 +251,26 @@ and their slope counterparts. The transformed summaries take the form
 $$
 	ilde{\text{CV}}_\text{tot}(t) = g_{\text{CV,tot}}(\text{CV}_\text{tot}(t)), \quad
 	ilde{\text{CS}}_\text{tot}(t) = g_{\text{CS,tot}}(\text{CS}_\text{tot}(t)), \quad
-	ilde{\text{CORR}} = g_{\text{CORR}}(\text{CORR}).
+	ilde{\text{CORR}} = g_{\text{CORR}}(\text{CORR}), \quad
+	ilde{\text{VCOV}} = g_{\text{VCOV}}(\text{VCOV}).
 $$
 
 Each $g(\cdot)$ is determined by the transformation mode and its inputs
 (bytecode, spline knots, or piecewise linear knots).
+
+For `corr` and `vcov`, the transformed summary is time-constant for a fixed
+subject because it depends only on that subject's covariance-regression
+Cholesky factor. The implemented likelihood therefore computes the transformed
+covariance-style scalar once per subject, then reuses that same value in both:
+
+- the exact event-time log-hazard $\log \lambda_i(T_i)$,
+- the Gauss-Kronrod node evaluations used inside
+  $\int_0^{T_i} \lambda_i(s) ds$.
+
+That symmetry is not just an efficiency trick; it is part of the statistical
+definition of the model. If a covariance-style term entered only one of those
+two pieces, coefficient recovery would be distorted even when simulation and
+fitting used the same raw feature definition.
 
 We use the $\alpha$ notation for association coefficients to align with joint-model
 literature and to distinguish these coefficients from the linear predictor $\eta$.

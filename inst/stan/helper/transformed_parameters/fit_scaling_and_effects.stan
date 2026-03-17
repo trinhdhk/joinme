@@ -1,5 +1,5 @@
   /**
-   * @brief Time-scaled coefficient vectors and derived random effects for both longitudinal and survival models.
+  * @brief Time-scaled coefficient vectors and derived random effects for both longitudinal and survival models.
    *
    * This block constructs:
    * 1. Scaled versions of fixed and random effect SDs where time transformations are applied
@@ -142,7 +142,8 @@
   //   without any divide-by-a-nearly-zero normalisation step.
   vector[n_coeff_cv] coeff_cv_eff = coeff_cv;
   vector[n_coeff_cs] coeff_cs_eff = coeff_cs;
-  vector[n_coeff_corr] coeff_corr_eff = coeff_corr;
+  matrix[M_corr, n_coeff_corr] coeff_corr_eff = coeff_corr;
+  matrix[M_vcov, n_coeff_vcov] coeff_vcov_eff = coeff_vcov;
   vector[n_coeff_cv_mean] coeff_cv_mean_eff = coeff_cv_mean;
   vector[n_coeff_cv_marker] coeff_cv_marker_eff = coeff_cv_marker;
   vector[n_coeff_cs_mean] coeff_cs_mean_eff = coeff_cs_mean;
@@ -159,9 +160,18 @@
     for (j in 2:n_coeff_cs) coeff_cs_eff[j] = coeff_cs_eff[j - 1] + delta[j - 1];
   }
   if (estimate_spline_corr == 1 && n_coeff_corr > 1 && n_free_spline_corr == n_coeff_corr - 1) {
-    vector[n_coeff_corr - 1] delta = softmax(z_spline_corr);
-    coeff_corr_eff[1] = 0;
-    for (j in 2:n_coeff_corr) coeff_corr_eff[j] = coeff_corr_eff[j - 1] + delta[j - 1];
+    for (m in 1:M_corr) {
+      vector[n_coeff_corr - 1] delta = softmax(to_vector(row(z_spline_corr, m)));
+      coeff_corr_eff[m, 1] = 0;
+      for (j in 2:n_coeff_corr) coeff_corr_eff[m, j] = coeff_corr_eff[m, j - 1] + delta[j - 1];
+    }
+  }
+  if (estimate_spline_vcov == 1 && n_coeff_vcov > 1 && n_free_spline_vcov == n_coeff_vcov - 1) {
+    for (m in 1:M_vcov) {
+      vector[n_coeff_vcov - 1] delta = softmax(to_vector(row(z_spline_vcov, m)));
+      coeff_vcov_eff[m, 1] = 0;
+      for (j in 2:n_coeff_vcov) coeff_vcov_eff[m, j] = coeff_vcov_eff[m, j - 1] + delta[j - 1];
+    }
   }
   if (estimate_spline_cv_mean == 1 && n_coeff_cv_mean > 1 && n_free_spline_cv_mean == n_coeff_cv_mean - 1) {
     vector[n_coeff_cv_mean - 1] delta = softmax(z_spline_cv_mean);
@@ -248,3 +258,4 @@
   real a_cs_mean = assoc_cs_mean * alpha_cs_mean;    // mean CS coefficient
   real a_cs_marker = assoc_cs_marker * alpha_cs_marker; // marker CS coefficient
   vector[M_corr] a_corr = assoc_corr * alpha_corr; // corr correlation coefficients
+  vector[M_vcov] a_vcov = assoc_vcov * alpha_vcov; // vcov association coefficients

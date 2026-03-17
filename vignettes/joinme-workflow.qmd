@@ -157,7 +157,7 @@ data so that the likelihood remains deterministic and reproducible.
 
 ## Marker-only random effects (no inner id term)
 
-In some studies, you may want **marker-level random effects only**, without subject-specific marker deviations. This is now supported by omitting the inner `( ... | id )` term inside the marker block. In this configuration, marker-by-id random effects are disabled (`Q_idm = 0`), and associations that require those effects (notably `corr`) are not permitted.
+In some studies, you may want **marker-level random effects only**, without subject-specific marker deviations. This is now supported by omitting the inner `( ... | id )` term inside the marker block. In this configuration, marker-by-id random effects are disabled (`Q_idm = 0`), and covariance-style associations that require those effects (`corr`, `vcov`) are not permitted.
 
 ```{r marker-only-example, eval=FALSE}
 # Marker-only random effects: no inner ( ... | id )
@@ -165,7 +165,7 @@ formulaLong_marker_only <- y ~ time + x1 +
   (1 + time || id) +
   (0 + x1 || marker)
 
-# Note: assoc = c("corr") is not allowed when Q_idm = 0
+# Note: assoc = c("corr") or assoc = c("vcov") is not allowed when Q_idm = 0
 ```
 
 ```{r priors}

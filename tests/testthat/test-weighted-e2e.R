@@ -82,6 +82,6 @@ test_that("weighted grouping works end-to-end (simulate fit predict plot)", {
   expect_true(all(is.finite(fit$stan_data$subject_weights)))
   expect_true(all(fit$stan_data$subject_weights > 0))
 
-  p <- plot(pred, which = "survival", ci_type = "ribbon")
+  p <- plot(pred, type = "survival", ci_type = "ribbon")
   expect_true(inherits(p, "ggplot") || is.list(p))
 })

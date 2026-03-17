@@ -50,14 +50,17 @@ component. From these components, `joinme` constructs:
 - **CS_marker**: slope of the marker component.
 - **CORR**: a subject-specific variance summary of the marker-by-id covariance
   structure, constant across time.
+- **VCOV**: a subject-specific lower-triangular summary of the marker-by-id
+  Cholesky factor `L`, also constant across time. The channel uses the entries
+  of `L` directly rather than the reconstructed covariance matrix `L L'`.
 
 Each component can be included or excluded using the `assoc` argument. If
 `assoc` does not include a component, the corresponding coefficient is prior-only
 and does not enter the likelihood.
 
-The CORR component requires marker-by-id random effects. If the marker block
-does not include an inner `( ... | id )` term, then `Q_idm = 0` and CORR is not
-available.
+The CORR and VCOV components require marker-by-id random effects. If the marker
+block does not include an inner `( ... | id )` term, then `Q_idm = 0` and these
+covariance-style associations are not available.
 
 # Marker-weighted CV and CS
 
@@ -134,6 +137,17 @@ components to keep interpretation focused on the fitted association structure.
   `"ispline_expit_penalised"`): the same monotone spline machinery, but applied
   to `plogis(x)` rather than directly to `x`.
 - **Piecewise linear** (`type = "pwlin"`): linear interpolation across knots.
+
+Interpretation note for recovery experiments:
+
+- If you use a fixed spline (`type = "ispline"` or an expit variant with
+  explicit `coeff`), the association coefficient is interpretable on that fixed
+  transformed scale and can be checked directly in simulate-fit recovery tests.
+- If you use a jointly estimated penalised spline (`*_penalised` without `y`),
+  the transform shape and the association coefficient are learned together. The
+  fitted alpha is still meaningful inside the model, but coefficient recovery is
+  typically weaker than in the fixed-transform case because the data must learn
+  both the transformed scale and the hazard weight simultaneously.
 
 ## Default values and minimal parameterisations
 
@@ -386,6 +400,6 @@ fit <- joinme(
   formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
   dataEvent = sim$dataEvent,
   transforms = transforms,
-  assoc = c("cv_total", "corr")
+  assoc = c("cv_total", "corr", "vcov")
 )
 ```

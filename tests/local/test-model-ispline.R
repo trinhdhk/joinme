@@ -99,7 +99,7 @@ fit <- joinme(
   control = control
 )
 
-plot(fit, which = c("association"),show_data = TRUE)
+plot(fit, type = c("association"), show_data = TRUE)
 sum_obj <- summary(fit)
 
 lastTime <- sim$dataLong %>%
@@ -130,7 +130,7 @@ pred <- predict(
   )
 )
 
-p <- plot(pred, which = c("longitudinal", "survival"), combined = TRUE)
+p <- plot(pred, type = c("longitudinal", "survival"), combined = TRUE)
 
 p3 <- if (is.list(p) && "3" %in% names(p)) p[["3"]] else p
 ggplot2::ggsave(

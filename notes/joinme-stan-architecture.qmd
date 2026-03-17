@@ -41,9 +41,13 @@ Additional implementation details that are central to the interpretation:
 - Marker-weighted contributions are formed as weighted means across markers.
   Base weights act as prior offsets and are used directly as effective intensities
   (no additional normalisation).
-- The CORR association depends on an id-level latent effect that drives a
-  covariance regression, producing subject-specific Cholesky factors.
-- Non-linear transforms are applied to CV, CS, and CORR before they enter the
+- The covariance-style associations (`corr`, `vcov`) depend on an id-level
+  latent effect that drives a covariance regression, producing subject-specific
+  Cholesky factors.
+- Time-constant covariance-style summaries are computed once per subject and
+  then reused consistently in both parts of the survival likelihood: the exact
+  event log-hazard and the Gauss-Kronrod cumulative-hazard approximation.
+- Non-linear transforms are applied to CV, CS, CORR, and VCOV before they enter the
   hazard, using identity, functional opcodes, monotone I-splines,
   expit-domain monotone I-splines, or piecewise linear rules.
 - Random-effects independence follows lme4-style `||` syntax in `formulaLong`,
@@ -216,6 +220,25 @@ FOR each MCMC iteration:
 END FOR
 ```
 
+For covariance-style channels, `partial_joinme()` follows this subject-level
+algorithm:
+
+1. Build the subject-specific Cholesky factor $L_i$ from covariance-regression
+  parameters.
+2. Extract raw `corr` or `vcov` features from $L_i$ in a fixed lower-triangular
+  ordering.
+3. Apply the configured transform to each covariance-style component
+  separately.
+4. Combine transformed components with the corresponding association
+  coefficients.
+5. Reuse that same transformed-and-weighted scalar in both the exact event
+  log-hazard and every Gauss-Kronrod node used for the cumulative hazard.
+
+This reuse is deliberate: covariance-style features are time-constant for a
+fixed subject, so rebuilding them at the event time would be redundant, but
+omitting them there would define a different likelihood than the one used in
+the cumulative hazard.
+
 ### `partial_joinme()` Function
 
 This is the core likelihood evaluation per subject slice.
@@ -293,7 +316,7 @@ FUNCTION partial_joinme(id_seq, start, end, ... [all data & parameters]):
     csm_raw = eta_fd(cvm_now, cvm_fwd, eps_fd) / tmax  // Time-rescaled slope
     
     // 3. Compute variance-covariance association feature
-    //    (logarithm of variances from Cholesky factor L_i)
+    //    (using the lower-triangular entries of Cholesky factor L_i directly)
     //    L_i is built by covariance regression with id-level latent effect u_L[i]
     //    lp_m = alpha_L[m] + beta_L[m]'Xcov[i] + lambda_L[m] * u_L[i]
     //    L_i[r,c] = log1p_exp(lp_m) if r == c, else lp_m

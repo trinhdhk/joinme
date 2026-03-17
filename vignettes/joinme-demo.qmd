@@ -297,8 +297,8 @@ pred_ep <- rstantools::posterior_epred(
   )
 )
 
-plot(pred_ep, which = "longitudinal")
-plot(pred_ep, which = "survival")
+plot(pred_ep, type = "longitudinal")
+plot(pred_ep, type = "survival")
 ```
 
 `predict()` now accepts `scale` as a character vector. If omitted, all
@@ -525,7 +525,7 @@ pred_comp <- predict(
   )
 )
 
-plot(pred_comp, which = "survival")
+plot(pred_comp, type = "survival")
 ```
 
 # Scenario C: Mixed Families and Nonlinear Association
@@ -671,8 +671,8 @@ pred_thread <- rstantools::posterior_epred(
   )
 )
 
-plot(pred_thread, which = "longitudinal")
-plot(pred_thread, which = "survival")
+plot(pred_thread, type = "longitudinal")
+plot(pred_thread, type = "survival")
 ```
 
 When requesting multiple outcomes with `combined = TRUE`, the method returns:

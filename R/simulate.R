@@ -398,11 +398,11 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   If no bracket is used (e.g. `sigma ~ 1 + time`), the formula applies to all
 #'   rows where that parameter exists. If a bracket is used, it only applies to
 #'   rows of that family and is estimated separately from other scopes.
-#' @param formulaAssoc Optional formula for association terms in hazard, e.g. `~ cv_total + corr`.
+#' @param formulaAssoc Optional formula for association terms in hazard, e.g. `~ cv_total + corr + vcov`.
 #'   If provided, it overrides `assoc`.
 #' @param transforms Optional transform specifications for association terms.
 #'   Supports the same structure as `joinme(..., transforms=...)` for
-#'   `cv_total`, `cv_mean`, `cv_marker`, `cs_total`, `cs_mean`, `cs_marker`, `corr`.
+#'   `cv_total`, `cv_mean`, `cv_marker`, `cs_total`, `cs_mean`, `cs_marker`, `corr`, `vcov`.
 #'   Simulation applies `cv_total` and `cv_marker` transforms at marker level before
 #'   weighted averaging (aligned with fit/predict Stan semantics).
 #'   Functional transforms support arithmetic and common nonlinear functions,
@@ -433,14 +433,16 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'     training pairs `x` and `y`, plus
 #'     smoothness penalty `lambda`. The simulator fits the monotone spline in R
 #'     before evaluating the transformed association. The fitted plug-in spline
-#'     uses anchored endpoint coefficients matching the Stan-estimated path
-#'     (first coefficient `0`, last coefficient `1`).
+#'     uses anchored endpoint coefficients matching the Stan-estimated path:
+#'     increasing splines run from `0` to `1`, while decreasing splines run from
+#'     `1` to `0`. If `direction` is omitted, the simulator infers it from the
+#'     supplied `(x, y)` pairs.
 #'   - `type = "ispline_expit"` / `"ispline_expit_penalised"`: same semantics
 #'     as the ordinary I-spline variants above, except the spline basis is built
 #'     on `plogis(x)` for a bounded-domain representation. Training `x` values
 #'     and explicit `knots` for these transform types are specified on that
-#'     bounded expit scale. This is useful when the raw association feature has
-#'     long tails or steep nonlinear effects.
+#'     bounded expit scale. This is useful
+#'     when the raw association feature has long tails or steep nonlinear effects.
 #'
 #'   In other words, simulation currently uses the legacy plug-in spline mode;
 #'   it does not estimate spline coefficients jointly inside Stan.
@@ -461,24 +463,28 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #' @param covariate_formulas Named or LHS formulas used to generate event-level covariates,
 #'   e.g. `list(x1 ~ rnorm(n_id), x2 ~ rt(n_id, df = 5))`.
 #' @param assoc Association components (same names as fit): `cv_total`, `cv_mean`,
-#'   `cv_marker`, `cs_total`, `cs_mean`, `cs_marker`, `corr`.
+#'   `cv_marker`, `cs_total`, `cs_mean`, `cs_marker`, `corr`, `vcov`.
 #'
 #'   Meaning of each channel:
 #'   - `cv_*`: current-value channels from longitudinal trajectories,
 #'   - `cs_*`: current-slope channels from finite differences (`eps_cs`),
 #'   - `corr`: off-diagonal correlation features from marker-by-id random effects.
+#'   - `vcov`: lower-triangular Cholesky-factor entries from marker-by-id random
+#'     effects, taken directly from the subject-specific `L` matrix.
 #'
 #'   You can also provide `formulaAssoc = ~ ...` to select channels; when present,
 #'   it overrides `assoc`.
 #' @param assoc_coefs Association coefficients for hazard terms.
-#'   Non-`corr` terms accept scalar values. The `corr` term accepts a vector of
+#'   Non-`corr`/`vcov` terms accept scalar values. The `corr` term accepts a vector of
 #'   off-diagonal correlation coefficients ordered as `(2,1), (3,1), (3,2), ...`
 #'   in lower-triangular row-major order of the marker-by-id random-effect
-#'   covariance dimension.
+#'   covariance dimension. The `vcov` term accepts lower-triangular Cholesky-factor
+#'   entries ordered as `(1,1), (2,1), (2,2), ...)`; when `||` is used in the marker-by-id
+#'   random-effects block, only diagonal `L` entries are used.
 #'
 #'   Accepted input forms:
 #'   - named numeric vector, e.g. `c(cv_total = 0.4, cs_mean = -0.2)`,
-#'   - named list, e.g. `list(cv_total = 0.4, corr = c(0.2, -0.1))`.
+#'   - named list, e.g. `list(cv_total = 0.4, corr = c(0.2, -0.1), vcov = c(0.4, 0.1, 0.5))`.
 #'   Missing channels default to 0.
 #' @param beta_long Fixed-effect coefficients for `formulaLong` fixed part. If NULL,
 #'   coefficients are randomly generated and named by model-matrix columns.
@@ -1019,7 +1025,7 @@ simulate_joinme <- function(
   .sim_assoc_from_formula <- function(f) {
     if (is.null(f)) return(NULL)
     vars <- all.vars(f)
-    unique(vars[vars %in% c("cv_total", "cv_mean", "cv_marker", "cs_total", "cs_mean", "cs_marker", "corr")])
+    unique(vars[vars %in% c("cv_total", "cv_mean", "cv_marker", "cs_total", "cs_mean", "cs_marker", "corr", "vcov")])
   }
 
   .sim_normalize_transform_list <- function(transform_list) {
@@ -1088,6 +1094,33 @@ simulate_joinme <- function(
     x
   }
 
+  .sim_resolve_monotone_direction <- function(direction = NULL, default = "increasing") {
+    direction <- direction %||% default
+    if (is.numeric(direction) && length(direction) == 1L && is.finite(direction)) {
+      if (direction > 0) return(1L)
+      if (direction < 0) return(-1L)
+    }
+    direction_chr <- tolower(trimws(as.character(direction)[1]))
+    if (direction_chr %in% c("increasing", "increase", "inc", "+1", "1")) return(1L)
+    if (direction_chr %in% c("decreasing", "decrease", "dec", "-1")) return(-1L)
+    cli::cli_abort(c(
+      x = "{.arg direction} must be either {.val increasing} or {.val decreasing}.",
+      i = "Numeric aliases {.val 1} and {.val -1} are also accepted."
+    ))
+  }
+
+  .sim_infer_monotone_direction <- function(x, y) {
+    ord <- order(x)
+    x <- as.numeric(x)[ord]
+    y <- as.numeric(y)[ord]
+    keep <- is.finite(x) & is.finite(y)
+    x <- x[keep]
+    y <- y[keep]
+    if (length(y) < 2L) return(1L)
+    if (y[length(y)] < y[1]) return(-1L)
+    1L
+  }
+
   .sim_make_penalised_ispline_transform <- function(spec) {
     if (is.null(spec$x) || is.null(spec$y)) {
       cli::cli_abort(c(
@@ -1107,6 +1140,8 @@ simulate_joinme <- function(
         i = "Check the transform training data."
       ))
     }
+
+    spline_direction <- .sim_resolve_monotone_direction(spec$direction, default = .sim_infer_monotone_direction(x, y))
 
     lambda <- as.numeric(spec$lambda %||% 1.0)
     if (!is.numeric(lambda) || length(lambda) != 1L || !is.finite(lambda) || lambda < 0) {
@@ -1216,14 +1251,16 @@ simulate_joinme <- function(
 
     init_coeff <- pmax(0, init_raw)
     init_coeff <- init_coeff - init_coeff[1]
-    if (!is.finite(init_coeff[n_coef]) || init_coeff[n_coef] <= 0) {
+    span <- max(init_coeff, na.rm = TRUE)
+    if (!is.finite(span) || span <= 0) {
       init_coeff <- seq(0, 1, length.out = n_coef)
     } else {
-      init_coeff <- init_coeff / init_coeff[n_coef]
+      init_coeff <- init_coeff / span
+      init_coeff <- pmin(pmax(init_coeff, 0), 1)
+      init_coeff <- cummax(init_coeff)
+      init_coeff[1] <- 0
+      init_coeff[n_coef] <- 1
     }
-    init_coeff <- cummax(pmin(pmax(init_coeff, 0), 1))
-    init_coeff[1] <- 0
-    init_coeff[n_coef] <- 1
     delta_init <- diff(init_coeff)
     delta_init <- pmax(delta_init, .Machine$double.eps)
     delta_init <- delta_init / sum(delta_init)
@@ -1231,7 +1268,11 @@ simulate_joinme <- function(
 
     fn <- function(z) {
       b <- .sim_anchored_coeff_from_z(z)
-      r <- y_w - B_w %*% b
+      fit_vals <- as.numeric(B_w %*% b)
+      if (spline_direction < 0L) {
+        fit_vals <- w_sqrt * (sum(b) - as.numeric(basis %*% b))
+      }
+      r <- y_w - fit_vals
       pen <- if (lambda > 0 && nrow(Dmat) > 0) Dmat %*% b else 0
       0.5 * sum(r^2) + 0.5 * lambda * sum(pen^2)
     }
@@ -1249,7 +1290,9 @@ simulate_joinme <- function(
       knots = knots,
       raw_knots = if (is.null(knots_raw)) NULL else as.numeric(knots_raw),
       coeff = as.numeric(.sim_anchored_coeff_from_z(opt$par)),
-      degree = degree
+      degree = degree,
+      direction = if (spline_direction < 0L) "decreasing" else "increasing",
+      spline_direction = spline_direction
     )
   }
 
@@ -1289,6 +1332,9 @@ simulate_joinme <- function(
         ))
       }
       knots <- as.numeric(spec$knots)
+      if (.sim_transform_uses_expit_input(spec)) {
+        knots <- .sim_validate_expit_domain_values(knots, "knots")
+      }
       coeff <- as.numeric(spec$coeff)
       degree <- as.integer(spec$degree %||% 3L)
       return(function(x) {
@@ -1300,9 +1346,7 @@ simulate_joinme <- function(
           ))
         }
         boundary <- c(knots[1], knots[length(knots)])
-        x_range <- range(x, finite = TRUE)
-        boundary[1] <- min(boundary[1], x_range[1])
-        boundary[2] <- max(boundary[2], x_range[2])
+        x <- pmin(pmax(x, boundary[1]), boundary[2])
         internal_knots <- if (length(knots) > 2) knots[2:(length(knots) - 1)] else numeric(0)
         basis <- splines2::iSpline(x,
           knots = internal_knots,
@@ -1316,7 +1360,11 @@ simulate_joinme <- function(
         } else {
           coeff_use <- coeff[seq_len(coef_len)]
         }
-        as.numeric(basis %*% coeff_use)
+        vals <- as.numeric(basis %*% coeff_use)
+        if (.sim_resolve_monotone_direction(spec$direction %||% spec$spline_direction %||% 1L, default = 1L) < 0L) {
+          vals <- sum(coeff_use) - vals
+        }
+        vals
       })
     }
 
@@ -1701,8 +1749,14 @@ simulate_joinme <- function(
   if (!is.null(assoc_from_formula)) assoc <- assoc_from_formula
   assoc <- unique(assoc)
   if (length(assoc) == 0) assoc <- "cv_total"
+  assoc <- .validate_assoc_channels(assoc, context = "simulate_joinme()")
 
-  M_corr <- if (K_idm >= 2) K_idm * (K_idm - 1) / 2 else 0
+  M_corr <- .assoc_cov_feature_count(K_idm, include_diag = FALSE)
+  M_vcov <- if (as.integer(indep_flags$indep_idmarker_cov %||% 0L) == 1L) {
+    as.integer(K_idm)
+  } else {
+    .assoc_cov_feature_count(K_idm, include_diag = TRUE)
+  }
 
   assoc_coef_scalar <- c(
     cv_total = 0,
@@ -1713,18 +1767,19 @@ simulate_joinme <- function(
     cs_marker = 0
   )
   assoc_coef_corr <- rep(0.0, M_corr)
+  assoc_coef_vcov <- rep(0.0, M_vcov)
 
-  .sim_extract_named_corr <- function(x) {
+  .sim_extract_named_assoc_vector <- function(x, prefix) {
     if (length(x) == 0) return(numeric(0))
     nms <- names(x)
     if (is.null(nms)) return(numeric(0))
-    idx <- grepl("^corr($|\\[[0-9]+\\]$|[._]?[0-9]+$)", nms)
+    idx <- grepl(paste0("^", prefix, "($|\\[[0-9]+\\]$|[._]?[0-9]+$)"), nms)
     if (!any(idx)) return(numeric(0))
     vals <- as.numeric(x[idx])
     nms_sel <- nms[idx]
     ord_key <- rep(NA_integer_, length(nms_sel))
-    ord_key[nms_sel == "corr"] <- 1L
-    idx_num <- nms_sel != "corr"
+    ord_key[nms_sel == prefix] <- 1L
+    idx_num <- nms_sel != prefix
     if (any(idx_num)) {
       ord_key[idx_num] <- suppressWarnings(as.integer(gsub("[^0-9]", "", nms_sel[idx_num])))
       ord_key[is.na(ord_key)] <- seq_len(sum(is.na(ord_key))) + 1L
@@ -1732,14 +1787,20 @@ simulate_joinme <- function(
     vals[order(ord_key)]
   }
 
-  .sim_fill_assoc_coefs <- function(assoc, assoc_coefs, M_corr) {
+  .sim_fill_assoc_coefs <- function(assoc, assoc_coefs, M_corr, M_vcov) {
     scalar <- assoc_coef_scalar
-    vc <- rep(0.0, M_corr)
+    corr <- rep(0.0, M_corr)
+    vcov <- rep(0.0, M_vcov)
 
     if (is.list(assoc_coefs) && !is.null(assoc_coefs$corr) && M_corr > 0) {
       vc_in <- as.numeric(assoc_coefs$corr)
       take <- min(M_corr, length(vc_in))
-      if (take > 0) vc[seq_len(take)] <- vc_in[seq_len(take)]
+      if (take > 0) corr[seq_len(take)] <- vc_in[seq_len(take)]
+    }
+    if (is.list(assoc_coefs) && !is.null(assoc_coefs$vcov) && M_vcov > 0) {
+      vc_in <- as.numeric(assoc_coefs$vcov)
+      take <- min(M_vcov, length(vc_in))
+      if (take > 0) vcov[seq_len(take)] <- vc_in[seq_len(take)]
     }
 
     if (!is.null(names(assoc_coefs))) {
@@ -1750,10 +1811,17 @@ simulate_joinme <- function(
       }
 
       if (M_corr > 0 && !is.list(assoc_coefs)) {
-        vc_named <- .sim_extract_named_corr(assoc_coefs)
+        vc_named <- .sim_extract_named_assoc_vector(assoc_coefs, "corr")
         if (length(vc_named) > 0) {
           take <- min(M_corr, length(vc_named))
-          vc[seq_len(take)] <- vc_named[seq_len(take)]
+          corr[seq_len(take)] <- vc_named[seq_len(take)]
+        }
+      }
+      if (M_vcov > 0 && !is.list(assoc_coefs)) {
+        vc_named <- .sim_extract_named_assoc_vector(assoc_coefs, "vcov")
+        if (length(vc_named) > 0) {
+          take <- min(M_vcov, length(vc_named))
+          vcov[seq_len(take)] <- vc_named[seq_len(take)]
         }
       }
     } else if (length(assoc_coefs) > 0) {
@@ -1765,7 +1833,15 @@ simulate_joinme <- function(
           if (M_corr > 0) {
             take <- min(M_corr, length(vals) - cursor + 1L)
             if (take > 0) {
-              vc[seq_len(take)] <- vals[cursor:(cursor + take - 1L)]
+              corr[seq_len(take)] <- vals[cursor:(cursor + take - 1L)]
+              cursor <- cursor + take
+            }
+          }
+        } else if (identical(term, "vcov")) {
+          if (M_vcov > 0) {
+            take <- min(M_vcov, length(vals) - cursor + 1L)
+            if (take > 0) {
+              vcov[seq_len(take)] <- vals[cursor:(cursor + take - 1L)]
               cursor <- cursor + take
             }
           }
@@ -1776,12 +1852,13 @@ simulate_joinme <- function(
       }
     }
 
-    list(scalar = scalar, corr = vc)
+    list(scalar = scalar, corr = corr, vcov = vcov)
   }
 
-  assoc_coef_parts <- .sim_fill_assoc_coefs(assoc, assoc_coefs, M_corr)
+  assoc_coef_parts <- .sim_fill_assoc_coefs(assoc, assoc_coefs, M_corr, M_vcov)
   assoc_coef_scalar <- assoc_coef_parts$scalar
   assoc_coef_corr <- assoc_coef_parts$corr
+  assoc_coef_vcov <- assoc_coef_parts$vcov
 
   weighted_terms <- intersect(c("cv_total", "cs_total", "cv_marker", "cs_marker"), assoc)
   if (length(weighted_terms) > 0) {
@@ -1795,8 +1872,23 @@ simulate_joinme <- function(
     vc_names <- paste0("corr[", seq_len(M_corr), "]")
     assoc_coef_vec <- c(assoc_coef_vec, stats::setNames(assoc_coef_corr, vc_names))
   }
+  if ("vcov" %in% assoc && M_vcov > 0) {
+    vc_names <- paste0("vcov[", seq_len(M_vcov), "]")
+    assoc_coef_vec <- c(assoc_coef_vec, stats::setNames(assoc_coef_vcov, vc_names))
+  }
 
   transforms <- .sim_normalize_transform_list(transforms)
+  .sim_make_component_transform_set <- function(spec, term_name, n_components) {
+    # Expand a single user-facing covariance-style transform spec into a list of
+    # per-component evaluators. Each component currently shares the same runtime
+    # transform definition in simulation, which mirrors the common-input user
+    # contract used when building standata for Stan.
+    n_components <- as.integer(n_components %||% 0L)
+    if (n_components <= 0L) {
+      return(list())
+    }
+    rep(list(.sim_make_assoc_transform(spec, term_name)), n_components)
+  }
   tf_funs <- list(
     cv_total = .sim_make_assoc_transform(transforms$cv_total, "cv_total"),
     cv_mean = .sim_make_assoc_transform(transforms$cv_mean, "cv_mean"),
@@ -1804,7 +1896,8 @@ simulate_joinme <- function(
     cs_total = .sim_make_assoc_transform(transforms$cs_total, "cs_total"),
     cs_mean = .sim_make_assoc_transform(transforms$cs_mean, "cs_mean"),
     cs_marker = .sim_make_assoc_transform(transforms$cs_marker, "cs_marker"),
-    corr = .sim_make_assoc_transform(transforms$corr, "corr")
+    corr = .sim_make_component_transform_set(transforms$corr, "corr", M_corr),
+    vcov = .sim_make_component_transform_set(transforms$vcov, "vcov", M_vcov)
   )
 
   has_tf_cv_marker <- !is.null(transforms$cv_marker)
@@ -1887,7 +1980,20 @@ simulate_joinme <- function(
     out
   }
 
+  .sim_vcov_features <- function(i) {
+    if (K_idm < 1) return(numeric(0))
+    Li <- matrix(L_i[i, , ], nrow = K_idm, ncol = K_idm)
+    if (!all(is.finite(Li))) {
+      return(rep(0.0, M_vcov))
+    }
+    .assoc_vcov_features_from_chol(
+      Li,
+      diagonal_only = as.integer(indep_flags$indep_idmarker_cov %||% 0L) == 1L
+    )
+  }
+
   corr_by_id <- lapply(seq_len(n_id), .sim_corr_features)
+  vcov_by_id <- lapply(seq_len(n_id), .sim_vcov_features)
 
   assoc_components <- function(i, t) {
     # Step A: build marker-resolved CV components at t and t + eps_cs.
@@ -1927,8 +2033,24 @@ simulate_joinme <- function(
     # CORR semantics are transform-first, then weight:
     #   corr_assoc = sum_j assoc_coef_corr[j] * tf_corr(corr_vals[j])
     # This mirrors Stan and intentionally avoids tf_corr(sum_j a_j * corr_j).
-    corr_vals_tf <- if (length(corr_vals) > 0) as.numeric(tf_funs$corr(corr_vals)) else numeric(0)
+    corr_vals_tf <- if (length(corr_vals) > 0) {
+      vapply(seq_along(corr_vals), function(m) as.numeric(tf_funs$corr[[m]](corr_vals[m]))[1], numeric(1))
+    } else {
+      numeric(0)
+    }
     corr_assoc <- if (length(corr_vals_tf) > 0) sum(assoc_coef_corr * corr_vals_tf) else 0
+    vcov_vals <- vcov_by_id[[i]]
+    # VCOV follows the same contract as CORR:
+    #   Step 1: extract raw time-constant Cholesky features for subject i.
+    #   Step 2: transform each component separately.
+    #   Step 3: apply the corresponding association coefficient after the
+    #           transform, never before it.
+    vcov_vals_tf <- if (length(vcov_vals) > 0) {
+      vapply(seq_along(vcov_vals), function(m) as.numeric(tf_funs$vcov[[m]](vcov_vals[m]))[1], numeric(1))
+    } else {
+      numeric(0)
+    }
+    vcov_assoc <- if (length(vcov_vals_tf) > 0) sum(assoc_coef_vcov * vcov_vals_tf) else 0
 
     list(
       cv_total = cv_total,
@@ -1938,6 +2060,7 @@ simulate_joinme <- function(
       cs_mean = tf_funs$cs_mean(cs_mean_raw),
       cs_marker = cs_marker,
       corr = corr_assoc,
+      vcov = vcov_assoc,
       raw = list(
         cv_mean = cv_mean_raw,
         cs_total = cs_total_raw,
@@ -1946,6 +2069,9 @@ simulate_joinme <- function(
         corr = corr_assoc,
         corr_vals = corr_vals,
         corr_vals_tf = corr_vals_tf,
+        vcov = vcov_assoc,
+        vcov_vals = vcov_vals,
+        vcov_vals_tf = vcov_vals_tf,
         marker_values = now
       )
     )
@@ -1970,7 +2096,8 @@ simulate_joinme <- function(
       assoc_coef_scalar[["cs_total"]] * comp$cs_total +
       assoc_coef_scalar[["cs_mean"]] * comp$cs_mean +
       assoc_coef_scalar[["cs_marker"]] * comp$cs_marker +
-      comp$corr
+      comp$corr +
+      comp$vcov
   }
 
   .sim_time_key <- function(t) sprintf("%.12f", as.numeric(t))
@@ -2306,6 +2433,7 @@ simulate_joinme <- function(
     cs_mean = function(i, t) assoc_components(i, t)$cs_mean,
     cs_marker = function(i, t) assoc_components(i, t)$cs_marker,
     corr = function(i, t) assoc_components(i, t)$corr,
+    vcov = function(i, t) assoc_components(i, t)$vcov,
     assoc_components_raw = function(i, t) assoc_components(i, t)$raw,
     assoc_components = assoc_components,
     baseline_hazard = h0_fn,

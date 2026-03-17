@@ -108,7 +108,8 @@ extract.JoinMeFit <- function(object,
       if (isTRUE(sd$assoc_cs_total == 1)) "alpha_cs_total",
       if (isTRUE(sd$assoc_cs_mean == 1)) "alpha_cs_mean",
       if (isTRUE(sd$assoc_cs_marker == 1)) "alpha_cs_marker",
-      if (isTRUE(sd$assoc_corr == 1)) grep("^alpha_corr\\[", all_vars, value = TRUE)
+      if (isTRUE(sd$assoc_corr == 1)) grep("^alpha_corr\\[", all_vars, value = TRUE),
+      if (isTRUE(sd$assoc_vcov == 1)) grep("^alpha_vcov\\[", all_vars, value = TRUE)
     )
     assoc_vars <- assoc_vars[assoc_vars %in% all_vars]
 

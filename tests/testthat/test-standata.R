@@ -68,4 +68,55 @@ test_that("standata validates formula requirements", {
     ),
     "corr"
   )
+
+  expect_error(
+    joinme_standata(
+      formulaLong = y ~ 1 + time + x1 +
+        (1 + time | id) +
+        (0 + x1 | marker),
+      dataLong = sim$dataLong,
+      formulaEvent = formulaEvent,
+      dataEvent = sim$dataEvent,
+      assoc = c("vcov")
+    ),
+    "vcov"
+  )
+
+  expect_error(
+    joinme_standata(
+      formulaLong = y ~ 1 + time + x1 +
+        (1 + time | id) +
+        (0 + x1 + (1 + time | id) | marker),
+      dataLong = sim$dataLong,
+      formulaEvent = formulaEvent,
+      dataEvent = sim$dataEvent,
+      assoc = c("corr", "vcov")
+    ),
+    "cannot be used together"
+  )
+})
+
+test_that("standata builds vcov association metadata", {
+  sim <- simulate_joinme_joint_student_t_cvtotal(
+    n_id = 3,
+    D = 2,
+    n_t = 2,
+    seed = 204,
+    include_marker_only = TRUE
+  )
+
+  sd <- joinme_standata(
+    formulaLong = y ~ 1 + time + x1 +
+      (1 + time | id) +
+      (0 + x1 + (1 + time | id) | marker),
+    dataLong = sim$dataLong,
+    formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
+    dataEvent = sim$dataEvent,
+    assoc = c("vcov"),
+    transforms = joinme_tf(vcov = "identity")
+  )
+
+  expect_equal(sd$assoc_corr, 0L)
+  expect_equal(sd$assoc_vcov, 1L)
+  expect_equal(sd$tf_mode_vcov, 0L)
 })

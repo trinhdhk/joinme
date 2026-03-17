@@ -12,8 +12,11 @@
 #'
 #' @details
 #' Transformations are provided through a single `transforms` argument.
-#' Each element (cv_total, cs_total, corr) is defined as a list specifying a type
-#' and type-specific fields (see `build_standata_transforms()` for details).
+#' Each element (cv_total, cs_total, corr, vcov) is defined as a list specifying a type
+#' and type-specific fields (see `build_standata_transforms()` for details). For
+#' covariance-style associations, `corr` acts on off-diagonal correlation features,
+#' while `vcov` acts on the lower-triangular entries of the subject-specific
+#' Cholesky factor `L` directly rather than on reconstructed covariance entries.
 #'
 #' Distributional regression can be specified in two equivalent forms:
 #' 1. A named list with RHS-only formulas, e.g. `list(sigma = ~ 1 + time)`.
@@ -66,7 +69,8 @@
 #' Example:
 #' `list(cv_total = list(type = "functional", expr = ~ log1p(x)),
 #'      cs_total = list(type = "identity"),
-#'      corr = list(type = "pwlin", x = c(-2, 0, 2), y = c(0.2, 1, 0.2)))`
+#'      corr = list(type = "pwlin", x = c(-2, 0, 2), y = c(0.2, 1, 0.2)),
+#'      vcov = list(type = "identity"))`
 #'
 #' Transformation parameterisation cheat sheet:
 #' - Omitted term, `NULL`, or `list(type = "identity")`:
@@ -101,14 +105,21 @@
 #'   - If `y` is supplied, `joinme` first fits the monotone spline to training
 #'     pairs `(x, y)` in R and passes fixed coefficients to Stan. These plug-in
 #'     coefficients use the same anchored convention as the Stan-estimated path:
-#'     first coefficient `0`, last coefficient `1`.
+#'     increasing splines run from `0` to `1`, while decreasing splines run from
+#'     `1` to `0`.
 #'   - If `y` is omitted, Stan estimates the monotone spline coefficients
-#'     directly.
+#'     directly. Use `direction = "decreasing"` when the monotone transform
+#'     should fall as the raw association feature increases.
 #' - `x`: raw association-feature values used either to define training pairs or
 #'   to help derive knot locations.
 #' - `y`: optional target transformed values at those `x` points. Supplying `y`
 #'   activates the legacy plug-in fit; omitting it activates Stan estimation.
 #' - `lambda`: smoothness control (larger = smoother transform).
+#' - `direction`: monotone orientation for penalised spline families. Accepted
+#'   values are `"increasing"` and `"decreasing"`. When `y` is supplied, the
+#'   plug-in fit infers the direction from the training pairs if you omit it.
+#'   When `y` is omitted and Stan estimates the spline directly, the default
+#'   remains `"increasing"` for backward compatibility.
 #' - `type = "ispline_expit"` / `"ispline_expit_penalised"`:
 #'   same semantics as the I-spline variants above, except the spline basis is
 #'   built on `plogis(x)`. This keeps the spline input on the bounded interval
@@ -133,7 +144,10 @@
 #'   covariates referenced in `formulaEvent`.
 #' @param formulaCorr Covariance regression formula for id-specific marker-by-id effects.
 #'   If the marker block omits the inner `( ... | id )`, marker-by-id effects are
-#'   absent and `corr` associations are not allowed.
+#'   absent and covariance-style associations (`corr`, `vcov`) are not allowed.
+#'   When present, `corr` associations use the resulting off-diagonal correlation
+#'   features, whereas `vcov` associations use the lower-triangular entries of the
+#'   subject-specific Cholesky factor `L` directly.
 #' @param formulaDist Optional list of formulas for distributional regression.
 #'   Supported LHS parameters are:
 #'   - `sigma`
@@ -493,7 +507,8 @@ joinme <- function(
       cs_total = sd$assoc_cs_total,
       cs_mean = sd$assoc_cs_mean,
       cs_marker = sd$assoc_cs_marker,
-      corr = sd$assoc_corr
+      corr = sd$assoc_corr,
+      vcov = sd$assoc_vcov
     ),
     transforms = list(
       tf_mode_cv_tot = sd$tf_mode_cv_tot,
@@ -502,7 +517,8 @@ joinme <- function(
       tf_mode_cs_mean = sd$tf_mode_cs_mean,
       tf_mode_cv_marker = sd$tf_mode_cv_marker,
       tf_mode_cs_marker = sd$tf_mode_cs_marker,
-      tf_mode_corr = sd$tf_mode_corr
+      tf_mode_corr = sd$tf_mode_corr,
+      tf_mode_vcov = sd$tf_mode_vcov
     ),
     transforms_spec = transforms,
     dist = list(

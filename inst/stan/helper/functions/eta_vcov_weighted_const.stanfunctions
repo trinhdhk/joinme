@@ -1,0 +1,58 @@
+/**
+ * @file eta_vcov_weighted_const.stanfunctions
+ * @brief Lower-triangular Cholesky-factor extractor for vcov association.
+ *
+ * @details
+ * Given a lower-triangular Cholesky factor L_i, this helper returns the raw
+ * lower-triangular entries of L_i itself in the same row-major indexing as the
+ * covariance regression block:
+ *   (1,1), (2,1), (2,2), ..., (Q,Q).
+ *
+ * This keeps the vcov association aligned with the LKJ/Cholesky parameterisation
+ * actually estimated by the model, rather than reconstructing Sigma_i = L_i * L_i'.
+ *
+ * When diagonal_only == 1, only the positive diagonal entries of L_i are returned.
+ *
+ * @param L_i Subject-specific lower-triangular Cholesky factor.
+ * @param diagonal_only Integer flag with accepted values:
+ *   - 0: return the full lower triangle in row-major order,
+ *   - 1: return diagonal entries only.
+ * @return Vector of raw vcov features aligned with the covariance-regression
+ *   indexing used elsewhere in the model.
+ */
+vector eta_vcov_weighted_const(matrix L_i, int diagonal_only) {
+  // Step 1: determine how many raw vcov features are required.
+  // - diagonal_only = 1 returns the diagonal SD-driving entries only,
+  // - diagonal_only = 0 returns the full lower triangle in row-major order.
+  int Q = rows(L_i);
+  int M = (diagonal_only == 1) ? Q : ((Q * (Q + 1)) %/% 2);
+  int m = 1;
+  vector[M] vcov_terms;
+
+  if (Q < 1)
+    return vcov_terms;
+
+  // Step 2a: in the diagonal-only case, expose exactly the positive Cholesky
+  // diagonal entries. This matches the `||` semantics where off-diagonal
+  // marker-by-id covariance terms are structurally absent.
+  if (diagonal_only == 1) {
+    for (r in 1 : Q) {
+      vcov_terms[m] = L_i[r, r];
+      m += 1;
+    }
+    return vcov_terms;
+  }
+
+  // Step 2b: otherwise expose the full lower triangle in the same ordering as
+  // the covariance-regression parameter block: (1,1), (2,1), (2,2), ... .
+  // Keeping this ordering identical across simulation, fitting, prediction,
+  // plotting, and summaries is what makes vcov component labels interpretable.
+  for (r in 1 : Q) {
+    for (c in 1 : r) {
+      vcov_terms[m] = L_i[r, c];
+      m += 1;
+    }
+  }
+
+  return vcov_terms;
+}

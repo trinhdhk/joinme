@@ -187,7 +187,7 @@ if (isTRUE(pred$metadata$marker_corr_depends_on_id)) {
 }
 
 # Plot longitudinal and survival predictions
-plot(pred, which = c("longitudinal", "survival"), combined = TRUE)
+plot(pred, type = c("longitudinal", "survival"), combined = TRUE)
 
 # For multiple subjects with combined=TRUE: returns one combined plot per subject
 # (named list). If combiner packages are unavailable, falls back to the

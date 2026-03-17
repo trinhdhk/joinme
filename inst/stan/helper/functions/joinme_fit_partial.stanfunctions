@@ -50,17 +50,19 @@
  *      Compute separately for mean (csm) and marker (csk) components
  *      Time-rescale by dividing by tmax (since time scaled to [0,1] internally)
  *
- *   d. **Variance-Covariance Association (corr)**:
+ *   d. **Covariance-style associations (corr, vcov)**:
  *      corr = sum_{r>c} a_corr[m(r,c)] * Corr_i[r,c]
+ *      vcov = sum_{r>=c} a_vcov[m(r,c)] * L_i[r,c]
  *      where Corr_i[r,c] is computed from Sigma_i = L_i*L_i'
- *      This is constant across time for a given subject
+ *      and the VCOV channel uses the lower-triangular entries of L_i directly.
+ *      These are constant across time for a given subject
  *
  *   e. **Aggregate Total Features**:
  *      cv_total = cvm + cvk  (full current value)
  *      cs_total = csm + csk  (full current slope)
  *
  * ### STEP 3: NONLINEAR TRANSFORMATIONS OF ASSOCIATION FEATURES
- *   Each association type (cv_total, cv_mean, cv_marker, cs_total, cs_mean, cs_marker, corr)
+ *   Each association type (cv_total, cv_mean, cv_marker, cs_total, cs_mean, cs_marker, corr, vcov)
  *   can be transformed flexibly before entering the survival predictor:
  *
  *   Transformation modes (tf_mode):
@@ -240,7 +242,8 @@
  * @param a_cv_marker Association weight (Marker Current Value).
  * @param a_cs_mean Association weight (Mean Current Slope).
  * @param a_cs_marker Association weight (Marker Current Slope).
- * @param a_corr Association weights for variance components.
+ * @param a_corr Association weights for off-diagonal correlation components.
+ * @param a_vcov Association weights for variance-covariance components.
  * @param tf_mode_cv_tot Transformation mode (CV Total).
  * @param tf_mode_cs_tot Transformation mode (CS Total).
  * @param tf_mode_corr Transformation mode (CORR).
@@ -439,9 +442,11 @@ real partial_joinme(
     real a_cs_mean,
     real a_cs_marker,
     vector a_corr,
+    vector a_vcov,
     int tf_mode_cv_tot,
     int tf_mode_cs_tot,
     int tf_mode_corr,
+    int tf_mode_vcov,
     int tf_mode_cv_mean,
     int tf_mode_cv_marker,
     int tf_mode_cs_mean,
@@ -459,8 +464,13 @@ real partial_joinme(
     array[] int functional_ops_corr,
     vector const_data_corr,
     vector knots_corr,
-    vector coeff_corr,
+    matrix coeff_corr,
     int spline_degree_corr,
+    array[] int functional_ops_vcov,
+    vector const_data_vcov,
+    vector knots_vcov,
+    matrix coeff_vcov,
+    int spline_degree_vcov,
     array[] int functional_ops_cv_mean,
     vector const_data_cv_mean,
     vector knots_cv_mean,
@@ -835,7 +845,7 @@ real partial_joinme(
     vector[n_gk] csm_raw = eta_fd(cvm_now, cvm_fwd, eps_fd) / tmax; // mean slope
     vector[n_gk] csk_raw; // marker slope (weighted across markers)
 
-    // STEP 2.3: Compute variance-covariance association feature
+    // STEP 2.3: Compute Cholesky-factor association feature
     // CORR feature pipeline:
     // 1) extract raw off-diagonal correlations from Sigma_i,
     // 2) apply corr transform term-wise,
@@ -843,6 +853,8 @@ real partial_joinme(
     // This enforces: a_corr * transform(corr_raw), not transform(a_corr * corr_raw).
     int M_corr_local = num_elements(a_corr);
     vector[M_corr_local] corr_terms_raw = eta_corr_varonly_weighted_const(L_i[i]);
+    int M_vcov_local = num_elements(a_vcov);
+    vector[M_vcov_local] vcov_terms_raw = eta_vcov_weighted_const(L_i[i], (M_vcov_local == Q_idm));
 
     // STEP 2.4: Apply nonlinear transformations
     // Each association feature can be transformed flexibly before entering hazard
@@ -922,11 +934,24 @@ real partial_joinme(
                                                      knots_cs_mean, coeff_cs_mean, spline_degree_cs_mean);
 
     // Transform CORR terms and apply a_corr after transform.
-    vector[M_corr_local] corr_terms_tf = apply_transform_vector(corr_terms_raw, tf_mode_corr,
-                                    functional_ops_corr, const_data_corr,
-                                    knots_corr, coeff_corr, spline_degree_corr);
+        vector[M_corr_local] corr_terms_tf = apply_transform_vector_by_component(corr_terms_raw, tf_mode_corr,
+            functional_ops_corr, const_data_corr,
+            knots_corr, coeff_corr, spline_degree_corr);
+        vector[M_corr_local] corr_terms_ref = apply_transform_vector_by_component(rep_vector(0, M_corr_local), tf_mode_corr,
+            functional_ops_corr, const_data_corr,
+            knots_corr, coeff_corr, spline_degree_corr);
+        corr_terms_tf = corr_terms_tf - corr_terms_ref;
     real corr_assoc_scalar = dot_product(a_corr, corr_terms_tf);
     vector[n_gk] corr_assoc = rep_vector(corr_assoc_scalar, n_gk);
+    vector[M_vcov_local] vcov_terms_tf = apply_transform_vector_by_component(vcov_terms_raw, tf_mode_vcov,
+            functional_ops_vcov, const_data_vcov,
+            knots_vcov, coeff_vcov, spline_degree_vcov);
+        vector[M_vcov_local] vcov_terms_ref = apply_transform_vector_by_component(rep_vector(0, M_vcov_local), tf_mode_vcov,
+          functional_ops_vcov, const_data_vcov,
+          knots_vcov, coeff_vcov, spline_degree_vcov);
+        vcov_terms_tf = vcov_terms_tf - vcov_terms_ref;
+    real vcov_assoc_scalar = dot_product(a_vcov, vcov_terms_tf);
+    vector[n_gk] vcov_assoc = rep_vector(vcov_assoc_scalar, n_gk);
 
     // STEP 2.6: Combine into survival predictor at GK nodes
     // eta_assoc(t) = sum(coefficient * transformed_association_feature)
@@ -943,7 +968,8 @@ real partial_joinme(
                      + a_cs_total * cs_tot_tf
                      + a_cs_mean * cs_mean_tf
                      + a_cs_marker * cs_marker_tf
-                     + corr_assoc;
+                                 + corr_assoc
+                                 + vcov_assoc;
     // eta_assoc_nodes: association predictor at GK nodes
 
 
@@ -986,8 +1012,12 @@ real partial_joinme(
       // Current slopes at event time (finite difference)
       real csm_S_raw = ((cvm_S_fwd - cvm_S) / eps_fd) / tmax; // mean slope at event
 
-      // CORR at event time equals the same transformed-and-weighted constant.
+      // Covariance-style channels are time-constant for a fixed subject because
+      // they depend only on the subject-specific Cholesky factor L_i.
+      // We therefore reuse the already transformed-and-weighted scalars from the
+      // GK-node calculation rather than rebuilding them at S_event[i].
       real corr_S_assoc = corr_assoc_scalar;
+      real vcov_S_assoc = vcov_assoc_scalar;
 
       // Association features at event time
       real cv_S_tot_tf = 0;
@@ -1045,14 +1075,18 @@ real partial_joinme(
                                                    functional_ops_cs_mean, const_data_cs_mean, 
                                                    knots_cs_mean, coeff_cs_mean, spline_degree_cs_mean);
 
-      // Combine into association predictor
+      // Combine every active association channel into the exact event-time
+      // predictor. This must mirror the GK-node construction above, otherwise
+      // the event log-hazard and the integrated hazard would target different
+      // models and coefficient recovery would drift.
       real eta_assoc_S = a_cv_total * cv_S_tot_tf
                    + a_cv_mean * cv_S_mean_tf
                    + a_cv_marker * cv_S_marker_tf
                    + a_cs_total * cs_S_tot_tf
                    + a_cs_mean * cs_S_mean_tf
                    + a_cs_marker * cs_S_marker_tf
-                   + corr_S_assoc;
+           + corr_S_assoc
+           + vcov_S_assoc;
       // eta_assoc_S: association predictor at event time
       
 

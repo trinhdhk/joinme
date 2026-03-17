@@ -9,7 +9,7 @@
 #' conditional survival curves.
 #'
 #' @param x An object of class `JoinMeDynPred` returned by the [predict] method.
-#' @param which Character vector indicating what to plot: "cumhaz" (default),
+#' @param type Character vector indicating what to plot: "cumhaz" (default),
 #'   "longitudinal", or "survival". Multiple values are allowed.
 #' @param subject Integer/Character vector. Which subject(s) to plot. If NULL,
 #'   plots all subjects in separate panels or returns a list.
@@ -87,7 +87,7 @@
 # - Support per-subject panels and combined outputs.
 plot.JoinMeDynPred <- function(
     x,
-    which = c("cumhaz", "longitudinal", "survival"),
+    type = c("cumhaz", "longitudinal", "survival"),
     subject = NULL,
     marker = NA,
     trajectory_type = c("id_marker", "marker_pop", "overall_pop", "all_types"),
@@ -119,15 +119,19 @@ plot.JoinMeDynPred <- function(
     palette_marker = NULL,
     ...
 ) {
+    dots <- list(...)
     is_competing <- FALSE
     if (!is.null(x$data$event)) {
         ev_cols <- names(x$data$event)
         is_competing <- any(c("event_type", "stage_from", "stage_to") %in% ev_cols)
     }
-    if (missing(which)) {
-        which <- if (isTRUE(is_competing)) "cumhaz" else c("longitudinal", "survival")
+    if ("which" %in% names(dots)) {
+        type <- dots$which
     }
-    which <- .validate_plot_which(which)
+    if (missing(type) && !("which" %in% names(dots))) {
+        type <- if (isTRUE(is_competing)) "cumhaz" else c("longitudinal", "survival")
+    }
+    type <- .validate_plot_type(type)
     trajectory_type <- match.arg(trajectory_type)
     smooth_method <- match.arg(smooth_method)
     facet_by <- match.arg(facet_by)
@@ -177,7 +181,7 @@ plot.JoinMeDynPred <- function(
         # =====================================================================
         # LONGITUDINAL PLOT
         # =====================================================================
-        if ("longitudinal" %in% which) {
+        if ("longitudinal" %in% type) {
             for (traj_src in trajectory_sources) {
                 p_long <- .plot_longitudinal_single(
                     x, id, traj_src,
@@ -201,7 +205,7 @@ plot.JoinMeDynPred <- function(
         # =====================================================================
         # SURVIVAL PLOT
         # =====================================================================
-        if ("survival" %in% which) {
+        if ("survival" %in% type) {
             p_surv <- .plot_survival_single(
                 x, id,
                 ci_levels, ci_type,
@@ -213,7 +217,7 @@ plot.JoinMeDynPred <- function(
         # =====================================================================
         # CUMHAZ PLOT
         # =====================================================================
-        if ("cumhaz" %in% which) {
+        if ("cumhaz" %in% type) {
             p_cumhaz <- .plot_cumhaz_single(
                 x, id,
                 ci_levels, ci_type,
@@ -235,7 +239,7 @@ plot.JoinMeDynPred <- function(
                 return(res[[1]])
             }
             if (isTRUE(combined)) {
-                combined_plot <- .combine_plot_grid(res, ncol = length(which))
+                combined_plot <- .combine_plot_grid(res, ncol = length(type))
                 if (inherits(combined_plot, "gg")) return(combined_plot)
             }
             return(res)
@@ -249,28 +253,28 @@ plot.JoinMeDynPred <- function(
             # - fallback: list(id -> uncombined per-subject plot list)
             out <- lapply(plots_list, function(sub_plots) {
                 design <- switch(
-                    length(which),
+                    length(type),
                     "1" = 'A',
                     "2" = "AB",
                     "3" = "AB\nAC"
                 )
                 .combine_plot_grid(
                     sub_plots,
-                    ncol = min(2, length(which)),
-                    nrow = min(1, length(which) - 1),
+                    ncol = min(2, length(type)),
+                    nrow = min(1, length(type) - 1),
                     design = design,
                     fallback = "input"
                 )
             })
             return(out)
         }
-        if (length(which) == 1 && which == "longitudinal") {
+        if (length(type) == 1 && type == "longitudinal") {
             return(lapply(plots_list, function(x) x$longitudinal))
         }
-        if (length(which) == 1 && which == "survival") {
+        if (length(type) == 1 && type == "survival") {
             return(lapply(plots_list, function(x) x$survival))
         }
-        if (length(which) == 1 && which == "cumhaz") {
+        if (length(type) == 1 && type == "cumhaz") {
             return(lapply(plots_list, function(x) x$cumhaz))
         }
         plots_list
@@ -905,17 +909,17 @@ plot.JoinMeDynPred <- function(
 # ============================================================================
 # Helper: validate plot selection
 # ============================================================================
-.validate_plot_which <- function(which) {
+.validate_plot_type <- function(type) {
     allowed <- c("cumhaz", "longitudinal", "survival")
-    which <- unique(which)
-    bad <- setdiff(which, allowed)
+    type <- unique(type)
+    bad <- setdiff(type, allowed)
     if (length(bad) > 0) {
         cli::cli_abort(c(
             x = "Unknown plot type(s): {paste(bad, collapse = ', ')}.",
             i = "Use one or more of: {paste(allowed, collapse = ', ')}."
         ))
     }
-    which
+    type
 }
 
 # ============================================================================
@@ -1083,7 +1087,6 @@ plot.JoinMeDynPred <- function(
 #'   `"ess_tail"`, `"mcse_mean"`, `"mcse_sd"`, `"running_mean"`, and
 #'   `"running_quantile"`. Fitted-data types are `"longitudinal"`,
 #'   `"survival"`, `"cumhaz"`, and `"association"`.
-#' @param which Optional alias for fitted-data plot selection.
 #' @param pars Optional character vector of parameter names to include for
 #'   diagnostic plots.
 #' @param regex_pars Optional regular expression for parameter selection for
@@ -1114,23 +1117,27 @@ plot.JoinMeDynPred <- function(
 #'   observed_first,facet_by,facet_scales,combined,show_data,
 #'   show_observed_line,observed_style,prediction_style,theme_fn,
 #'   palette_marker Passed to `plot.JoinMeDynPred()` for fitted-data plots.
-#' @param association_term Optional association term subset for
-#'   `type = "association"`.
-#' @param association_grid Optional numeric grid for association plots.
-#' @param association_points Number of grid points when `association_grid` is
-#'   not supplied. When omitted, `plot.JoinMeFit()` uses cached model-implied
-#'   raw support from the fitted association channels and only falls back to
-#'   knot support or observed-data heuristics when that cache is unavailable.
-#' @param association_metric Quantity to plot for association curves:
-#'   `"hazard"` plots the posterior contribution $\alpha \times f(x)$ and
-#'   `"transform"` plots the transform $f(x)$ alone.
+#' @param association_options Named list of options for
+#'   `type = "association"`. Supported entries are
+#'   `association_term`, `association_grid`, `association_range`,
+#'   `association_points`, and `association_metric`. When
+#'   `association_grid` is not supplied, `plot.JoinMeFit()` uses cached
+#'   model-implied raw support from the fitted association channels and only
+#'   falls back to knot support or observed-data heuristics when that cache is
+#'   unavailable. `association_range`, when supplied, overrides those default
+#'   range heuristics and constructs an evenly spaced raw-scale grid over the
+#'   requested interval.
+#'   `association_metric = "hazard"` plots the posterior contribution used by
+#'   the fitted model. For covariance-style channels (`corr`, `vcov`) this
+#'   contribution is zero-referenced at raw value `0` before multiplying by
+#'   $\alpha$; `association_metric = "transform"` plots the transform $f(x)$
+#'   alone and therefore omits the association-coefficient sign.
 #' @param ... Unused.
 #'
 #' @return A `ggplot` object, a combined plot, or a named list of plots.
 #' @export
 plot.JoinMeFit <- function(x,
                            type = c("rhat", "ess_bulk", "ess_tail", "mcse_mean", "mcse_sd", "running_mean", "running_quantile"),
-                           which = NULL,
                            pars = NULL, regex_pars = NULL, draws = NULL, seed = 1, max_vars = 4,
                            quantile_probs = c(0.1, 0.5, 0.9),
                            subject = NULL,
@@ -1166,11 +1173,9 @@ plot.JoinMeFit <- function(x,
                            ),
                            theme_fn = ggplot2::theme_bw,
                            palette_marker = NULL,
-                           association_term = NULL,
-                           association_grid = NULL,
-                           association_points = 200,
-                           association_metric = c("hazard", "transform"),
+                           association_options = list(),
                            ...) {
+    dots <- list(...)
     diagnostic_types <- c("rhat", "ess_bulk", "ess_tail", "mcse_mean", "mcse_sd", "running_mean", "running_quantile")
     fitted_types <- c("longitudinal", "survival", "cumhaz", "association")
 
@@ -1181,8 +1186,8 @@ plot.JoinMeFit <- function(x,
         cli::cli_abort("Package {.pkg ggplot2} is required for plotting.")
     }
 
-    if (!is.null(which)) {
-        type <- which
+    if ("which" %in% names(dots)) {
+        type <- dots$which
     }
     type <- unique(as.character(type))
     bad_types <- setdiff(type, c(diagnostic_types, fitted_types))
@@ -1223,7 +1228,6 @@ plot.JoinMeFit <- function(x,
     smooth_method <- match.arg(smooth_method)
     facet_by <- match.arg(facet_by)
     ci_type <- match.arg(ci_type)
-    association_metric <- match.arg(association_metric)
     marker_var <- .joinmefit_call_arg_chr(x$call, "marker_var", "marker")
     marker_levels <- if (!is.null(x$dataLong) && marker_var %in% names(x$dataLong)) {
         unique(as.character(stats::na.omit(x$dataLong[[marker_var]])))
@@ -1233,15 +1237,20 @@ plot.JoinMeFit <- function(x,
     marker <- .normalize_plot_marker_filter(marker, available_markers = marker_levels)
 
     if (identical(type, "association") || (length(type) == 1L && type[[1]] == "association")) {
+        association_opts <- .normalize_joinmefit_association_options(
+            association_options = association_options,
+            dots = dots
+        )
         return(.plot_joinmefit_association(
             x = x,
-            association_term = association_term,
+            association_term = association_opts$association_term,
             marker = marker,
-            association_grid = association_grid,
-            association_points = association_points,
+            association_grid = association_opts$association_grid,
+            association_range = association_opts$association_range,
+            association_points = association_opts$association_points,
             ci_levels = ci_levels,
             ci_type = ci_type,
-            association_metric = association_metric,
+            association_metric = association_opts$association_metric,
             prediction_style = prediction_style,
             theme_fn = theme_fn,
             combined = combined,
@@ -1251,7 +1260,7 @@ plot.JoinMeFit <- function(x,
 
     .plot_joinmefit_fitted(
         x = x,
-        which = type,
+        type = type,
         subject = subject,
         marker = marker,
         scale = scale,
@@ -1277,6 +1286,96 @@ plot.JoinMeFit <- function(x,
         theme_fn = theme_fn,
         palette_marker = palette_marker
     )
+}
+
+.normalize_joinmefit_association_options <- function(association_options = NULL, dots = list()) {
+    if (is.null(association_options)) {
+        association_options <- list()
+    }
+    if (!is.list(association_options)) {
+        cli::cli_abort("{.arg association_options} must be a named list.")
+    }
+
+    if (length(association_options) > 0L) {
+        nm <- names(association_options)
+        if (is.null(nm) || anyNA(nm) || any(!nzchar(nm))) {
+            cli::cli_abort("{.arg association_options} must be a named list.")
+        }
+    }
+
+    alias_map <- c(
+        term = "association_term",
+        grid = "association_grid",
+        range = "association_range",
+        points = "association_points",
+        metric = "association_metric"
+    )
+    valid_names <- c(unname(alias_map), names(alias_map))
+    unknown <- setdiff(names(association_options), valid_names)
+    if (length(unknown) > 0L) {
+        cli::cli_abort(c(
+            x = "Unknown {.arg association_options} entr{?y/ies}: {paste(unknown, collapse = ', ')}.",
+            i = "Supported names are association_term, association_grid, association_range, association_points, and association_metric."
+        ))
+    }
+
+    canonical_names <- ifelse(names(association_options) %in% names(alias_map), alias_map[names(association_options)], names(association_options))
+    duplicated_names <- unique(canonical_names[duplicated(canonical_names)])
+    if (length(duplicated_names) > 0L) {
+        cli::cli_abort("{.arg association_options} cannot supply the same option more than once.")
+    }
+    names(association_options) <- canonical_names
+
+    opts <- list(
+        association_term = NULL,
+        association_grid = NULL,
+        association_range = NULL,
+        association_points = 200,
+        association_metric = "hazard"
+    )
+    opts[names(association_options)] <- association_options
+
+    legacy_names <- names(opts)
+    for (nm in intersect(legacy_names, names(dots))) {
+        if (nm %in% names(association_options)) {
+            next
+        }
+        opts[[nm]] <- dots[[nm]]
+    }
+
+    opts$association_metric <- match.arg(as.character(opts$association_metric)[1], c("hazard", "transform"))
+
+    if (!is.null(opts$association_grid)) {
+        opts$association_grid <- as.numeric(opts$association_grid)
+        if (!length(opts$association_grid) || any(!is.finite(opts$association_grid))) {
+            cli::cli_abort("{.arg association_grid} must be a numeric vector with finite values.")
+        }
+    }
+
+    if (!is.null(opts$association_range)) {
+        opts$association_range <- as.numeric(opts$association_range)
+        if (length(opts$association_range) != 2L || any(!is.finite(opts$association_range))) {
+            cli::cli_abort("{.arg association_range} must be a finite numeric vector of length 2.")
+        }
+        opts$association_range <- sort(opts$association_range)
+        if (diff(opts$association_range) <= 0) {
+            cli::cli_abort("{.arg association_range} must span two distinct values.")
+        }
+    }
+
+    if (!is.null(opts$association_grid) && !is.null(opts$association_range)) {
+        cli::cli_abort(c(
+            x = "{.arg association_grid} and {.arg association_range} cannot be supplied together.",
+            i = "Use {.arg association_grid} for an explicit evaluation grid, or {.arg association_range} with {.arg association_points} for an evenly spaced grid."
+        ))
+    }
+
+    opts$association_points <- as.integer(opts$association_points)[1]
+    if (!is.finite(opts$association_points) || opts$association_points < 2L) {
+        cli::cli_abort("{.arg association_points} must be an integer greater than or equal to 2.")
+    }
+
+    opts
 }
 
 .plot_joinmefit_diagnostic <- function(x, type, pars, regex_pars, draws, seed, max_vars, quantile_probs) {
@@ -1334,14 +1433,14 @@ plot.JoinMeFit <- function(x,
         ggplot2::theme_minimal()
 }
 
-.plot_joinmefit_fitted <- function(x, which, subject, marker, scale, conditioning, time_start, times, time_horizon,
+.plot_joinmefit_fitted <- function(x, type, subject, marker, scale, conditioning, time_start, times, time_horizon,
                                    pred_control, seed, smooth_trajectory, smooth_method, smooth_span,
                                    ci_levels, ci_type, observed_first, facet_by, facet_scales, combined,
                                    show_data, show_observed_line, observed_style, prediction_style,
                                    theme_fn, palette_marker) {
     pred <- .build_joinmefit_plot_prediction(
         x = x,
-        which = which,
+    which = type,
         subject = subject,
         scale = scale,
         conditioning = conditioning,
@@ -1354,7 +1453,7 @@ plot.JoinMeFit <- function(x,
     )
 
     plot(pred,
-         which = intersect(which, c("longitudinal", "survival", "cumhaz")),
+            type = intersect(type, c("longitudinal", "survival", "cumhaz")),
          subject = subject,
             marker = if (is.null(marker)) NA else marker,
          scale = scale,
@@ -1447,7 +1546,7 @@ plot.JoinMeFit <- function(x,
     )
 }
 
-.plot_joinmefit_association <- function(x, association_term = NULL, marker = NULL, association_grid = NULL, association_points = 200,
+.plot_joinmefit_association <- function(x, association_term = NULL, marker = NULL, association_grid = NULL, association_range = NULL, association_points = 200,
                                         ci_levels = c(0.5, 0.95), ci_type = c("ribbon", "line", "both"),
                                         association_metric = c("hazard", "transform"),
                                         prediction_style = list(color = "steelblue", fill = "steelblue", linewidth = 0.8, alpha = 0.2),
@@ -1456,7 +1555,7 @@ plot.JoinMeFit <- function(x,
     association_metric <- match.arg(association_metric)
     assoc_terms <- .joinmefit_available_association_terms(x)
     if (!is.null(association_term)) {
-        assoc_terms <- intersect(assoc_terms, association_term)
+        assoc_terms <- .joinmefit_expand_association_terms(association_term, assoc_terms)
     }
     if (length(assoc_terms) == 0) {
         cli::cli_abort(c(
@@ -1471,6 +1570,7 @@ plot.JoinMeFit <- function(x,
             term = term,
             marker = marker,
             association_grid = association_grid,
+            association_range = association_range,
             association_points = association_points,
             ci_levels = ci_levels,
             ci_type = ci_type,
@@ -1487,6 +1587,24 @@ plot.JoinMeFit <- function(x,
     plots
 }
 
+.joinmefit_expand_association_terms <- function(requested_terms, available_terms) {
+    requested_terms <- unique(as.character(requested_terms %||% character(0)))
+    available_terms <- unique(as.character(available_terms %||% character(0)))
+    if (!length(requested_terms) || !length(available_terms)) {
+        return(character(0))
+    }
+
+    matched <- unlist(lapply(requested_terms, function(requested_term) {
+        hits <- available_terms[
+            available_terms == requested_term |
+                startsWith(available_terms, paste0(requested_term, "["))
+        ]
+        hits
+    }), use.names = FALSE)
+
+    unique(matched)
+}
+
 .joinmefit_available_association_terms <- function(x) {
     payload <- .joinmefit_get_association_plot_payload(x)
     if (!is.null(payload$term_map) && nrow(payload$term_map) > 0L) {
@@ -1498,18 +1616,30 @@ plot.JoinMeFit <- function(x,
     terms[!grepl("^weight:\\s", terms)]
 }
 
-.plot_joinmefit_association_single <- function(x, term, marker, association_grid, association_points, ci_levels,
+.plot_joinmefit_association_single <- function(x, term, marker, association_grid, association_range, association_points, ci_levels,
                                                ci_type, association_metric, prediction_style, theme_fn, seed) {
-    term_key <- if (grepl("^corr", term)) "corr" else term
+    term_key <- if (grepl("^corr", term)) {
+        "corr"
+    } else if (grepl("^vcov", term)) {
+        "vcov"
+    } else {
+        term
+    }
     payload <- .joinmefit_get_association_plot_payload(x, seed = seed)
     coeff_draws <- .joinmefit_assoc_coeff_draws(x, term = term, payload = payload, seed = seed)
     marker_levels <- .association_plot_markers(x, term_key, marker)
     probs <- .quantile_probs_from_ci_plot(ci_levels)
     q_names <- .quantile_colnames(probs)
     plot_df <- do.call(rbind, lapply(marker_levels, function(marker_level) {
-        x_grid <- association_grid %||% .default_joinmefit_association_grid(x, term_key, marker = marker_level, n = association_points)
+        x_grid <- association_grid %||% .default_joinmefit_association_grid(
+            x,
+            term_key,
+            marker = marker_level,
+            association_range = association_range,
+            n = association_points
+        )
         x_grid <- sort(unique(as.numeric(x_grid)))
-        tf_mat <- .joinmefit_association_transform_matrix(x, term_key, x_grid = x_grid, n_draws = length(coeff_draws), seed = seed, payload = payload)
+        tf_mat <- .joinmefit_association_transform_matrix(x, term_key, term = term, x_grid = x_grid, n_draws = length(coeff_draws), seed = seed, payload = payload)
         weight_draws <- .joinmefit_association_marker_weight_draws(
             x = x,
             term_key = term_key,
@@ -1519,6 +1649,19 @@ plot.JoinMeFit <- function(x,
             payload = payload
         )
         tf_mat <- tf_mat * as.numeric(weight_draws)
+
+        if (identical(association_metric, "hazard") && term_key %in% c("corr", "vcov")) {
+            tf_ref <- .joinmefit_association_transform_matrix(
+                x,
+                term_key,
+                term = term,
+                x_grid = 0,
+                n_draws = length(coeff_draws),
+                seed = seed,
+                payload = payload
+            )
+            tf_mat <- tf_mat - matrix(tf_ref[, 1], nrow = nrow(tf_mat), ncol = ncol(tf_mat))
+        }
 
         curve_mat <- if (identical(association_metric, "hazard")) {
             tf_mat * coeff_draws
@@ -1609,8 +1752,14 @@ plot.JoinMeFit <- function(x,
         paste0(term_key, " transform")
     }
 
+    plot_title <- if (identical(association_metric, "hazard")) {
+        paste("Association contribution:", term)
+    } else {
+        paste("Association transform:", term)
+    }
+
     p <- p + ggplot2::labs(
-        title = paste("Association curve:", term),
+        title = plot_title,
         x = term_key,
         y = y_lab,
         color = if (multi_marker) "marker" else NULL,
@@ -1625,7 +1774,7 @@ plot.JoinMeFit <- function(x,
 }
 
 .association_plot_markers <- function(x, term_key, marker = NULL) {
-    if (identical(term_key, "corr")) {
+    if (term_key %in% c("corr", "vcov")) {
         return("all")
     }
     marker_var <- .joinmefit_call_arg_chr(x$call, "marker_var", "marker")
@@ -1645,12 +1794,26 @@ plot.JoinMeFit <- function(x,
     x$config$transforms_spec %||% x$call$transforms %||% list()
 }
 
+.joinmefit_assoc_component_index <- function(term) {
+    term <- as.character(term %||% "")[1]
+    if (!grepl("\\[\\d+\\]$", term)) {
+        return(1L)
+    }
+    as.integer(sub("^.*\\[(\\d+)\\]$", "\\1", term))
+}
+
+.joinmefit_transform_spec_for_term <- function(x, term_key, term = term_key) {
+    specs <- .joinmefit_transform_specs(x)
+    specs[[term_key]] %||% list(type = "identity")
+}
+
 .joinmefit_plot_raw_knot_range <- function(tf_spec) {
     knots <- as.numeric(tf_spec$knots %||% tf_spec$x %||% numeric(0))
     if (!length(knots) || !all(is.finite(knots))) {
         return(NULL)
     }
     if (.transform_uses_expit_input(tf_spec)) {
+        knots <- .validate_expit_domain_values(knots, "knots")
         eps <- sqrt(.Machine$double.eps)
         knots <- stats::qlogis(pmin(pmax(knots, eps), 1 - eps))
     }
@@ -1672,13 +1835,23 @@ plot.JoinMeFit <- function(x,
     any(support < boundary[1] | support > boundary[2])
 }
 
-.default_joinmefit_association_grid <- function(x, term_key, marker = NULL, n = 200) {
+.default_joinmefit_association_grid <- function(x, term_key, marker = NULL, association_range = NULL, n = 200) {
+    if (!is.null(association_range)) {
+        return(seq(association_range[1], association_range[2], length.out = n))
+    }
+
     if (identical(term_key, "corr")) {
         support <- .joinmefit_association_support_range(x, term_key = term_key, marker = marker)
         if (!is.null(support)) {
             return(seq(support[1], support[2], length.out = n))
         }
         return(seq(-1, 1, length.out = n))
+    }
+    if (identical(term_key, "vcov")) {
+        support <- .joinmefit_association_support_range(x, term_key = term_key, marker = marker)
+        if (!is.null(support)) {
+            return(seq(support[1], support[2], length.out = n))
+        }
     }
 
     tf_spec <- .joinmefit_transform_specs(x)[[term_key]]
@@ -1861,6 +2034,13 @@ plot.JoinMeFit <- function(x,
             knots = "knots_corr",
             degree = "spline_degree_corr"
         ),
+        vcov = list(
+            eff_prefix = "coeff_vcov_eff",
+            base_coeff = "coeff_vcov",
+            n_coeff = "n_coeff_vcov",
+            knots = "knots_vcov",
+            degree = "spline_degree_vcov"
+        ),
         cv_mean = list(
             eff_prefix = "coeff_cv_mean_eff",
             base_coeff = "coeff_cv_mean",
@@ -1893,8 +2073,8 @@ plot.JoinMeFit <- function(x,
     )
 }
 
-.joinmefit_association_transform_matrix <- function(x, term_key, x_grid, n_draws, seed = 1, payload = NULL) {
-    tf_spec <- .joinmefit_transform_specs(x)[[term_key]] %||% list(type = "identity")
+.joinmefit_association_transform_matrix <- function(x, term_key, term = term_key, x_grid, n_draws, seed = 1, payload = NULL) {
+    tf_spec <- .joinmefit_transform_spec_for_term(x, term_key, term = term)
     tf_type <- .canonicalise_transform_type(tf_spec$type %||% "identity")
 
     if (identical(tf_type, "identity")) {
@@ -1914,7 +2094,7 @@ plot.JoinMeFit <- function(x,
     }
 
     if (.is_ispline_transform_type(tf_type)) {
-        return(.joinmefit_ispline_transform_matrix(x, term_key, x_grid, n_draws = n_draws, seed = seed, payload = payload))
+        return(.joinmefit_ispline_transform_matrix(x, term_key, term = term, x_grid, n_draws = n_draws, seed = seed, payload = payload))
     }
 
     tf_fun <- .joinme_make_assoc_transform(tf_spec, term_key)
@@ -1922,7 +2102,7 @@ plot.JoinMeFit <- function(x,
     matrix(rep(vals, each = n_draws), nrow = n_draws)
 }
 
-.joinmefit_ispline_transform_matrix <- function(x, term_key, x_grid, n_draws, seed = 1, payload = NULL) {
+.joinmefit_ispline_transform_matrix <- function(x, term_key, term = term_key, x_grid, n_draws, seed = 1, payload = NULL) {
     if (!requireNamespace("splines2", quietly = TRUE)) {
         cli::cli_abort(c(
             x = "Package {.pkg splines2} is required for spline-based association plotting.",
@@ -1932,7 +2112,7 @@ plot.JoinMeFit <- function(x,
 
     sd <- x$stan_data
     map <- .joinmefit_assoc_channel_map(term_key)
-    tf_spec <- .joinmefit_transform_specs(x)[[term_key]] %||% list(type = "ispline")
+    tf_spec <- .joinmefit_transform_spec_for_term(x, term_key, term = term)
 
     knots <- as.numeric(sd[[map$knots]] %||% tf_spec$knots %||% tf_spec$x)
     degree <- as.integer(sd[[map$degree]] %||% tf_spec$degree %||% 3L)
@@ -1942,10 +2122,12 @@ plot.JoinMeFit <- function(x,
         eff_prefix = map$eff_prefix,
         base_coeff = sd[[map$base_coeff]] %||% tf_spec$coeff,
         n_coeff = n_coeff,
+        component_index = if (term_key %in% c("corr", "vcov")) .joinmefit_assoc_component_index(term) else NULL,
         n_draws = n_draws,
         seed = seed,
         payload = payload,
-        term_key = term_key
+        term_key = term_key,
+        term = term
     )
 
     if (length(knots) < 2L) {
@@ -1975,17 +2157,43 @@ plot.JoinMeFit <- function(x,
         coeff_draws <- coeff_draws[, seq_len(n_basis), drop = FALSE]
     }
 
-    coeff_draws %*% t(basis)
+    out <- coeff_draws %*% t(basis)
+    if (.resolve_monotone_direction(tf_spec$direction %||% tf_spec$spline_direction %||% 1L, default = 1L) < 0L) {
+        out <- matrix(rowSums(coeff_draws), nrow = nrow(coeff_draws), ncol = ncol(out)) - out
+    }
+    out
 }
 
-.joinmefit_transform_coeff_draws <- function(x, eff_prefix, base_coeff, n_coeff, n_draws, seed = 1, payload = NULL, term_key = NULL) {
+.joinmefit_transform_coeff_draws <- function(x, eff_prefix, base_coeff, n_coeff, n_draws, seed = 1, payload = NULL, term_key = NULL, term = term_key, component_index = NULL) {
     n_coeff <- as.integer(n_coeff %||% 0L)
     if (n_coeff < 1L) {
         return(matrix(0, nrow = n_draws, ncol = 0L))
     }
 
-    if (!is.null(term_key) && !is.null(payload$transform_coeff_draws[[term_key]])) {
-        return(as.matrix(payload$transform_coeff_draws[[term_key]]))
+    payload_key <- term %||% term_key
+    if (!is.null(payload_key) && !is.null(payload$transform_coeff_draws[[payload_key]])) {
+        return(as.matrix(payload$transform_coeff_draws[[payload_key]]))
+    }
+
+    if (!is.null(component_index) && !is.na(component_index)) {
+        eff_names <- paste0(eff_prefix, "[", component_index, ",", seq_len(n_coeff), "]")
+        dmat <- tryCatch(
+            .get_draws_matrix(x$fit, variables = eff_names, draws = n_draws, seed = seed),
+            error = function(e) NULL
+        )
+        if (!is.null(dmat) && all(eff_names %in% colnames(dmat))) {
+            return(as.matrix(dmat[, eff_names, drop = FALSE]))
+        }
+
+        base_mat <- as.matrix(base_coeff %||% matrix(0, nrow = component_index, ncol = n_coeff))
+        if (nrow(base_mat) < component_index) {
+            base_mat <- rbind(base_mat, matrix(0, nrow = component_index - nrow(base_mat), ncol = ncol(base_mat)))
+        }
+        if (ncol(base_mat) < n_coeff) {
+            base_mat <- cbind(base_mat, matrix(0, nrow = nrow(base_mat), ncol = n_coeff - ncol(base_mat)))
+        }
+        base_vec <- base_mat[component_index, seq_len(n_coeff), drop = TRUE]
+        return(matrix(rep(base_vec, times = n_draws), nrow = n_draws, byrow = TRUE))
     }
 
     eff_names <- paste0(eff_prefix, "[", seq_len(n_coeff), "]")
@@ -2005,10 +2213,29 @@ plot.JoinMeFit <- function(x,
 }
 
 .joinmefit_assoc_coeff_draws <- function(x, term, payload = NULL, seed = 1) {
-    term_key <- if (grepl("^corr", term)) "corr" else term
+    term_key <- if (grepl("^corr", term)) {
+        "corr"
+    } else if (grepl("^vcov", term)) {
+        "vcov"
+    } else {
+        term
+    }
     if (!is.null(payload$coeff_draws[[term_key]])) {
         vals <- payload$coeff_draws[[term_key]]
         if (is.matrix(vals)) {
+            target_var <- NULL
+            if (!is.null(payload$term_map) && nrow(payload$term_map) > 0L) {
+                target_rows <- payload$term_map[payload$term_map$term == term, , drop = FALSE]
+                if (nrow(target_rows) > 0L) {
+                    target_var <- as.character(target_rows$variable[[1L]])
+                }
+            }
+            if (is.null(target_var) && grepl("^(corr|vcov)\\[\\d+\\]$", term)) {
+                target_var <- paste0("alpha_", term)
+            }
+            if (!is.null(target_var) && !is.null(colnames(vals)) && target_var %in% colnames(vals)) {
+                return(as.numeric(vals[, target_var, drop = TRUE]))
+            }
             return(as.numeric(vals[, 1]))
         }
         return(as.numeric(vals))
@@ -2084,19 +2311,25 @@ plot.JoinMeFit <- function(x,
         cs_marker = "alpha_cs_marker"
     )
     for (term_key in active_terms) {
-        if (identical(term_key, "corr")) {
-            corr_vars <- grep("^alpha_corr\\[", posterior::variables(.get_draws_obj(fit)), value = TRUE)
+        if (term_key %in% c("corr", "vcov")) {
+            corr_vars <- grep(paste0("^alpha_", term_key, "\\["), posterior::variables(.get_draws_obj(fit)), value = TRUE)
             if (length(corr_vars)) {
-                payload$coeff_draws[[term_key]] <- .get_draws_matrix(fit, variables = corr_vars, seed = seed)
-                payload$term_map <- rbind(payload$term_map, data.frame(term = term_key, variable = corr_vars[1], stringsAsFactors = FALSE))
+                payload$coeff_draws[[term_key]] <- .get_draws_matrix(fit, variables = corr_vars, seed = seed)[, corr_vars, drop = FALSE]
+                payload$term_map <- rbind(
+                    payload$term_map,
+                    data.frame(
+                        term = sub("^alpha_", "", corr_vars),
+                        variable = corr_vars,
+                        stringsAsFactors = FALSE
+                    )
+                )
             }
-            next
-        }
-
-        alpha_var <- alpha_map[[term_key]]
-        if (!is.null(alpha_var)) {
-            payload$coeff_draws[[term_key]] <- .get_draws_matrix(fit, variables = alpha_var, seed = seed)[, 1, drop = FALSE]
-            payload$term_map <- rbind(payload$term_map, data.frame(term = term_key, variable = alpha_var, stringsAsFactors = FALSE))
+        } else {
+            alpha_var <- alpha_map[[term_key]]
+            if (!is.null(alpha_var)) {
+                payload$coeff_draws[[term_key]] <- .get_draws_matrix(fit, variables = alpha_var, seed = seed)[, 1, drop = FALSE]
+                payload$term_map <- rbind(payload$term_map, data.frame(term = term_key, variable = alpha_var, stringsAsFactors = FALSE))
+            }
         }
 
         tf_spec <- payload$transform_specs[[term_key]] %||% list(type = "identity")
@@ -2105,10 +2338,26 @@ plot.JoinMeFit <- function(x,
             map <- .joinmefit_assoc_channel_map(term_key)
             n_coeff <- as.integer(stan_data[[map$n_coeff]] %||% length(stan_data[[map$base_coeff]] %||% tf_spec$coeff %||% numeric(0)))
             if (n_coeff > 0L) {
-                eff_names <- paste0(map$eff_prefix, "[", seq_len(n_coeff), "]")
-                dmat <- tryCatch(.get_draws_matrix(fit, variables = eff_names, seed = seed), error = function(e) NULL)
-                if (!is.null(dmat) && all(eff_names %in% colnames(dmat))) {
-                    payload$transform_coeff_draws[[term_key]] <- as.matrix(dmat[, eff_names, drop = FALSE])
+                if (term_key %in% c("corr", "vcov")) {
+                    n_components <- .assoc_transform_component_count(
+                        term_key,
+                        stan_data$Q_idm,
+                        diagonal_only = identical(term_key, "vcov") && as.integer(stan_data$indep_idmarker_cov %||% 0L) == 1L
+                    )
+                    component_terms <- .assoc_transform_component_labels(term_key, n_components)
+                    for (m in seq_len(n_components)) {
+                        eff_names <- paste0(map$eff_prefix, "[", m, ",", seq_len(n_coeff), "]")
+                        dmat <- tryCatch(.get_draws_matrix(fit, variables = eff_names, seed = seed), error = function(e) NULL)
+                        if (!is.null(dmat) && all(eff_names %in% colnames(dmat))) {
+                            payload$transform_coeff_draws[[component_terms[[m]]]] <- as.matrix(dmat[, eff_names, drop = FALSE])
+                        }
+                    }
+                } else {
+                    eff_names <- paste0(map$eff_prefix, "[", seq_len(n_coeff), "]")
+                    dmat <- tryCatch(.get_draws_matrix(fit, variables = eff_names, seed = seed), error = function(e) NULL)
+                    if (!is.null(dmat) && all(eff_names %in% colnames(dmat))) {
+                        payload$transform_coeff_draws[[term_key]] <- as.matrix(dmat[, eff_names, drop = FALSE])
+                    }
                 }
             }
         }
@@ -2265,6 +2514,65 @@ plot.JoinMeFit <- function(x,
     if ("corr" %in% terms) {
         out[[length(out) + 1L]] <- data.frame(term = "corr", marker = "all", lower = -1, upper = 1, source = "theoretical", stringsAsFactors = FALSE)
     }
+    if ("vcov" %in% terms && isTRUE((stan_data$Q_idm %||% 0L) > 0L)) {
+        vcov_map <- .assoc_cov_feature_map(
+            q_idm = as.integer(stan_data$Q_idm),
+            diagonal_only = as.integer(stan_data$indep_idmarker_cov %||% 0L) == 1L,
+            include_diag = TRUE
+        )
+        alpha_mean <- mean_of_vars(paste0("alpha_L[", seq_len(nrow(vcov_map)), "]"), default = 0)
+        lambda_mean <- mean_of_vars(paste0("lambda_L[", seq_len(nrow(vcov_map)), "]"), default = 0)
+        tau_l_mean <- mean_of_vars("tau_L", default = 0)[1]
+        z_l_mean <- mean_of_vars(paste0("z_L[", seq_len(n_id), "]"), default = 0)
+        k_cov <- as.integer(stan_data$K_cov %||% 0L)
+        beta_mean <- if (k_cov > 0L && nrow(vcov_map) > 0L) {
+            beta_flat <- mean_of_vars(as.vector(outer(seq_len(nrow(vcov_map)), seq_len(k_cov), function(m, k) paste0("beta_L[", m, ",", k, "]"))), default = 0)
+            matrix(beta_flat, nrow = nrow(vcov_map), byrow = TRUE)
+        } else {
+            matrix(0, nrow = nrow(vcov_map), ncol = 0L)
+        }
+        xcov <- as.matrix(stan_data$Xcov %||% matrix(0, nrow = n_id, ncol = k_cov))
+        li_terms <- lapply(seq_len(n_id), function(i) {
+            li <- matrix(0, nrow = as.integer(stan_data$Q_idm), ncol = as.integer(stan_data$Q_idm))
+            if (nrow(vcov_map) == 0L) {
+                return(numeric(0))
+            }
+            for (m in seq_len(nrow(vcov_map))) {
+                lp <- alpha_mean[m] +
+                    if (k_cov > 0L) sum(beta_mean[m, ] * xcov[i, ]) else 0 +
+                    lambda_mean[m] * tau_l_mean * z_l_mean[min(i, length(z_l_mean))]
+                r_ <- vcov_map[m, 1]
+                c_ <- vcov_map[m, 2]
+                li[r_, c_] <- if (r_ == c_) {
+                    if (as.integer(stan_data$corr_diag_link %||% 0L) == 1L) exp(lp) else log1p(exp(lp))
+                } else {
+                    lp
+                }
+
+                    if (identical(association_metric, "hazard") && term_key %in% c("corr", "vcov")) {
+                        tf_ref <- .joinmefit_association_transform_matrix(
+                            x,
+                            term_key,
+                            term = term,
+                            x_grid = 0,
+                            n_draws = length(coeff_draws),
+                            seed = seed,
+                            payload = payload
+                        )
+                        tf_mat <- tf_mat - matrix(tf_ref[, 1], nrow = nrow(tf_mat), ncol = ncol(tf_mat))
+                    }
+            }
+            .assoc_vcov_features_from_chol(
+                li,
+                diagonal_only = as.integer(stan_data$indep_idmarker_cov %||% 0L) == 1L
+            )
+        })
+        li_vals <- unlist(li_terms, use.names = FALSE)
+        li_vals <- li_vals[is.finite(li_vals)]
+        if (length(li_vals) > 1L) {
+            out[[length(out) + 1L]] <- make_support_rows("vcov", li_vals)
+        }
+    }
 
     out <- out[!vapply(out, is.null, logical(1))]
     if (!length(out)) {
@@ -2304,14 +2612,15 @@ plot.JoinMeFit <- function(x,
             ))
         }
         knots <- as.numeric(spec$knots)
+        if (.transform_uses_expit_input(spec)) {
+            knots <- .validate_expit_domain_values(knots, "knots")
+        }
         coeff <- as.numeric(spec$coeff)
         degree <- as.integer(spec$degree %||% 3L)
         return(function(x) {
             x <- .transform_input_for_spec(x, spec)
             boundary <- c(knots[1], knots[length(knots)])
-            x_range <- range(x, finite = TRUE)
-            boundary[1] <- min(boundary[1], x_range[1])
-            boundary[2] <- max(boundary[2], x_range[2])
+            x <- pmin(pmax(x, boundary[1]), boundary[2])
             internal_knots <- if (length(knots) > 2) knots[2:(length(knots) - 1)] else numeric(0)
             basis <- splines2::iSpline(x,
                 knots = internal_knots,
@@ -2321,7 +2630,11 @@ plot.JoinMeFit <- function(x,
             )
             coef_len <- ncol(basis)
             coeff_use <- if (length(coeff) < coef_len) c(coeff, rep(0, coef_len - length(coeff))) else coeff[seq_len(coef_len)]
-            as.numeric(basis %*% coeff_use)
+            vals <- as.numeric(basis %*% coeff_use)
+            if (.resolve_monotone_direction(spec$direction %||% spec$spline_direction %||% 1L, default = 1L) < 0L) {
+                vals <- sum(coeff_use) - vals
+            }
+            vals
         })
     }
 

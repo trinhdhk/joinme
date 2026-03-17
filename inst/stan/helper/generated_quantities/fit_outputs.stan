@@ -1,18 +1,18 @@
   /**
-   * @brief Convenience outputs for debugging and interpretation.
+  * @brief Convenience outputs for debugging and interpretation.
    * beta is on ORIGINAL time scale by construction.
    * beta_scaled is the coefficient vector actually used with scaled-time design matrices.
    */
   vector[P] beta_used_in_likelihood = beta_scaled;
   
   /**
-   * @brief Association coefficients actually used for totals.
+  * @brief Association coefficients actually used for totals.
    */
   real alpha_cv_total_used = a_cv_total;
   real alpha_cs_total_used = a_cs_total;
 
   /**
-   * @brief Per-observation log-likelihoods for model assessment (loo/waic).
+  * @brief Per-observation log-likelihoods for model assessment (loo/waic).
    *
    * We compute:
    * - log_lik_long[n]: longitudinal log-likelihood contribution for row n.
@@ -223,6 +223,8 @@
     vector[n_gk] csk_raw; // marker slope (weighted across markers)
     int M_corr_local = num_elements(a_corr);
     vector[M_corr_local] corr_terms_raw = eta_corr_varonly_weighted_const(L_i[i]); // raw off-diagonal corr terms
+    int M_vcov_local = num_elements(a_vcov);
+    vector[M_vcov_local] vcov_terms_raw = eta_vcov_weighted_const(L_i[i], (M_vcov_local == Q_idm)); // raw lower-triangular L entries
 
     int D_mkrs = size(v_marker);
     vector[n_gk] cv_tot_tf;
@@ -293,7 +295,7 @@
       coeff_cs_mean_eff,
       spline_degree_cs_mean
     );
-    vector[M_corr_local] corr_terms_tf = apply_transform_vector(
+    vector[M_corr_local] corr_terms_tf = apply_transform_vector_by_component(
       corr_terms_raw,
       tf_mode_corr,
       functional_ops_corr,
@@ -302,8 +304,39 @@
       coeff_corr_eff,
       spline_degree_corr
     );
+    vector[M_corr_local] corr_terms_ref = apply_transform_vector_by_component(
+      rep_vector(0, M_corr_local),
+      tf_mode_corr,
+      functional_ops_corr,
+      const_data_corr,
+      knots_corr,
+      coeff_corr_eff,
+      spline_degree_corr
+    );
+    corr_terms_tf = corr_terms_tf - corr_terms_ref;
     real corr_assoc_scalar = dot_product(a_corr, corr_terms_tf);
     vector[n_gk] corr_assoc = rep_vector(corr_assoc_scalar, n_gk);
+    vector[M_vcov_local] vcov_terms_tf = apply_transform_vector_by_component(
+      vcov_terms_raw,
+      tf_mode_vcov,
+      functional_ops_vcov,
+      const_data_vcov,
+      knots_vcov,
+      coeff_vcov_eff,
+      spline_degree_vcov
+    );
+    vector[M_vcov_local] vcov_terms_ref = apply_transform_vector_by_component(
+      rep_vector(0, M_vcov_local),
+      tf_mode_vcov,
+      functional_ops_vcov,
+      const_data_vcov,
+      knots_vcov,
+      coeff_vcov_eff,
+      spline_degree_vcov
+    );
+    vcov_terms_tf = vcov_terms_tf - vcov_terms_ref;
+    real vcov_assoc_scalar = dot_product(a_vcov, vcov_terms_tf);
+    vector[n_gk] vcov_assoc = rep_vector(vcov_assoc_scalar, n_gk);
 
     vector[n_gk] eta_assoc_nodes = a_cv_total * cv_tot_tf
                                  + a_cv_mean * cv_mean_tf
@@ -311,7 +344,8 @@
                                  + a_cs_total * cs_tot_tf
                                  + a_cs_mean * cs_mean_tf
                                  + a_cs_marker * cs_marker_tf
-                                 + corr_assoc;
+                                 + corr_assoc
+                                 + vcov_assoc;
     // eta_assoc_nodes: association predictor across GK nodes
 
     // Event contribution

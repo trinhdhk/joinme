@@ -107,6 +107,7 @@ for (k in 1 : n_draws) {
   real a_cs_marker = flag_assoc_cs_marker * coeff_assoc_cs_marker[k];
   vector[(n_random_marker_id * (n_random_marker_id - 1)) %/% 2] a_corr = flag_assoc_corr
                       * coeff_assoc_corr[k];
+  vector[num_unique_cov_entries] a_vcov = flag_assoc_vcov * coeff_assoc_vcov[k];
 
   // -------------------------------------------------------------
   // 3. Fitted values for observed history (scale-aware)
@@ -299,6 +300,8 @@ for (k in 1 : n_draws) {
     vector[n_gk] csk_raw; // marker slope (weighted across markers)
     int M_corr_local = num_elements(a_corr);
     vector[M_corr_local] corr_terms_raw = eta_corr_varonly_weighted_const(Li);
+    int M_vcov_local = num_elements(a_vcov);
+    vector[M_vcov_local] vcov_terms_raw = eta_vcov_weighted_const(Li, flag_indep_idmarker_cov);
 
     vector[n_gk] cv_tot = cvm + cvk; // total current value
 
@@ -371,7 +374,7 @@ for (k in 1 : n_draws) {
         coeff_cs_mean[k],
       spline_degree_cs_mean
     );
-    vector[M_corr_local] corr_terms_tf = apply_transform_vector(
+    vector[M_corr_local] corr_terms_tf = apply_transform_vector_by_component(
       corr_terms_raw,
       tf_mode_corr,
       functional_ops_corr,
@@ -380,8 +383,39 @@ for (k in 1 : n_draws) {
         coeff_corr[k],
       spline_degree_corr
     );
+      vector[M_corr_local] corr_terms_ref = apply_transform_vector_by_component(
+        rep_vector(0, M_corr_local),
+        tf_mode_corr,
+        functional_ops_corr,
+        const_data_corr,
+        knots_corr,
+        coeff_corr[k],
+        spline_degree_corr
+      );
+      corr_terms_tf = corr_terms_tf - corr_terms_ref;
     real corr_assoc_scalar = dot_product(a_corr, corr_terms_tf);
     vector[n_gk] corr_assoc = rep_vector(corr_assoc_scalar, n_gk);
+    vector[M_vcov_local] vcov_terms_tf = apply_transform_vector_by_component(
+      vcov_terms_raw,
+      tf_mode_vcov,
+      functional_ops_vcov,
+      const_data_vcov,
+      knots_vcov,
+        coeff_vcov[k],
+      spline_degree_vcov
+    );
+    vector[M_vcov_local] vcov_terms_ref = apply_transform_vector_by_component(
+      rep_vector(0, M_vcov_local),
+      tf_mode_vcov,
+      functional_ops_vcov,
+      const_data_vcov,
+      knots_vcov,
+      coeff_vcov[k],
+      spline_degree_vcov
+    );
+    vcov_terms_tf = vcov_terms_tf - vcov_terms_ref;
+    real vcov_assoc_scalar = dot_product(a_vcov, vcov_terms_tf);
+    vector[n_gk] vcov_assoc = rep_vector(vcov_assoc_scalar, n_gk);
 
     vector[n_gk] eta_assoc_nodes = a_cv_total * cv_tot_tf
                                  + a_cv_mean * cv_mean_tf
@@ -389,7 +423,8 @@ for (k in 1 : n_draws) {
                                  + a_cs_total * cs_tot_tf
                                  + a_cs_mean * cs_mean_tf
                                  + a_cs_marker * cs_marker_tf
-                                 + corr_assoc;
+                                 + corr_assoc
+                                 + vcov_assoc;
     // eta_assoc_nodes: association predictor at GK nodes
 
     vector[n_gk] log_h_total; // total log-hazard at quadrature nodes
@@ -435,6 +470,8 @@ for (k in 1 : n_draws) {
     vector[n_gk] csk_raw; // marker slope (weighted across markers)
     int M_corr_local2 = num_elements(a_corr);
     vector[M_corr_local2] corr_terms_raw = eta_corr_varonly_weighted_const(Li);
+    int M_vcov_local2 = num_elements(a_vcov);
+    vector[M_vcov_local2] vcov_terms_raw = eta_vcov_weighted_const(Li, flag_indep_idmarker_cov);
 
     vector[n_gk] cv_tot = cvm + cvk; // total current value
 
@@ -507,7 +544,7 @@ for (k in 1 : n_draws) {
         coeff_cs_mean[k],
       spline_degree_cs_mean
     );
-    vector[M_corr_local2] corr_terms_tf = apply_transform_vector(
+    vector[M_corr_local2] corr_terms_tf = apply_transform_vector_by_component(
       corr_terms_raw,
       tf_mode_corr,
       functional_ops_corr,
@@ -516,8 +553,39 @@ for (k in 1 : n_draws) {
         coeff_corr[k],
       spline_degree_corr
     );
+      vector[M_corr_local2] corr_terms_ref = apply_transform_vector_by_component(
+        rep_vector(0, M_corr_local2),
+        tf_mode_corr,
+        functional_ops_corr,
+        const_data_corr,
+        knots_corr,
+        coeff_corr[k],
+        spline_degree_corr
+      );
+      corr_terms_tf = corr_terms_tf - corr_terms_ref;
     real corr_assoc_scalar = dot_product(a_corr, corr_terms_tf);
     vector[n_gk] corr_assoc = rep_vector(corr_assoc_scalar, n_gk);
+    vector[M_vcov_local2] vcov_terms_tf = apply_transform_vector_by_component(
+      vcov_terms_raw,
+      tf_mode_vcov,
+      functional_ops_vcov,
+      const_data_vcov,
+      knots_vcov,
+        coeff_vcov[k],
+      spline_degree_vcov
+    );
+    vector[M_vcov_local2] vcov_terms_ref = apply_transform_vector_by_component(
+      rep_vector(0, M_vcov_local2),
+      tf_mode_vcov,
+      functional_ops_vcov,
+      const_data_vcov,
+      knots_vcov,
+      coeff_vcov[k],
+      spline_degree_vcov
+    );
+    vcov_terms_tf = vcov_terms_tf - vcov_terms_ref;
+    real vcov_assoc_scalar = dot_product(a_vcov, vcov_terms_tf);
+    vector[n_gk] vcov_assoc = rep_vector(vcov_assoc_scalar, n_gk);
 
     vector[n_gk] eta_assoc_nodes = a_cv_total * cv_tot_tf
                                  + a_cv_mean * cv_mean_tf
@@ -525,7 +593,8 @@ for (k in 1 : n_draws) {
                                  + a_cs_total * cs_tot_tf
                                  + a_cs_mean * cs_mean_tf
                                  + a_cs_marker * cs_marker_tf
-                                 + corr_assoc;
+                                 + corr_assoc
+                                 + vcov_assoc;
     // eta_assoc_nodes: association predictor at GK nodes
 
     vector[n_gk] log_h_total; // total log-hazard at quadrature nodes

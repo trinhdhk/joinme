@@ -1,5 +1,5 @@
   /**
-   * @brief Prior distributions for all model parameters.
+  * @brief Prior distributions for all model parameters.
    *
    * Includes priors for:
    * - Fixed effects (beta) and distributional regression parameters
@@ -10,7 +10,7 @@
    */
 
   // -------------------- Basic outcome checks for discrete families
-  for (n in 1 : N) {
+  for (n in 1:N) {
     int fam = family_long[marker[n]]; // family for this marker
     if (fam == 3) {
       if (y_int[n] != 0 && y_int[n] != 1)
@@ -143,11 +143,13 @@
   sd_alpha_cv_marker ~ normal(0, 0.5);
   sd_alpha_cs_marker ~ normal(0, 0.5);
   s_corr ~ normal(0, 0.5);
-  
+  s_vcov ~ normal(0, 0.5);
+
   
   /* Shrinkage family switch for corr weights */
   if (shrinkage == 1) {
     alpha_corr ~ double_exponential(0, 1);
+    alpha_vcov ~ double_exponential(0, 1);
     z_alpha_cv_total ~ double_exponential(0, 1);
     z_alpha_cs_total ~ double_exponential(0, 1);
     z_alpha_cv_mean ~ double_exponential(0, 1);
@@ -156,8 +158,24 @@
     z_alpha_cs_marker ~ double_exponential(0, 1);
     // if (estimate_marker_weights == 1 && use_marker_weight_assoc == 1)
     z_marker_weights ~ double_exponential(0, 1);
+
+    /* Penalised monotone spline shape priors */
+  // Tight prior on the latent increment logits:
+  // - z = 0 implies equal increments,
+  // - expit(z) gives positive increments summing to 1,
+  // - smaller prior scale keeps the learned shape close to a smooth default
+  //   unless the data clearly support bends.
+  if (n_free_spline_cv > 0) z_spline_cv ~ double_exponential(0, 1);
+  if (n_free_spline_cs > 0) z_spline_cs ~ double_exponential(0, 1);
+  if (n_free_spline_corr > 0) to_vector(z_spline_corr) ~ double_exponential(0, 1);
+  if (n_free_spline_vcov > 0) to_vector(z_spline_vcov) ~ double_exponential(0, 1);
+  if (n_free_spline_cv_mean > 0) z_spline_cv_mean ~ double_exponential(0, 1);
+  if (n_free_spline_cv_marker > 0) z_spline_cv_marker ~ double_exponential(0, 1);
+  if (n_free_spline_cs_mean > 0) z_spline_cs_mean ~ double_exponential(0, 1);
+  if (n_free_spline_cs_marker > 0) z_spline_cs_marker ~ double_exponential(0, 1);
   } else if (shrinkage == 2) {
     alpha_corr ~ std_normal();
+    alpha_vcov ~ std_normal();
     z_alpha_cv_total ~ std_normal();
     z_alpha_cs_total ~ std_normal();
     z_alpha_cv_mean ~ std_normal();
@@ -166,23 +184,25 @@
     z_alpha_cs_marker ~ std_normal();
     // if (estimate_marker_weights == 1 && use_marker_weight_assoc == 1)
     z_marker_weights ~ std_normal();
+
+    /* Penalised monotone spline shape priors */
+    // Tight prior on the latent increment logits:
+    // - z = 0 implies equal increments,
+    // - expit(z) gives positive increments summing to 1,
+    // - smaller prior scale keeps the learned shape close to a smooth default
+    //   unless the data clearly support bends.
+    if (n_free_spline_cv > 0) z_spline_cv ~ std_normal();
+    if (n_free_spline_cs > 0) z_spline_cs ~ std_normal();
+    if (n_free_spline_corr > 0) to_vector(z_spline_corr) ~ std_normal();
+    if (n_free_spline_vcov > 0) to_vector(z_spline_vcov) ~ std_normal();
+    if (n_free_spline_cv_mean > 0) z_spline_cv_mean ~ std_normal();
+    if (n_free_spline_cv_marker > 0) z_spline_cv_marker ~ std_normal();
+    if (n_free_spline_cs_mean > 0) z_spline_cs_mean ~ std_normal();
+    if (n_free_spline_cs_marker > 0) z_spline_cs_marker ~ std_normal();
   }
 
-  /* Penalised monotone spline shape priors */
-  // Tight prior on the latent increment logits:
-  // - z = 0 implies equal increments,
-  // - softmax(z) gives positive increments summing to 1,
-  // - smaller prior scale keeps the learned shape close to a smooth default
-  //   unless the data clearly support bends.
-  if (n_free_spline_cv > 0) z_spline_cv ~ normal(0, 0.35);
-  if (n_free_spline_cs > 0) z_spline_cs ~ normal(0, 0.35);
-  if (n_free_spline_corr > 0) z_spline_corr ~ normal(0, 0.35);
-  if (n_free_spline_cv_mean > 0) z_spline_cv_mean ~ normal(0, 0.35);
-  if (n_free_spline_cv_marker > 0) z_spline_cv_marker ~ normal(0, 0.35);
-  if (n_free_spline_cs_mean > 0) z_spline_cs_mean ~ normal(0, 0.35);
-  if (n_free_spline_cs_marker > 0) z_spline_cs_marker ~ normal(0, 0.35);
+  
 
-  // Layman's view:
   // - first differences control monotone increase,
   // - second differences control wiggliness,
   // - lambda says how strongly we discourage bends.
@@ -195,8 +215,14 @@
       target += -0.5 * lambda_spline_cs * square(coeff_cs_eff[j] - 2 * coeff_cs_eff[j - 1] + coeff_cs_eff[j - 2]);
   }
   if (estimate_spline_corr == 1 && n_coeff_corr > 2 && lambda_spline_corr > 0) {
-    for (j in 3:n_coeff_corr)
-      target += -0.5 * lambda_spline_corr * square(coeff_corr_eff[j] - 2 * coeff_corr_eff[j - 1] + coeff_corr_eff[j - 2]);
+    for (m in 1:M_corr)
+      for (j in 3:n_coeff_corr)
+        target += -0.5 * lambda_spline_corr * square(coeff_corr_eff[m, j] - 2 * coeff_corr_eff[m, j - 1] + coeff_corr_eff[m, j - 2]);
+  }
+  if (estimate_spline_vcov == 1 && n_coeff_vcov > 2 && lambda_spline_vcov > 0) {
+    for (m in 1:M_vcov)
+      for (j in 3:n_coeff_vcov)
+        target += -0.5 * lambda_spline_vcov * square(coeff_vcov_eff[m, j] - 2 * coeff_vcov_eff[m, j - 1] + coeff_vcov_eff[m, j - 2]);
   }
   if (estimate_spline_cv_mean == 1 && n_coeff_cv_mean > 2 && lambda_spline_cv_mean > 0) {
     for (j in 3:n_coeff_cv_mean)

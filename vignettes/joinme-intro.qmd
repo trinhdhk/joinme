@@ -51,8 +51,10 @@ The association terms implemented in `joinme` are:
 
 - Current value (CV) of the latent linear predictor.
 - Current slope (CS) of the latent linear predictor.
-- Variance association (CORR) derived from the marker-by-subject
-  covariance structure.
+- Correlation association (CORR) derived from off-diagonal marker-by-subject
+  correlations.
+- Variance-covariance association (VCOV) derived from lower-triangular
+  marker-by-subject Cholesky-factor entries taken directly from `L`.
 
 Each association term can be left on its original scale or transformed
 using a functional expression, a monotone I-spline, or a piecewise linear
@@ -245,7 +247,7 @@ pred <- rstantools::posterior_epred(
 ### Step 7: Plot longitudinal and survival predictions
 
 ```{r intro-plot}
-plot(pred, which = c("longitudinal", "survival"), scale = "epred", combined = TRUE)
+plot(pred, type = c("longitudinal", "survival"), scale = "epred", combined = TRUE)
 ```
 
 If `patchwork`/`cowplot` is unavailable, `combined = TRUE` falls back to the
@@ -259,8 +261,8 @@ diagnosis(fit)
 diagnosis(pred)
 ```
 
-`ranef(fit)` and `corr(fit)` are nested by `formulaLong` and `formulaDist`.
-For prediction objects, `ranef(pred)` and `corr(pred)` are available only when
+`ranef(fit)`, `corr(fit)`, and `vcov(fit)` are nested by `formulaLong` and `formulaDist`.
+For prediction objects, `ranef(pred)`, `corr(pred)`, and `vcov(pred)` are available only when
 marker covariance is configured to depend on id.
 
 ## Next steps

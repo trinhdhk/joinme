@@ -215,6 +215,26 @@ $$ L_{i}[r,c] = \begin{cases} \text{softplus}(\mu_{r,c} + \beta_{r,c}^\top X_i +
 
 This allows the *variability* and *correlation* of biomarker trajectories to depend on patient characteristics (e.g., higher volatility in older patients) and to act as a predictor for survival itself.
 
+For survival association, the implementation uses two covariance-style summary
+families derived from the same $L_i$ object:
+
+1. `corr`: off-diagonal correlations computed from $\Sigma_i = L_i L_i^\top$.
+2. `vcov`: lower-triangular entries of $L_i$ itself, taken directly in
+  row-major order.
+
+When either summary is active, the algorithm is:
+
+1. Extract raw covariance-style features from the fitted $L_i$.
+2. Apply the user-specified transform to each feature separately.
+3. Weight transformed features by their association coefficients.
+4. Reuse the resulting time-constant scalar in both the exact event hazard and
+  the numerical cumulative-hazard integration.
+
+This last step matters. If the exact event term and the integrated hazard use
+different active association channels, posterior recovery of the association
+coefficient becomes systematically biased even when simulation and fitting are
+otherwise aligned.
+
 # Computational Strategy
 
 Solving the integral $\Lambda(t) = \int_0^t \lambda(s) ds$ inside an MCMC loop is expensive. We optimize this via:

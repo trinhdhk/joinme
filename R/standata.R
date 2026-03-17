@@ -43,7 +43,10 @@
 #'   covariates referenced in `formulaEvent`.
 #' @param formulaCorr Covariance regression formula for id-specific marker-by-id effects.
 #'   If the marker block omits the inner `( ... | id )`, then marker-by-id effects
-#'   are absent and `corr` associations are not allowed.
+#'   are absent and covariance-style associations (`corr`, `vcov`) are not allowed.
+#'   Downstream, `corr` uses off-diagonal correlation features derived from those
+#'   marker-by-id effects, whereas `vcov` uses the lower-triangular entries of the
+#'   subject-specific Cholesky factor `L` directly.
 #' @param formulaDist Optional list of formulas for distributional regression. Two
 #'   forms are supported:
 #'   1. Named list with RHS-only formulas, e.g. `list(sigma = ~ 1 + time)`.
@@ -56,14 +59,18 @@
 #' @param time_var Column name for longitudinal time in `dataLong`.
 #' @param eps_fd Positive finite-difference step for association derivatives.
 #' @param assoc Character vector specifying association components
-#'   (e.g., "cv_mean", "cs_total", "corr").
+#'   (e.g., "cv_mean", "cs_total", "corr", "vcov"). The `corr` channel
+#'   targets off-diagonal correlation features; the `vcov` channel targets the
+#'   lower-triangular entries of the subject-specific Cholesky factor `L`.
 #' @param families Optional marker-specific family specification. Can be
 #'   character family names or `jm_family(...)` entries with per-marker links.
 #'   If NULL, all markers use Gaussian responses with identity link.
 #'   Supported links/inverse-links: `identity`, `log`, `logit`, `probit`, `exp`.
 #' @param transforms Optional list specifying transformations for association terms.
-#'   Each element (cv_total, cs_total, corr) is a list with a `type` and fields
-#'   required by that type (see `build_standata_transforms()`).
+#'   Each element (cv_total, cs_total, corr, vcov) is a list with a `type` and fields
+#'   required by that type (see `build_standata_transforms()`). For covariance-style
+#'   terms, transforms apply either to off-diagonal correlation features (`corr`) or
+#'   to lower-triangular Cholesky-factor entries (`vcov`).
 #' @param beta_prior Prior specification for longitudinal fixed effects.
 #' @param alpha_prior Prior specification for association parameters.
 #' @param lkj_prior Prior specification for correlation structures.
@@ -129,6 +136,7 @@ joinme_standata <- function(
 ) {
   assertthat::assert_that(is.data.frame(dataLong), msg = "dataLong must be a data.frame")
   assertthat::assert_that(is.data.frame(dataEvent), msg = "dataEvent must be a data.frame")
+  assoc <- .validate_assoc_channels(assoc, context = "joinme_standata()")
   y_var <- .resolve_response_var(
     formulaLong = formulaLong,
     dataLong = dataLong,
@@ -186,10 +194,10 @@ joinme_standata <- function(
     ))
   }
   has_idm <- length(idm_rhs_list) > 0
-  if (!has_idm && "corr" %in% assoc) {
+  if (!has_idm && any(c("corr", "vcov") %in% assoc)) {
     cli::cli_abort(c(
-      x = "Association {.arg corr} requires marker-by-id random effects.",
-      i = "Add an inner ( ... | {.arg id_var} ) term inside the marker block, or remove {.arg corr} from {.arg assoc}."
+      x = "Associations {.arg corr} and {.arg vcov} require marker-by-id random effects.",
+      i = "Add an inner ( ... | {.arg id_var} ) term inside the marker block, or remove covariance-style association terms from {.arg assoc}."
     ))
   }
 
@@ -531,7 +539,7 @@ joinme_standata <- function(
   }
 
   # marker-by-id basis
-  # - enables corr association features
+  # - enables covariance-style association features (corr, vcov)
   if (!has_idm) {
     Z_idm_obs <- matrix(0.0, nrow(dl), 0)
     Q_idm <- 0L
@@ -709,6 +717,12 @@ joinme_standata <- function(
 
   # Association flags
   af <- .parse_assoc(assoc)
+  M_corr_tf <- .assoc_transform_component_count("corr", Q_idm, diagonal_only = FALSE)
+  M_vcov_tf <- .assoc_transform_component_count(
+    "vcov",
+    Q_idm,
+    diagonal_only = as.integer(indep_flags$indep_idmarker_cov %||% 0L) == 1L
+  )
 
   # --------------------------
   # Time-index metadata
@@ -750,7 +764,11 @@ joinme_standata <- function(
   }
 
   # Build arbitrary transformations (optional)
-  arbitrary_tf_data <- build_standata_transforms(transforms)
+  arbitrary_tf_data <- build_standata_transforms(
+    transforms,
+    n_corr_components = M_corr_tf,
+    n_vcov_components = M_vcov_tf
+  )
 
   # if (af$assoc_cv_total == 0 && af$assoc_cv_mean == 1 && af$assoc_cv_marker == 1 &&
   #     arbitrary_tf_data$tf_mode_cv_mean == 0 && arbitrary_tf_data$tf_mode_cv_marker == 0) {
@@ -819,6 +837,8 @@ joinme_standata <- function(
     indep_marker_re = as.integer(indep_flags$indep_marker_re),
     indep_marker_byid_latent_re = as.integer(1L), # keep as in your Page; extend if needed
     indep_idmarker_cov = as.integer(indep_flags$indep_idmarker_cov),
+    M_corr_tf = as.integer(M_corr_tf),
+    M_vcov_tf = as.integer(M_vcov_tf),
     allow_marker_crosscorr = as.integer(allow_marker_crosscorr),
     corr_diag_link = as.integer(corr_diag_link_code),
     use_tau_sde_fixed = as.integer(use_tau_sde_fixed),
@@ -927,6 +947,7 @@ joinme_standata <- function(
     assoc_cs_mean = af$assoc_cs_mean,
     assoc_cs_marker = af$assoc_cs_marker,
     assoc_corr = af$assoc_corr,
+    assoc_vcov = af$assoc_vcov,
     shrinkage = as.integer(shrinkage),
 
     # --------------------------

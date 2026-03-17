@@ -40,7 +40,7 @@
  *
  * STEP 5: Compute survival conditioning at time T_cond
  *   - Build current value (CV) and current slope (CS) at 15 GK nodes in [0, T_cond]
- *   - Apply nonlinear transforms to CV/CS/CORR features
+ *   - Apply nonlinear transforms to CV/CS/covariance-style features
  *   - Compute hazard at nodes and integrate via Gauss-Kronrod:
  *       Lambda(T_cond) = integral_0^T_cond sum_k h_k(t) dt
  *   - Add survival contribution: log S(T_cond) = -Lambda(T_cond)
@@ -306,6 +306,7 @@ real partial_draw(
     array[] real coeff_assoc_cv_marker,
     array[] real coeff_assoc_cs_marker,
     array[] vector coeff_assoc_corr,
+    array[] vector coeff_assoc_vcov,
     int K_ord,
     array[] vector cutpoints_ord,
     int flag_assoc_cv_total,
@@ -313,9 +314,11 @@ real partial_draw(
     int flag_assoc_cv_mean,
     int flag_assoc_cv_marker,
     int flag_assoc_cs_mean,
+    int flag_assoc_vcov,
     int flag_assoc_cs_marker,
     int flag_assoc_corr,
     int tf_mode_cv_tot,
+    int tf_mode_vcov,
     int tf_mode_cs_tot,
     int tf_mode_corr,
     int tf_mode_cv_mean,
@@ -335,8 +338,13 @@ real partial_draw(
     array[] int functional_ops_corr,
     vector const_data_corr,
     vector knots_corr,
-    array[] vector coeff_corr,
+    array[] matrix coeff_corr,
     int spline_degree_corr,
+    array[] int functional_ops_vcov,
+    vector const_data_vcov,
+    vector knots_vcov,
+    array[] matrix coeff_vcov,
+    int spline_degree_vcov,
     array[] int functional_ops_cv_mean,
     vector const_data_cv_mean,
     vector knots_cv_mean,
@@ -360,6 +368,7 @@ real partial_draw(
     int flag_indep_id_re,
     int flag_indep_marker_re,
     int flag_indep_marker_byid_latent_re,
+    int flag_indep_idmarker_cov,
     int flag_allow_marker_crosscorr,
     array[] vector z_u,
     array[,] vector z_v,
@@ -624,6 +633,8 @@ real partial_draw(
     // transform raw corr terms first, then apply assoc coefficients.
     int M_corr_local = num_elements(coeff_assoc_corr[k]);
     vector[M_corr_local] corr_terms_raw = eta_corr_varonly_weighted_const(Li);
+    int M_vcov_local = num_elements(coeff_assoc_vcov[k]);
+    vector[M_vcov_local] vcov_terms_raw = eta_vcov_weighted_const(Li, flag_indep_idmarker_cov);
 
     // Apply association flags (0 disables the term)
     real a_cv_total = flag_assoc_cv_total * coeff_assoc_cv_total[k];
@@ -701,9 +712,16 @@ real partial_draw(
     }
 
     vector[n_gk] cs_mean_tf = apply_transform_vector(csm_raw, tf_mode_cs_mean, functional_ops_cs_mean, const_data_cs_mean, knots_cs_mean, coeff_cs_mean[k], spline_degree_cs_mean);
-    vector[M_corr_local] corr_terms_tf = apply_transform_vector(corr_terms_raw, tf_mode_corr, functional_ops_corr, const_data_corr, knots_corr, coeff_corr[k], spline_degree_corr);
+    vector[M_corr_local] corr_terms_tf = apply_transform_vector_by_component(corr_terms_raw, tf_mode_corr, functional_ops_corr, const_data_corr, knots_corr, coeff_corr[k], spline_degree_corr);
+    vector[M_corr_local] corr_terms_ref = apply_transform_vector_by_component(rep_vector(0, M_corr_local), tf_mode_corr, functional_ops_corr, const_data_corr, knots_corr, coeff_corr[k], spline_degree_corr);
+    corr_terms_tf = corr_terms_tf - corr_terms_ref;
     real corr_assoc_scalar = dot_product(flag_assoc_corr * coeff_assoc_corr[k], corr_terms_tf);
     vector[n_gk] corr_assoc = rep_vector(corr_assoc_scalar, n_gk);
+    vector[M_vcov_local] vcov_terms_tf = apply_transform_vector_by_component(vcov_terms_raw, tf_mode_vcov, functional_ops_vcov, const_data_vcov, knots_vcov, coeff_vcov[k], spline_degree_vcov);
+    vector[M_vcov_local] vcov_terms_ref = apply_transform_vector_by_component(rep_vector(0, M_vcov_local), tf_mode_vcov, functional_ops_vcov, const_data_vcov, knots_vcov, coeff_vcov[k], spline_degree_vcov);
+    vcov_terms_tf = vcov_terms_tf - vcov_terms_ref;
+    real vcov_assoc_scalar = dot_product(flag_assoc_vcov * coeff_assoc_vcov[k], vcov_terms_tf);
+    vector[n_gk] vcov_assoc = rep_vector(vcov_assoc_scalar, n_gk);
 
     // Combine transformed association features into hazard predictor
     vector[n_gk] eta_assoc_nodes = a_cv_total * cv_tot_tf
@@ -712,7 +730,8 @@ real partial_draw(
                                  + a_cs_total * cs_tot_tf
                                  + a_cs_mean * cs_mean_tf
                                  + a_cs_marker * cs_marker_tf
-                                 + corr_assoc;
+                                 + corr_assoc
+                                 + vcov_assoc;
     // eta_assoc_nodes: association predictor at GK nodes
 
     // ---------------------------------------------------------------

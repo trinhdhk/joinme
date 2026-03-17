@@ -69,6 +69,7 @@
   real z_alpha_cv_marker;              // latent for marker CV association
   real z_alpha_cs_marker;              // latent for marker CS association
   vector[M_corr] alpha_corr;          // corr association coefficients (off-diagonal correlations)
+  vector[M_vcov] alpha_vcov;          // vcov association coefficients for lower-triangular L entries
 
   /* marker-weight perturbations (global across ids) */
   vector[D * estimate_marker_weights * use_marker_weight_assoc] z_marker_weights; // latent signed perturbations (active only when needed)
@@ -76,7 +77,8 @@
   /* Stan-estimated monotone spline increments for association transforms */
   vector[n_free_spline_cv] z_spline_cv;               // free increments for total CV spline
   vector[n_free_spline_cs] z_spline_cs;               // free increments for total CS spline
-  vector[n_free_spline_corr] z_spline_corr;           // free increments for corr spline
+  matrix[M_corr, n_free_spline_corr] z_spline_corr;   // free increments for corr spline by component
+  matrix[M_vcov, n_free_spline_vcov] z_spline_vcov;   // free increments for vcov spline by component
   vector[n_free_spline_cv_mean] z_spline_cv_mean;     // free increments for mean CV spline
   vector[n_free_spline_cv_marker] z_spline_cv_marker; // free increments for marker CV spline
   vector[n_free_spline_cs_mean] z_spline_cs_mean;     // free increments for mean CS spline
@@ -90,3 +92,4 @@
   real<lower=0> sd_alpha_cv_marker;    // scale for marker CV association
   real<lower=0> sd_alpha_cs_marker;    // scale for marker CS association
   real<lower=0> s_corr;                // scale for corr association
+  real<lower=0> s_vcov;                // scale for vcov association

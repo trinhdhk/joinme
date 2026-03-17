@@ -8,7 +8,6 @@
   x,
   type = c("rhat", "ess_bulk", "ess_tail", "mcse_mean", "mcse_sd", "running_mean",
     "running_quantile"),
-  which = NULL,
   pars = NULL,
   regex_pars = NULL,
   draws = NULL,
@@ -39,10 +38,7 @@
     = 0.2),
   theme_fn = ggplot2::theme_bw,
   palette_marker = NULL,
-  association_term = NULL,
-  association_grid = NULL,
-  association_points = 200,
-  association_metric = c("hazard", "transform"),
+  association_options = list(),
   ...
 )
 }
@@ -53,8 +49,6 @@
 \code{"ess_tail"}, \code{"mcse_mean"}, \code{"mcse_sd"}, \code{"running_mean"}, and
 \code{"running_quantile"}. Fitted-data types are \code{"longitudinal"},
 \code{"survival"}, \code{"cumhaz"}, and \code{"association"}.}
-
-\item{which}{Optional alias for fitted-data plot selection.}
 
 \item{pars}{Optional character vector of parameter names to include for
 diagnostic plots.}
@@ -100,19 +94,21 @@ plotting. By default this uses a modest draw count for plotting.}
 show_observed_line,observed_style,prediction_style,theme_fn,
 palette_marker Passed to \code{plot.JoinMeDynPred()} for fitted-data plots.}
 
-\item{association_term}{Optional association term subset for
-\code{type = "association"}.}
-
-\item{association_grid}{Optional numeric grid for association plots.}
-
-\item{association_points}{Number of grid points when \code{association_grid} is
-not supplied. When omitted, \code{plot.JoinMeFit()} uses cached model-implied
-raw support from the fitted association channels and only falls back to
-knot support or observed-data heuristics when that cache is unavailable.}
-
-\item{association_metric}{Quantity to plot for association curves:
-\code{"hazard"} plots the posterior contribution $\alpha \times f(x)$ and
-\code{"transform"} plots the transform $f(x)$ alone.}
+\item{association_options}{Named list of options for
+\code{type = "association"}. Supported entries are
+\code{association_term}, \code{association_grid}, \code{association_range},
+\code{association_points}, and \code{association_metric}. When
+\code{association_grid} is not supplied, \code{plot.JoinMeFit()} uses cached
+model-implied raw support from the fitted association channels and only falls
+back to knot support or observed-data heuristics when that cache is
+unavailable. \code{association_range}, when supplied, overrides those default
+range heuristics and constructs an evenly spaced raw-scale grid over the
+requested interval. \code{association_metric = "hazard"} plots the posterior
+contribution used by the fitted model. For covariance-style channels
+(\code{corr}, \code{vcov}) this contribution is zero-referenced at raw value
+\code{0} before multiplying by $\alpha$; \code{association_metric = "transform"}
+plots the transform $f(x)$ alone and therefore omits the association-coefficient
+sign.}
 
 \item{...}{Unused.}
 }

@@ -860,6 +860,9 @@ predict.JoinMeFit <- function(object,
         n_pred_draws = n_pred_draws,
         n_subjects = length(ids),
         marker_corr_depends_on_id = marker_corr_depends_on_id,
+        indep_id_re = sd$indep_id_re,
+        indep_marker_re = sd$indep_marker_re,
+        indep_idmarker_cov = sd$indep_idmarker_cov,
         family_links = if (!is.null(sd$link_names)) {
             ifelse(is.na(sd$link_names), "custom", sd$link_names)
         } else {
@@ -1250,10 +1253,10 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     dmat <- suppressMessages(posterior::as_draws_matrix(d))
 
     sd <- object$stan_data
-    if (isTRUE(sd$assoc_corr) && sd$Q_idm < 1) {
+    if ((isTRUE(sd$assoc_corr) || isTRUE(sd$assoc_vcov)) && sd$Q_idm < 1) {
         cli::cli_abort(c(
-            x = "Association {.arg corr} requires marker-by-id random effects (Q_idm > 0).",
-            i = "Refit with an inner ( ... | id ) term inside the marker block, or drop {.arg corr} from {.arg assoc}."
+            x = "Covariance-style association requires marker-by-id random effects (Q_idm > 0).",
+            i = "Refit with an inner ( ... | id ) term inside the marker block, or drop {.arg corr}/{.arg vcov} from {.arg assoc}."
         ))
     }
     n <- nrow(dmat)
@@ -1269,11 +1272,49 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         rep(default, n)
     }
 
-    get_transform_coeff_draws <- function(eff_prefix, base_coeff, n_coeff) {
+    get_transform_coeff_draws <- function(eff_prefix, base_coeff, n_coeff, n_components = 1L) {
         n_coeff <- as.integer(n_coeff %||% 0L)
+        n_components <- as.integer(n_components %||% 1L)
         if (n_coeff < 1L) {
+            if (n_components > 1L) {
+                return(array(0, dim = c(n, n_components, 0L)))
+            }
             return(matrix(0, n, 0))
         }
+        if (n_components > 1L) {
+            eff_names <- as.vector(outer(seq_len(n_components), seq_len(n_coeff), function(m, j) paste0(eff_prefix, "[", m, ",", j, "]")))
+            eff_names <- eff_names[eff_names %in% colnames(dmat)]
+            if (length(eff_names) > 0L) {
+                out <- array(0, dim = c(n, n_components, n_coeff))
+                for (m in seq_len(n_components)) {
+                    for (j in seq_len(n_coeff)) {
+                        nm <- paste0(eff_prefix, "[", m, ",", j, "]")
+                        if (nm %in% colnames(dmat)) {
+                            out[, m, j] <- dmat[, nm]
+                        }
+                    }
+                }
+                return(out)
+            }
+
+            base_mat <- as.matrix(base_coeff %||% matrix(0, nrow = n_components, ncol = n_coeff))
+            if (nrow(base_mat) == 0L) {
+                base_mat <- matrix(0, nrow = n_components, ncol = n_coeff)
+            }
+            if (nrow(base_mat) < n_components) {
+                base_mat <- rbind(base_mat, matrix(0, nrow = n_components - nrow(base_mat), ncol = ncol(base_mat)))
+            }
+            if (ncol(base_mat) < n_coeff) {
+                base_mat <- cbind(base_mat, matrix(0, nrow = nrow(base_mat), ncol = n_coeff - ncol(base_mat)))
+            }
+            base_mat <- base_mat[seq_len(n_components), seq_len(n_coeff), drop = FALSE]
+            out <- array(0, dim = c(n, n_components, n_coeff))
+            for (m in seq_len(n_components)) {
+                out[, m, ] <- matrix(rep(base_mat[m, ], times = n), nrow = n, byrow = TRUE)
+            }
+            return(out)
+        }
+
         eff_names <- paste0(eff_prefix, "[", seq_len(n_coeff), "]")
         if (all(eff_names %in% colnames(dmat))) {
             return(get_mat(eff_names))
@@ -1447,6 +1488,26 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         matrix(0, n, 0)
     }
 
+    vcov_coef_vars <- grep("^alpha_vcov\\[", colnames(dmat), value = TRUE)
+    if (length(vcov_coef_vars) > 0) {
+        vcov_idx <- as.integer(sub("^alpha_vcov\\[(\\d+)\\]$", "\\1", vcov_coef_vars))
+        vcov_coef_vars <- vcov_coef_vars[order(vcov_idx)]
+    }
+    vcov_coef_raw <- if (length(vcov_coef_vars) > 0) get_mat(vcov_coef_vars) else matrix(0, n, 0)
+    M_vcov_assoc <- if (sd$Q_idm > 0) {
+        if (as.integer(sd$indep_idmarker_cov %||% 0L) == 1L) sd$Q_idm else (sd$Q_idm * (sd$Q_idm + 1)) / 2
+    } else {
+        0
+    }
+    vcov_coef_padded <- if (M_vcov_assoc > 0) {
+        out <- matrix(0, nrow = n, ncol = M_vcov_assoc)
+        n_copy <- min(ncol(vcov_coef_raw), M_vcov_assoc)
+        if (n_copy > 0) out[, seq_len(n_copy)] <- vcov_coef_raw[, seq_len(n_copy), drop = FALSE]
+        out
+    } else {
+        matrix(0, n, 0)
+    }
+
     list(
         n_samples = n,
         beta_fixed = beta_fixed,
@@ -1504,9 +1565,11 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         coeff_assoc_cv_marker = get_col("alpha_cv_marker"),
         coeff_assoc_cs_marker = get_col("alpha_cs_marker"),
         coeff_assoc_corr = corr_coef_padded,
+        coeff_assoc_vcov = vcov_coef_padded,
         coeff_cv = get_transform_coeff_draws("coeff_cv_eff", sd$coeff_cv, sd$n_coeff_cv),
         coeff_cs = get_transform_coeff_draws("coeff_cs_eff", sd$coeff_cs, sd$n_coeff_cs),
-        coeff_corr = get_transform_coeff_draws("coeff_corr_eff", sd$coeff_corr, sd$n_coeff_corr),
+        coeff_corr = get_transform_coeff_draws("coeff_corr_eff", sd$coeff_corr, sd$n_coeff_corr, n_components = sd$M_corr_tf %||% ncol(corr_coef_padded)),
+        coeff_vcov = get_transform_coeff_draws("coeff_vcov_eff", sd$coeff_vcov, sd$n_coeff_vcov, n_components = sd$M_vcov_tf %||% ncol(vcov_coef_padded)),
         coeff_cv_mean = get_transform_coeff_draws("coeff_cv_mean_eff", sd$coeff_cv_mean, sd$n_coeff_cv_mean),
         coeff_cv_marker = get_transform_coeff_draws("coeff_cv_marker_eff", sd$coeff_cv_marker, sd$n_coeff_cv_marker),
         coeff_cs_mean = get_transform_coeff_draws("coeff_cs_mean_eff", sd$coeff_cs_mean, sd$n_coeff_cs_mean),
@@ -1964,27 +2027,34 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         coeff_assoc_cv_mean = draws_list$coeff_assoc_cv_mean, coeff_assoc_cs_mean = draws_list$coeff_assoc_cs_mean,
         coeff_assoc_cv_marker = draws_list$coeff_assoc_cv_marker, coeff_assoc_cs_marker = draws_list$coeff_assoc_cs_marker,
         coeff_assoc_corr = draws_list$coeff_assoc_corr,
+        coeff_assoc_vcov = draws_list$coeff_assoc_vcov,
         K_ord = sd$K_ord %||% 2L,
         cutpoints_ord = draws_list$cutpoints_ord,
         flag_assoc_cv_total = sd$assoc_cv_total, flag_assoc_cv_mean = sd$assoc_cv_mean, flag_assoc_cv_marker = sd$assoc_cv_marker,
         flag_assoc_cs_total = sd$assoc_cs_total, flag_assoc_cs_mean = sd$assoc_cs_mean, flag_assoc_cs_marker = sd$assoc_cs_marker,
-        flag_assoc_corr = sd$assoc_corr,
+        flag_assoc_corr = sd$assoc_corr, flag_assoc_vcov = sd$assoc_vcov,
+        M_corr_tf = sd$M_corr_tf %||% ncol(draws_list$coeff_assoc_corr),
+        M_vcov_tf = sd$M_vcov_tf %||% ncol(draws_list$coeff_assoc_vcov),
         tf_mode_cv_tot = sd$tf_mode_cv_tot, tf_mode_cs_tot = sd$tf_mode_cs_tot,
         tf_mode_cv_mean = sd$tf_mode_cv_mean, tf_mode_cv_marker = sd$tf_mode_cv_marker,
         tf_mode_cs_mean = sd$tf_mode_cs_mean, tf_mode_cs_marker = sd$tf_mode_cs_marker,
-        tf_mode_corr = sd$tf_mode_corr,
+        tf_mode_corr = sd$tf_mode_corr, tf_mode_vcov = sd$tf_mode_vcov,
         n_functional_ops_cv = sd$n_functional_ops_cv, functional_ops_cv = sd$functional_ops_cv,
         n_const_cv = sd$n_const_cv, const_data_cv = sd$const_data_cv,
         n_functional_ops_cs = sd$n_functional_ops_cs, functional_ops_cs = sd$functional_ops_cs,
         n_const_cs = sd$n_const_cs, const_data_cs = sd$const_data_cs,
         n_functional_ops_corr = sd$n_functional_ops_corr, functional_ops_corr = sd$functional_ops_corr,
         n_const_corr = sd$n_const_corr, const_data_corr = sd$const_data_corr,
+        n_functional_ops_vcov = sd$n_functional_ops_vcov, functional_ops_vcov = sd$functional_ops_vcov,
+        n_const_vcov = sd$n_const_vcov, const_data_vcov = sd$const_data_vcov,
         n_knots_cv = sd$n_knots_cv, knots_cv = sd$knots_cv,
         n_coeff_cv = sd$n_coeff_cv, coeff_cv = draws_list$coeff_cv, spline_degree_cv = sd$spline_degree_cv,
         n_knots_cs = sd$n_knots_cs, knots_cs = sd$knots_cs,
         n_coeff_cs = sd$n_coeff_cs, coeff_cs = draws_list$coeff_cs, spline_degree_cs = sd$spline_degree_cs,
         n_knots_corr = sd$n_knots_corr, knots_corr = sd$knots_corr,
         n_coeff_corr = sd$n_coeff_corr, coeff_corr = draws_list$coeff_corr, spline_degree_corr = sd$spline_degree_corr,
+        n_knots_vcov = sd$n_knots_vcov, knots_vcov = sd$knots_vcov,
+        n_coeff_vcov = sd$n_coeff_vcov, coeff_vcov = draws_list$coeff_vcov, spline_degree_vcov = sd$spline_degree_vcov,
         n_functional_ops_cv_mean = sd$n_functional_ops_cv_mean, functional_ops_cv_mean = sd$functional_ops_cv_mean,
         n_const_cv_mean = sd$n_const_cv_mean, const_data_cv_mean = sd$const_data_cv_mean,
         n_knots_cv_mean = sd$n_knots_cv_mean, knots_cv_mean = sd$knots_cv_mean,
@@ -2428,6 +2498,11 @@ summary.JoinMeDynPred <- function(object, ...) {
     }
 
     marker_corr_depends_on_id <- isTRUE(object$metadata$marker_corr_depends_on_id)
+    any_re_indep <- any(as.integer(c(
+        object$metadata$indep_id_re %||% 0L,
+        object$metadata$indep_marker_re %||% 0L,
+        object$metadata$indep_idmarker_cov %||% 0L
+    )) == 1L)
 
     random_effects_marker_id_table <- NULL
     if (marker_corr_depends_on_id && !is.null(object$draws$random_effects_marker_id) && length(object$draws$random_effects_marker_id) > 0) {
@@ -2497,6 +2572,9 @@ summary.JoinMeDynPred <- function(object, ...) {
         corr_rows <- Filter(Negate(is.null), corr_rows)
         if (length(corr_rows) > 0) {
             corr_marker_id_table <- do.call(rbind, corr_rows)
+            if (isTRUE(any_re_indep)) {
+                corr_marker_id_table <- corr_marker_id_table[corr_marker_id_table$row == corr_marker_id_table$col, , drop = FALSE]
+            }
         }
     }
 
@@ -2670,38 +2748,21 @@ print.JoinMeDynPred <- function(x, ...) {
 
 #' @export
 print.summary_JoinMeDynPred <- function(x, ...) {
-    cat("Prediction summary\n")
-    cat("==================\n")
-    if (!is.null(x$tables$diagnostics)) {
-        cat("Diagnostics\n")
-        cat("-----------\n")
-        print(x$tables$diagnostics, row.names = FALSE)
+    .cli_summary_heading("Prediction summary", level = 1L)
+    meta_lines <- character(0)
+    if (!is.null(x$metadata$pred_type)) {
+        meta_lines <- c(meta_lines, paste0("Prediction type: ", x$metadata$pred_type))
     }
-    if (!is.null(x$tables$overview)) {
-        cat("\nOverview\n")
-        cat("--------\n")
-        print(x$tables$overview, row.names = FALSE)
+    if (!is.null(x$metadata$n_subjects)) {
+        meta_lines <- c(meta_lines, paste0("Subjects: ", x$metadata$n_subjects))
     }
-    if (!is.null(x$tables$median_survival_time)) {
-        cat("\nMedian survival time\n")
-        cat("--------------------\n")
-        print(x$tables$median_survival_time, row.names = FALSE)
-    }
-    if (!is.null(x$tables$random_effects_id)) {
-        cat("\nPredicted id random effects\n")
-        cat("---------------------------\n")
-        print(x$tables$random_effects_id, row.names = FALSE)
-    }
-    if (!is.null(x$tables$random_effects_marker_id)) {
-        cat("\nPredicted marker-by-id random effects\n")
-        cat("-------------------------------------\n")
-        print(x$tables$random_effects_marker_id, row.names = FALSE)
-    }
-    if (!is.null(x$tables$corr_marker_id)) {
-        cat("\nPredicted marker-by-id covariance\n")
-        cat("----------------------------------\n")
-        print(x$tables$corr_marker_id, row.names = FALSE)
-    }
+    .cli_print_bullets(meta_lines)
+    .cli_print_table_section("Diagnostics", x$tables$diagnostics, level = 2L, formatter = .format_common_diagnostics_for_print)
+    .cli_print_table_section("Overview", x$tables$overview, level = 2L)
+    .cli_print_table_section("Median survival time", x$tables$median_survival_time, level = 2L)
+    .cli_print_table_section("Predicted id random effects", x$tables$random_effects_id, level = 2L)
+    .cli_print_table_section("Predicted marker-by-id random effects", x$tables$random_effects_marker_id, level = 2L)
+    .cli_print_table_section("Predicted marker-by-id covariance", x$tables$corr_marker_id, level = 2L)
     invisible(x)
 }
 

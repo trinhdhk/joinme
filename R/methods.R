@@ -83,11 +83,14 @@ corr <- function(object, ...) {
     knots <- spec$raw_knots %||% spec$knots %||% spec$x
     degree <- spec$degree %||% 3L
     label <- if (spec$type %in% c("ispline_expit", "ispline_expit_penalised")) "ispline_expit" else "ispline"
+    direction <- spec$direction %||% if (!is.null(spec$spline_direction)) .monotone_direction_label(spec$spline_direction) else NULL
     if (!is.null(knots)) {
       knot_text <- paste(format(knots, digits = 3, trim = TRUE), collapse = ", ")
-      return(paste0(label, "(knots = c(", knot_text, "), degree = ", degree, ")"))
+      direction_text <- if (!is.null(direction)) paste0(", direction = ", direction) else ""
+      return(paste0(label, "(knots = c(", knot_text, "), degree = ", degree, direction_text, ")"))
     }
-    return(paste0(label, "(degree = ", degree, ")"))
+    direction_text <- if (!is.null(direction)) paste0(", direction = ", direction) else ""
+    return(paste0(label, "(degree = ", degree, direction_text, ")"))
   }
   if (spec$type == "pwlin") {
     x_vals <- spec$x
@@ -100,15 +103,65 @@ corr <- function(object, ...) {
 }
 
 #' @keywords internal
-.transform_formulas_from_specs <- function(transforms) {
+.omit_fixed_transform_endpoint_rows <- function(tbl, channel, spec, sd) {
+  if (is.null(tbl) || nrow(tbl) == 0L) {
+    return(tbl)
+  }
+
+  channel_map <- list(
+    cv_total = list(estimate = "estimate_spline_cv", n_free = "n_free_spline_cv"),
+    cs_total = list(estimate = "estimate_spline_cs", n_free = "n_free_spline_cs"),
+    corr = list(estimate = "estimate_spline_corr", n_free = "n_free_spline_corr"),
+    vcov = list(estimate = "estimate_spline_vcov", n_free = "n_free_spline_vcov"),
+    cv_mean = list(estimate = "estimate_spline_cv_mean", n_free = "n_free_spline_cv_mean"),
+    cv_marker = list(estimate = "estimate_spline_cv_marker", n_free = "n_free_spline_cv_marker"),
+    cs_mean = list(estimate = "estimate_spline_cs_mean", n_free = "n_free_spline_cs_mean"),
+    cs_marker = list(estimate = "estimate_spline_cs_marker", n_free = "n_free_spline_cs_marker")
+  )
+
+  map <- channel_map[[channel]]
+  if (is.null(map)) {
+    return(tbl)
+  }
+
+  estimate_flag <- as.integer(sd[[map$estimate]] %||% 0L)
+  n_free <- as.integer(sd[[map$n_free]] %||% 0L)
+  n_coeff <- as.integer(spec$n %||% 0L)
+
+  if (!isTRUE(estimate_flag == 1L) || n_coeff < 2L || n_free != (n_coeff - 1L)) {
+    return(tbl)
+  }
+
+  anchored_terms <- c("coeff_1", paste0("coeff_", n_coeff))
+  tbl[!(tbl$term %in% anchored_terms), , drop = FALSE]
+}
+
+#' @keywords internal
+.transform_formulas_from_specs <- function(transforms, sd = NULL) {
   if (is.null(transforms) || length(transforms) == 0) return(NULL)
   terms <- names(transforms)
   if (is.null(terms)) return(NULL)
-  data.frame(
-    term = terms,
-    formula = vapply(transforms, .format_transform_spec, character(1)),
-    stringsAsFactors = FALSE
-  )
+
+  rows <- lapply(terms, function(term_name) {
+    labels <- term_name
+    if (!is.null(sd) && term_name %in% c("corr", "vcov")) {
+      labels <- .assoc_transform_component_labels(
+        term_name,
+        .assoc_transform_component_count(
+          term_name,
+          sd$Q_idm,
+          diagonal_only = identical(term_name, "vcov") && as.integer(sd$indep_idmarker_cov %||% 0L) == 1L
+        )
+      )
+    }
+    data.frame(
+      term = labels,
+      formula = rep(.format_transform_spec(transforms[[term_name]]), length(labels)),
+      stringsAsFactors = FALSE
+    )
+  })
+
+  do.call(rbind, rows)
 }
 
 #' @keywords internal
@@ -427,6 +480,55 @@ corr <- function(object, ...) {
 }
 
 #' @keywords internal
+.cli_summary_heading <- function(text, level = 1L) {
+  level <- as.integer(level %||% 1L)
+  captured_output <- sink.number(type = "output") > 0L
+  if (!captured_output) {
+    if (level <= 1L) {
+      cli::cli_h1(text)
+    } else if (level == 2L) {
+      cli::cli_h2(text)
+    } else {
+      cli::cli_h3(text)
+    }
+  } else {
+    cat("\n", text, "\n", sep = "")
+  }
+  invisible(NULL)
+}
+
+#' @keywords internal
+.cli_print_table <- function(tbl, formatter = identity) {
+  if (is.null(tbl)) {
+    return(invisible(NULL))
+  }
+  formatted_tbl <- tibble::as_tibble(formatter(tbl))
+  print(formatted_tbl, n = nrow(formatted_tbl), width = Inf)
+  invisible(formatted_tbl)
+}
+
+#' @keywords internal
+.cli_print_bullets <- function(lines) {
+  lines <- lines[!is.na(lines) & nzchar(lines)]
+  if (!length(lines)) {
+    return(invisible(NULL))
+  }
+  bullet <- cli::symbol$bullet %||% "-"
+  cat(paste0(bullet, " ", lines, collapse = "\n"), "\n", sep = "")
+  invisible(lines)
+}
+
+#' @keywords internal
+.cli_print_table_section <- function(title, tbl, level = 2L, formatter = identity) {
+  if (is.null(tbl)) {
+    return(invisible(NULL))
+  }
+  .cli_summary_heading(title, level = level)
+  .cli_print_table(tbl, formatter = formatter)
+  invisible(tbl)
+}
+
+#' @keywords internal
 .diagnostics_table_from_sampler <- function(diag) {
   .build_common_diagnostics_table(
     draws = as.numeric(diag$draws %||% NA_real_),
@@ -717,6 +819,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
 
   a_vars <- c("alpha_cv_total", "alpha_cv_mean", "alpha_cv_marker", "alpha_cs_total", "alpha_cs_mean", "alpha_cs_marker")
   a_vars <- c(a_vars, grep("^alpha_corr\\[", all_vars, value = TRUE))
+  a_vars <- c(a_vars, grep("^alpha_vcov\\[", all_vars, value = TRUE))
   a_vars <- a_vars[a_vars %in% all_vars]
   active_vars <- c(
     if (isTRUE(sd$assoc_cv_total == 1)) "alpha_cv_total",
@@ -725,7 +828,8 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     if (isTRUE(sd$assoc_cs_total == 1)) "alpha_cs_total",
     if (isTRUE(sd$assoc_cs_mean == 1)) "alpha_cs_mean",
     if (isTRUE(sd$assoc_cs_marker == 1)) "alpha_cs_marker",
-    if (isTRUE(sd$assoc_corr == 1)) grep("^alpha_corr\\[", a_vars, value = TRUE)
+    if (isTRUE(sd$assoc_corr == 1)) grep("^alpha_corr\\[", a_vars, value = TRUE),
+    if (isTRUE(sd$assoc_vcov == 1)) grep("^alpha_vcov\\[", a_vars, value = TRUE)
   )
   if (length(active_vars) > 0) {
     a_vars <- a_vars[a_vars %in% active_vars]
@@ -851,6 +955,18 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
   corr_tables <- NULL
   id_marker_cov_tables <- NULL
   if (isTRUE(include_corr)) {
+    any_re_indep <- any(as.integer(c(
+      sd$indep_id_re %||% 0L,
+      sd$indep_marker_re %||% 0L,
+      sd$indep_idmarker_cov %||% 0L
+    )) == 1L)
+    .filter_diag_rows <- function(tbl) {
+      if (is.null(tbl) || !all(c("row", "col") %in% names(tbl))) {
+        return(tbl)
+      }
+      tbl[tbl$row == tbl$col, , drop = FALSE]
+    }
+
     q_idm <- as.integer(sd$Q_idm %||% 0L)
 
     if (q_idm > 0) {
@@ -999,6 +1115,10 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
       if (!is.null(regression_tbl)) {
         regression_tbl <- regression_tbl[, c("block", "row", "col", "term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
       }
+      if (isTRUE(any_re_indep)) {
+        latent_tbl <- .filter_diag_rows(latent_tbl)
+        regression_tbl <- NULL
+      }
       id_marker_cov_tables <- list(
         latent = latent_tbl,
         regression = regression_tbl,
@@ -1012,12 +1132,16 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
       id = corr(object, what = "id", draws = draws),
       marker = if (sd$R_mk > 0) corr(object, what = "marker", draws = draws) else NULL
     )
+    if (isTRUE(any_re_indep)) {
+      corr_tables <- lapply(corr_tables, .filter_diag_rows)
+    }
   }
 
   transform_param_specs <- list(
     cv_total = list(prefix = "coeff_cv_eff", n = sd$n_coeff_cv %||% 0L),
     cs_total = list(prefix = "coeff_cs_eff", n = sd$n_coeff_cs %||% 0L),
     corr = list(prefix = "coeff_corr_eff", n = sd$n_coeff_corr %||% 0L),
+    vcov = list(prefix = "coeff_vcov_eff", n = sd$n_coeff_vcov %||% 0L),
     cv_mean = list(prefix = "coeff_cv_mean_eff", n = sd$n_coeff_cv_mean %||% 0L),
     cv_marker = list(prefix = "coeff_cv_marker_eff", n = sd$n_coeff_cv_marker %||% 0L),
     cs_mean = list(prefix = "coeff_cs_mean_eff", n = sd$n_coeff_cs_mean %||% 0L),
@@ -1026,20 +1150,50 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
   transform_param_tables <- list()
   for (channel in names(transform_param_specs)) {
     spec <- transform_param_specs[[channel]]
-    var_names <- paste0(spec$prefix, "[", seq_len(as.integer(spec$n)), "]")
-    var_names <- var_names[var_names %in% all_vars]
+    if (channel %in% c("corr", "vcov")) {
+      n_components <- .assoc_transform_component_count(
+        channel,
+        sd$Q_idm,
+        diagonal_only = identical(channel, "vcov") && isTRUE(as.integer(sd$indep_idmarker_cov %||% 0L) == 1L)
+      )
+      if (n_components < 1L || as.integer(spec$n) < 1L) {
+        next
+      }
+      component_labels <- .assoc_transform_component_labels(channel, n_components)
+      var_names <- as.vector(outer(seq_len(n_components), seq_len(as.integer(spec$n)), function(m, j) paste0(spec$prefix, "[", m, ",", j, "]")))
+      var_names <- var_names[var_names %in% all_vars]
+      if (length(var_names) == 0L && as.integer(spec$n) > 0L) {
+        var_names <- paste0(spec$prefix, "[", seq_len(as.integer(spec$n)), "]")
+        var_names <- var_names[var_names %in% all_vars]
+      }
+    } else {
+      component_labels <- channel
+      var_names <- paste0(spec$prefix, "[", seq_len(as.integer(spec$n)), "]")
+      var_names <- var_names[var_names %in% all_vars]
+    }
     if (length(var_names) == 0) next
     tmp <- as.data.frame(.summarise_draws_diag(fit, var_names, draws = draws, seed = seed))
-    idx <- match(tmp$variable, var_names)
-    tmp$channel <- channel
-    tmp$term <- paste0("basis_", idx)
+    if (channel %in% c("corr", "vcov") && any(grepl(paste0("^", spec$prefix, "\\[\\d+,\\d+\\]$"), tmp$variable))) {
+      comp_idx <- as.integer(sub(paste0("^", spec$prefix, "\\[(\\d+),\\d+\\]$"), "\\1", tmp$variable))
+      basis_idx <- as.integer(sub(paste0("^", spec$prefix, "\\[\\d+,(\\d+)\\]$"), "\\1", tmp$variable))
+      tmp$channel <- component_labels[comp_idx]
+      tmp$term <- paste0("coeff_", basis_idx)
+    } else {
+      idx <- match(tmp$variable, var_names)
+      tmp$channel <- channel
+      tmp$term <- paste0("coeff_", idx)
+    }
     tmp <- tmp[, c("channel", "term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
+    tmp <- .omit_fixed_transform_endpoint_rows(tmp, channel = channel, spec = spec, sd = sd)
+    if (nrow(tmp) == 0L) {
+      next
+    }
     tmp$Estimate <- round(tmp$Estimate, digits)
     tmp$Est.Error <- round(tmp$Est.Error, digits)
     tmp$Q2.5 <- round(tmp$Q2.5, digits)
     tmp$Q97.5 <- round(tmp$Q97.5, digits)
     tmp$Rhat <- round(tmp$Rhat, 3)
-    transform_param_tables[[channel]] <- tmp
+    transform_param_tables[[channel]] <- dplyr::arrange(tmp, channel, term)
   }
   transform_params <- if (length(transform_param_tables) > 0) {
     do.call(rbind, unname(transform_param_tables))
@@ -1048,7 +1202,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
   }
 
   transform_specs <- cfg$transforms_spec %||% object$call$transforms
-  transform_formulas <- .transform_formulas_from_specs(transform_specs)
+  transform_formulas <- .transform_formulas_from_specs(transform_specs, sd = sd)
 
   term_diag <- .term_diagnostics_from_tables(list(s_beta, s_surv, s_a, transform_params, s_d, s_dr, corr_tables, id_marker_cov_tables))
   diag_table <- .build_common_diagnostics_table(
@@ -1079,6 +1233,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     ),
     diagnostics = diag,
     metadata = list(
+      call = if (!is.null(object$call)) paste(deparse(object$call, width.cutoff = 500L), collapse = " ") else NULL,
       family = sd$family_names %||% .family_code_to_name(cfg$family_long),
       tmax = sd$tmax %||% cfg$tmax %||% 1.0,
       draws = draws,
@@ -1238,8 +1393,11 @@ update.JoinMeFit <- function(
 #' @return Invisibly returns the summary object.
 #' @export
 print.summary_JoinMeFit <- function(x, ...) {
-  cat("Joint mixed effects model summary\n")
-  cat("=================================\n")
+  .cli_summary_heading("Joint mixed effects model summary", level = 1L)
+  meta_lines <- character(0)
+  if (!is.null(x$metadata$call) && nzchar(x$metadata$call)) {
+    meta_lines <- c(meta_lines, paste0("Call: ", x$metadata$call))
+  }
   if (!is.null(x$metadata$family)) {
     family <- x$metadata$family
     family <- if (length(family) == 1) {
@@ -1252,87 +1410,48 @@ print.summary_JoinMeFit <- function(x, ...) {
       fm_collapsed
     }
 
-    cat("Family: ", family, "\n", sep = "")
+    meta_lines <- c(meta_lines, paste0("Family: ", family))
   }
   if (!is.null(x$metadata$tmax)) {
-    cat("tmax: ", x$metadata$tmax, "\n", sep = "")
+    meta_lines <- c(meta_lines, paste0("tmax: ", x$metadata$tmax))
   }
-  cat("\n")
+  .cli_print_bullets(meta_lines)
   diag_tbl <- x$tables$diagnostics
   if (is.null(diag_tbl) && !is.null(x$diagnostics)) {
     diag_tbl <- .diagnostics_table_from_sampler(x$diagnostics)
   }
-  if (!is.null(diag_tbl)) {
-    cat("Sampler diagnostics\n")
-    cat("-------------------\n")
-    print(.format_common_diagnostics_for_print(diag_tbl), row.names = FALSE)
-  }
-  if (!is.null(x$metadata$transform_formulas)) {
-    cat("\nTransformations\n")
-    cat("----------------\n")
-    print(x$metadata$transform_formulas, row.names = FALSE)
-  }
-  if (!is.null(x$tables$fixef)) {
-    cat("\nFixed effects (beta)\n")
-    cat("---------------------\n")
-    print(x$tables$fixef, row.names = FALSE)
-  }
-  if (!is.null(x$tables$survival_process)) {
-    cat("\nSurvival process (non-association covariates)\n")
-    cat("-----------------------------------------------\n")
-    print(x$tables$survival_process, row.names = FALSE)
-  }
-  if (!is.null(x$tables$assoc)) {
-    cat("\nAssociation parameters\n")
-    cat("-----------------------\n")
-    print(x$tables$assoc, row.names = FALSE)
-  }
-  if (!is.null(x$tables$transform_parameters)) {
-    cat("\nTransform parameters\n")
-    cat("--------------------\n")
-    print(x$tables$transform_parameters, row.names = FALSE)
-  }
-  if (!is.null(x$tables$distributional)) {
-    cat("\nDistributional parameters\n")
-    cat("---------------------------\n")
-    print(x$tables$distributional, row.names = FALSE)
-  }
-  if (!is.null(x$tables$distributional_regression)) {
-    cat("\nDistributional regression\n")
-    cat("---------------------------\n")
-    print(x$tables$distributional_regression, row.names = FALSE)
-  }
+  .cli_print_table_section("Sampler diagnostics", diag_tbl, level = 2L, formatter = .format_common_diagnostics_for_print)
+  .cli_print_table_section("Transformations", x$metadata$transform_formulas, level = 2L)
+  .cli_print_table_section("Fixed effects (beta)", x$tables$fixef, level = 2L)
+  .cli_print_table_section("Survival process (non-association covariates)", x$tables$survival_process, level = 2L)
+  .cli_print_table_section("Association parameters", x$tables$assoc, level = 2L)
+  .cli_print_table_section("Transform parameters", x$tables$transform_parameters, level = 2L)
+  .cli_print_table_section("Distributional parameters", x$tables$distributional, level = 2L)
+  .cli_print_table_section("Distributional regression", x$tables$distributional_regression, level = 2L)
   if (!is.null(x$tables$corr)) {
-    cat("\nCovariance summaries\n")
-    cat("----------------------\n")
+    .cli_summary_heading("Covariance summaries", level = 2L)
     if (!is.null(x$tables$corr$id)) {
-      cat("id\n")
-      print(x$tables$corr$id, row.names = FALSE)
+      .cli_summary_heading("id", level = 3L)
+      .cli_print_table(x$tables$corr$id)
     }
     if (!is.null(x$tables$corr$marker)) {
-      cat("\nmarker\n")
-      print(x$tables$corr$marker, row.names = FALSE)
+      .cli_summary_heading("marker", level = 3L)
+      .cli_print_table(x$tables$corr$marker)
     }
   }
   if (!is.null(x$tables$id_marker_cov)) {
-    cat("\nid:marker covariance parameters\n")
-    cat("----------------------------------\n")
+    .cli_summary_heading("id:marker covariance parameters", level = 2L)
     if (!is.null(x$tables$id_marker_cov$latent)) {
-      cat("latent covariance matrix\n")
-      print(x$tables$id_marker_cov$latent, row.names = FALSE)
+      .cli_print_table_section("latent covariance matrix", x$tables$id_marker_cov$latent, level = 3L)
     }
     if (!is.null(x$tables$id_marker_cov$regression)) {
-      cat("\ncovariance regression coefficients\n")
-      print(x$tables$id_marker_cov$regression, row.names = FALSE)
+      .cli_print_table_section("covariance regression coefficients", x$tables$id_marker_cov$regression, level = 3L)
     }
     if (!is.null(x$tables$id_marker_cov$hyperparameters)) {
-      cat("\ncovariance regression hyperparameters\n")
-      print(x$tables$id_marker_cov$hyperparameters, row.names = FALSE)
+      .cli_print_table_section("covariance regression hyperparameters", x$tables$id_marker_cov$hyperparameters, level = 3L)
     }
   } else if (!is.null(x$tables$corr) && !is.null(x$tables$corr$id_marker)) {
-    cat("\nid:marker covariance parameters\n")
-    cat("----------------------------------\n")
-    print(x$tables$corr$id_marker, row.names = FALSE)
+    .cli_print_table_section("id:marker covariance parameters", x$tables$corr$id_marker, level = 2L)
   }
   invisible(x)
 }
