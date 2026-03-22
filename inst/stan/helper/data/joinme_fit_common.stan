@@ -214,8 +214,8 @@
   array[n_time_uid] int<lower=1, upper=R_id> idx_time_uid; // indices in tau_u to scale
   int<lower=0> n_time_vmk;                    // count of time cols in marker RE design
   array[n_time_vmk] int<lower=1> idx_time_vmk; // indices in tau_v to scale
-  int<lower=0> n_time_widm;                   // count of time cols in marker-by-id design
-  array[n_time_widm] int<lower=0, upper=Q_idm> idx_time_widm; // indices in the marker-by-id basis to scale
+  int<lower=0> n_time_idm;                    // count of raw-time cols in marker-by-id design
+  array[n_time_idm] int<lower=0, upper=Q_idm> idx_time_idm; // indices in the marker-by-id basis to scale
 
   /* Transform configuration */
   int<lower=0, upper=4> tf_mode_cv_tot;     // transform mode for total CV

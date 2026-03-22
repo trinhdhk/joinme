@@ -2435,7 +2435,7 @@ plot.JoinMeFit <- function(x,
         for (i in seq_len(n_id)) {
             for (d in seq_len(D)) {
                 for (q in seq_len(Q_idm)) {
-                    w_vars <- c(w_vars, paste0("w_idscaled[", i, ",", d, ",", q, "]"))
+                    w_vars <- c(w_vars, paste0("w_idm[", i, ",", d, ",", q, "]"))
                 }
             }
         }

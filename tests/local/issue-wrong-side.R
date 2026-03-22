@@ -10,8 +10,8 @@ sim <- simulate_joinme(
   formulaVCov = ~ 1,
   families = c("gaussian", "gaussian", "gaussian"),
   n_id = 400,
-  n_obs_per_marker_per_id = 10,
-  times_obs = seq(0, 8, length.out = 10),
+  n_obs_per_marker_per_id = 20,
+  times_obs = seq(0, 8, length.out = 20),
   assoc = "vcov",
   assoc_coefs = list(
     vcov = c(1, -1, -1)),
@@ -19,7 +19,7 @@ sim <- simulate_joinme(
   beta_long = c(-1, 0.5),
   beta_event = 0.5,
   re_params = list(
-    id = list(sd = c(1, 0.25)),
+    id = list(sd = c(1, 0.25), corr = matrix(c(1, -0.5, -0.5, 1), ncol=2)),
     id_marker_cov = list(
       alpha = c(0.5, -0.5, -1),
       lambda = c(0.1, 0.15, 0.2)
@@ -72,7 +72,7 @@ control <- list(
   engine = "cmdstanr",
   chains = 2,
   parallel_chains = 2,
-  iter_warmup = 800,
+  iter_warmup = 1000,
   iter_sampling = 800,
   threads_per_chain = 6,
   adapt_delta = 0.72,

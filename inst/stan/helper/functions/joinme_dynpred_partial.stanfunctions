@@ -24,17 +24,19 @@
  *   - u_id = L_u * z_u
  *   - v_marker[d] = L_v * z_v[d]
  *   - z_w[d] = (optional cross-correlation) + z_w_lat[d]
- *   - w_idscaled[d] = L_i * z_w[d], where L_i is subject-specific covariance
+ *   - w_idm[d] = L_i * z_w[d], where L_i is subject-specific covariance
  *
  * STEP 3: Build subject-specific Cholesky factor L_i via covariance regression
  *   - For each unique lower-triangular entry (r,c), compute:
  *       lp_i = alpha_vcov_reg + beta_vcov_reg' * vec_cov_vcov + lambda * z_Lk
  *     If r == c (diagonal), apply softplus or exp to ensure positivity.
  *     Otherwise, use lp_i directly for off-diagonal entries.
+ *     When `formulaVCov = ~ 1`, `vec_cov_vcov` has length 0 and the slope term
+ *     drops out, leaving an intercept-only covariance regression.
  *
  * STEP 4: Evaluate longitudinal likelihood given random effects
  *   - For each observed longitudinal row n:
- *       eta = X * beta_fixed + Z_id * u_id + Z_mk * v_marker[d] + Z_idm * w_idscaled[d]
+ *       eta = X * beta_fixed + Z_id * u_id + Z_mk * v_marker[d] + Z_idm * w_idm[d]
  *     Then evaluate log p(y_n | eta, family) with distributional parameters
  *     (sigma, nu, phi, alpha, tau) taken from draw-specific regressions.
  *
@@ -446,8 +448,12 @@ real partial_draw(
     for (m in 1 : num_unique_cov_entries) {
       int r_ = idx_row_cov[m];
       int c_ = idx_col_cov[m];
-      vector[n_cov_vcov] bL_m = beta_vcov_reg_flat[k][((m - 1) * n_cov_vcov + 1) : (m * n_cov_vcov)];
-      real lp_i = alpha_vcov_reg[k][m] + dot_product(bL_m, vec_cov_vcov) + lambda_vcov_reg[k][m] * z_L[k][m];
+      real beta_contrib = 0.0;
+      if (n_cov_vcov > 0) {
+        vector[n_cov_vcov] bL_m = beta_vcov_reg_flat[k][((m - 1) * n_cov_vcov + 1) : (m * n_cov_vcov)];
+        beta_contrib = dot_product(bL_m, vec_cov_vcov);
+      }
+      real lp_i = alpha_vcov_reg[k][m] + beta_contrib + lambda_vcov_reg[k][m] * z_L[k][m];
       // lp_i: linear predictor for L_i element (r_, c_)
       if (r_ == c_) {
         Li[r_, c_] = (vcov_diag_link == 1) ? exp(lp_i) : log1p_exp(lp_i);
@@ -458,9 +464,9 @@ real partial_draw(
 
     // Transform marker-by-ID latent effects into actual random effects
     matrix[n_random_marker_id, n_random_marker_id] Li_eff = diag_pre_multiply(marker_id_row_scale, Li);
-    array[n_marker_types] vector[n_random_marker_id] w_idscaled; // scaled marker-id REs
+    array[n_marker_types] vector[n_random_marker_id] w_idm; // scaled marker-id REs
     for (d in 1 : n_marker_types)
-      w_idscaled[d] = Li_eff * z_w[d];
+      w_idm[d] = Li_eff * z_w[d];
 
     // ---------------------------------------------------------------
     // STEP 4: Longitudinal log-likelihood for observed history
@@ -470,7 +476,7 @@ real partial_draw(
       real eta = dot_product(mat_fixed_obs[n], beta_fixed[k])
                  + dot_product(mat_id_obs[n], u_id)
                  + ((n_random_marker > 0) ? dot_product(mat_marker_obs[n], v_marker[d]) : 0.0)
-                 + dot_product(mat_marker_id_obs[n], w_idscaled[d]);
+                 + dot_product(mat_marker_id_obs[n], w_idm[d]);
       // eta: linear predictor for observed row n
       int link_d = canonical_link_code_from_program(d, inv_link_n_ops, inv_link_ops, inv_link_n_const);
       real mu = inv_link_bytecode(eta, d, inv_link_n_ops, inv_link_ops, inv_link_n_const, inv_link_const);

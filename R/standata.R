@@ -15,7 +15,7 @@
 #'    - n_time_beta, idx_time_beta
 #'    - n_time_uid,  idx_time_uid
 #'    - n_time_vmk,  idx_time_vmk
-#'    - n_time_widm, idx_time_widm
+#'    - n_time_idm,  idx_time_idm
 #'
 #' @details
 #' This builder performs three key steps:
@@ -46,7 +46,8 @@
 #'   are absent and covariance-style associations (`corr`, `vcov`) are not allowed.
 #'   Downstream, `corr` uses off-diagonal correlation features derived from those
 #'   marker-by-id effects, whereas `vcov` uses the lower-triangular entries of the
-#'   subject-specific Cholesky factor `L` directly.
+#'   subject-specific Cholesky factor `L` directly. The default `~ 1` is valid and
+#'   yields an intercept-only covariance regression with no subject-level slope columns.
 #' @param formulaDist Optional list of formulas for distributional regression. Two
 #'   forms are supported:
 #'   1. Named list with RHS-only formulas, e.g. `list(sigma = ~ 1 + time)`.
@@ -518,13 +519,29 @@ joinme_standata <- function(
   re_phi_beta <- .pad_re_terms(.build_dist_re_terms(dist_formulas$phi_beta, dl), nrow(dl))
   re_tau_sde <- .pad_re_terms(.build_dist_re_terms(dist_formulas$tau_sde, dl), nrow(dl))
 
-  X_obs <- .mm(fixed_rhs, dl)
+  fixed_blueprint <- .make_model_matrix_blueprint(
+    fixed_rhs,
+    dl,
+    boundary_var = time_var,
+    boundary_values = c(0, 1)
+  )
+  id_rhs_list <- .bar_terms_to_rhs_list(bars[id_idx])
+  id_blueprints <- lapply(id_rhs_list, function(rhs) {
+    .make_model_matrix_blueprint(rhs, dl, boundary_var = time_var, boundary_values = c(0, 1))
+  })
+  mk_blueprints <- lapply(mk_rhs_list, function(rhs) {
+    .make_model_matrix_blueprint(rhs, dl, boundary_var = time_var, boundary_values = c(0, 1))
+  })
+  idm_blueprints <- lapply(idm_rhs_list, function(rhs) {
+    .make_model_matrix_blueprint(rhs, dl, boundary_var = time_var, boundary_values = c(0, 1))
+  })
+
+  X_obs <- .mm(fixed_blueprint, dl)
   P <- ncol(X_obs)
 
   # id block
   # - always required (subject random effects)
-  id_rhs_list <- .bar_terms_to_rhs_list(bars[id_idx])
-  Z_id_obs <- do.call(cbind, lapply(id_rhs_list, function(rhs) .mm(rhs, dl)))
+  Z_id_obs <- do.call(cbind, lapply(id_blueprints, function(rhs) .mm(rhs, dl)))
   R_id <- ncol(Z_id_obs)
 
   # marker-only optional
@@ -534,7 +551,7 @@ joinme_standata <- function(
     R_mk <- mk0$R_mk
     Z_mk_obs <- mk0$Z_mk_obs
   } else {
-    Z_mk_obs <- do.call(cbind, lapply(mk_rhs_list, function(rhs) .mm(rhs, dl)))
+    Z_mk_obs <- do.call(cbind, lapply(mk_blueprints, function(rhs) .mm(rhs, dl)))
     R_mk <- ncol(Z_mk_obs)
   }
 
@@ -544,7 +561,7 @@ joinme_standata <- function(
     Z_idm_obs <- matrix(0.0, nrow(dl), 0)
     Q_idm <- 0L
   } else {
-    Z_idm_obs <- do.call(cbind, lapply(idm_rhs_list, function(rhs) .mm(rhs, dl)))
+    Z_idm_obs <- do.call(cbind, lapply(idm_blueprints, function(rhs) .mm(rhs, dl)))
     Q_idm <- ncol(Z_idm_obs)
   }
 
@@ -670,15 +687,15 @@ joinme_standata <- function(
   de_fwd[[time_var]] <- S_fwd
 
   # Mean designs
-  X_gk_now <- .eval_rhs_list_on_times(list(fixed_rhs), dataEvent, time_var, u_now)
-  X_gk_fwd <- .eval_rhs_list_on_times(list(fixed_rhs), dataEvent, time_var, u_fwd)
-  X_event_now <- .mm(fixed_rhs, de_now)
-  X_event_fwd <- .mm(fixed_rhs, de_fwd)
+  X_gk_now <- .eval_rhs_list_on_times(list(fixed_blueprint), dataEvent, time_var, u_now)
+  X_gk_fwd <- .eval_rhs_list_on_times(list(fixed_blueprint), dataEvent, time_var, u_fwd)
+  X_event_now <- .mm(fixed_blueprint, de_now)
+  X_event_fwd <- .mm(fixed_blueprint, de_fwd)
 
-  Z_id_gk_now <- .eval_rhs_list_on_times(id_rhs_list, dataEvent, time_var, u_now)
-  Z_id_gk_fwd <- .eval_rhs_list_on_times(id_rhs_list, dataEvent, time_var, u_fwd)
-  Z_id_event_now <- .eval_rhs_list_at_event(id_rhs_list, dataEvent, time_var, S_now)
-  Z_id_event_fwd <- .eval_rhs_list_at_event(id_rhs_list, dataEvent, time_var, S_fwd)
+  Z_id_gk_now <- .eval_rhs_list_on_times(id_blueprints, dataEvent, time_var, u_now)
+  Z_id_gk_fwd <- .eval_rhs_list_on_times(id_blueprints, dataEvent, time_var, u_fwd)
+  Z_id_event_now <- .eval_rhs_list_at_event(id_blueprints, dataEvent, time_var, S_now)
+  Z_id_event_fwd <- .eval_rhs_list_at_event(id_blueprints, dataEvent, time_var, S_fwd)
 
   # Marker-only designs (optional)
   if (R_mk == 0) {
@@ -688,17 +705,17 @@ joinme_standata <- function(
     Z_mk_event_now <- mk0$Z_mk_event_now
     Z_mk_event_fwd <- mk0$Z_mk_event_fwd
   } else {
-    Z_mk_gk_now <- .eval_rhs_list_on_times(mk_rhs_list, dataEvent, time_var, u_now)
-    Z_mk_gk_fwd <- .eval_rhs_list_on_times(mk_rhs_list, dataEvent, time_var, u_fwd)
-    Z_mk_event_now <- .eval_rhs_list_at_event(mk_rhs_list, dataEvent, time_var, S_now)
-    Z_mk_event_fwd <- .eval_rhs_list_at_event(mk_rhs_list, dataEvent, time_var, S_fwd)
+    Z_mk_gk_now <- .eval_rhs_list_on_times(mk_blueprints, dataEvent, time_var, u_now)
+    Z_mk_gk_fwd <- .eval_rhs_list_on_times(mk_blueprints, dataEvent, time_var, u_fwd)
+    Z_mk_event_now <- .eval_rhs_list_at_event(mk_blueprints, dataEvent, time_var, S_now)
+    Z_mk_event_fwd <- .eval_rhs_list_at_event(mk_blueprints, dataEvent, time_var, S_fwd)
   }
 
   # Marker-by-id designs
-  Z_idm_gk_now <- .eval_rhs_list_on_times(idm_rhs_list, dataEvent, time_var, u_now)
-  Z_idm_gk_fwd <- .eval_rhs_list_on_times(idm_rhs_list, dataEvent, time_var, u_fwd)
-  Z_idm_event_now <- .eval_rhs_list_at_event(idm_rhs_list, dataEvent, time_var, S_now)
-  Z_idm_event_fwd <- .eval_rhs_list_at_event(idm_rhs_list, dataEvent, time_var, S_fwd)
+  Z_idm_gk_now <- .eval_rhs_list_on_times(idm_blueprints, dataEvent, time_var, u_now)
+  Z_idm_gk_fwd <- .eval_rhs_list_on_times(idm_blueprints, dataEvent, time_var, u_fwd)
+  Z_idm_event_now <- .eval_rhs_list_at_event(idm_blueprints, dataEvent, time_var, S_now)
+  Z_idm_event_fwd <- .eval_rhs_list_at_event(idm_blueprints, dataEvent, time_var, S_fwd)
 
   # Association flags
   af <- .parse_assoc(assoc)
@@ -723,7 +740,11 @@ joinme_standata <- function(
     zid_cols = zid_cols,
     zmk_cols = zmk_cols,
     zidm_cols = zidm_cols,
-    time_var = time_var
+    time_var = time_var,
+    fixed_design = fixed_blueprint,
+    id_design = id_blueprints,
+    marker_design = mk_blueprints,
+    idm_design = idm_blueprints
   )
 
   # Prior scales (align to P)
@@ -949,6 +970,8 @@ joinme_standata <- function(
     # Time metadata
     # --------------------------
     tmax = as.numeric(tmax),
+    tmax_internal = as.numeric(tmax),
+    tmax_reported = as.numeric(tmax),
     quadrature_nodes = as.integer(n_gk),
     n_time_beta = as.integer(time_meta$n_time_beta),
     idx_time_beta = as.array(as.integer(time_meta$idx_time_beta)),
@@ -956,8 +979,8 @@ joinme_standata <- function(
     idx_time_uid = as.array(as.integer(time_meta$idx_time_uid)),
     n_time_vmk = as.integer(time_meta$n_time_vmk),
     idx_time_vmk = as.array(as.integer(time_meta$idx_time_vmk)),
-    n_time_widm = as.integer(time_meta$n_time_widm),
-    idx_time_widm = as.array(as.integer(time_meta$idx_time_widm)),
+    n_time_idm = as.integer(time_meta$n_time_idm),
+    idx_time_idm = as.array(as.integer(time_meta$idx_time_idm)),
 
     # --------------------------
     # Other metadata
@@ -967,6 +990,12 @@ joinme_standata <- function(
     zid_cols = zid_cols,
     zmk_cols = zmk_cols,
     zidm_cols = zidm_cols,
+    design_blueprints = list(
+      fixed = fixed_blueprint,
+      id = id_blueprints,
+      marker = mk_blueprints,
+      idm = idm_blueprints
+    ),
     time_var = time_var,
     marker_levels = marker_levels,
     marker_weights = as.numeric(marker_weights),

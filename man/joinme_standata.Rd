@@ -148,7 +148,7 @@ index vectors indicating which columns correspond to time.
 \item n_time_beta, idx_time_beta
 \item n_time_uid,  idx_time_uid
 \item n_time_vmk,  idx_time_vmk
-\item n_time_widm, idx_time_widm
+\item n_time_idm, idx_time_idm
 }
 }
 }

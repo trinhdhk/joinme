@@ -9,7 +9,7 @@ test_that(".scale_draw_dependent_time_terms scales time-indexed draw components"
     idx_time_beta = c(2L),
     idx_time_uid = c(1L),
     idx_time_vmk = c(2L),
-    idx_time_widm = c(1L)
+    idx_time_idm = c(1L)
   )
 
   out <- joinme:::.scale_draw_dependent_time_terms(draws, stan_data, tmax = 10)
@@ -37,7 +37,7 @@ test_that(".scale_draw_dependent_time_terms is no-op for tmax ~ 1", {
     idx_time_beta = c(1L, 3L),
     idx_time_uid = c(2L),
     idx_time_vmk = c(1L),
-    idx_time_widm = c(2L)
+    idx_time_idm = c(2L)
   )
 
   out <- joinme:::.scale_draw_dependent_time_terms(draws, stan_data, tmax = 1)

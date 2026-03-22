@@ -147,7 +147,8 @@
 #'   absent and covariance-style associations (`corr`, `vcov`) are not allowed.
 #'   When present, `corr` associations use the resulting off-diagonal correlation
 #'   features, whereas `vcov` associations use the lower-triangular entries of the
-#'   subject-specific Cholesky factor `L` directly.
+#'   subject-specific Cholesky factor `L` directly. The default `~ 1` remains a
+#'   supported intercept-only covariance regression.
 #' @param formulaDist Optional list of formulas for distributional regression.
 #'   Supported LHS parameters are:
 #'   - `sigma`
@@ -546,12 +547,14 @@ joinme <- function(
     dims = c(n_id = sd$n_id, N = sd$N, D = sd$D, P = sd$P, R_id = sd$R_id, R_mk = sd$R_mk, Q_idm = sd$Q_idm),
     draws_default = draws,
     threads_per_chain = threads_per_chain,
-    tmax = sd$tmax,
+    tmax = sd$tmax_reported %||% sd$tmax,
+    tmax_internal = sd$tmax_internal %||% sd$tmax,
+    tmax_reported = sd$tmax_reported %||% sd$tmax,
     time_indices = list(
       idx_time_beta = sd$idx_time_beta,
       idx_time_uid = sd$idx_time_uid,
       idx_time_vmk = sd$idx_time_vmk,
-      idx_time_widm = sd$idx_time_widm
+      idx_time_idm = sd$idx_time_idm
     ),
     marker_weights = sd$marker_weights,
     fixed_marker_weights = sd$fixed_marker_weights,
@@ -573,7 +576,7 @@ joinme <- function(
     formulaVCov = formulaVCov,
     config = cfg,
     call = match.call(),
-    tmax = sd$tmax,
+    tmax = sd$tmax_reported %||% sd$tmax,
     dataLong = dataLong,
     dataEvent = dataEvent
   )

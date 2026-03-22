@@ -41,7 +41,7 @@
  *   b. **Current Value - Marker Component (cvk)**:
  *      cvk(t) = Z_mk(t)*vbar + Z_idm(t)*wbar_i
  *      where vbar = weighted average of v_marker across markers
- *            wbar_i = weighted average of w_idscaled[i, ] across markers
+ *            wbar_i = weighted average of w_idm[i, ] across markers
  *      This captures marker-specific deviations
  *
  *   c. **Current Slope via Finite Difference**:
@@ -194,7 +194,7 @@
  * @param z_tau_sde Standard normal draws for tau_sde random effects.
  * @param u_id Random effects (subject-level).
  * @param v_marker Random effects (marker-level).
- * @param w_idscaled Random effects (scaled subject-marker).
+ * @param w_idm Random effects (scaled subject-marker).
  * @param wbar_i Mean of random effects per subject (for centring).
  * @param sigma_y Base residual standard deviation.
  * @param sigma_marker Marker-specific residual scales.
@@ -392,7 +392,7 @@ real partial_joinme(
     array[] matrix z_tau_sde,
     array[] vector u_id,
     array[] vector v_marker,
-    array[,] vector w_idscaled,
+    array[,] vector w_idm,
     array[] vector wbar_i,
     vector sigma_family,
     vector nu_family,
@@ -519,7 +519,7 @@ real partial_joinme(
       int d = marker[n];  // Marker type for this observation (1, 2, ..., D_mkrs)
       
       // Subject-by-marker interaction random effects for this observation
-      vector[Q_idm] w_idscaled_i = w_idscaled[i, d]; // marker-id RE for obs n
+      vector[Q_idm] w_idm_i = w_idm[i, d]; // marker-id RE for obs n
       
       // -------------------------------------------------------------------
       // LINEAR PREDICTOR (LOCATION PARAMETER) FOR LONGITUDINAL OBSERVATION
@@ -534,7 +534,7 @@ real partial_joinme(
       real eta_long = dot_product(X_obs[n], beta_scaled)
                       + dot_product(Z_id_obs[n], u_id[i])
                       + ((R_mk > 0) ? dot_product(Z_mk_obs[n], v_marker[d]) : 0.0)
-                      + dot_product(Z_idm_obs[n], w_idscaled_i);
+                      + dot_product(Z_idm_obs[n], w_idm_i);
       // eta_long: linear predictor for observation n
 
       // -------------------------------------------------------------------
@@ -889,8 +889,8 @@ real partial_joinme(
           mk_part_now_d = dot_product(Z_mk_gk_now[i][j], v_marker[d]);
           mk_part_fwd_d = dot_product(Z_mk_gk_fwd[i][j], v_marker[d]);
         }
-        real cvk_now_d = mk_part_now_d + dot_product(Z_idm_gk_now[i][j], w_idscaled[i, d]);
-        real cvk_fwd_d = mk_part_fwd_d + dot_product(Z_idm_gk_fwd[i][j], w_idscaled[i, d]);
+        real cvk_now_d = mk_part_now_d + dot_product(Z_idm_gk_now[i][j], w_idm[i, d]);
+        real cvk_fwd_d = mk_part_fwd_d + dot_product(Z_idm_gk_fwd[i][j], w_idm[i, d]);
         real cv_tot_now_d = cvm_now[j] + cvk_now_d;
 
         acc_cv_tot_tf += marker_weights_eff[d]
@@ -1038,8 +1038,8 @@ real partial_joinme(
           mk_part_S_d = dot_product(Z_mk_event_now[i], v_marker[d]);
           mk_part_S_fwd_d = dot_product(Z_mk_event_fwd[i], v_marker[d]);
         }
-        real cvk_S_d = mk_part_S_d + dot_product(Z_idm_event_now[i], w_idscaled[i, d]);
-        real cvk_S_fwd_d = mk_part_S_fwd_d + dot_product(Z_idm_event_fwd[i], w_idscaled[i, d]);
+        real cvk_S_d = mk_part_S_d + dot_product(Z_idm_event_now[i], w_idm[i, d]);
+        real cvk_S_fwd_d = mk_part_S_fwd_d + dot_product(Z_idm_event_fwd[i], w_idm[i, d]);
         real cv_S_tot_d = cvm_S + cvk_S_d;
 
         cv_S_tot_tf += marker_weights_eff[d]

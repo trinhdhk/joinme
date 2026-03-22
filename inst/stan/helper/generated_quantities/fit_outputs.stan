@@ -6,7 +6,7 @@
   vector[P] beta_eff_in_likelihood = beta_scaled;
   vector[R_id] tau_u_eff = tau_u_scaled;
   vector[R_mk] tau_v_eff = tau_v_scaled;
-  vector[Q_idm] marker_id_row_scale_eff = row_scale_widm;
+  vector[Q_idm] marker_id_row_scale_eff = row_scale_idm;
   
   /**
   * @brief Association coefficients actually used for totals.
@@ -34,7 +34,7 @@
                     + dot_product(Z_id_obs[n], u_id[i])
                     + ((R_mk > 0) ? dot_product(Z_mk_obs[n], v_marker[d])
                        : 0.0)
-                    + dot_product(Z_idm_obs[n], w_idscaled[i, d]);
+                    + dot_product(Z_idm_obs[n], w_idm[i, d]);
      // eta_long: linear predictor for longitudinal outcome
     int link_d = canonical_link_code_from_program(d, inv_link_n_ops, inv_link_ops, inv_link_n_const);
     real mu_long = inv_link_bytecode(eta_long, d, inv_link_n_ops, inv_link_ops, inv_link_n_const, inv_link_const);
@@ -256,8 +256,8 @@
           mk_part_now_d = dot_product(Z_mk_gk_now[i][j], v_marker[d]);
           mk_part_fwd_d = dot_product(Z_mk_gk_fwd[i][j], v_marker[d]);
         }
-        real cvk_now_d = mk_part_now_d + dot_product(Z_idm_gk_now[i][j], w_idscaled[i, d]);
-        real cvk_fwd_d = mk_part_fwd_d + dot_product(Z_idm_gk_fwd[i][j], w_idscaled[i, d]);
+        real cvk_now_d = mk_part_now_d + dot_product(Z_idm_gk_now[i][j], w_idm[i, d]);
+        real cvk_fwd_d = mk_part_fwd_d + dot_product(Z_idm_gk_fwd[i][j], w_idm[i, d]);
         real cv_tot_now_d = cvm_now[j] + cvk_now_d;
         acc_cv_tot_tf += marker_weights_eff[d]
           * apply_transform_scalar(cv_tot_now_d, tf_mode_cv_tot,
@@ -403,8 +403,8 @@
           mk_part_S_d = dot_product(Z_mk_event_now[i], v_marker[d]);
           mk_part_S_fwd_d = dot_product(Z_mk_event_fwd[i], v_marker[d]);
         }
-        real cvk_S_d = mk_part_S_d + dot_product(Z_idm_event_now[i], w_idscaled[i, d]);
-        real cvk_S_fwd_d = mk_part_S_fwd_d + dot_product(Z_idm_event_fwd[i], w_idscaled[i, d]);
+        real cvk_S_d = mk_part_S_d + dot_product(Z_idm_event_now[i], w_idm[i, d]);
+        real cvk_S_fwd_d = mk_part_S_fwd_d + dot_product(Z_idm_event_fwd[i], w_idm[i, d]);
         real cv_S_tot_d = cvm_S + cvk_S_d;
 
         cv_S_tot_tf += marker_weights_eff[d]

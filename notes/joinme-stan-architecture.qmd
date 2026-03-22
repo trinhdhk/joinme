@@ -175,7 +175,7 @@ graph LR
     
     subgraph Params["Parameters"]
         Beta["Î²: Fixed effects<br/>(scaled)"]
-        RE["u_id: ID REs<br/>v_marker: Marker REs<br/>w_idscaled: Interaction REs"]
+        RE["u_id: ID REs<br/>v_marker: Marker REs<br/>w_idm: Interaction REs"]
         Scales["Ï„: RE scales<br/>Lcorr: Correlations"]
         Gamma["Î³: Hazard params<br/>h0: Baseline hazard"]
         Alpha["Î±: Association<br/>coefficients"]
@@ -261,7 +261,7 @@ FUNCTION partial_joinme(id_seq, start, end, ... [all data & parameters]):
       Î·_long = X_obs[n]'Î²_scaled             // Fixed effects
              + Z_id_obs[n]'u_id[i]           // ID-specific RE
              + Z_mk_obs[n]'v_marker[d]       // Marker-specific RE
-             + Z_idm_obs[n]'w_idscaled[i,d]  // IDÃ—Marker interaction RE
+             + Z_idm_obs[n]'w_idm[i,d]  // IDÃ—Marker interaction RE
       
       // 2. Compute distributional parameters if needed
       //    (e.g., Ïƒ for Gaussian, Î½ for Student-t, Ï† for NegBinom, etc.)
@@ -306,9 +306,9 @@ FUNCTION partial_joinme(id_seq, start, end, ... [all data & parameters]):
 
       // b. Compute marker-level totals first (per marker d)
       FOR each marker d:
-        cvmkr_now[d,j] = Z_mk_gk_now[i][j,d]'v_marker[d] + Z_idm_gk_now[i][j,d]'w_idscaled[i,d]
+        cvmkr_now[d,j] = Z_mk_gk_now[i][j,d]'v_marker[d] + Z_idm_gk_now[i][j,d]'w_idm[i,d]
         cvtot_now[d,j] = cvm_now[j] + cvmkr_now[d,j]
-        cvmkr_fwd[d,j] = Z_mk_gk_fwd[i][j,d]'v_marker[d] + Z_idm_gk_fwd[i][j,d]'w_idscaled[i,d]
+        cvmkr_fwd[d,j] = Z_mk_gk_fwd[i][j,d]'v_marker[d] + Z_idm_gk_fwd[i][j,d]'w_idm[i,d]
         cvtot_fwd[d,j] = cvm_fwd[j] + cvmkr_fwd[d,j]
       END FOR
     END FOR
@@ -600,13 +600,13 @@ FUNCTION partial_draw(draw_ids_slice, start, end, ... [data & posterior draws]):
     
     // Transform latent REs to actual subjectÃ—marker REs
     FOR each marker d:
-      w_idscaled[d] = L_i * z_w[d]
+      w_idm[d] = L_i * z_w[d]
     END FOR
 
     // 3b. Marker-weighted means for association summaries
     //     weights Ï‰_d are draw-specific when marker weights are estimated
     vbar = Î£_d Ï‰_d v_marker[d]
-    wbar = Î£_d Ï‰_d w_idscaled[d]
+    wbar = Î£_d Ï‰_d w_idm[d]
     
     // -------------------
     // 4. LONGITUDINAL CONDITIONING: log p(y_obs | u, v, w, Î¸^(k))
@@ -618,7 +618,7 @@ FUNCTION partial_draw(draw_ids_slice, start, end, ... [data & posterior draws]):
       Î· = mat_fixed_obs[n]' * Î²_fixed^(k)
         + mat_id_obs[n]' * u_id
         + mat_marker_obs[n]' * v_marker[d]
-        + mat_marker_id_obs[n]' * w_idscaled[d]
+        + mat_marker_id_obs[n]' * w_idm[d]
       
       // Likelihood based on family (same logic as joinme_fit)
       SWITCH family_long[d]:
@@ -642,8 +642,8 @@ FUNCTION partial_draw(draw_ids_slice, start, end, ... [data & posterior draws]):
       cvm_f[j] = mat_fixed_gk_cond_fwd[j]' * Î²_fixed^(k) + mat_id_gk_cond_fwd[j]' * u_id
 
       FOR each marker d:
-        cvk[d,j] = mat_marker_gk_cond[j,d]' * v_marker[d] + mat_marker_id_gk_cond[j,d]' * w_idscaled[d]
-        cvk_f[d,j] = mat_marker_gk_cond_fwd[j,d]' * v_marker[d] + mat_marker_id_gk_cond_fwd[j,d]' * w_idscaled[d]
+        cvk[d,j] = mat_marker_gk_cond[j,d]' * v_marker[d] + mat_marker_id_gk_cond[j,d]' * w_idm[d]
+        cvk_f[d,j] = mat_marker_gk_cond_fwd[j,d]' * v_marker[d] + mat_marker_id_gk_cond_fwd[j,d]' * w_idm[d]
         cvtot[d,j] = cvm[j] + cvk[d,j]
         cvtot_f[d,j] = cvm_f[j] + cvk_f[d,j]
       END FOR

@@ -35,10 +35,10 @@
   // Marker-by-id covariance regression is parameterised on the original-time
   // scale. We only row-scale time-indexed marker-by-id coefficients when they
   // are paired with the scaled-time longitudinal design matrices.
-  vector[Q_idm] row_scale_widm = rep_vector(1.0, Q_idm);
-  if (n_time_widm > 0) {
-    for (k in 1 : n_time_widm)
-      row_scale_widm[idx_time_widm[k]] = tmax;
+  vector[Q_idm] row_scale_idm = rep_vector(1.0, Q_idm);
+  if (n_time_idm > 0) {
+    for (k in 1 : n_time_idm)
+      row_scale_idm[idx_time_idm[k]] = tmax;
   }
   
   /* -------------------- id RE covariance */
@@ -99,12 +99,12 @@
     L_i[i] = Li;
   }
   
-  /* -------------------- marker-by-id scaled effects: w_idscaled[i,d] = L_i_eff[i] * z_w[i,d] */
-  array[n_id, D] vector[Q_idm] w_idscaled; // scaled marker-id effects
+  /* -------------------- marker-by-id scaled effects: w_idm[i,d] = L_i_eff[i] * z_w[i,d] */
+  array[n_id, D] vector[Q_idm] w_idm; // scaled marker-id effects
   for (i in 1 : n_id) {
-    matrix[Q_idm, Q_idm] L_i_eff = diag_pre_multiply(row_scale_widm, L_i[i]);
+    matrix[Q_idm, Q_idm] L_i_eff = diag_pre_multiply(row_scale_idm, L_i[i]);
     for (d in 1 : D)
-      w_idscaled[i, d] = L_i_eff * z_w[i, d];
+      w_idm[i, d] = L_i_eff * z_w[i, d];
   }
   
   /* -------------------- marker weights (signed) */
@@ -218,7 +218,7 @@
   
   array[n_id] vector[Q_idm] wbar_i; // scaled weighted mean per subject
   for (i in 1 : n_id)
-    wbar_i[i] = diag_pre_multiply(row_scale_widm, L_i[i]) * zbar[i];
+    wbar_i[i] = diag_pre_multiply(row_scale_idm, L_i[i]) * zbar[i];
   
   /* -------------------- Effective association coefficients (flags applied) */
   // Non-centred association construction with flexible sign constraints:

@@ -100,7 +100,7 @@ draw_vars <- c(
   paste0("alpha_L[", seq_len(sd_check$M_vcov_tf), "]"),
   paste0("lambda_L[", seq_len(sd_check$M_vcov_tf), "]"),
   as.vector(outer(seq_len(n_id), seq_len(sd_check$M_vcov_tf), function(i, m) paste0("z_L[", i, ",", m, "]"))),
-  as.vector(outer(rep(seq_len(n_id), each = n_marker), rep(seq_len(n_marker), times = n_id), function(i, d) paste0("w_idscaled[", i, ",", d, ",2]")))
+  as.vector(outer(rep(seq_len(n_id), each = n_marker), rep(seq_len(n_marker), times = n_id), function(i, d) paste0("w_idm[", i, ",", d, ",2]")))
 )
 
 draws <- joinme:::.get_draws_matrix(fit$fit, variables = draw_vars, seed = seed)
@@ -145,7 +145,7 @@ post_slope_sd_original_draws <- post_slope_sd_scaled_draws / tmax
 post_slope_sd_original_mean <- apply(post_slope_sd_original_draws, 2, mean)
 
 truth_w_slope_original <- as.numeric(truth_w[, , 2]) / tmax
-post_w_names <- as.vector(outer(rep(seq_len(n_id), each = n_marker), rep(seq_len(n_marker), times = n_id), function(i, d) paste0("w_idscaled[", i, ",", d, ",2]")))
+post_w_names <- as.vector(outer(rep(seq_len(n_id), each = n_marker), rep(seq_len(n_marker), times = n_id), function(i, d) paste0("w_idm[", i, ",", d, ",2]")))
 post_w_available <- post_w_names[post_w_names %in% draw_names]
 post_w_slope_original <- if (length(post_w_available) > 0) {
   as.numeric(draws[, post_w_available, drop = FALSE]) / tmax
@@ -200,7 +200,7 @@ cat("observed time range:", paste(format(range(sim$dataLong$time), digits = 6), 
 cat("scaled time range:", paste(format(range(sim$dataLong$time / tmax), digits = 6), collapse = " to "), "\n")
 cat("idx_time_beta:", paste(sd_check$idx_time_beta, collapse = ", "), "\n")
 cat("idx_time_uid:", paste(sd_check$idx_time_uid, collapse = ", "), "\n")
-cat("idx_time_widm:", paste(sd_check$idx_time_widm, collapse = ", "), "\n\n")
+cat("idx_time_idm:", paste(sd_check$idx_time_idm, collapse = ", "), "\n\n")
 
 cat("== Alpha/Lambda posterior ==\n")
 print(data.frame(
@@ -245,7 +245,7 @@ if (length(post_w_slope_original) > 0) {
     row.names = NULL,
     check.names = FALSE
   ), row.names = FALSE, digits = 4)
-  cat("posterior w_idscaled[,,2] draws were not available in the fit output.\n")
+  cat("posterior w_idm[,,2] draws were not available in the fit output.\n")
 }
 
 cat("\n== Subjects with largest posterior L22 discrepancy ==\n")

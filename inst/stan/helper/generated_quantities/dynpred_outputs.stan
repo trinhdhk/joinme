@@ -64,10 +64,10 @@ for (k in 1 : n_draws) {
 
   matrix[n_random_marker_id, n_random_marker_id] Li_eff = diag_pre_multiply(marker_id_row_scale, Li);
 
-  // Scale latent effects: w_idscaled
-  array[n_marker_types] vector[n_random_marker_id] w_idscaled; // scaled marker-id REs
+  // Scale latent effects: w_idm
+  array[n_marker_types] vector[n_random_marker_id] w_idm; // scaled marker-id REs
   for (d in 1 : n_marker_types)
-    w_idscaled[d] = Li_eff * z_w[d];
+    w_idm[d] = Li_eff * z_w[d];
 
   // -------------------------------------------------------------
   // 2. Prepare for Association (Averages)
@@ -116,7 +116,7 @@ for (k in 1 : n_draws) {
                     + dot_product(mat_id_obs[n], u_id)
                     + ((n_random_marker > 0)
                        ? dot_product(mat_marker_obs[n], v_marker[d]) : 0.0)
-                    + dot_product(mat_marker_id_obs[n], w_idscaled[d]);
+                    + dot_product(mat_marker_id_obs[n], w_idm[d]);
      // eta_long: linear predictor for observed history
 
     y_fit_linpred[k, n] = eta_long;
@@ -168,7 +168,7 @@ for (k in 1 : n_draws) {
                     + dot_product(mat_id_pred[n], u_id)
                     + ((n_random_marker > 0)
                        ? dot_product(mat_marker_pred[n], v_marker[d]) : 0.0)
-                    + dot_product(mat_marker_id_pred[n], w_idscaled[d]);
+                    + dot_product(mat_marker_id_pred[n], w_idm[d]);
      // eta_long: linear predictor for prediction grid
 
     y_pred_linpred[k, n] = eta_long;

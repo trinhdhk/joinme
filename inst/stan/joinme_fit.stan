@@ -174,7 +174,7 @@ model {
     /* Realized random effects + longitudinal distributional parameters */
     u_id,
     v_marker,
-    w_idscaled,
+    w_idm,
     wbar_i,
     sigma_family,
     nu_family,

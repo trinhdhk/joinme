@@ -1170,7 +1170,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
 .recover_metadata <- function(object, tmax_arg) {
     tmax <- tmax_arg
     if (is.null(tmax)) {
-        if (!is.null(object$tmax)) tmax <- object$tmax
+        tmax <- object$config$tmax_internal %||% object$stan_data$tmax_internal %||% object$tmax
     }
     if (is.null(tmax)) {
         cli::cli_warn(c(
@@ -1219,7 +1219,13 @@ posterior_predict.JoinMeFit <- function(object, ...) {
 
     col_means <- colMeans(B_raw - object$stan_data$Bs_event_c)
 
-    list(tmax = tmax, knots = knots, col_means = col_means, degree = degree)
+    list(
+        tmax = tmax,
+        tmax_reported = object$config$tmax_reported %||% object$stan_data$tmax_reported %||% object$tmax %||% tmax,
+        knots = knots,
+        col_means = col_means,
+        degree = degree
+    )
 }
 
 .parse_formulas <- function(object) {
@@ -1577,33 +1583,43 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     marker_var <- eval(object$call$marker_var) %||% "marker"
 
     sd <- object$stan_data
+    blueprints <- sd$design_blueprints %||% list()
 
     dL[[time_var]] <- dL[[time_var]] / tmax
     T_cond_scaled <- t_cond / tmax
 
-    f_exp <- reformulas::expandDoubleVerts(forms$formulaLong)
-    bars <- reformulas::findbars(f_exp)
-    f_fix <- reformulas::nobars(f_exp)
-    fixed_rhs <- stats::update(f_fix, . ~ .)
-    fixed_rhs[[2]] <- NULL
+    if (!.is_model_matrix_blueprint(blueprints$fixed)) {
+        f_exp <- reformulas::expandDoubleVerts(forms$formulaLong)
+        bars <- reformulas::findbars(f_exp)
+        f_fix <- reformulas::nobars(f_exp)
+        fixed_rhs <- stats::update(f_fix, . ~ .)
+        fixed_rhs[[2]] <- NULL
 
-    grp <- vapply(bars, function(b) .group_name_from_expr(b[[3]]), character(1))
-    id_rhs_list <- .bar_terms_to_rhs_list(bars[which(grp == id_var)])
-    nested <- .extract_nested_marker_terms(forms$formulaLong, marker_var, id_var)
+        grp <- vapply(bars, function(b) .group_name_from_expr(b[[3]]), character(1))
+        id_designs <- .bar_terms_to_rhs_list(bars[which(grp == id_var)])
+        nested <- .extract_nested_marker_terms(forms$formulaLong, marker_var, id_var)
+        marker_designs <- nested$mk_rhs_list
+        idm_designs <- nested$idm_rhs_list
+    } else {
+        fixed_rhs <- blueprints$fixed
+        id_designs <- blueprints$id %||% list()
+        marker_designs <- blueprints$marker %||% list()
+        idm_designs <- blueprints$idm %||% list()
+    }
 
     mat_fixed_obs <- .mm(fixed_rhs, dL)
-    mat_id_obs <- if (length(id_rhs_list) > 0) {
-        do.call(cbind, lapply(id_rhs_list, function(rhs) .mm(rhs, dL)))
+    mat_id_obs <- if (length(id_designs) > 0) {
+        do.call(cbind, lapply(id_designs, function(rhs) .mm(rhs, dL)))
     } else {
         matrix(0, nrow(dL), sd$R_id)
     }
-    mat_marker_obs <- if (length(nested$mk_rhs_list) > 0) {
-        do.call(cbind, lapply(nested$mk_rhs_list, function(rhs) .mm(rhs, dL)))
+    mat_marker_obs <- if (length(marker_designs) > 0) {
+        do.call(cbind, lapply(marker_designs, function(rhs) .mm(rhs, dL)))
     } else {
         matrix(0, nrow(dL), sd$R_mk)
     }
-    mat_marker_id_obs <- if (length(nested$idm_rhs_list) > 0) {
-        do.call(cbind, lapply(nested$idm_rhs_list, function(rhs) .mm(rhs, dL)))
+    mat_marker_id_obs <- if (length(idm_designs) > 0) {
+        do.call(cbind, lapply(idm_designs, function(rhs) .mm(rhs, dL)))
     } else {
         matrix(0, nrow(dL), sd$Q_idm)
     }
@@ -1660,14 +1676,14 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     }
 
     mat_fixed_gk_cond <- .eval_on_times(list(fixed_rhs), u_cond)
-    mat_id_gk_cond <- if (length(id_rhs_list) > 0) .eval_on_times(id_rhs_list, u_cond) else matrix(0, n_gk, sd$R_id)
-    mat_marker_gk_cond <- if (length(nested$mk_rhs_list) > 0) .eval_on_times(nested$mk_rhs_list, u_cond) else matrix(0, n_gk, sd$R_mk)
-    mat_marker_id_gk_cond <- if (length(nested$idm_rhs_list) > 0) .eval_on_times(nested$idm_rhs_list, u_cond) else matrix(0, n_gk, sd$Q_idm)
+    mat_id_gk_cond <- if (length(id_designs) > 0) .eval_on_times(id_designs, u_cond) else matrix(0, n_gk, sd$R_id)
+    mat_marker_gk_cond <- if (length(marker_designs) > 0) .eval_on_times(marker_designs, u_cond) else matrix(0, n_gk, sd$R_mk)
+    mat_marker_id_gk_cond <- if (length(idm_designs) > 0) .eval_on_times(idm_designs, u_cond) else matrix(0, n_gk, sd$Q_idm)
 
     mat_fixed_gk_cond_fwd <- .eval_on_times(list(fixed_rhs), u_cond_fwd)
-    mat_id_gk_cond_fwd <- if (length(id_rhs_list) > 0) .eval_on_times(id_rhs_list, u_cond_fwd) else matrix(0, n_gk, sd$R_id)
-    mat_marker_gk_cond_fwd <- if (length(nested$mk_rhs_list) > 0) .eval_on_times(nested$mk_rhs_list, u_cond_fwd) else matrix(0, n_gk, sd$R_mk)
-    mat_marker_id_gk_cond_fwd <- if (length(nested$idm_rhs_list) > 0) .eval_on_times(nested$idm_rhs_list, u_cond_fwd) else matrix(0, n_gk, sd$Q_idm)
+    mat_id_gk_cond_fwd <- if (length(id_designs) > 0) .eval_on_times(id_designs, u_cond_fwd) else matrix(0, n_gk, sd$R_id)
+    mat_marker_gk_cond_fwd <- if (length(marker_designs) > 0) .eval_on_times(marker_designs, u_cond_fwd) else matrix(0, n_gk, sd$R_mk)
+    mat_marker_id_gk_cond_fwd <- if (length(idm_designs) > 0) .eval_on_times(idm_designs, u_cond_fwd) else matrix(0, n_gk, sd$Q_idm)
 
     if (!is.null(object$config$Bs_obj)) {
         bs_basis <- as.matrix(predict(object$config$Bs_obj, newx = u_cond))
@@ -1731,18 +1747,18 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         dl_pred_scaled[[time_var]] <- dl_pred_scaled[[time_var]] / tmax
         
         mat_fixed_pred <- .mm(fixed_rhs, dl_pred_scaled)
-        mat_id_pred <- if (length(id_rhs_list) > 0) {
-            do.call(cbind, lapply(id_rhs_list, function(rhs) .mm(rhs, dl_pred_scaled)))
+        mat_id_pred <- if (length(id_designs) > 0) {
+            do.call(cbind, lapply(id_designs, function(rhs) .mm(rhs, dl_pred_scaled)))
         } else {
             matrix(0, n_obs_pred, sd$R_id)
         }
-        mat_marker_pred <- if (length(nested$mk_rhs_list) > 0) {
-            do.call(cbind, lapply(nested$mk_rhs_list, function(rhs) .mm(rhs, dl_pred_scaled)))
+        mat_marker_pred <- if (length(marker_designs) > 0) {
+            do.call(cbind, lapply(marker_designs, function(rhs) .mm(rhs, dl_pred_scaled)))
         } else {
             matrix(0, n_obs_pred, sd$R_mk)
         }
-        mat_marker_id_pred <- if (length(nested$idm_rhs_list) > 0) {
-            do.call(cbind, lapply(nested$idm_rhs_list, function(rhs) .mm(rhs, dl_pred_scaled)))
+        mat_marker_id_pred <- if (length(idm_designs) > 0) {
+            do.call(cbind, lapply(idm_designs, function(rhs) .mm(rhs, dl_pred_scaled)))
         } else {
             matrix(0, n_obs_pred, sd$Q_idm)
         }
@@ -1799,14 +1815,14 @@ posterior_predict.JoinMeFit <- function(object, ...) {
             }
             mat_basis_gk_surv[s, , ] <- sweep(bs, 2, col_means, "-")
             mat_fixed_gk_surv[s, , ] <- .eval_on_times(list(fixed_rhs), us)
-            mat_id_gk_surv[s, , ] <- if (length(id_rhs_list) > 0) .eval_on_times(id_rhs_list, us) else matrix(0, n_gk, sd$R_id)
-            mat_marker_gk_surv[s, , ] <- if (length(nested$mk_rhs_list) > 0) .eval_on_times(nested$mk_rhs_list, us) else matrix(0, n_gk, sd$R_mk)
-            mat_marker_id_gk_surv[s, , ] <- if (length(nested$idm_rhs_list) > 0) .eval_on_times(nested$idm_rhs_list, us) else matrix(0, n_gk, sd$Q_idm)
+            mat_id_gk_surv[s, , ] <- if (length(id_designs) > 0) .eval_on_times(id_designs, us) else matrix(0, n_gk, sd$R_id)
+            mat_marker_gk_surv[s, , ] <- if (length(marker_designs) > 0) .eval_on_times(marker_designs, us) else matrix(0, n_gk, sd$R_mk)
+            mat_marker_id_gk_surv[s, , ] <- if (length(idm_designs) > 0) .eval_on_times(idm_designs, us) else matrix(0, n_gk, sd$Q_idm)
 
             mat_fixed_gk_surv_fwd[s, , ] <- .eval_on_times(list(fixed_rhs), us_f)
-            mat_id_gk_surv_fwd[s, , ] <- if (length(id_rhs_list) > 0) .eval_on_times(id_rhs_list, us_f) else matrix(0, n_gk, sd$R_id)
-            mat_marker_gk_surv_fwd[s, , ] <- if (length(nested$mk_rhs_list) > 0) .eval_on_times(nested$mk_rhs_list, us_f) else matrix(0, n_gk, sd$R_mk)
-            mat_marker_id_gk_surv_fwd[s, , ] <- if (length(nested$idm_rhs_list) > 0) .eval_on_times(nested$idm_rhs_list, us_f) else matrix(0, n_gk, sd$Q_idm)
+            mat_id_gk_surv_fwd[s, , ] <- if (length(id_designs) > 0) .eval_on_times(id_designs, us_f) else matrix(0, n_gk, sd$R_id)
+            mat_marker_gk_surv_fwd[s, , ] <- if (length(marker_designs) > 0) .eval_on_times(marker_designs, us_f) else matrix(0, n_gk, sd$R_mk)
+            mat_marker_id_gk_surv_fwd[s, , ] <- if (length(idm_designs) > 0) .eval_on_times(idm_designs, us_f) else matrix(0, n_gk, sd$Q_idm)
         }
     }
 
@@ -1866,10 +1882,10 @@ posterior_predict.JoinMeFit <- function(object, ...) {
     }
 
     marker_id_row_scale <- rep(1, sd$Q_idm)
-    idx_time_widm <- as.integer(sd$idx_time_widm %||% integer(0))
-    idx_time_widm <- idx_time_widm[is.finite(idx_time_widm) & idx_time_widm >= 1L & idx_time_widm <= sd$Q_idm]
-    if (length(idx_time_widm) > 0L) {
-        marker_id_row_scale[idx_time_widm] <- tmax
+    idx_time_idm <- as.integer(sd$idx_time_idm %||% sd$idx_time_widm %||% integer(0))
+    idx_time_idm <- idx_time_idm[is.finite(idx_time_idm) & idx_time_idm >= 1L & idx_time_idm <= sd$Q_idm]
+    if (length(idx_time_idm) > 0L) {
+        marker_id_row_scale[idx_time_idm] <- tmax
     }
 
     dL[[marker_var]] <- factor(dL[[marker_var]], levels = marker_levels)
@@ -2344,10 +2360,10 @@ posterior_predict.JoinMeFit <- function(object, ...) {
             }
 
             z_w <- cross + z_w_lat
-            w_idscaled <- as.numeric(l_i_eff %*% z_w)
+            w_idm <- as.numeric(l_i_eff %*% z_w)
 
             idx <- (col_offset + 1L):(col_offset + n_random_marker_id)
-            draw_values[idx] <- w_idscaled
+            draw_values[idx] <- w_idm
             col_offset <- col_offset + n_random_marker_id
         }
 

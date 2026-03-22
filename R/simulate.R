@@ -173,11 +173,11 @@ simulate_joinme_joint_student_t_cvtotal <- function(
     }
   }
 
-  # w_idscaled[i,d] = L_i[i] %*% z_w[i,d]
-  w_idscaled <- array(0.0, dim = c(n_id, D, Q_idm))
+  # w_idm[i,d] = L_i[i] %*% z_w[i,d]
+  w_idm <- array(0.0, dim = c(n_id, D, Q_idm))
   for (i in seq_len(n_id)) {
     Li <- matrix(L_i[i, , ], Q_idm, Q_idm)
-    for (d in seq_len(D)) w_idscaled[i, d, ] <- as.numeric(Li %*% z_w[i, d, ])
+    for (d in seq_len(D)) w_idm[i, d, ] <- as.numeric(Li %*% z_w[i, d, ])
   }
 
   # ---- design rows (original time)
@@ -207,7 +207,7 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 
     for (d in seq_len(D)) {
       mk_part <- if (include_marker_only && R_mk > 0) x1_val * v_marker[d, 1] else 0
-      idm_part <- if (Q_idm == 1) w_idscaled[i, d, 1] else w_idscaled[i, d, 1] + w_idscaled[i, d, 2] * t
+      idm_part <- if (Q_idm == 1) w_idm[i, d, 1] else w_idm[i, d, 1] + w_idm[i, d, 2] * t
       per_marker_sum <- per_marker_sum + mk_part + idm_part
     }
     per_marker_sum / D
@@ -275,7 +275,7 @@ simulate_joinme_joint_student_t_cvtotal <- function(
         mu_id <- sum(id_row(tt) * u_id[i, ])
         mu_mk <- 0
         if (include_marker_only && R_mk > 0) mu_mk <- sum(mk_row(i, tt) * v_marker[d, ])
-        mu_idm <- sum(idm_row(tt) * w_idscaled[i, d, ])
+        mu_idm <- sum(idm_row(tt) * w_idm[i, d, ])
         mu[k] <- mu_fixed + mu_id + mu_mk + mu_idm
       }
       sig <- if (is.null(sigma_fun)) {
@@ -327,7 +327,7 @@ simulate_joinme_joint_student_t_cvtotal <- function(
     lambda_L = lambda_L,
     z_L = z_L,
     L_i = L_i,
-    w_idscaled = w_idscaled
+    w_idm = w_idm
   )
 
   # Return helper closures for CV and hazard functions
@@ -371,6 +371,7 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'
 #'   Internally, this formula drives subject-specific lower-triangular entries
 #'   of `L_i` used to scale marker-by-id latent effects; see `re_params$id_marker_cov`.
+#'   The default `~ 1` is supported and gives an intercept-only covariance regression.
 #' @param formulaDist Optional distributional regression formulas (same role as in `joinme()`).
 #'   Supported LHS parameters are `sigma`, `nu`, `phi`, `alpha` (aliases:
 #'   `alpha_skew`, `skew`), `phi_beta`, and `tau_sde`.
@@ -1032,17 +1033,6 @@ simulate_joinme <- function(
     do.call(cbind, mats)
   }
 
-  .sim_detect_time_cols <- function(mat_builder, prototype_df, time_var, tol = 1e-10) {
-    mat_ref <- mat_builder(prototype_df)
-    if (is.null(mat_ref) || ncol(mat_ref) == 0L) return(integer(0))
-
-    probe_df <- prototype_df
-    probe_df[[time_var]] <- probe_df[[time_var]] + 1
-    mat_probe <- mat_builder(probe_df)
-    changed <- colSums(abs(mat_probe - mat_ref) > tol) > 0
-    which(changed)
-  }
-
   .sim_get_family_param <- function(fam_name, param_name, fallback) {
     val <- family_params[[fam_name]][[param_name]]
     if (is.null(val)) fallback else val
@@ -1666,19 +1656,49 @@ simulate_joinme <- function(
   Xcov <- vcov_design$Xcov
 
   # ---- Build prototype data for matrix column alignment
+  # Time-dependent model matrices are defined on the scaled [0, 1] domain so
+  # spline bases follow the same construction path as joinme_standata().
+  time_scale_internal <- max(c(time_cens, times_obs), na.rm = TRUE)
+  if (!is.finite(time_scale_internal) || time_scale_internal <= 0) {
+    time_scale_internal <- 1.0
+  }
+
   prototype <- dataEvent[rep(1, D), , drop = FALSE]
   prototype[[marker_var]] <- factor(marker_levels, levels = marker_levels)
-  prototype[[time_var]] <- rep(mean(range(times_obs)), D)
+  prototype[[time_var]] <- rep(0.5, D)
 
-  X_proto <- .mm(fixed_rhs, prototype)
-  Z_id_proto <- .sim_rhs_matrix(id_rhs_list, prototype)
-  Z_mk_proto <- .sim_rhs_matrix(mk_rhs_list, prototype)
-  Z_idm_proto <- .sim_rhs_matrix(idm_rhs_list, prototype)
+  fixed_blueprint <- .make_model_matrix_blueprint(
+    fixed_rhs,
+    prototype,
+    boundary_var = time_var,
+    boundary_values = c(0, 1)
+  )
+  id_blueprints <- lapply(id_rhs_list, function(rhs) {
+    .make_model_matrix_blueprint(rhs, prototype, boundary_var = time_var, boundary_values = c(0, 1))
+  })
+  mk_blueprints <- lapply(mk_rhs_list, function(rhs) {
+    .make_model_matrix_blueprint(rhs, prototype, boundary_var = time_var, boundary_values = c(0, 1))
+  })
+  idm_blueprints <- lapply(idm_rhs_list, function(rhs) {
+    .make_model_matrix_blueprint(rhs, prototype, boundary_var = time_var, boundary_values = c(0, 1))
+  })
 
-  idx_time_beta <- .sim_detect_time_cols(function(df) .mm(fixed_rhs, df), prototype, time_var)
-  idx_time_uid <- .sim_detect_time_cols(function(df) .sim_rhs_matrix(id_rhs_list, df), prototype, time_var)
-  idx_time_vmk <- .sim_detect_time_cols(function(df) .sim_rhs_matrix(mk_rhs_list, df), prototype, time_var)
-  idx_time_widm <- .sim_detect_time_cols(function(df) .sim_rhs_matrix(idm_rhs_list, df), prototype, time_var)
+  X_proto <- .mm(fixed_blueprint, prototype)
+  Z_id_proto <- .sim_rhs_matrix(id_blueprints, prototype)
+  Z_mk_proto <- .sim_rhs_matrix(mk_blueprints, prototype)
+  Z_idm_proto <- .sim_rhs_matrix(idm_blueprints, prototype)
+
+  time_meta <- .make_time_index_metadata(
+    time_var = time_var,
+    fixed_design = fixed_blueprint,
+    id_design = id_blueprints,
+    marker_design = mk_blueprints,
+    idm_design = idm_blueprints
+  )
+  idx_time_beta <- time_meta$idx_time_beta
+  idx_time_uid <- time_meta$idx_time_uid
+  idx_time_vmk <- time_meta$idx_time_vmk
+  idx_time_idm <- time_meta$idx_time_idm
 
   beta_long <- .sim_align_coef(colnames(X_proto), beta_long, sd_default = 0.35, intercept_default = 1.0)
 
@@ -2170,12 +2190,12 @@ simulate_joinme <- function(
 
   eta_components_all_markers <- function(i, t) {
     row_df <- assoc_row_template[[i]]
-    row_df[[time_var]] <- t
+    row_df[[time_var]] <- t / time_scale_internal
 
-    x_fix <- .mm(fixed_rhs, row_df)
-    z_id <- .sim_rhs_matrix(id_rhs_list, row_df)
-    z_mk <- .sim_rhs_matrix(mk_rhs_list, row_df)
-    z_idm <- .sim_rhs_matrix(idm_rhs_list, row_df)
+    x_fix <- .mm(fixed_blueprint, row_df)
+    z_id <- .sim_rhs_matrix(id_blueprints, row_df)
+    z_mk <- .sim_rhs_matrix(mk_blueprints, row_df)
+    z_idm <- .sim_rhs_matrix(idm_blueprints, row_df)
 
     fixed_part <- if (ncol(x_fix) > 0) as.numeric(x_fix %*% beta_long) else rep(0, D)
     id_part <- if (ncol(z_id) > 0) as.numeric(z_id %*% re_id[i, ]) else rep(0, D)
@@ -2538,10 +2558,12 @@ simulate_joinme <- function(
   rownames(dataLong) <- NULL
 
   # ---- Mean structure from model matrices and sampled random effects
-  X_long <- .mm(fixed_rhs, dataLong)
-  Z_id_long <- .sim_rhs_matrix(id_rhs_list, dataLong)
-  Z_mk_long <- .sim_rhs_matrix(mk_rhs_list, dataLong)
-  Z_idm_long <- .sim_rhs_matrix(idm_rhs_list, dataLong)
+  dataLong_scaled <- dataLong
+  dataLong_scaled[[time_var]] <- dataLong_scaled[[time_var]] / time_scale_internal
+  X_long <- .mm(fixed_blueprint, dataLong_scaled)
+  Z_id_long <- .sim_rhs_matrix(id_blueprints, dataLong_scaled)
+  Z_mk_long <- .sim_rhs_matrix(mk_blueprints, dataLong_scaled)
+  Z_idm_long <- .sim_rhs_matrix(idm_blueprints, dataLong_scaled)
 
   id_index <- match(as.character(dataLong[[id_var]]), as.character(dataEvent[[id_var]]))
   marker_index <- match(as.character(dataLong[[marker_var]]), marker_levels)
@@ -2730,8 +2752,8 @@ simulate_joinme <- function(
   }
 
   marker_id_row_scale_eff <- rep(1.0, K_idm)
-  if (length(idx_time_widm) > 0L) {
-    marker_id_row_scale_eff[idx_time_widm] <- tmax
+  if (length(idx_time_idm) > 0L) {
+    marker_id_row_scale_eff[idx_time_idm] <- tmax
   }
 
   family_codes_present <- sort(unique(family_codes))

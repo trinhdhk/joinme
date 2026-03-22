@@ -48,7 +48,7 @@
   matrix[n_obs_pred, P_tau_sde] X_tau_sde_pred;  // tau_sde design pred
 
   /* Covariance regression covariates */
-  int<lower=1> n_cov_vcov;                        // covariate count for covariance regression
+  int<lower=0> n_cov_vcov;                        // covariate count for covariance regression
   vector[n_cov_vcov] vec_cov_vcov;                // covariate vector (subject-level)
 
   /* Hazard covariates */

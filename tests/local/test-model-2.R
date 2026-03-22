@@ -92,7 +92,7 @@ run_fit <- function(label, alpha_prior, tau_spline) {
   beta_vars <- paste0("beta[", seq_len(sd$P), "]")
   u_vars <- paste0("u_id[", i, ",", seq_len(sd$R_id), "]")
   v_vars <- if (sd$R_mk > 0) paste0("v_marker[", d, ",", seq_len(sd$R_mk), "]") else character(0)
-  w_vars <- if (sd$Q_idm > 0) paste0("w_idscaled[", i, ",", d, ",", seq_len(sd$Q_idm), "]") else character(0)
+  w_vars <- if (sd$Q_idm > 0) paste0("w_idm[", i, ",", d, ",", seq_len(sd$Q_idm), "]") else character(0)
   alpha_vars <- c("alpha_cv_marker")
   cov_vars <- c(
     paste0("alpha_L[", seq_len(sd$Q_idm), "]"),

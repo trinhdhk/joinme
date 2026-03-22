@@ -599,9 +599,149 @@ gk_quadrature <- function(nodes = 15L) {
   # Always return double matrices for Stan compatibility
   data <- as.data.frame(data)
   rownames(data) <- NULL
-  X <- stats::model.matrix(formula, data = data)
+  if (.is_model_matrix_blueprint(formula)) {
+    terms_obj <- formula$terms
+    mf <- stats::model.frame(
+      terms_obj,
+      data = data,
+      xlev = formula$xlev,
+      na.action = stats::na.pass
+    )
+    X <- stats::model.matrix(
+      terms_obj,
+      data = mf,
+      contrasts.arg = formula$contrasts
+    )
+  } else {
+    X <- stats::model.matrix(formula, data = data)
+  }
   storage.mode(X) <- "double"
   X
+}
+
+#' Detect stored model-matrix blueprint objects
+#' @keywords internal
+.is_model_matrix_blueprint <- function(x) {
+  is.list(x) && inherits(x, "joinme_mm_blueprint") && !is.null(x$terms)
+}
+
+#' Build a reusable model-matrix blueprint
+#' @keywords internal
+.make_model_matrix_blueprint <- function(formula,
+                                         data,
+                                         boundary_var = NULL,
+                                         boundary_values = NULL) {
+  data <- as.data.frame(data)
+  rownames(data) <- NULL
+
+  if (!is.null(boundary_var) && !is.null(boundary_values) && boundary_var %in% names(data) && nrow(data) > 0L) {
+    boundary_rows <- data[rep(1L, length(boundary_values)), , drop = FALSE]
+    boundary_rows[[boundary_var]] <- as.numeric(boundary_values)
+    data <- rbind(data, boundary_rows)
+    rownames(data) <- NULL
+  }
+
+  mf <- stats::model.frame(formula, data = data, na.action = stats::na.pass)
+  terms_obj <- stats::delete.response(stats::terms(mf))
+  X <- stats::model.matrix(terms_obj, data = mf)
+
+  structure(
+    list(
+      formula = formula,
+      terms = terms_obj,
+      xlev = stats::.getXlevels(terms_obj, mf),
+      contrasts = attr(X, "contrasts"),
+      assign = attr(X, "assign") %||% integer(0),
+      columns = colnames(X) %||% character(0)
+    ),
+    class = "joinme_mm_blueprint"
+  )
+}
+
+#' Build reusable blueprints for an RHS formula list
+#' @keywords internal
+.make_rhs_blueprints <- function(rhs_list, data) {
+  if (length(rhs_list) == 0L) {
+    return(list())
+  }
+  lapply(rhs_list, function(rhs) .make_model_matrix_blueprint(rhs, data = data))
+}
+
+#' Detect raw linear time terms from model.matrix term labels
+#' @keywords internal
+.term_is_raw_time_linear <- function(term_label, time_var) {
+  if (is.null(term_label) || !nzchar(term_label)) {
+    return(FALSE)
+  }
+
+  expr <- tryCatch(parse(text = term_label)[[1]], error = function(e) NULL)
+  if (is.null(expr)) {
+    return(FALSE)
+  }
+
+  inspect <- function(node) {
+    if (is.name(node)) {
+      return(list(ok = TRUE, has_time = identical(as.character(node), time_var)))
+    }
+    if (!is.call(node)) {
+      return(list(ok = FALSE, has_time = FALSE))
+    }
+
+    op <- as.character(node[[1]])
+    if (length(op) != 1L || !op %in% c(":", "*")) {
+      return(list(ok = FALSE, has_time = FALSE))
+    }
+
+    pieces <- lapply(as.list(node)[-1], inspect)
+    list(
+      ok = all(vapply(pieces, function(piece) isTRUE(piece$ok), logical(1))),
+      has_time = any(vapply(pieces, function(piece) isTRUE(piece$has_time), logical(1)))
+    )
+  }
+
+  res <- inspect(expr)
+  isTRUE(res$ok) && isTRUE(res$has_time)
+}
+
+#' Detect coefficient indices that need original-time rescaling
+#' @keywords internal
+.time_rescale_idx_from_blueprint <- function(blueprint, time_var) {
+  if (!.is_model_matrix_blueprint(blueprint)) {
+    return(integer(0))
+  }
+
+  assign_idx <- as.integer(blueprint$assign %||% integer(0))
+  if (length(assign_idx) == 0L) {
+    return(integer(0))
+  }
+
+  term_labels <- attr(blueprint$terms, "term.labels") %||% character(0)
+  keep <- vapply(assign_idx, function(idx) {
+    if (!is.finite(idx) || idx < 1L || idx > length(term_labels)) {
+      return(FALSE)
+    }
+    .term_is_raw_time_linear(term_labels[[idx]], time_var = time_var)
+  }, logical(1))
+  which(keep)
+}
+
+#' Flatten time-rescale indices across a blueprint list
+#' @keywords internal
+.time_rescale_idx_from_blueprint_list <- function(blueprints, time_var) {
+  if (length(blueprints) == 0L) {
+    return(integer(0))
+  }
+
+  out <- integer(0)
+  offset <- 0L
+  for (blueprint in blueprints) {
+    local_idx <- .time_rescale_idx_from_blueprint(blueprint, time_var = time_var)
+    if (length(local_idx) > 0L) {
+      out <- c(out, offset + local_idx)
+    }
+    offset <- offset + length(blueprint$columns %||% character(0))
+  }
+  as.integer(out)
 }
 
 #' Survival/event model matrix
@@ -1462,7 +1602,7 @@ gk_quadrature <- function(nodes = 15L) {
     }
 
     op <- as.character(expr[[1]])
-    if (op %in% c("|", "||")) {
+    if (length(op) == 1L && op %in% c("|", "||")) {
       grp <- .group_name_from_expr(expr[[3]])
       terms <- c(terms, list(list(op = op, group = grp, context = context)))
       # Traverse the left-hand side within the current group context.
@@ -1603,11 +1743,28 @@ gk_quadrature <- function(nodes = 15L) {
 #'
 #' @return named list with n_time_* and idx_time_* values.
 #' @keywords internal
-.make_time_index_metadata <- function(x_cols, zid_cols, zmk_cols, zidm_cols, time_var) {
-  idx_beta <- .detect_time_cols(x_cols, time_var)
-  idx_uid <- .detect_time_cols(zid_cols, time_var)
-  idx_vmk <- .detect_time_cols(zmk_cols, time_var)
-  idx_widm <- .detect_time_cols(zidm_cols, time_var)
+.make_time_index_metadata <- function(x_cols = NULL,
+                                      zid_cols = NULL,
+                                      zmk_cols = NULL,
+                                      zidm_cols = NULL,
+                                      time_var,
+                                      fixed_design = NULL,
+                                      id_design = NULL,
+                                      marker_design = NULL,
+                                      idm_design = NULL) {
+  has_blueprints <- !is.null(fixed_design) || !is.null(id_design) || !is.null(marker_design) || !is.null(idm_design)
+
+  if (has_blueprints) {
+    idx_beta <- .time_rescale_idx_from_blueprint(fixed_design, time_var = time_var)
+    idx_uid <- .time_rescale_idx_from_blueprint_list(id_design %||% list(), time_var = time_var)
+    idx_vmk <- .time_rescale_idx_from_blueprint_list(marker_design %||% list(), time_var = time_var)
+    idx_idm <- .time_rescale_idx_from_blueprint_list(idm_design %||% list(), time_var = time_var)
+  } else {
+    idx_beta <- .detect_time_cols(x_cols, time_var)
+    idx_uid <- .detect_time_cols(zid_cols, time_var)
+    idx_vmk <- .detect_time_cols(zmk_cols, time_var)
+    idx_idm <- .detect_time_cols(zidm_cols, time_var)
+  }
 
   list(
     n_time_beta = length(idx_beta),
@@ -1616,8 +1773,8 @@ gk_quadrature <- function(nodes = 15L) {
     idx_time_uid = idx_uid,
     n_time_vmk = length(idx_vmk),
     idx_time_vmk = idx_vmk,
-    n_time_widm = length(idx_widm),
-    idx_time_widm = idx_widm
+    n_time_idm = length(idx_idm),
+    idx_time_idm = idx_idm
   )
 }
 
@@ -1875,8 +2032,15 @@ gk_quadrature <- function(nodes = 15L) {
 #' Coerce time index fields for rstan
 #' @keywords internal
 .coerce_rstan_time_indices <- function(sd) {
-  idx_names <- c("idx_time_beta", "idx_time_uid", "idx_time_vmk", "idx_time_widm")
-  n_names <- c("n_time_beta", "n_time_uid", "n_time_vmk", "n_time_widm")
+  if (is.null(sd$idx_time_idm) && !is.null(sd$idx_time_widm)) {
+    sd$idx_time_idm <- sd$idx_time_widm
+  }
+  if (is.null(sd$n_time_idm) && !is.null(sd$n_time_widm)) {
+    sd$n_time_idm <- sd$n_time_widm
+  }
+
+  idx_names <- c("idx_time_beta", "idx_time_uid", "idx_time_vmk", "idx_time_idm")
+  n_names <- c("n_time_beta", "n_time_uid", "n_time_vmk", "n_time_idm")
   for (i in seq_along(idx_names)) {
     idx <- sd[[idx_names[i]]] %||% integer(0)
     idx <- as.integer(idx)

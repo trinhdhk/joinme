@@ -72,7 +72,7 @@ test_that("draw-dependent containers are re-indexed to prediction draw count", {
 })
 
 
-test_that("marker-id draw reconstruction uses scaled-time rows only in w_idscaled", {
+test_that("marker-id draw reconstruction uses scaled-time rows only in w_idm", {
   draws_matrix <- matrix(
     c(log(2), 3, log(4), 0, 0, 0, 5, 7),
     nrow = 1,
