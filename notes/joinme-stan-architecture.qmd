@@ -41,9 +41,10 @@ Additional implementation details that are central to the interpretation:
 - Marker-weighted contributions are formed as weighted means across markers.
   Base weights act as prior offsets and are used directly as effective intensities
   (no additional normalisation).
-- The covariance-style associations (`corr`, `vcov`) depend on an id-level
-  latent effect that drives a covariance regression, producing subject-specific
-  Cholesky factors.
+- The covariance-style associations (`corr`, `vcov`) depend on subject-specific
+  Cholesky factors built by covariance regression. Marker-by-id latent seeds are
+  iid standard normal; baseline covariance is encoded directly in the same
+  `L_i` object.
 - Time-constant covariance-style summaries are computed once per subject and
   then reused consistently in both parts of the survival likelihood: the exact
   event log-hazard and the Gauss-Kronrod cumulative-hazard approximation.
@@ -317,8 +318,9 @@ FUNCTION partial_joinme(id_seq, start, end, ... [all data & parameters]):
     
     // 3. Compute variance-covariance association feature
     //    (using the lower-triangular entries of Cholesky factor L_i directly)
-    //    L_i is built by covariance regression with id-level latent effect u_L[i]
-    //    lp_m = alpha_L[m] + beta_L[m]'Xcov[i] + lambda_L[m] * u_L[i]
+    //    L_i is built by covariance regression with component-specific latent z_L[i,m]
+    //    and non-negative loading lambda_L[m]
+    //    lp_m = alpha_L[m] + beta_L[m]'Xcov[i] + lambda_L[m] * z_L[i,m]
     //    L_i[r,c] = log1p_exp(lp_m) if r == c, else lp_m
     corr_terms_raw = offdiag_correlations(L_i[i])
     
@@ -554,7 +556,7 @@ FUNCTION partial_draw(draw_ids_slice, start, end, ... [data & posterior draws]):
     z_u[k]      ~ N(0, I_{R_id})            // ID-level standard normal
     z_v[k,d]    ~ N(0, I_{R_mk})  âˆ€d        // Marker-level standard normal
     z_w_lat[k,d] ~ N(0, I_{Q_idm}) âˆ€d       // Latent IDÃ—marker standard normal
-    z_L[k]      ~ N(0, 1)                   // Latent covariance regression
+    z_L[k,m]    ~ N(0, 1)  âˆ€m               // Component-specific covariance-regression latents
     
     lp += log p(z_u, z_v, z_w_lat, z_L)  // Standard normal densities
     
@@ -564,7 +566,6 @@ FUNCTION partial_draw(draw_ids_slice, start, end, ... [data & posterior draws]):
     // Build Cholesky factors from draw k parameters
     L_u = diag(Ï„_id^(k)) * Lcorr_id^(k)
     L_v = diag(Ï„_marker^(k)) * Lcorr_marker^(k)
-    L_w = diag(Ï„_marker_id^(k)) * Lcorr_marker_id^(k)
     
     // Transform standard normals to correlated REs
     u_id = L_u * z_u[k]
@@ -576,22 +577,19 @@ FUNCTION partial_draw(draw_ids_slice, start, end, ... [data & posterior draws]):
     // For subjectÃ—marker interaction, allow cross-marker correlation
     FOR each marker d:
       cross = B_cross^(k) * v_marker[d]  (if cross-correlation enabled)
-      z_w[d] = cross + L_w * z_w_lat[k, d]
+      z_w[d] = cross + z_w_lat[k, d]
     END FOR
     
     // -------------------
     // 3. BUILD SUBJECT-SPECIFIC COVARIANCE VIA REGRESSION
     // -------------------
-    // Latent random intercept for covariance
-    u_Lk = Ï„_corr_reg^(k) * z_L[k]
-    
     // Build Cholesky factor L_i for this subject
     L_i = matrix(Q_idm Ã— Q_idm, 0)
     FOR each unique entry (r,c) in lower triangle:
       // Regression on covariance covariates
-      lin_pred = Î±_corr_reg^(k)[r,c]
-               + vec_cov_corr' * Î²_corr_reg^(k)[r,c]
-               + Î»_corr_reg^(k)[r,c] * u_Lk
+      lin_pred = Î±_vcov_reg^(k)[r,c]
+           + vec_cov_vcov' * Î²_vcov_reg^(k)[r,c]
+           + Î»_vcov_reg^(k)[r,c] * z_L[k, m]
       
       IF r == c:  // Diagonal (log scale with softplus)
         L_i[r,c] = log(1 + exp(lin_pred))
@@ -965,7 +963,7 @@ All times scaled to $[0, 1]$ via division by $t_{max}$:
 
 Subject-specific Cholesky factor $L_i$ is modelled via regression. For each unique entry $(r,c)$ of $L_i$:
 
-$$ \eta_{r,c} = \alpha[r,c] + X_{cov}[i] \beta[r,c] + \lambda[r,c] u_L[i] $$
+$$ \eta_{r,c} = \alpha[r,c] + X_{cov}[i] \beta[r,c] + \lambda[r,c] z_L[i] $$
 
 If $r=c$ (Diagonal):
 $$ L_i[r,c] = \text{softplus}(\eta_{r,c}) $$
@@ -974,12 +972,13 @@ $$ L_i[r,c] = \eta_{r,c} $$
 
 **Enables**:
 - Covariance structure varying with subject covariates.
-- Individual-specific uncertainty in longitudinal predictions ($u_L$).
+- Individual-specific covariance heterogeneity through $z_L$.
 - Richer association with survival (via corr feature).
 
 **Shrinkage**:
 - Normal priors on $\beta[r,c]$ with scale 0.3 
-- Random intercept $u_L$ $\to$ subject-level variation.
+- Non-negative loadings $\lambda[r,c]$ multiplied by component-specific
+  standard-normal latents $z_L[i, m]$ generate subject-level covariance variation.
 
 ## Marker Weighting
 
@@ -1168,7 +1167,7 @@ associated training `x` values and explicit `knots` are therefore interpreted on
 that same expit scale.
 
 ### Covariance Regression (CORR)
-- **Latent Effect ($u_L$)**: Normal(0, $\tau_L$).
+- **Latent Effect ($z_L$)**: Normal(0, 1).
 - **Coefficients**: Normal priors on regression terms linking baseline covariates to the log-volatility.
 - **Rationale**: This structure allows the variability of the biomarkers (and their correlation) to itself be a predictor of survival (e.g., highly labile blood pressure predicts stroke), regularized by the hierarchical structure of the latent variable.
 

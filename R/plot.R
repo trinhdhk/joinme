@@ -2223,18 +2223,25 @@ plot.JoinMeFit <- function(x,
     if (!is.null(payload$coeff_draws[[term_key]])) {
         vals <- payload$coeff_draws[[term_key]]
         if (is.matrix(vals)) {
-            target_var <- NULL
+            target_var_candidates <- character(0)
             if (!is.null(payload$term_map) && nrow(payload$term_map) > 0L) {
                 target_rows <- payload$term_map[payload$term_map$term == term, , drop = FALSE]
                 if (nrow(target_rows) > 0L) {
-                    target_var <- as.character(target_rows$variable[[1L]])
+                    target_var_candidates <- as.character(target_rows$variable)
                 }
             }
-            if (is.null(target_var) && grepl("^(corr|vcov)\\[\\d+\\]$", term)) {
-                target_var <- paste0("alpha_", term)
+            if (grepl("^(corr|vcov)\\[\\d+\\]$", term)) {
+                target_var_candidates <- unique(c(
+                    target_var_candidates,
+                    paste0("alpha_", sub("\\[", "_eff[", term)),
+                    paste0("alpha_", term)
+                ))
             }
-            if (!is.null(target_var) && !is.null(colnames(vals)) && target_var %in% colnames(vals)) {
-                return(as.numeric(vals[, target_var, drop = TRUE]))
+            if (length(target_var_candidates) > 0L && !is.null(colnames(vals))) {
+                matched_var <- target_var_candidates[target_var_candidates %in% colnames(vals)][1L]
+                if (!is.na(matched_var) && nzchar(matched_var)) {
+                    return(as.numeric(vals[, matched_var, drop = TRUE]))
+                }
             }
             return(as.numeric(vals[, 1]))
         }
@@ -2312,13 +2319,19 @@ plot.JoinMeFit <- function(x,
     )
     for (term_key in active_terms) {
         if (term_key %in% c("corr", "vcov")) {
-            corr_vars <- grep(paste0("^alpha_", term_key, "\\["), posterior::variables(.get_draws_obj(fit)), value = TRUE)
+            corr_vars <- grep(paste0("^alpha_", term_key, "_eff\\["), posterior::variables(.get_draws_obj(fit)), value = TRUE)
+            if (!length(corr_vars)) {
+                corr_vars <- grep(paste0("^alpha_", term_key, "_used\\["), posterior::variables(.get_draws_obj(fit)), value = TRUE)
+            }
+            if (!length(corr_vars)) {
+                corr_vars <- grep(paste0("^alpha_", term_key, "\\["), posterior::variables(.get_draws_obj(fit)), value = TRUE)
+            }
             if (length(corr_vars)) {
                 payload$coeff_draws[[term_key]] <- .get_draws_matrix(fit, variables = corr_vars, seed = seed)[, corr_vars, drop = FALSE]
                 payload$term_map <- rbind(
                     payload$term_map,
                     data.frame(
-                        term = sub("^alpha_", "", corr_vars),
+                        term = sub("_(?:eff|used)\\[", "[", sub("^alpha_", "", corr_vars), perl = TRUE),
                         variable = corr_vars,
                         stringsAsFactors = FALSE
                     )
@@ -2522,8 +2535,17 @@ plot.JoinMeFit <- function(x,
         )
         alpha_mean <- mean_of_vars(paste0("alpha_L[", seq_len(nrow(vcov_map)), "]"), default = 0)
         lambda_mean <- mean_of_vars(paste0("lambda_L[", seq_len(nrow(vcov_map)), "]"), default = 0)
-        tau_l_mean <- mean_of_vars("tau_L", default = 0)[1]
-        z_l_mean <- mean_of_vars(paste0("z_L[", seq_len(n_id), "]"), default = 0)
+        z_l_names <- as.vector(outer(seq_len(n_id), seq_len(nrow(vcov_map)), function(i, m) paste0("z_L[", i, ",", m, "]")))
+        z_l_mean <- if (length(z_l_names) > 0L) {
+            matrix(
+                mean_of_vars(z_l_names, default = 0),
+                nrow = n_id,
+                ncol = nrow(vcov_map),
+                byrow = TRUE
+            )
+        } else {
+            matrix(0, nrow = n_id, ncol = 0L)
+        }
         k_cov <- as.integer(stan_data$K_cov %||% 0L)
         beta_mean <- if (k_cov > 0L && nrow(vcov_map) > 0L) {
             beta_flat <- mean_of_vars(as.vector(outer(seq_len(nrow(vcov_map)), seq_len(k_cov), function(m, k) paste0("beta_L[", m, ",", k, "]"))), default = 0)
@@ -2540,27 +2562,14 @@ plot.JoinMeFit <- function(x,
             for (m in seq_len(nrow(vcov_map))) {
                 lp <- alpha_mean[m] +
                     if (k_cov > 0L) sum(beta_mean[m, ] * xcov[i, ]) else 0 +
-                    lambda_mean[m] * tau_l_mean * z_l_mean[min(i, length(z_l_mean))]
+                    lambda_mean[m] * z_l_mean[min(i, nrow(z_l_mean)), m]
                 r_ <- vcov_map[m, 1]
                 c_ <- vcov_map[m, 2]
                 li[r_, c_] <- if (r_ == c_) {
-                    if (as.integer(stan_data$corr_diag_link %||% 0L) == 1L) exp(lp) else log1p(exp(lp))
+                    if (as.integer(stan_data$vcov_diag_link %||% 0L) == 1L) exp(lp) else log1p(exp(lp))
                 } else {
                     lp
                 }
-
-                    if (identical(association_metric, "hazard") && term_key %in% c("corr", "vcov")) {
-                        tf_ref <- .joinmefit_association_transform_matrix(
-                            x,
-                            term_key,
-                            term = term,
-                            x_grid = 0,
-                            n_draws = length(coeff_draws),
-                            seed = seed,
-                            payload = payload
-                        )
-                        tf_mat <- tf_mat - matrix(tf_ref[, 1], nrow = nrow(tf_mat), ncol = ncol(tf_mat))
-                    }
             }
             .assoc_vcov_features_from_chol(
                 li,

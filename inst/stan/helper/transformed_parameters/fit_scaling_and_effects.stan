@@ -31,11 +31,14 @@
         tau_v_scaled[idx_time_vmk[k]] = tau_v[idx_time_vmk[k]] * tmax;
     }
   }
-  
-  vector[Q_idm] tau_w_scaled = tau_w;
+
+  // Marker-by-id covariance regression is parameterised on the original-time
+  // scale. We only row-scale time-indexed marker-by-id coefficients when they
+  // are paired with the scaled-time longitudinal design matrices.
+  vector[Q_idm] row_scale_widm = rep_vector(1.0, Q_idm);
   if (n_time_widm > 0) {
-    for (k in 1 : n_time_widm) 
-      tau_w_scaled[idx_time_widm[k]] = tau_w[idx_time_widm[k]] * tmax;
+    for (k in 1 : n_time_widm)
+      row_scale_widm[idx_time_widm[k]] = tmax;
   }
   
   /* -------------------- id RE covariance */
@@ -62,28 +65,21 @@
       v_marker[d] = L_v * z_v[d];
   }
   
-  /* -------------------- marker-by-id latent covariance */
-  matrix[Q_idm, Q_idm] L_w; // Cholesky factor for marker-id latents
-  if (indep_marker_byid_latent_re == 1) 
-    L_w = diag_matrix(tau_w_scaled);
-  else 
-    L_w = diag_pre_multiply(tau_w_scaled, Lcorr_w);
-  
-  /* Construct z_w[i,d], optionally cross-correlated with v_marker[d] */
-  array[n_id, D] vector[Q_idm] z_w; // latent marker-id effects after correlation
+  /* -------------------- marker-by-id latent effects */
+  // The marker-by-id latent seeds are now always iid standard normal.
+  // Baseline covariance and subject-specific covariance changes are both
+  // encoded by L_i below, which avoids a redundant global covariance layer.
+  // Optional cross-correlation with marker-level effects is still added here
+  // before the subject-specific covariance scaling is applied.
+  array[n_id, D] vector[Q_idm] z_w; // latent marker-id effects after optional cross-correlation
   for (i in 1 : n_id) {
     for (d in 1 : D) {
       vector[Q_idm] cross = rep_vector(0.0, Q_idm);
       if (allow_marker_crosscorr == 1 && R_mk > 0)
         cross = B_cross * v_marker[d];
-      z_w[i, d] = cross + L_w * z_w_lat[i, d];
+      z_w[i, d] = cross + z_w_lat[i, d];
     }
   }
-  
-  /* -------------------- id random effect for covariance regression */
-  vector[n_id] u_L; // latent scalar per subject for covariance regression
-  for (i in 1 : n_id) 
-    u_L[i] = tau_L * z_L[i];
   
   /* -------------------- id-specific Cholesky factors L_i */
   array[n_id] matrix[Q_idm, Q_idm] L_i; // subject-specific Cholesky factor
@@ -93,9 +89,9 @@
       int r = r_idx[m];
       int c = c_idx[m];
       real lp = alpha_L[m] + dot_product(beta_L[m], to_vector(Xcov[i]'))
-            + lambda_L[m] * u_L[i]; // linear predictor for L_i element
+        + lambda_L[m] * z_L[i][m]; // linear predictor for L_i element
       if (r == c) {
-        Li[r, c] = (corr_diag_link == 1) ? exp(lp) : log1p_exp(lp);
+        Li[r, c] = (vcov_diag_link == 1) ? exp(lp) : log1p_exp(lp);
       } else {
         Li[r, c] = lp;
       }
@@ -103,11 +99,13 @@
     L_i[i] = Li;
   }
   
-  /* -------------------- marker-by-id scaled effects: w_idscaled[i,d] = L_i[i] * z_w[i,d] */
+  /* -------------------- marker-by-id scaled effects: w_idscaled[i,d] = L_i_used[i] * z_w[i,d] */
   array[n_id, D] vector[Q_idm] w_idscaled; // scaled marker-id effects
-  for (i in 1 : n_id)
+  for (i in 1 : n_id) {
+    matrix[Q_idm, Q_idm] L_i_used = diag_pre_multiply(row_scale_widm, L_i[i]);
     for (d in 1 : D)
-      w_idscaled[i, d] = L_i[i] * z_w[i, d];
+      w_idscaled[i, d] = L_i_used * z_w[i, d];
+  }
   
   /* -------------------- marker weights (signed) */
   // Goal:
@@ -220,7 +218,7 @@
   
   array[n_id] vector[Q_idm] wbar_i; // scaled weighted mean per subject
   for (i in 1 : n_id)
-    wbar_i[i] = L_i[i] * zbar[i];
+    wbar_i[i] = diag_pre_multiply(row_scale_widm, L_i[i]) * zbar[i];
   
   /* -------------------- Effective association coefficients (flags applied) */
   // Non-centred association construction with flexible sign constraints:
@@ -250,6 +248,8 @@
   real alpha_cs_mean = z_alpha_cs_mean * sd_alpha_cs_mean;
   real alpha_cv_marker = z_alpha_cv_marker_eff * sd_alpha_cv_marker;
   real alpha_cs_marker = z_alpha_cs_marker_eff * sd_alpha_cs_marker;
+  vector[M_corr] alpha_corr_eff = s_corr * alpha_corr; // effective corr coefficients on the model scale
+  vector[M_vcov] alpha_vcov_eff = s_vcov * alpha_vcov; // effective vcov coefficients on the model scale
 
   real a_cv_total = assoc_cv_total * alpha_cv_total; // total CV coefficient
   real a_cs_total = assoc_cs_total * alpha_cs_total; // total CS coefficient
@@ -257,5 +257,5 @@
   real a_cv_marker = assoc_cv_marker * alpha_cv_marker; // marker CV coefficient
   real a_cs_mean = assoc_cs_mean * alpha_cs_mean;    // mean CS coefficient
   real a_cs_marker = assoc_cs_marker * alpha_cs_marker; // marker CS coefficient
-  vector[M_corr] a_corr = assoc_corr * alpha_corr; // corr correlation coefficients
-  vector[M_vcov] a_vcov = assoc_vcov * alpha_vcov; // vcov association coefficients
+  vector[M_corr] a_corr = assoc_corr * alpha_corr_eff; // corr correlation coefficients actually used in the hazard
+  vector[M_vcov] a_vcov = assoc_vcov * alpha_vcov_eff; // vcov association coefficients actually used in the hazard

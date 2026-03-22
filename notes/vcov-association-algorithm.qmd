@@ -1,0 +1,424 @@
+---
+title: "VCov Association Algorithm Investigation"
+format:
+  pdf:
+    toc: true
+    number-sections: true
+    colorlinks: true
+    geometry:
+      - margin=1in
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+# Purpose
+
+This note documents the exact `vcov` association algorithm currently used in:
+
+- simulation in `R/simulate.R`
+- fitting in Stan via `inst/stan/helper/transformed_parameters/fit_scaling_and_effects.stan`
+- the joint likelihood in `inst/stan/helper/functions/joinme_fit_partial.stanfunctions`
+
+The goal is to make the `vcov` association path auditable with the same variable names that appear in the code.
+
+# Executive Conclusion
+
+The current code implements the `vcov` association as:
+
+1. Build the subject-specific lower-triangular Cholesky factor `L_i`.
+2. Extract the raw `vcov` feature vector from `L_i` itself, not from `Sigma_i = L_i %*% t(L_i)`.
+3. Transform each `vcov` component separately.
+4. Zero-reference each transformed component by subtracting the same transform evaluated at raw value `0`.
+5. Sum the weighted transformed components into a single scalar hazard contribution.
+
+In symbols, the intended contract is:
+
+$$
+\texttt{vcov\_assoc} = \sum_{m=1}^{M_{vcov}} a_{vcov,m}
+\left[f_{vcov,m}(\texttt{vcov\_raw}_m) - f_{vcov,m}(0)\right].
+$$
+
+That contract is already implemented in both simulation and the fitted Stan likelihood.
+
+So the present evidence does **not** indicate that simulation is applying the `vcov` association on the wrong compartment or in the wrong order.
+
+The reproduction in `tests/local/issue-wrong-side.R` instead points to two practical issues:
+
+1. It tracks `alpha_vcov[...]`, which is the latent coefficient, not the hazard-scale coefficient used by the model.
+2. The fitted model shows severe geometry problems in the covariance-regression block, with divergences, maximum-treedepth hits, and unstable chains. That can destroy association recovery even if the simulator is correct.
+
+# Key Variables
+
+## Simulation-side variables in `R/simulate.R`
+
+- `L_i`: subject-specific Cholesky factor for the marker-by-id covariance structure.
+- `assoc_coef_vcov`: simulation truth for the `vcov` association coefficients.
+- `vcov_by_id[[i]]`: raw `vcov` features for subject `i`, produced by `.sim_vcov_features(i)`.
+- `vcov_vals_tf`: transformed and zero-referenced `vcov` features.
+- `vcov_assoc`: scalar `vcov` hazard contribution for subject `i`.
+- `.assoc_vcov_features_from_chol(L_i, diagonal_only = ...)`: raw feature extractor.
+- `tf_funs$vcov[[m]]`: per-component `vcov` transform function.
+
+## Stan transformed-parameter variables
+
+From `inst/stan/helper/transformed_parameters/fit_scaling_and_effects.stan`:
+
+- `alpha_vcov`: latent `vcov` association coefficients.
+- `s_vcov`: positive global scale for the `vcov` association channel.
+- `alpha_vcov_eff = s_vcov * alpha_vcov`: effective hazard-scale coefficients.
+- `a_vcov = assoc_vcov * alpha_vcov_eff`: actual coefficients entering the hazard.
+- `L_i[i]`: subject-specific Cholesky factor used by the hazard.
+
+## Stan likelihood variables
+
+From `inst/stan/helper/functions/joinme_fit_partial.stanfunctions`:
+
+- `vcov_terms_raw = eta_vcov_weighted_const(L_i[i], ...)`
+- `vcov_terms_tf = apply_transform_vector_by_component(vcov_terms_raw, ...)`
+- `vcov_terms_ref = apply_transform_vector_by_component(rep_vector(0, M_vcov_local), ...)`
+- `vcov_terms_tf = vcov_terms_tf - vcov_terms_ref`
+- `vcov_assoc_scalar = dot_product(a_vcov, vcov_terms_tf)`
+
+# Simulation Algorithm
+
+## Step 1: Build `L_i`
+
+In simulation, the covariance-regression block constructs `L_i` entry-wise using:
+
+$$
+\eta_{im} = \texttt{alpha\_cov}[m] + X_{cov}[i,] \cdot \texttt{beta\_cov}[m,] + \texttt{lambda\_cov}[m] \cdot \texttt{z\_cov}[i,m].
+$$
+
+Then:
+
+- diagonal entries use `softplus` or `exp`
+- off-diagonal entries stay on identity scale
+
+So `L_i` is the direct source of the `vcov` association features.
+
+## Step 2: Extract raw `vcov` features
+
+The helper `.sim_vcov_features(i)` does:
+
+1. read `Li <- matrix(L_i[i, , ], ...)`
+2. call `.assoc_vcov_features_from_chol(Li, diagonal_only = ...)`
+
+This means the raw `vcov` features are the lower-triangular entries of `L_i` in row-major order:
+
+$$
+(1,1), (2,1), (2,2), \ldots, (Q,Q).
+$$
+
+This is **not** using `Sigma_i` and it is **not** applying coefficients before the transform.
+
+## Step 3: Transform each component separately
+
+Inside `assoc_components(i, t)` in `R/simulate.R`:
+
+```r
+vcov_vals <- vcov_by_id[[i]]
+vcov_vals_tf <- if (length(vcov_vals) > 0) {
+  vapply(seq_along(vcov_vals), function(m) {
+    as.numeric(tf_funs$vcov[[m]](vcov_vals[m]))[1] -
+      as.numeric(tf_funs$vcov[[m]](0))[1]
+  }, numeric(1))
+} else {
+  numeric(0)
+}
+vcov_assoc <- if (length(vcov_vals_tf) > 0) sum(assoc_coef_vcov * vcov_vals_tf) else 0
+```
+
+This is the crucial point. Simulation is doing:
+
+$$
+\texttt{vcov\_assoc} = \sum_m \texttt{assoc\_coef\_vcov}[m] \cdot \texttt{vcov\_vals\_tf}[m].
+$$
+
+That is exactly “association on the transformed `vcov` compartment” and “the sum of them”.
+
+## Step 4: Add `vcov_assoc` to the event hazard
+
+Simulation combines all channels in `.sim_assoc_lp_from_components(comp)`:
+
+```r
+assoc_coef_scalar[["cv_total"]] * comp$cv_total +
+assoc_coef_scalar[["cv_mean"]] * comp$cv_mean +
+assoc_coef_scalar[["cv_marker"]] * comp$cv_marker +
+assoc_coef_scalar[["cs_total"]] * comp$cs_total +
+assoc_coef_scalar[["cs_mean"]] * comp$cs_mean +
+assoc_coef_scalar[["cs_marker"]] * comp$cs_marker +
+comp$corr +
+comp$vcov
+```
+
+Then the simulated hazard is:
+
+$$
+h_i(t) = h_0(t) \exp\left(\texttt{eta\_event\_i}[i] + \texttt{assoc\_lp}(i,t)\right).
+$$
+
+No extra penalty is applied inside the simulated hazard. The simulator uses the coefficient vector directly.
+
+# Fitted Stan Algorithm
+
+## Step 1: Build the effective `vcov` coefficient
+
+In `fit_scaling_and_effects.stan`:
+
+```stan
+vector[M_vcov] alpha_vcov_eff = s_vcov * alpha_vcov;
+vector[M_vcov] a_vcov = assoc_vcov * alpha_vcov_eff;
+```
+
+So the fitted hazard does **not** use raw `alpha_vcov` directly. It uses:
+
+$$
+a_{vcov} = \texttt{assoc\_vcov} \cdot \left(\texttt{s\_vcov} \cdot \texttt{alpha\_vcov}\right).
+$$
+
+This is why monitoring `alpha_vcov[...]` alone is incomplete.
+
+## Step 2: Extract raw `vcov` features from `L_i`
+
+In the partial likelihood:
+
+```stan
+vector[M_vcov_local] vcov_terms_raw = eta_vcov_weighted_const(L_i[i], (M_vcov_local == Q_idm));
+```
+
+The helper `eta_vcov_weighted_const()` returns the lower-triangular entries of `L_i` itself.
+
+## Step 3: Transform and zero-reference
+
+The Stan likelihood then does:
+
+```stan
+vector[M_vcov_local] vcov_terms_tf = apply_transform_vector_by_component(vcov_terms_raw, ...);
+vector[M_vcov_local] vcov_terms_ref = apply_transform_vector_by_component(rep_vector(0, M_vcov_local), ...);
+vcov_terms_tf = vcov_terms_tf - vcov_terms_ref;
+real vcov_assoc_scalar = dot_product(a_vcov, vcov_terms_tf);
+```
+
+So Stan is using the same transform-first, zero-reference, weighted-sum contract as simulation.
+
+## Step 4: Add the scalar `vcov` contribution to the hazard
+
+The fitted hazard predictor includes:
+
+```stan
+vector[n_gk] eta_assoc_nodes = ... + vcov_assoc;
+```
+
+where `vcov_assoc` is a constant vector built from the scalar `vcov_assoc_scalar` because `vcov` depends only on `L_i[i]`, not on time `t` for a fixed subject.
+
+# Alignment Check: Simulation vs Stan
+
+| Stage | Simulation (`R/simulate.R`) | Stan fit (`joinme_fit_partial.stanfunctions`) |
+|---|---|---|
+| Raw source | `.assoc_vcov_features_from_chol(L_i)` | `eta_vcov_weighted_const(L_i[i], ...)` |
+| Transform timing | after raw extraction | after raw extraction |
+| Reference subtraction | `tf(0)` subtracted component-wise | `tf(0)` subtracted component-wise |
+| Aggregation | `sum(assoc_coef_vcov * vcov_vals_tf)` | `dot_product(a_vcov, vcov_terms_tf)` |
+| Time dependence | constant in `t` for subject `i` | constant in `t` for subject `i` |
+
+This is algorithmic alignment.
+
+# Why the Local Reproduction Still Looks Wrong
+
+## Finding 1: the script tracks the wrong association parameter
+
+The local script `tests/local/issue-wrong-side.R` currently monitors:
+
+- `alpha_vcov[1]`
+- `alpha_vcov[2]`
+- `alpha_vcov[3]`
+
+But the fitted hazard uses:
+
+- `alpha_vcov_eff[1]`
+- `alpha_vcov_eff[2]`
+- `alpha_vcov_eff[3]`
+
+with
+
+$$
+\texttt{alpha\_vcov\_eff} = \texttt{s\_vcov} \cdot \texttt{alpha\_vcov}.
+$$
+
+So a comparison against simulation truth should target the effective coefficient, not the latent coefficient.
+
+## Finding 2: the fit is geometrically unhealthy
+
+The reproduction output showed:
+
+- divergences
+- 50% of transitions at maximum treedepth
+- covariance-regression `Rhat` values near 1.9 to 2.0 for some `alpha_L` entries
+- one chain sitting in a very different mode than the other
+
+That means the association recovery problem cannot be attributed to the simulator alone.
+
+When the covariance-regression block is poorly explored, the model can fit the longitudinal part reasonably while still failing to stabilize the survival association.
+
+## Finding 3: simulation truth is actually well separated
+
+The same reproduction showed the simulated transformed `vcov` components had low cross-correlation across subjects, so the simulator is not collapsing them into one near-collinear feature in that setup.
+
+# Pseudocode
+
+## Simulation pseudocode
+
+```text
+INPUT:
+  L_i
+  assoc_coef_vcov
+  tf_funs$vcov[[m]]
+  eta_event_i[i]
+  h0_fn(t)
+
+FOR subject i:
+  vcov_vals <- .assoc_vcov_features_from_chol(L_i[i], diagonal_only)
+
+  FOR component m:
+    vcov_vals_tf[m] <- tf_funs$vcov[[m]](vcov_vals[m]) - tf_funs$vcov[[m]](0)
+  END FOR
+
+  vcov_assoc <- sum(assoc_coef_vcov * vcov_vals_tf)
+
+  assoc_lp(i, t) <-
+      assoc_coef_scalar[cv_total]  * cv_total(i, t)
+    + assoc_coef_scalar[cv_mean]   * cv_mean(i, t)
+    + assoc_coef_scalar[cv_marker] * cv_marker(i, t)
+    + assoc_coef_scalar[cs_total]  * cs_total(i, t)
+    + assoc_coef_scalar[cs_mean]   * cs_mean(i, t)
+    + assoc_coef_scalar[cs_marker] * cs_marker(i, t)
+    + corr_assoc(i)
+    + vcov_assoc(i)
+
+  hazard_i(t) <- h0_fn(t) * exp(eta_event_i[i] + assoc_lp(i, t))
+END FOR
+```
+
+## Stan fitting pseudocode
+
+```text
+INPUT:
+  alpha_vcov
+  s_vcov
+  assoc_vcov
+  L_i[i]
+  transform configuration for vcov
+
+alpha_vcov_eff <- s_vcov * alpha_vcov
+a_vcov <- assoc_vcov * alpha_vcov_eff
+
+FOR subject i:
+  vcov_terms_raw <- eta_vcov_weighted_const(L_i[i], diagonal_only)
+
+  vcov_terms_tf  <- apply_transform_vector_by_component(vcov_terms_raw, vcov transform)
+  vcov_terms_ref <- apply_transform_vector_by_component(0-vector, vcov transform)
+  vcov_terms_tf  <- vcov_terms_tf - vcov_terms_ref
+
+  vcov_assoc_scalar <- dot_product(a_vcov, vcov_terms_tf)
+
+  eta_assoc_nodes <-
+      a_cv_total  * cv_tot_tf
+    + a_cv_mean   * cv_mean_tf
+    + a_cv_marker * cv_marker_tf
+    + a_cs_total  * cs_tot_tf
+    + a_cs_mean   * cs_mean_tf
+    + a_cs_marker * cs_marker_tf
+    + corr_assoc_scalar
+    + vcov_assoc_scalar
+END FOR
+```
+
+# UML / Data Flow
+
+## Sequence diagram
+
+```{mermaid}
+sequenceDiagram
+  participant Sim as R/simulate.R
+  participant Chol as L_i
+  participant TF as tf_funs$vcov[[m]]
+  participant Haz as hazard_i
+  participant StanTP as fit_scaling_and_effects.stan
+  participant StanLL as joinme_fit_partial.stanfunctions
+
+  Sim->>Chol: build L_i from alpha_cov, beta_cov, lambda_cov, z_cov
+  Sim->>Chol: .assoc_vcov_features_from_chol(L_i)
+  Chol-->>Sim: vcov_vals
+  Sim->>TF: transform each vcov_vals[m]
+  TF-->>Sim: vcov_vals_tf[m] - tf(0)
+  Sim->>Haz: vcov_assoc = sum(assoc_coef_vcov * vcov_vals_tf)
+
+  StanTP->>StanTP: alpha_vcov_eff = s_vcov * alpha_vcov
+  StanTP->>StanTP: a_vcov = assoc_vcov * alpha_vcov_eff
+  StanLL->>Chol: eta_vcov_weighted_const(L_i[i], ...)
+  Chol-->>StanLL: vcov_terms_raw
+  StanLL->>StanLL: apply_transform_vector_by_component(vcov_terms_raw)
+  StanLL->>StanLL: subtract transform at 0
+  StanLL->>StanLL: vcov_assoc_scalar = dot_product(a_vcov, vcov_terms_tf)
+```
+
+## Class-style variable map
+
+```{mermaid}
+classDiagram
+  class Simulation {
+    L_i
+    assoc_coef_vcov
+    vcov_vals
+    vcov_vals_tf
+    vcov_assoc
+  }
+
+  class StanTransformedParameters {
+    alpha_vcov
+    s_vcov
+    alpha_vcov_eff
+    a_vcov
+  }
+
+  class StanLikelihood {
+    vcov_terms_raw
+    vcov_terms_tf
+    vcov_terms_ref
+    vcov_assoc_scalar
+  }
+
+  Simulation --> StanLikelihood : same raw source concept (L_i lower triangle)
+  StanTransformedParameters --> StanLikelihood : a_vcov enters dot_product
+```
+
+# Recommended Diagnostics
+
+If the goal is to check whether the fitted association matches simulation truth, inspect these variables in this order:
+
+1. `alpha_vcov_eff[m]`, not only `alpha_vcov[m]`
+2. `s_vcov`
+3. `alpha_L[m]`
+4. `lambda_L[m]`
+5. sampler diagnostics: divergences, treedepth, `Rhat`, ESS
+
+For the local script, the important correction is conceptual:
+
+```text
+simulation truth     -> vcov[m]
+fit latent draw      -> alpha_vcov[m]
+fit hazard-scale draw -> alpha_vcov_eff[m] = s_vcov * alpha_vcov[m]
+```
+
+# Bottom Line
+
+The current `vcov` association algorithm is already:
+
+- on the transformed `vcov` compartment,
+- summed across components,
+- zero-referenced at raw `0`,
+- and aligned between simulation and Stan.
+
+So the next debugging target should be posterior geometry and identifiability in the covariance-regression plus survival-association block, not a simulator order-of-operations bug in the `vcov` channel.

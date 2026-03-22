@@ -31,7 +31,7 @@ test_that("vcov association fits and predicts end-to-end", {
     dataLong = sim$dataLong,
     formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
     dataEvent = sim$dataEvent,
-    formulaCorr = ~ x1,
+    formulaVCov = ~ x1,
     assoc = "vcov",
     families = c("gaussian", "gaussian"),
     transforms = joinme_tf(vcov = "identity"),
@@ -48,6 +48,11 @@ test_that("vcov association fits and predicts end-to-end", {
 
   fit_summary <- suppressWarnings(summary(fit, draws = 20, seed = 3321))
   expect_true(any(grepl("^vcov\\[", fit_summary$tables$assoc$term)))
+
+  fit_assoc <- extract(fit, what = "assoc", keep_chains = FALSE)
+  expect_true(any(grepl("^vcov\\[", colnames(fit_assoc$draws))))
+  expect_true(any(grepl("^alpha_vcov_eff\\[", fit_assoc$term_map$variable)))
+  expect_false(any(grepl("^alpha_vcov\\[", fit_assoc$term_map$variable)))
 
   ndL <- sim$dataLong[sim$dataLong$id == 1, , drop = FALSE]
   ndE <- sim$dataEvent[sim$dataEvent$id == 1, , drop = FALSE]

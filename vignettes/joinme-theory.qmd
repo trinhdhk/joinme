@@ -130,15 +130,15 @@ A unique feature of `joinme` is the ability to model the covariance structure of
 $$
 \Sigma_{w, i} = \text{diag}(\boldsymbol{\tau}_i) \, \Omega \, \text{diag}(\boldsymbol{\tau}_i)
 $$
-where $\log(\boldsymbol{\tau}_i) = \mathbf{X}_{cov, i} \boldsymbol{\beta}_{\tau}$. This allows, for example, the variability in biomarker trajectories to differ between treatment groups or with baseline age (`formulaCorr`).
+where $\log(\boldsymbol{\tau}_i) = \mathbf{X}_{cov, i} \boldsymbol{\beta}_{\tau}$. This allows, for example, the variability in biomarker trajectories to differ between treatment groups or with baseline age (`formulaVCov`).
 
 In the Stan implementation, the subject-specific covariance matrix is built from
 its Cholesky factor $L_i$. Each unique lower-triangular element of $L_i$ is
 modelled through a regression with a subject-level latent effect:
 
 $$
-\ell_{im} = \alpha_m + \mathbf{x}_{cov,i}^\top \boldsymbol{\beta}_m + \lambda_m u_{L,i},
-\qquad u_{L,i} \sim \mathcal{N}(0, \tau_L^2).
+\ell_{im} = \alpha_m + \mathbf{x}_{cov,i}^\top \boldsymbol{\beta}_m + \lambda_m z_{L,i},
+\qquad z_{L,i} \sim \mathcal{N}(0, 1).
 $$
 
 For diagonal elements, a softplus (default) or exp transform ensures positivity:
@@ -147,7 +147,7 @@ $$
 L_i[r,r] = \log(1 + \exp(\ell_{im}))\;\text{or}\;\exp(\ell_{im}), \qquad L_i[r,c] = \ell_{im} \; (r > c).
 $$
 
-Use `control$corr_diag_link` to select `"softplus"` (default) or `"exp"`.
+Use `control$vcov_diag_link` to select `"softplus"` (default) or `"exp"`.
 
 This construction allows both covariate-driven heterogeneity and subject-level
 latent variability in the marker-by-subject covariance structure.
@@ -192,6 +192,18 @@ is passed to Stan; the GK nodes and weights themselves are fixed in the Stan
 code and used via precomputed design matrices. CS is approximated by a forward
 finite difference with step size $\varepsilon$. These summaries can be
 transformed before entering the hazard, as described below.
+
+For covariance-style channels (`corr`, `vcov`), the fitted association
+coefficients follow a scale-times-latent form. Internally, a positive global
+scale (`s_corr` or `s_vcov`) multiplies a latent coefficient vector, and the
+reported posterior summaries correspond to the effective coefficients that enter
+the hazard.
+
+The covariance-regression layer itself uses an identified parameterisation for
+the subject-specific Cholesky factor: each lower-triangular entry has its own
+latent perturbation $z_{im}$ and a non-negative loading $\lambda_m$, so
+$\eta_{im} = \alpha_m + x_i^\top \beta_m + \lambda_m z_{im}$ with
+$\lambda_m \ge 0$ and $z_{im} \sim \mathcal{N}(0, 1)$.
 
 ### Marker-weighted contributions (CV and CS)
 

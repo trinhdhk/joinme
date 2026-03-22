@@ -26,7 +26,7 @@ run_joinme_example <- function() {
   fit <- joinme(
     formulaLong = formulaLong,
     formulaEvent = formulaEvent,
-    formulaCorr = ~1,
+    formulaVCov = ~1,
     dataLong = sim$dataLong,
     dataEvent = sim$dataEvent,
     draws = 500,

@@ -37,7 +37,7 @@ It is organised by common simulation goals:
 
 - selecting association channels (`assoc`, `formulaAssoc`, `assoc_coefs`),
 - configuring random effects (`re_params`),
-- controlling marker-by-id covariance regression (`formulaCorr` + `re_params$id_marker_cov`),
+- controlling marker-by-id covariance regression (`formulaVCov` + `re_params$id_marker_cov`),
 - defining distributional regressions (`formulaDist`) with family-scoped coefficients (`dist_coefs`),
 - generating event-level covariates (`covariate_formulas`),
 - checking outputs and truth objects.
@@ -48,7 +48,7 @@ The examples intentionally mirror the `joinme()` fitting syntax so your simulati
 
 At a high level, `simulate_joinme()` does this:
 
-1. Parse formulas (`formulaLong`, `formulaEvent`, optional `formulaDist`, `formulaCorr`).
+1. Parse formulas (`formulaLong`, `formulaEvent`, optional `formulaDist`, `formulaVCov`).
 2. Simulate event-level covariates from `covariate_formulas`.
 3. Draw random effects from `re_params`.
 4. Build longitudinal trajectories.
@@ -243,23 +243,15 @@ tf_pwlin <- list(
 
 - `id`: from top-level `( ... | id)` terms,
 - `marker`: from marker-level terms,
-- `id_marker_cov$latent`: latent marker-by-id random effects from nested terms,
 - `id_marker_cov`: subject-specific covariance regression for marker-by-id latents,
 - `dist`: random effects in distributional regression formulas.
 
-## `id`, `marker`, `id_marker_cov$latent`
+## `id` and `marker`
 
 Each uses:
 
 - `sd`: scalar or vector (length = block dimension),
 - `corr`: square correlation matrix.
-
-For `id_marker_cov$latent` specifically:
-
-- this is the **base** marker-by-id latent random effect draw (before covariance regression),
-- think of it as a standard RE block with covariance built from `sd` and `corr`,
-- then `id_marker_cov` (`alpha`, `beta`, `lambda`, `sd_u`, `diag_link`) builds subject-specific `L_i` and transforms that base latent draw,
-- so `latent` sets baseline scale/correlation, while `id_marker_cov` controls how that structure changes across subjects.
 
 ```{r}
 re_cfg <- list(
@@ -291,11 +283,16 @@ This block controls the subject-specific lower-triangular matrix `L_i` used to s
 
 Pipeline view:
 
-1. Draw base latent effects from `id_marker_cov$latent`.
-2. Build subject-specific `L_i` from `alpha`, `beta`, `lambda`, `sd_u`, `diag_link`.
-3. Produce final marker-by-id effects by multiplying latent effects with `L_i`.
+1. Draw marker-by-id latent seeds from iid standard normal values.
+2. Build subject-specific `L_i` from `alpha`, `beta`, `lambda`, `diag_link`.
+3. Produce final marker-by-id effects by multiplying those latent seeds with `L_i`.
 
-So if `latent` is near zero, changing `alpha/beta/lambda/sd_u` has little practical impact, because there is almost no base latent signal to reshape.
+This keeps the baseline covariance and the subject-specific covariance changes in one place: `L_i`.
+
+Backward-compatibility note:
+
+- If you still provide `re_params$id_marker_cov$latent`, the simulator translates that old baseline covariance into the baseline `alpha` intercepts before simulation.
+- New code should set `alpha` directly and leave `latent` unset.
 
 Recovery tip:
 
@@ -306,18 +303,18 @@ Recovery tip:
   harder inference problem; it is suitable for flexible modelling, but not the
   cleanest first recovery check.
 
-Mathematically (two-stage form):
+Mathematically:
 
 $$
-z_{id} \sim \mathcal{N}(0, \Sigma_{\text{latent}}),
+z_{id} \sim \mathcal{N}(0, I),
 $$
 
-where $z_{id}$ is the base latent marker-by-id random-effect vector for subject $i$ and marker $d$, and $\Sigma_{\text{latent}}$ is defined by `id_marker_cov$latent` (`sd`, `corr`).
+where $z_{id}$ is the marker-by-id latent seed vector for subject $i$ and marker $d$.
 
 For each subject $i$ and lower-triangular element index $m$ (one diagonal or off-diagonal entry), simulation builds
 
 $$
-\eta_{im} = \alpha_m + x_i^\top \beta_m + \lambda_m u_{im}, \quad u_{im} \sim \mathcal{N}(0, \mathrm{sd\_u}_m^2),
+\eta_{im} = \alpha_m + x_i^\top \beta_m + \lambda_m z_i, \quad z_i \sim \mathcal{N}(0, 1),
 $$
 
 then maps diagonal entries through `diag_link` (`softplus` or `exp`) so diagonals are positive. Off-diagonals are left on identity scale.
@@ -328,22 +325,19 @@ $$
 b_{id} = L_i z_{id}
 $$
 
-so `latent` governs the baseline distribution of $z_{id}$, while `alpha`/`beta`/`lambda`/`sd_u` govern how $L_i$ reshapes that latent signal by subject.
+so `alpha`/`beta`/`lambda` fully govern how $L_i$ shapes marker-by-id covariance by subject.
 
 Fields:
 
-- `alpha`: baseline level of each covariance element when `formulaCorr` covariates are zero and random perturbation is zero. Larger diagonal `alpha` means larger typical within-subject latent SD after diagonal link.
-- `beta`: covariate effects from `formulaCorr`; shifts covariance elements systematically across subjects by observed covariates (`x1`, `x2`, ...).
+- `alpha`: baseline level of each covariance element when `formulaVCov` covariates are zero and random perturbation is zero. Larger diagonal `alpha` means larger typical within-subject marker-by-id SD after the diagonal link.
+- `beta`: covariate effects from `formulaVCov`; shifts covariance elements systematically across subjects by observed covariates (`x1`, `x2`, ...).
 - `lambda`: multiplier on the latent subject perturbation; controls how strongly unobserved subject heterogeneity affects each covariance element.
-- `sd_u` (or `tau_u`): SD of latent perturbation `u`; controls the raw spread of latent perturbations before `lambda` scaling.
 - `diag_link`: link for diagonal elements (`"softplus"` or `"exp"`).
 
 Practical interpretation of variability:
 
-- Effective random spread contributed by latent perturbation is approximately `|lambda| * sd_u` (element-wise if vectors).
-- Increase `lambda` with fixed `sd_u` to amplify heterogeneity.
-- Increase `sd_u` with fixed `lambda` to amplify heterogeneity.
-- Set either near zero to make covariance elements mostly deterministic from `alpha + X beta`.
+- Larger `|lambda|` increases subject-to-subject covariance heterogeneity.
+- Set `lambda` near zero to make covariance elements mostly deterministic from `alpha + X beta`.
 
 Dimension rule:
 
@@ -354,7 +348,7 @@ Dimension rule:
 sim <- simulate_joinme(
   n_id = 80,
   families = c("gaussian", "gaussian", "gaussian"),
-  formulaCorr = ~ x1 + x2,
+  formulaVCov = ~ x1 + x2,
   re_params = list(
     id = list(sd = c(0.5, 0.2)),
     marker = list(sd = 0.3),
@@ -365,7 +359,6 @@ sim <- simulate_joinme(
                       0.05, 0.05,
                       0.10, -0.05), nrow = 3, byrow = TRUE),
       lambda = c(0.4, 0.4, 0.4),
-      sd_u = 0.6,
       diag_link = "softplus"
     )
   ),
@@ -481,7 +474,7 @@ set.seed(2026)
 sim <- simulate_joinme(
   formulaLong = y ~ 1 + time + x1 + (1 + time | id) + (0 + x1 + (1 + time | id) | marker),
   formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
-  formulaCorr = ~ x1 + x2,
+  formulaVCov = ~ x1 + x2,
   formulaDist = list(
     sigma[family = gaussian] ~ 1 + x1,
     sigma[family = student_t] ~ 1 + time,
@@ -507,8 +500,7 @@ sim <- simulate_joinme(
     id_marker_cov = list(
       latent = list(sd = c(0.7, 0.3)),
       alpha = c(-0.2, 0.0, -0.1),
-      lambda = 0.35,
-      sd_u = 0.5
+      lambda = 0.175
     ),
     dist = list(sigma = list(sd = 0.4))
   ),

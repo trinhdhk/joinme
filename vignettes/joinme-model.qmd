@@ -113,6 +113,16 @@ Marker weights and association coefficients are regularized with Normal or Lapla
 priors depending on the `shrinkage` setting, using a positive non-centred
 parameterisation $\alpha = z_{\alpha} \cdot sd_{\alpha}$.
 
+For covariance-style channels (`corr`, `vcov`), the fitted association
+coefficients use the same positive-scale parameterisation: a global scale
+(`s_corr` or `s_vcov`) multiplies a latent coefficient vector, and summaries
+report the resulting effective coefficients on the hazard scale.
+
+For covariance regression, each lower-triangular entry has its own latent
+perturbation $z_{im}$ and a non-negative loading $\lambda_m$, so the identified
+form is $\eta_{im} = \alpha_m + x_i^\top \beta_m + \lambda_m z_{im}$ with
+$\lambda_m \ge 0$ and $z_{im} \sim \mathcal{N}(0, 1)$.
+
 # Implementation
 
 The model is implemented in Stan, utilising Hamiltonian Monte Carlo (HMC) for efficient posterior sampling.

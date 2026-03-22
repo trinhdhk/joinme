@@ -574,7 +574,7 @@ real partial_joinme(
         
         // Compute sigma from regression or use marker/global constant
         real sig = (P_sigma > 0 || n_re_sigma > 0)
-             ? exp(eta_sigma)
+             ? exp(fmin(eta_sigma, 20))
              : sigma_family[marker_to_sigma_family[d]];
         // sig: residual scale
         
@@ -597,7 +597,7 @@ real partial_joinme(
           }
         }
         real sig = (P_sigma > 0 || n_re_sigma > 0)
-             ? exp(eta_sigma)
+             ? exp(fmin(eta_sigma, 20))
              : sigma_family[marker_to_sigma_family[d]];
         // sig: residual scale
         
@@ -612,7 +612,7 @@ real partial_joinme(
             eta_nu += dot_product(Z_nu[j][n, 1:K_nu[j]], b);
           }
         }
-        real nu = (P_nu > 0 || n_re_nu > 0) ? (2 + exp(eta_nu)) : nu_family[marker_to_nu_family[d]];
+        real nu = (P_nu > 0 || n_re_nu > 0) ? (2 + exp(fmin(eta_nu, 20))) : nu_family[marker_to_nu_family[d]];
         // nu: degrees of freedom
         
         lp_i += student_t_lpdf(y_real[n] | nu, mu_long, sig);
@@ -689,7 +689,7 @@ real partial_joinme(
           }
         }
         real sig = (P_sigma > 0 || n_re_sigma > 0)
-             ? exp(eta_sigma)
+             ? exp(fmin(eta_sigma, 20))
              : sigma_family[marker_to_sigma_family[d]];
         // sig: residual scale
         
@@ -724,7 +724,7 @@ real partial_joinme(
           }
         }
         real sig = (P_sigma > 0 || n_re_sigma > 0)
-             ? exp(eta_sigma)
+             ? exp(fmin(eta_sigma, 20))
              : sigma_family[marker_to_sigma_family[d]];
         // sig: residual scale
         lp_i += double_exponential_lpdf(y_real[n] | mu_long, sig);
@@ -739,7 +739,7 @@ real partial_joinme(
           }
         }
         real sig = (P_sigma > 0 || n_re_sigma > 0)
-             ? exp(eta_sigma)
+             ? exp(fmin(eta_sigma, 20))
              : sigma_family[marker_to_sigma_family[d]];
         // sig: residual scale
         

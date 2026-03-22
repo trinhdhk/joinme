@@ -54,7 +54,7 @@ test_that("draw-dependent containers are re-indexed to prediction draw count", {
     beta_fixed = matrix(seq_len(20), nrow = 10, ncol = 2),
     tau_id = matrix(seq_len(30), nrow = 10, ncol = 3),
     Lcorr_id = array(seq_len(40), dim = c(10, 2, 2)),
-    tau_corr_reg = seq_len(10),
+    lambda_vcov_reg = matrix(seq_len(20), nrow = 10, ncol = 2),
     bs_gamma_c = array(seq_len(30), dim = c(10, 1, 3))
   )
 
@@ -64,9 +64,47 @@ test_that("draw-dependent containers are re-indexed to prediction draw count", {
   expect_equal(nrow(out$beta_fixed), length(idx))
   expect_equal(nrow(out$tau_id), length(idx))
   expect_equal(dim(out$Lcorr_id)[1], length(idx))
-  expect_equal(length(out$tau_corr_reg), length(idx))
+  expect_equal(nrow(out$lambda_vcov_reg), length(idx))
   expect_equal(dim(out$bs_gamma_c)[1], length(idx))
 
   expect_equal(out$beta_fixed[, 1], draws$beta_fixed[idx, 1])
-  expect_equal(out$tau_corr_reg, draws$tau_corr_reg[idx])
+  expect_equal(out$lambda_vcov_reg[, 1], draws$lambda_vcov_reg[idx, 1])
+})
+
+
+test_that("marker-id draw reconstruction uses scaled-time rows only in w_idscaled", {
+  draws_matrix <- matrix(
+    c(log(2), 3, log(4), 0, 0, 0, 5, 7),
+    nrow = 1,
+    dimnames = list(
+      NULL,
+      c(
+        "alpha_L[1]", "alpha_L[2]", "alpha_L[3]",
+        "lambda_L[1]", "lambda_L[2]", "lambda_L[3]",
+        "z_w_lat[1,1,1]", "z_w_lat[1,1,2]"
+      )
+    )
+  )
+
+  standata_subject <- list(
+    n_random_marker_id = 2L,
+    n_marker_types = 1L,
+    alpha_vcov_reg = matrix(c(log(2), 3, log(4)), nrow = 1),
+    beta_vcov_reg_flat = matrix(numeric(0), nrow = 1, ncol = 0),
+    lambda_vcov_reg = matrix(0, nrow = 1, ncol = 3),
+    vec_cov_vcov = numeric(0),
+    idx_row_cov = c(1L, 2L, 2L),
+    idx_col_cov = c(1L, 1L, 2L),
+    n_random_marker = 0L,
+    flag_indep_marker_re = 1L,
+    flag_allow_marker_crosscorr = 0L,
+    marker_id_row_scale = c(1, 10),
+    vcov_diag_link = 1L,
+    zidm_cols = c("(Intercept)", "time")
+  )
+
+  out <- joinme:::.reconstruct_subject_marker_id_draws(draws_matrix, standata_subject, n_draws_target = 1)
+
+  expect_equal(unname(out$matrix[1, ]), c(10, 430))
+  expect_equal(out$corr[1, , ], matrix(c(4, 6, 6, 25), nrow = 2, byrow = TRUE))
 })

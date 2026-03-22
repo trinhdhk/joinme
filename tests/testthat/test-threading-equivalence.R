@@ -44,7 +44,7 @@ test_that("threaded and non-threaded Stan paths stay aligned", {
     dataLong = sim$dataLong,
     formulaEvent = formulaEvent,
     dataEvent = sim$dataEvent,
-    formulaCorr = ~1,
+    formulaVCov = ~1,
     assoc = "cv_total",
     transforms = list(
       cv_total = list(type = "identity"),
@@ -63,7 +63,7 @@ test_that("threaded and non-threaded Stan paths stay aligned", {
     dataLong = sim$dataLong,
     formulaEvent = formulaEvent,
     dataEvent = sim$dataEvent,
-    formulaCorr = ~1,
+    formulaVCov = ~1,
     assoc = "cv_total",
     transforms = list(
       cv_total = list(type = "identity"),

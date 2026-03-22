@@ -137,7 +137,7 @@
   int<lower=0> M_corr_tf;                    // number of corr transform components
   int<lower=0> M_vcov_tf;                    // number of vcov transform components
   int<lower=0, upper=1> allow_marker_crosscorr; // 1 allow cross via B_cross
-  int<lower=0, upper=1> corr_diag_link;         // 0 softplus, 1 exp for corr diag
+  int<lower=0, upper=1> vcov_diag_link;         // 0 softplus, 1 exp for covariance diagonals
   int<lower=0, upper=1> use_tau_sde_fixed;      // 1 use fixed tau for SDE
   real<lower=0, upper=1> tau_sde_fixed;         // fixed tau value when enabled
 
@@ -146,7 +146,7 @@
   matrix[n_id, p_w] W;           // hazard covariate design per subject
 
   /* Covariance regression covariates for L_i */
-  int<lower=1> K_cov;            // number of covariates in covariance regression
+  int<lower=0> K_cov;            // number of covariates in covariance regression
   matrix[n_id, K_cov] Xcov;      // covariate matrix for covariance regression
 
   /* Baseline hazard spline (centred basis) */
@@ -215,7 +215,7 @@
   int<lower=0> n_time_vmk;                    // count of time cols in marker RE design
   array[n_time_vmk] int<lower=1> idx_time_vmk; // indices in tau_v to scale
   int<lower=0> n_time_widm;                   // count of time cols in marker-by-id design
-  array[n_time_widm] int<lower=0, upper=Q_idm> idx_time_widm; // indices in tau_w to scale
+  array[n_time_widm] int<lower=0, upper=Q_idm> idx_time_widm; // indices in the marker-by-id basis to scale
 
   /* Transform configuration */
   int<lower=0, upper=4> tf_mode_cv_tot;     // transform mode for total CV

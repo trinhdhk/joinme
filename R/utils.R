@@ -115,6 +115,76 @@ suppressPackageStartupMessages({
   )
 }
 
+#' Resolve the covariance-regression formula
+#'
+#' @param formulaVCov Covariance-regression formula.
+#' @param default Default formula when the input is not supplied.
+#' @param context Character label for error messages.
+#'
+#' @return A formula for the subject-level covariance regression.
+#' @keywords internal
+.resolve_vcov_formula <- function(formulaVCov = NULL,
+                                  default = ~ 1,
+                                  context = "joinme") {
+  chosen <- formulaVCov %||% default
+  if (!inherits(chosen, "formula")) {
+    cli::cli_abort(c(
+      x = "{context}: {.arg formulaVCov} must be a formula.",
+      i = "Example: {.code ~ x1 + x2}."
+    ))
+  }
+  chosen
+}
+
+#' Build the subject-level covariance-regression design matrix
+#'
+#' @param formulaVCov Covariance-regression formula.
+#' @param dataEvent Event-level data with one row per subject.
+#' @param time_var Longitudinal time variable name, forbidden in `formulaVCov`.
+#' @param context Character label for error messages.
+#'
+#' @return Named list with `formulaVCov`, `K_cov`, and `Xcov`.
+#' @keywords internal
+.build_vcov_design <- function(formulaVCov,
+                               dataEvent,
+                               time_var,
+                               context = "joinme") {
+  if (length(reformulas::findbars(formulaVCov)) > 0) {
+    cli::cli_abort(c(
+      x = "{context}: {.arg formulaVCov} does not support random-effects terms.",
+      i = "Remove all ( ... | ... ) terms from {.arg formulaVCov}."
+    ))
+  }
+
+  fv_rhs <- stats::update(formulaVCov, . ~ .)
+  fv_rhs[[2]] <- NULL
+  if (length(fv_rhs) >= 3 && .expr_has_time(fv_rhs[[3]], time_var)) {
+    cli::cli_abort(c(
+      x = "{context}: {.arg formulaVCov} cannot include the time variable {.arg {time_var}}.",
+      i = "Remove time from {.arg formulaVCov} or move it to longitudinal formulas."
+    ))
+  }
+
+  Xtmp <- .mm(fv_rhs, dataEvent)
+  if ("(Intercept)" %in% colnames(Xtmp)) {
+    Xtmp <- Xtmp[, colnames(Xtmp) != "(Intercept)", drop = FALSE]
+  }
+
+  if (ncol(Xtmp) < 1L) {
+    return(list(
+      formulaVCov = formulaVCov,
+      K_cov = 0L,
+      Xcov = matrix(0.0, nrow(dataEvent), 0)
+    ))
+  }
+
+  list(
+    formulaVCov = formulaVCov,
+    K_cov = as.integer(ncol(Xtmp)),
+    Xcov = Xtmp
+  )
+}
+
 #' Decode event status into event indicator and cause/type index
 #'
 #' @param status_raw Raw event-status vector.

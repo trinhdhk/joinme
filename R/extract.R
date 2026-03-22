@@ -101,6 +101,20 @@ extract.JoinMeFit <- function(object,
     if (length(g_terms) != length(g_vars)) g_terms <- g_vars
     map <- data.frame(term = as.character(g_terms), variable = as.character(g_vars), stringsAsFactors = FALSE)
   } else if (what == "assoc") {
+    corr_assoc_vars <- grep("^alpha_corr_eff\\[", all_vars, value = TRUE)
+    if (length(corr_assoc_vars) == 0L) {
+      corr_assoc_vars <- grep("^alpha_corr_used\\[", all_vars, value = TRUE)
+    }
+    if (length(corr_assoc_vars) == 0L) {
+      corr_assoc_vars <- grep("^alpha_corr\\[", all_vars, value = TRUE)
+    }
+    vcov_assoc_vars <- grep("^alpha_vcov_eff\\[", all_vars, value = TRUE)
+    if (length(vcov_assoc_vars) == 0L) {
+      vcov_assoc_vars <- grep("^alpha_vcov_used\\[", all_vars, value = TRUE)
+    }
+    if (length(vcov_assoc_vars) == 0L) {
+      vcov_assoc_vars <- grep("^alpha_vcov\\[", all_vars, value = TRUE)
+    }
     assoc_vars <- c(
       if (isTRUE(sd$assoc_cv_total == 1)) "alpha_cv_total",
       if (isTRUE(sd$assoc_cv_mean == 1)) "alpha_cv_mean",
@@ -108,8 +122,8 @@ extract.JoinMeFit <- function(object,
       if (isTRUE(sd$assoc_cs_total == 1)) "alpha_cs_total",
       if (isTRUE(sd$assoc_cs_mean == 1)) "alpha_cs_mean",
       if (isTRUE(sd$assoc_cs_marker == 1)) "alpha_cs_marker",
-      if (isTRUE(sd$assoc_corr == 1)) grep("^alpha_corr\\[", all_vars, value = TRUE),
-      if (isTRUE(sd$assoc_vcov == 1)) grep("^alpha_vcov\\[", all_vars, value = TRUE)
+      if (isTRUE(sd$assoc_corr == 1)) corr_assoc_vars,
+      if (isTRUE(sd$assoc_vcov == 1)) vcov_assoc_vars
     )
     assoc_vars <- assoc_vars[assoc_vars %in% all_vars]
 
@@ -123,6 +137,7 @@ extract.JoinMeFit <- function(object,
     )
     assoc_terms <- assoc_map[assoc_vars]
     assoc_terms[is.na(assoc_terms)] <- sub("^alpha_", "", assoc_vars[is.na(assoc_terms)])
+    assoc_terms <- sub("_(?:eff|used)\\[", "[", assoc_terms, perl = TRUE)
 
     map <- data.frame(term = as.character(assoc_terms), variable = as.character(assoc_vars), stringsAsFactors = FALSE)
 

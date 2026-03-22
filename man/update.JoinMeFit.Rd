@@ -10,7 +10,7 @@
   dataLong = NULL,
   formulaEvent = NULL,
   dataEvent = NULL,
-  formulaCorr = NULL,
+  formulaVCov = NULL,
   formulaDist = NULL,
   control = NULL,
   draws = NULL,
@@ -32,7 +32,7 @@
 
 \item{dataEvent}{Optional updated event dataset.}
 
-\item{formulaCorr}{Optional updated covariance formula (full or update form).}
+\item{formulaVCov}{Optional updated covariance formula (full or update form).}
 
 \item{formulaDist}{Optional distributional regression formulas with parameter
 names on the LHS (e.g., \code{sigma ~ 1 + time}).}

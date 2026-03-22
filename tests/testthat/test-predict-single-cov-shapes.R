@@ -7,7 +7,7 @@ test_that("posterior_predict handles single-covariate hazard/corr shapes", {
     n_id = 8,
     formulaLong = y ~ 1 + time + x1 + (1 + time | id) + (0 + x1 + (1 + time | id) | marker),
     formulaEvent = survival::Surv(time, event) ~ x2,
-    formulaCorr = ~ x1,
+    formulaVCov = ~ x1,
     families = c("gaussian", "student_t", "student_t"),
     n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 3, length.out = 4),
@@ -18,7 +18,7 @@ test_that("posterior_predict handles single-covariate hazard/corr shapes", {
   fit <- joinme(
     formulaLong = y ~ 1 + time + x1 + (1 + time | id) + (0 + x1 + (1 + time | id) | marker),
     formulaEvent = survival::Surv(time, event) ~ x2,
-    formulaCorr = ~ x1,
+    formulaVCov = ~ x1,
     families = c("gaussian", "student_t", "student_t"),
     dataLong = sim$dataLong,
     dataEvent = sim$dataEvent,

@@ -18,17 +18,17 @@
  *   - z_u[k]     : ID-level latent effects
  *   - z_v[k, d]  : marker-level latent effects
  *   - z_w_lat[k, d] : marker-by-id latent effects
- *   - z_L[k]     : latent effect for covariance regression
+ *   - z_L[k, m]  : component-specific latent effect for covariance regression
  *
- * STEP 2: Transform latent effects into correlated random effects
+ * STEP 2: Transform latent effects into random effects
  *   - u_id = L_u * z_u
  *   - v_marker[d] = L_v * z_v[d]
- *   - z_w[d] = (optional cross-correlation) + L_w * z_w_lat[d]
+ *   - z_w[d] = (optional cross-correlation) + z_w_lat[d]
  *   - w_idscaled[d] = L_i * z_w[d], where L_i is subject-specific covariance
  *
  * STEP 3: Build subject-specific Cholesky factor L_i via covariance regression
  *   - For each unique lower-triangular entry (r,c), compute:
- *       lp_i = alpha_corr_reg + beta_corr_reg' * vec_cov_corr + lambda * u_Lk
+ *       lp_i = alpha_vcov_reg + beta_vcov_reg' * vec_cov_vcov + lambda * z_Lk
  *     If r == c (diagonal), apply softplus or exp to ensure positivity.
  *     Otherwise, use lp_i directly for off-diagonal entries.
  *
@@ -77,8 +77,8 @@
  * @param X_phi_beta_obs Design matrix for phi_beta regression.
  * @param P_tau_sde Number of coefficients for tau_sde regression.
  * @param X_tau_sde_obs Design matrix for tau_sde regression.
- * @param n_cov_corr Number of covariates for variance-covariance regression.
- * @param vec_cov_corr Vector of covariates for variance-covariance regression.
+ * @param n_cov_vcov Number of covariates for variance-covariance regression.
+ * @param vec_cov_vcov Vector of covariates for variance-covariance regression.
  * @param n_cov_hazard Number of covariates for hazard baseline.
  * @param vec_cov_hazard Vector of covariates for hazard baseline.
  * @param n_basehaz_basis Number of basis functions for baseline hazard.
@@ -95,7 +95,7 @@
  * @param eps_finite_diff Epsilon for finite difference derivative approximation.
  * @param family_long Array of family codes for each observation.
  * @param flag_resid_dim Flag for residual dimension handling.
- * @param corr_diag_link Link flag for corr diagonal (0 softplus, 1 exp).
+ * @param vcov_diag_link Link flag for covariance-regression diagonal (0 softplus, 1 exp).
  * @param use_tau_sde_fixed Flag to use fixed tau for SDE.
  * @param tau_sde_fixed Fixed tau value for SDE (0 < tau < 1).
  * @param num_unique_cov_entries Number of unique entries in covariance regression.
@@ -112,13 +112,10 @@
  * @param Lcorr_id Array of ID random effect Cholesky correlations (per draw).
  * @param tau_marker Array of marker random effect scales (per draw).
  * @param Lcorr_marker Array of marker random effect Cholesky correlations (per draw).
- * @param tau_marker_id Array of ID-marker random effect scales (per draw).
- * @param Lcorr_marker_id Array of ID-marker random effect Cholesky correlations (per draw).
  * @param B_cross Array of cross-correlation matrices between levels (per draw).
- * @param alpha_corr_reg Array of intercept vectors for covariance regression (per draw).
- * @param beta_corr_reg_flat Array of flattened coefficient vectors for covariance regression (per draw).
- * @param tau_corr_reg Array of scales for latent covariance effects (per draw).
- * @param lambda_corr_reg Array of loading vectors for latent covariance effects (per draw).
+ * @param alpha_vcov_reg Array of intercept vectors for covariance regression (per draw).
+ * @param beta_vcov_reg_flat Array of flattened coefficient vectors for covariance regression (per draw).
+ * @param lambda_vcov_reg Array of effective loading vectors for latent covariance effects (per draw).
  * @param K_event Number of competing risks.
  * @param bs_gamma_c Array of baseline hazard spline coefficients (per draw).
  * @param gamma_hazard Array of hazard covariate coefficients (per draw).
@@ -189,12 +186,11 @@
  * @param spline_degree_cs_marker Spline degree for Marker Slope transforms.
  * @param flag_indep_id_re Flag for independent ID random effects.
  * @param flag_indep_marker_re Flag for independent Marker random effects.
- * @param flag_indep_marker_byid_latent_re Flag for independent latent Maker-ID random effects.
  * @param flag_allow_marker_crosscorr Flag allowing cross-correlation between levels.
  * @param z_u Array of standard normal draws for ID random effects.
  * @param z_v Array of standard normal draws for Marker random effects.
  * @param z_w_lat Array of standard normal draws for latent Marker-ID random effects.
- * @param z_L Vector of standard normal draws for latent correlation effects.
+ * @param z_L Array of standard normal draws for covariance-regression latents.
  * @return Accumulated log-likelihood for the slice.
  */
 real partial_draw(
@@ -216,6 +212,7 @@ real partial_draw(
     matrix mat_id_obs,
     matrix mat_marker_obs,
     matrix mat_marker_id_obs,
+    vector marker_id_row_scale,
     int P_sigma,
     matrix X_sigma_obs,
     int P_nu,
@@ -228,8 +225,8 @@ real partial_draw(
     matrix X_phi_beta_obs,
     int P_tau_sde,
     matrix X_tau_sde_obs,
-    int n_cov_corr,
-    vector vec_cov_corr,
+    int n_cov_vcov,
+    vector vec_cov_vcov,
     int n_cov_hazard,
     vector vec_cov_hazard,
     int n_basehaz_basis,
@@ -266,7 +263,7 @@ real partial_draw(
     int n_family_tau_sde,
     array[] int marker_to_tau_sde_family,
     int flag_resid_dim,
-    int corr_diag_link,
+    int vcov_diag_link,
     int use_tau_sde_fixed,
     real tau_sde_fixed,
     int num_unique_cov_entries,
@@ -283,13 +280,10 @@ real partial_draw(
     array[] matrix Lcorr_id,
     array[] vector tau_marker,
     array[] matrix Lcorr_marker,
-    array[] vector tau_marker_id,
-    array[] matrix Lcorr_marker_id,
     array[] matrix B_cross,
-    array[] vector alpha_corr_reg,
-    array[] vector beta_corr_reg_flat,
-    array[] real tau_corr_reg,
-    array[] vector lambda_corr_reg,
+    array[] vector alpha_vcov_reg,
+    array[] vector beta_vcov_reg_flat,
+    array[] vector lambda_vcov_reg,
     int K_event,
     array[,] vector bs_gamma_c,
     array[,] vector gamma_hazard,
@@ -367,13 +361,12 @@ real partial_draw(
     int spline_degree_cs_marker,
     int flag_indep_id_re,
     int flag_indep_marker_re,
-    int flag_indep_marker_byid_latent_re,
     int flag_indep_idmarker_cov,
     int flag_allow_marker_crosscorr,
     array[] vector z_u,
     array[,] vector z_v,
     array[,] vector z_w_lat,
-    vector z_L
+    array[] vector z_L
 ) {
   real lp = 0;  // Accumulated log-likelihood for this draw slice
   // Load Gauss-Kronrod weights from the hardcoded table keyed by n_gk.
@@ -433,44 +426,41 @@ real partial_draw(
     }
 
     // Marker-by-ID random effects (latent): z_w
-    // Optional cross-correlation with marker-level REs via B_cross
-    matrix[n_random_marker_id, n_random_marker_id] L_w;
-    if (flag_indep_marker_byid_latent_re == 1)
-      L_w = diag_matrix(tau_marker_id[k]);
-    else
-      L_w = diag_pre_multiply(tau_marker_id[k], Lcorr_marker_id[k]);
+    // These seeds remain iid standard normal. Optional cross-correlation with
+    // marker-level random effects is added before the subject-specific
+    // covariance scaling Li is applied.
     array[n_marker_types] vector[n_random_marker_id] z_w; // marker-id latent effects
     for (d in 1 : n_marker_types) {
       vector[n_random_marker_id] cross = rep_vector(0.0, n_random_marker_id);
       if (flag_allow_marker_crosscorr == 1 && n_random_marker > 0)
         cross = B_cross[k] * v_marker[d];
-      z_w[d] = cross + L_w * z_w_lat[k, d];
+      z_w[d] = cross + z_w_lat[k, d];
     }
 
     // ---------------------------------------------------------------
     // STEP 3: Build subject-specific covariance Cholesky factor L_i
     // ---------------------------------------------------------------
-    // L_i is built via covariance regression with covariates vec_cov_corr
-    // and a latent random effect u_Lk for additional subject variability.
-    real u_Lk = tau_corr_reg[k] * z_L[k]; // latent corr effect for this draw
+    // L_i is built via covariance regression with covariates vec_cov_vcov
+    // and component-specific latent standard normals z_L[k][m] for additional variability.
     matrix[n_random_marker_id, n_random_marker_id] Li = rep_matrix(0.0, n_random_marker_id, n_random_marker_id);
     for (m in 1 : num_unique_cov_entries) {
       int r_ = idx_row_cov[m];
       int c_ = idx_col_cov[m];
-      vector[n_cov_corr] bL_m = beta_corr_reg_flat[k][((m - 1) * n_cov_corr + 1) : (m * n_cov_corr)];
-      real lp_i = alpha_corr_reg[k][m] + dot_product(bL_m, vec_cov_corr) + lambda_corr_reg[k][m] * u_Lk;
+      vector[n_cov_vcov] bL_m = beta_vcov_reg_flat[k][((m - 1) * n_cov_vcov + 1) : (m * n_cov_vcov)];
+      real lp_i = alpha_vcov_reg[k][m] + dot_product(bL_m, vec_cov_vcov) + lambda_vcov_reg[k][m] * z_L[k][m];
       // lp_i: linear predictor for L_i element (r_, c_)
       if (r_ == c_) {
-        Li[r_, c_] = (corr_diag_link == 1) ? exp(lp_i) : log1p_exp(lp_i);
+        Li[r_, c_] = (vcov_diag_link == 1) ? exp(lp_i) : log1p_exp(lp_i);
       } else {
         Li[r_, c_] = lp_i;
       }
     }
 
     // Transform marker-by-ID latent effects into actual random effects
+    matrix[n_random_marker_id, n_random_marker_id] Li_used = diag_pre_multiply(marker_id_row_scale, Li);
     array[n_marker_types] vector[n_random_marker_id] w_idscaled; // scaled marker-id REs
     for (d in 1 : n_marker_types)
-      w_idscaled[d] = Li * z_w[d];
+      w_idscaled[d] = Li_used * z_w[d];
 
     // ---------------------------------------------------------------
     // STEP 4: Longitudinal log-likelihood for observed history
@@ -505,14 +495,14 @@ real partial_draw(
       // FAMILY 1: Gaussian
       // sigma from regression if P_sigma > 0, else marker-specific or shared
       if (family_long[d] == 1) {
-        real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_obs[n], beta_sigma[k])) : sigma_family[k][marker_to_sigma_family[d]];
+        real sig = (P_sigma > 0) ? exp(fmin(dot_product(X_sigma_obs[n], beta_sigma[k]), 20)) : sigma_family[k][marker_to_sigma_family[d]];
         // sig: residual scale
         lp += normal_lpdf(y_real[n] | mu, sig);
       // FAMILY 2: Student-t
       // sigma from regression; nu = 2 + exp(eta_nu) if P_nu > 0
       } else if (family_long[d] == 2) {
-        real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_obs[n], beta_sigma[k])) : sigma_family[k][marker_to_sigma_family[d]];
-        real nu = (P_nu > 0) ? (2 + exp(dot_product(X_nu_obs[n], beta_nu[k]))) : nu_family[k][marker_to_nu_family[d]];
+        real sig = (P_sigma > 0) ? exp(fmin(dot_product(X_sigma_obs[n], beta_sigma[k]), 20)) : sigma_family[k][marker_to_sigma_family[d]];
+        real nu = (P_nu > 0) ? (2 + exp(fmin(dot_product(X_nu_obs[n], beta_nu[k]), 20))) : nu_family[k][marker_to_nu_family[d]];
         // sig: residual scale, nu: degrees of freedom
         lp += student_t_lpdf(y_real[n] | nu, mu, sig);
       // FAMILY 3: Bernoulli (logit)
@@ -543,19 +533,19 @@ real partial_draw(
           lp += neg_binomial_2_lpmf(y_int[n] | fmax(mu, 1e-12), phi);
       // FAMILY 7: Skew-normal (eta, sigma, alpha)
       } else if (family_long[d] == 7) {
-        real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_obs[n], beta_sigma[k])) : sigma_family[k][marker_to_sigma_family[d]];
+        real sig = (P_sigma > 0) ? exp(fmin(dot_product(X_sigma_obs[n], beta_sigma[k]), 20)) : sigma_family[k][marker_to_sigma_family[d]];
         real alpha = (P_alpha > 0) ? dot_product(X_alpha_obs[n], beta_alpha[k]) : alpha_family[k][marker_to_alpha_family[d]];
         // sig: residual scale, alpha: skewness
         lp += skew_normal_lpdf(y_real[n] | mu, sig, alpha);
       // FAMILY 8: Double-exponential (Laplace)
       } else if (family_long[d] == 8) {
-        real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_obs[n], beta_sigma[k])) : sigma_family[k][marker_to_sigma_family[d]];
+        real sig = (P_sigma > 0) ? exp(fmin(dot_product(X_sigma_obs[n], beta_sigma[k]), 20)) : sigma_family[k][marker_to_sigma_family[d]];
         // sig: residual scale
         lp += double_exponential_lpdf(y_real[n] | mu, sig);
       // FAMILY 9: Skew double-exponential (eta, sigma, tau)
       // tau constrained to (0,1) via logit link if regression used
       } else if (family_long[d] == 9) {
-        real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_obs[n], beta_sigma[k])) : sigma_family[k][marker_to_sigma_family[d]];
+        real sig = (P_sigma > 0) ? exp(fmin(dot_product(X_sigma_obs[n], beta_sigma[k]), 20)) : sigma_family[k][marker_to_sigma_family[d]];
         real tau_sde = use_tau_sde_fixed == 1
           ? tau_sde_fixed
           : ((P_tau_sde > 0) ? inv_logit(dot_product(X_tau_sde_obs[n], beta_tau_sde[k])) : tau_sde_family[k][marker_to_tau_sde_family[d]]);
@@ -610,7 +600,7 @@ real partial_draw(
       zbar[q] = acc / n_marker_types;
     }
     // Convert unweighted latent effects into actual ID-by-marker REs
-    vector[n_random_marker_id] wbar_i = Li * zbar; // scaled unweighted mean
+    vector[n_random_marker_id] wbar_i = Li_used * zbar; // scaled unweighted mean
 
     for (j in 1 : n_gk) {
       cvm[j] = dot_product(mat_fixed_gk_cond[j], beta_fixed[k]) + dot_product(mat_id_gk_cond[j], u_id);

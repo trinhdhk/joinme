@@ -62,7 +62,7 @@ test_that("joinme supports expit-based penalised spline transforms end to end", 
     seed = 2401
   )
  
-  fit <- tryCatch(
+  fit2 <- tryCatch(
     suppressWarnings(
       joinme::joinme(
         formulaLong = y ~ 1 + time + (1 + time | id) + (0 + (1 + time | id) | marker),
@@ -70,7 +70,10 @@ test_that("joinme supports expit-based penalised spline transforms end to end", 
         dataLong = sim$dataLong,
         dataEvent = sim$dataEvent,
         assoc = "vcov",
-        transforms = fit_tf,
+        # transforms = fit_tf,
+        transform = joinme_tf(
+          vcov = ~ log(1+exp(x))
+        ),
         control = control
       )
     ),

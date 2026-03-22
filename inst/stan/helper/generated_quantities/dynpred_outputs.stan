@@ -36,22 +36,18 @@ for (k in 1 : n_draws) {
   }
 
   // Marker-by-ID Latent Effects: z_w
-  matrix[n_random_marker_id, n_random_marker_id] L_w;
-  if (flag_indep_marker_byid_latent_re == 1)
-    L_w = diag_matrix(tau_marker_id[k]);
-  else
-    L_w = diag_pre_multiply(tau_marker_id[k], Lcorr_marker_id[k]);
-
+  // These latent seeds are iid standard normal. The full subject-specific
+  // covariance now lives in Li, so there is no separate marker-by-id baseline
+  // covariance matrix to reconstruct here.
   array[n_marker_types] vector[n_random_marker_id] z_w; // latent marker-id effects
   for (d in 1 : n_marker_types) {
     vector[n_random_marker_id] cross = rep_vector(0.0, n_random_marker_id);
     if (flag_allow_marker_crosscorr == 1 && n_random_marker > 0)
       cross = B_cross[k] * v_marker[d];
-    z_w[d] = cross + L_w * z_w_lat[k, d];
+    z_w[d] = cross + z_w_lat[k, d];
   }
 
-  // Use Covariance Regression to construct L_i
-  real u_Lk = tau_corr_reg[k] * z_L[k]; // latent corr effect for this draw
+  // Use covariance regression to construct L_i directly from component-specific z_L[k][m]
   matrix[n_random_marker_id, n_random_marker_id] Li = rep_matrix(0.0,
                                                                  n_random_marker_id,
                                                                  n_random_marker_id);
@@ -59,17 +55,19 @@ for (k in 1 : n_draws) {
     int r_ = idx_row_cov[m];
     int c_ = idx_col_cov[m];
     // unpack flattened beta
-    vector[n_cov_corr] bL_m = beta_corr_reg_flat[k][((m - 1) * n_cov_corr
-                                                     + 1) : (m * n_cov_corr)];
-    real lp = alpha_corr_reg[k][m] + dot_product(bL_m, vec_cov_corr)
-              + lambda_corr_reg[k][m] * u_Lk;
+    vector[n_cov_vcov] bL_m = beta_vcov_reg_flat[k][((m - 1) * n_cov_vcov
+                             + 1) : (m * n_cov_vcov)];
+        real lp = alpha_vcov_reg[k][m] + dot_product(bL_m, vec_cov_vcov)
+          + lambda_vcov_reg[k][m] * z_L[k][m];
     Li[r_, c_] = (r_ == c_) ? log1p_exp(lp) : lp;
   }
+
+  matrix[n_random_marker_id, n_random_marker_id] Li_used = diag_pre_multiply(marker_id_row_scale, Li);
 
   // Scale latent effects: w_idscaled
   array[n_marker_types] vector[n_random_marker_id] w_idscaled; // scaled marker-id REs
   for (d in 1 : n_marker_types)
-    w_idscaled[d] = Li * z_w[d];
+    w_idscaled[d] = Li_used * z_w[d];
 
   // -------------------------------------------------------------
   // 2. Prepare for Association (Averages)
@@ -93,10 +91,10 @@ for (k in 1 : n_draws) {
       acc += z_w[d][q];
     zbar[q] = acc / n_marker_types;
   }
-  vector[n_random_marker_id] wbar_i = Li * zbar; // scaled mean marker-id effects
+  vector[n_random_marker_id] wbar_i = Li_used * zbar; // scaled mean marker-id effects
     array[n_marker_types] vector[n_random_marker_id] w_draw;
     for (d in 1 : n_marker_types)
-      w_draw[d] = Li * z_w[d];
+      w_draw[d] = Li_used * z_w[d];
 
   // Global Association Scales
   real a_cv_total = flag_assoc_cv_total * coeff_assoc_cv_total[k];
@@ -180,16 +178,16 @@ for (k in 1 : n_draws) {
 
       if (family_long[d] == 1) {
       // Gaussian
-      real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_pred[n], beta_sigma[k]))
+      real sig = (P_sigma > 0) ? exp(fmin(dot_product(X_sigma_pred[n], beta_sigma[k]), 20))
              : sigma_family[k][marker_to_sigma_family[d]];
       // sig: residual scale for Gaussian prediction
       y_pred_epred[k, n] = mu_long;
       y_pred[k, n] = normal_rng(mu_long, sig);
       } else if (family_long[d] == 2) {
       // Student-t
-      real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_pred[n], beta_sigma[k]))
+      real sig = (P_sigma > 0) ? exp(fmin(dot_product(X_sigma_pred[n], beta_sigma[k]), 20))
              : sigma_family[k][marker_to_sigma_family[d]];
-      real nu = (P_nu > 0) ? (2 + exp(dot_product(X_nu_pred[n], beta_nu[k])))
+      real nu = (P_nu > 0) ? (2 + exp(fmin(dot_product(X_nu_pred[n], beta_nu[k]), 20)))
             : nu_family[k][marker_to_nu_family[d]];
       // nu: degrees of freedom for Student-t prediction
       y_pred_epred[k, n] = mu_long;
@@ -221,7 +219,7 @@ for (k in 1 : n_draws) {
       }
       } else if (family_long[d] == 7) {
       // Skew-normal
-      real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_pred[n], beta_sigma[k]))
+      real sig = (P_sigma > 0) ? exp(fmin(dot_product(X_sigma_pred[n], beta_sigma[k]), 20))
              : sigma_family[k][marker_to_sigma_family[d]];
       real alpha = (P_alpha > 0) ? dot_product(X_alpha_pred[n], beta_alpha[k])
           : alpha_family[k][marker_to_alpha_family[d]];
@@ -230,14 +228,14 @@ for (k in 1 : n_draws) {
       y_pred[k, n] = skew_normal_rng(mu_long, sig, alpha);
       } else if (family_long[d] == 8) {
       // Double exponential (Laplace)
-      real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_pred[n], beta_sigma[k]))
+      real sig = (P_sigma > 0) ? exp(fmin(dot_product(X_sigma_pred[n], beta_sigma[k]), 20))
              : sigma_family[k][marker_to_sigma_family[d]];
       // sig: Laplace scale
       y_pred_epred[k, n] = mu_long;
       y_pred[k, n] = double_exponential_rng(mu_long, sig);
       } else if (family_long[d] == 9) {
       // Skew double exponential (asymmetric Laplace)
-        real sig = (P_sigma > 0) ? exp(dot_product(X_sigma_pred[n], beta_sigma[k]))
+        real sig = (P_sigma > 0) ? exp(fmin(dot_product(X_sigma_pred[n], beta_sigma[k]), 20))
              : sigma_family[k][marker_to_sigma_family[d]];
       real tau_sde = (P_tau_sde > 0) ? inv_logit(dot_product(X_tau_sde_pred[n], beta_tau_sde[k]))
                : tau_sde_family[k][marker_to_tau_sde_family[d]];

@@ -142,7 +142,7 @@
 #' @param formulaEvent Survival formula for baseline covariates and event model.
 #' @param dataEvent One row per id event data with event time, event indicator, and
 #'   covariates referenced in `formulaEvent`.
-#' @param formulaCorr Covariance regression formula for id-specific marker-by-id effects.
+#' @param formulaVCov Covariance regression formula for id-specific marker-by-id effects.
 #'   If the marker block omits the inner `( ... | id )`, marker-by-id effects are
 #'   absent and covariance-style associations (`corr`, `vcov`) are not allowed.
 #'   When present, `corr` associations use the resulting off-diagonal correlation
@@ -185,7 +185,7 @@
 #'   - quadrature_nodes: optional positive integer total node target for survival
 #'     integration. Allowed values are exactly 7/15/31/41/51/61. Only the node
 #'     count is passed to Stan; GK nodes/weights are fixed in the Stan code.
-#'   - corr_diag_link: "softplus" or "exp" for covariance regression diagonals.
+#'   - vcov_diag_link: "softplus" or "exp" for covariance regression diagonals.
 #'   - tau_sde_fixed: optional fixed tau in (0,1) for skew-double-exponential.
 #' @param draws Optional number of posterior draws used for summaries (not sampling).
 #' @param families Marker-specific family specification (optional).
@@ -225,7 +225,7 @@ joinme <- function(
   dataLong,
   formulaEvent,
   dataEvent,
-  formulaCorr = ~1,
+  formulaVCov = ~1,
   formulaDist = NULL,
   control = list(),
   draws = NULL,
@@ -253,15 +253,20 @@ joinme <- function(
 
   # Workflow: build standata -> resolve threading -> choose engine -> fit -> wrap
   # - sd: prepared Stan data list with all dimensions and transforms
-  corr_diag_link <- control$corr_diag_link %||% "softplus"
+  vcov_diag_link <- control$vcov_diag_link %||% "softplus"
   tau_sde_fixed <- control$tau_sde_fixed %||% NULL
   quadrature_nodes <- control$quadrature_nodes %||% NULL
+  formulaVCov <- .resolve_vcov_formula(
+    formulaVCov = formulaVCov,
+    default = ~ 1,
+    context = "joinme()"
+  )
   sd <- joinme_standata(
     formulaLong = formulaLong,
     dataLong = dataLong,
     formulaEvent = formulaEvent,
     dataEvent = dataEvent,
-    formulaCorr = formulaCorr,
+    formulaVCov = formulaVCov,
     formulaDist = formulaDist,
     families = families,
     transforms = transforms,
@@ -270,7 +275,7 @@ joinme <- function(
     lkj_prior = priors$lkj,
     fixed_marker_weights = fixed_marker_weights,
     quadrature_nodes = quadrature_nodes,
-    corr_diag_link = corr_diag_link,
+    vcov_diag_link = vcov_diag_link,
     tau_sde_fixed = tau_sde_fixed,
     ...
   )
@@ -402,7 +407,12 @@ joinme <- function(
     "beta_scale",
     "const_data_cv",
     "const_data_cs",
-    "const_data_corr"
+    "const_data_corr",
+    "const_data_vcov",
+    "const_data_cv_mean",
+    "const_data_cv_marker",
+    "const_data_cs_mean",
+    "const_data_cs_marker"
   ))
 
   has_nonstan_metadata <- function(x) {
@@ -549,7 +559,7 @@ joinme <- function(
     n_knots = sd$n_knots,
     basehaz_degree = sd$basehaz_degree,
     K_event = sd$K_event,
-    corr_diag_link = sd$corr_diag_link,
+    vcov_diag_link = sd$vcov_diag_link,
     use_tau_sde_fixed = sd$use_tau_sde_fixed,
     tau_sde_fixed = sd$tau_sde_fixed
   )
@@ -560,7 +570,7 @@ joinme <- function(
     stan_data = sd,
     formulaLong = formulaLong,
     formulaEvent = formulaEvent,
-    formulaCorr = formulaCorr,
+    formulaVCov = formulaVCov,
     config = cfg,
     call = match.call(),
     tmax = sd$tmax,

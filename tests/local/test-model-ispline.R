@@ -30,7 +30,7 @@ fit_cv_tf <- list(
 sim <- simulate_joinme(
   formulaLong = y ~ 1 + time + x1 + (1 + time | id) + (0 + x1 + (1 + time | id) | marker),
   formulaEvent = survival::Surv(time, event) ~ x2,
-  formulaCorr = ~ x1,
+  formulaVCov = ~ x1,
   families = c("gaussian", "gaussian"),
   n_id = 200,
   n_obs_per_marker_per_id = 6,
@@ -56,8 +56,7 @@ sim <- simulate_joinme(
     id_marker_cov = list(
       latent = list(sd = c(0.6, 0.25)),
       alpha = c(-0.1, 0.05, -0.05),
-      lambda = 0.3,
-      sd_u = 0.4
+      lambda = 0.12
     )
   ),
   use_mirai = TRUE,
@@ -82,7 +81,7 @@ control <- list(
 fit <- joinme(
   formulaLong = y ~ 1 + time + x1 + (1 + time | id) + (0 + x1 + (1 + time | id) | marker),
   formulaEvent = survival::Surv(time, event) ~ x2,
-  formulaCorr = ~ x1,
+  formulaVCov = ~ x1,
   dataLong = sim$dataLong,
   dataEvent = sim$dataEvent,
   assoc = c("corr"),

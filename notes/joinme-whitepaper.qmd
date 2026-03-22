@@ -209,11 +209,11 @@ inside $\gamma_{bs}$; there is no separate baseline-intercept parameter.
 
 # Advanced Architecture: Covariance Regression
 
-A unique feature of `joinme` is the model for the covariance matrix itself. The Cholesky factor $L_i$ of the random effect covariance $\Sigma_{idm}$ is not static but modelled as a function of covariates and a latent volatility effect $u_{L,i}$:
+A unique feature of `joinme` is the model for the covariance matrix itself. The Cholesky factor $L_i$ of the marker-by-id random effect covariance $\Sigma_{idm}$ is not static but modelled directly as a function of covariates and an iid standard-normal latent effect $z_{L,i}$:
 
-$$ L_{i}[r,c] = \begin{cases} \text{softplus}(\mu_{r,c} + \beta_{r,c}^\top X_i + \lambda_{r,c} u_{L,i}) & \text{if } r=c \\ \mu_{r,c} + \beta_{r,c}^\top X_i + \lambda_{r,c} u_{L,i} & \text{if } r \neq c \end{cases} $$
+$$ L_{i}[r,c] = \begin{cases} \text{softplus}(\mu_{r,c} + \beta_{r,c}^\top X_i + \lambda_{r,c} z_{L,i}) & \text{if } r=c \\ \mu_{r,c} + \beta_{r,c}^\top X_i + \lambda_{r,c} z_{L,i} & \text{if } r \neq c \end{cases} $$
 
-This allows the *variability* and *correlation* of biomarker trajectories to depend on patient characteristics (e.g., higher volatility in older patients) and to act as a predictor for survival itself.
+This allows the *variability* and *correlation* of biomarker trajectories to depend on patient characteristics (e.g., higher volatility in older patients) and to act as a predictor for survival itself. The fitted model uses iid standard-normal marker-by-id latent seeds; baseline covariance is carried by $L_i$ itself rather than by a second global covariance layer.
 
 For survival association, the implementation uses two covariance-style summary
 families derived from the same $L_i$ object:

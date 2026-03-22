@@ -76,7 +76,7 @@ test_that("plot.JoinMeFit reuses fitted-data prediction plotting", {
     stan_data = list(),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
-    formulaCorr = NULL,
+    formulaVCov = NULL,
     config = list(transforms = list()),
     call = quote(joinme::joinme(formulaLong = y ~ 1 + time)),
     tmax = 1,
@@ -119,7 +119,7 @@ test_that("plot.JoinMeFit can plot association curves", {
     stan_data = list(),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
-    formulaCorr = NULL,
+    formulaVCov = NULL,
     config = list(
       transforms = list(),
       transforms_spec = list(
@@ -167,7 +167,7 @@ test_that("plot.JoinMeFit supports all diagnostic plot types with parameter filt
     stan_data = list(),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
-    formulaCorr = NULL,
+    formulaVCov = NULL,
     config = list(transforms = list(), transforms_spec = list()),
     call = quote(joinme::joinme(formulaLong = y ~ 1 + time)),
     tmax = 1,
@@ -257,7 +257,7 @@ test_that("plot.JoinMeFit filters fitted longitudinal plots by marker", {
     stan_data = list(),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
-    formulaCorr = NULL,
+    formulaVCov = NULL,
     config = list(transforms = list(), transforms_spec = list()),
     call = quote(joinme::joinme(formulaLong = y ~ 1 + time)),
     tmax = 1,
@@ -296,7 +296,7 @@ test_that("plot.JoinMeFit association curves respect marker selection", {
     stan_data = list(),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
-    formulaCorr = NULL,
+    formulaVCov = NULL,
     config = list(
       transforms = list(),
       transforms_spec = list(
@@ -342,7 +342,7 @@ test_that("plot.JoinMeFit rejects expit spline knots outside [0, 1]", {
     stan_data = list(),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
-    formulaCorr = NULL,
+    formulaVCov = NULL,
     config = list(
       transforms = list(),
       transforms_spec = list(
@@ -383,7 +383,7 @@ test_that("plot.JoinMeFit weighted cv_total curves are marker-specific", {
     ),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
-    formulaCorr = NULL,
+    formulaVCov = NULL,
     config = list(
       transforms = list(),
       transforms_spec = list(
@@ -437,7 +437,7 @@ test_that("plot.JoinMeFit cv_total default grid uses observed y support", {
     stan_data = list(marker_levels = c("m1"), marker_weights = 1),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
-    formulaCorr = NULL,
+    formulaVCov = NULL,
     config = list(
       transforms = list(),
       transforms_spec = list(
@@ -474,7 +474,7 @@ test_that("plot.JoinMeFit cv_total warns and falls back to knot support when y e
     stan_data = list(marker_levels = c("m1"), marker_weights = 1),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
-    formulaCorr = NULL,
+    formulaVCov = NULL,
     config = list(
       transforms = list(),
       transforms_spec = list(
@@ -513,7 +513,7 @@ test_that("plot.JoinMeFit association curves respect nonlinear functional transf
     stan_data = list(),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
-    formulaCorr = NULL,
+    formulaVCov = NULL,
     config = list(
       transforms = list(),
       transforms_spec = list(
@@ -562,7 +562,7 @@ test_that("plot.JoinMeFit association_options range controls the raw evaluation 
     stan_data = list(marker_levels = c("m1"), marker_weights = 1),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
-    formulaCorr = NULL,
+    formulaVCov = NULL,
     config = list(
       transforms = list(),
       transforms_spec = list(
@@ -599,7 +599,7 @@ test_that("plot.JoinMeFit rejects simultaneous association grid and range", {
     stan_data = list(marker_levels = c("m1"), marker_weights = 1),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
-    formulaCorr = NULL,
+    formulaVCov = NULL,
     config = list(
       transforms = list(),
       transforms_spec = list(
@@ -656,7 +656,7 @@ test_that("plot.JoinMeFit association curves use fitted spline coefficients", {
     ),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
-    formulaCorr = NULL,
+    formulaVCov = NULL,
     config = list(
       transforms = list(),
       transforms_spec = list(
@@ -722,7 +722,7 @@ test_that("plot.JoinMeFit association curves evaluate expit splines on the trans
     ),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
-    formulaCorr = NULL,
+    formulaVCov = NULL,
     config = list(
       transforms = list(),
       transforms_spec = list(
@@ -766,7 +766,7 @@ test_that("plot.JoinMeFit expands vcov association plots to all components", {
     coeff_draws = list(
       vcov = structure(
         matrix(c(rep(1, 6), rep(2, 6)), nrow = 6, ncol = 2),
-        dimnames = list(NULL, c("alpha_vcov[1]", "alpha_vcov[2]"))
+        dimnames = list(NULL, c("alpha_vcov_eff[1]", "alpha_vcov_eff[2]"))
       )
     ),
     marker_weight_draws = NULL,
@@ -782,7 +782,7 @@ test_that("plot.JoinMeFit expands vcov association plots to all components", {
     ),
     term_map = data.frame(
       term = c("vcov[1]", "vcov[2]"),
-      variable = c("alpha_vcov[1]", "alpha_vcov[2]"),
+      variable = c("alpha_vcov_eff[1]", "alpha_vcov_eff[2]"),
       stringsAsFactors = FALSE
     )
   )
@@ -797,7 +797,7 @@ test_that("plot.JoinMeFit expands vcov association plots to all components", {
     stan_data = list(),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
-    formulaCorr = NULL,
+    formulaVCov = NULL,
     config = list(
       assoc = list(vcov = TRUE),
       transforms = list(),
@@ -834,7 +834,7 @@ test_that("plot.JoinMeFit zero-references covariance-style hazard contributions"
     coeff_draws = list(
       vcov = structure(
         matrix(rep(1, 6), nrow = 6, ncol = 1),
-        dimnames = list(NULL, "alpha_vcov[1]")
+        dimnames = list(NULL, "alpha_vcov_eff[1]")
       )
     ),
     marker_weight_draws = NULL,
@@ -850,7 +850,7 @@ test_that("plot.JoinMeFit zero-references covariance-style hazard contributions"
     ),
     term_map = data.frame(
       term = "vcov[1]",
-      variable = "alpha_vcov[1]",
+      variable = "alpha_vcov_eff[1]",
       stringsAsFactors = FALSE
     )
   )
@@ -865,7 +865,7 @@ test_that("plot.JoinMeFit zero-references covariance-style hazard contributions"
     stan_data = list(),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
-    formulaCorr = NULL,
+    formulaVCov = NULL,
     config = list(
       assoc = list(vcov = TRUE),
       transforms = list(),
@@ -911,6 +911,48 @@ test_that("plot.JoinMeFit zero-references covariance-style hazard contributions"
   expect_equal(p_hazard$data[[median_col]], exp(-x_grid) - 1, tolerance = 1e-8)
 })
 
+test_that("association plot payload prefers effective covariance coefficients", {
+  draws_obj <- posterior::as_draws_matrix(stats::setNames(
+    data.frame(
+      raw = c(0.1, 0.1, 0.1),
+      eff = c(0.4, 0.5, 0.6),
+      check.names = FALSE
+    ),
+    c("alpha_vcov[1]", "alpha_vcov_eff[1]")
+  ))
+
+  testthat::local_mocked_bindings(
+    .get_draws_obj = function(fit, variables = NULL, draws = NULL, seed = 1, keep_chains = FALSE) {
+      if (is.null(variables)) {
+        return(draws_obj)
+      }
+      posterior::subset_draws(draws_obj, variable = variables)
+    },
+    .get_draws_matrix = function(fit, variables = NULL, draws = NULL, seed = 1) {
+      as.matrix(posterior::subset_draws(draws_obj, variable = variables))
+    },
+    .joinmefit_model_implied_support = function(fit, stan_data, config, dataLong, seed = 1) {
+      data.frame(term = "vcov", marker = "all", lower = -1, upper = 1, source = "mock", stringsAsFactors = FALSE)
+    },
+    .package = "joinme"
+  )
+
+  payload <- joinme:::.build_joinmefit_association_plot_payload(
+    fit = structure(list(), class = "mock_fit"),
+    stan_data = list(Q_idm = 1L, indep_idmarker_cov = 1L, D = 1L),
+    config = list(
+      assoc = list(vcov = TRUE),
+      transforms_spec = list(vcov = list(type = "identity"))
+    ),
+    dataLong = data.frame(id = 1L, marker = "m1", time = 0, y = 0),
+    seed = 1
+  )
+
+  expect_equal(payload$term_map$term, "vcov[1]")
+  expect_equal(payload$term_map$variable, "alpha_vcov_eff[1]")
+  expect_equal(as.numeric(payload$coeff_draws$vcov[, 1]), c(0.4, 0.5, 0.6))
+})
+
 test_that("plot.JoinMeFit defaults expit-spline fallback grids on the raw scale", {
   testthat::local_mocked_bindings(
     extract.JoinMeFit = function(object, what = c("fixef", "gamma_w", "assoc", "distributional", "distributional_regression", "raw"),
@@ -930,7 +972,7 @@ test_that("plot.JoinMeFit defaults expit-spline fallback grids on the raw scale"
     stan_data = list(marker_levels = c("m1"), marker_weights = 1),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
-    formulaCorr = NULL,
+    formulaVCov = NULL,
     config = list(
       transforms = list(),
       transforms_spec = list(
@@ -958,7 +1000,7 @@ test_that("plot.JoinMeFit uses cached association plotting payload when availabl
     stan_data = list(marker_levels = c("m1"), marker_weights = 1),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
-    formulaCorr = NULL,
+    formulaVCov = NULL,
     config = list(
       transforms = list(),
       transforms_spec = list(

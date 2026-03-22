@@ -7,7 +7,7 @@
 simulate_joinme(
   formulaLong = y ~ 1 + time + x1 + (1 + time | id) + (0 + x1 + (1 + time | id) | marker),
   formulaEvent = survival::Surv(time, event) ~ x1 + x2,
-  formulaCorr = ~1,
+  formulaVCov = ~1,
   formulaDist = NULL,
   formulaAssoc = NULL,
   transforms = NULL,
@@ -27,7 +27,7 @@ simulate_joinme(
   dist_coefs = list(),
   re_params = list(id = list(sd = NULL, corr = NULL), marker = list(sd = NULL, corr =
     NULL), id_marker_cov = list(latent = list(sd = NULL, corr = NULL), alpha = NULL, beta
-    = NULL, lambda = NULL, sd_u = NULL, diag_link = "softplus"), dist = list()),
+    = NULL, lambda = NULL, diag_link = "softplus"), dist = list()),
   family_params = list(gaussian = list(sigma = 1), student_t = list(sigma = 1.5, nu = 4),
     bernoulli = list(), binomial = list(trials = 10), poisson = list(), negbin2 =
     list(phi = 2), skew_normal = list(sigma = 1, alpha = 0), double_exponential =
@@ -61,8 +61,8 @@ should be available in generated covariates (for example via
 
 \item{formulaEvent}{Event/survival formula (same role as in \code{joinme()}).}
 
-\item{formulaCorr}{Optional covariance-regression formula for the id-specific
-marker-by-id latent covariance (same role as in \code{joinme_standata()}).
+\item{formulaVCov}{Optional covariance-regression formula for the id-specific
+marker-by-id covariance factor (same role as in \code{joinme_standata()}).
 This formula is evaluated on event-level covariates (one row per subject),
 must not include random-effect bars \code{( ... | ... )}, and must not include
 the longitudinal time variable.
@@ -212,7 +212,7 @@ marker-by-id latent effects.
 \code{formulaDist}.
 }
 
-For \code{id}, \code{marker}, and \code{id_marker_cov$latent}, each block is a list:
+For \code{id} and \code{marker}, each block is a list:
 \itemize{
 \item \code{sd}: scalar or length-K vector of random-effect standard deviations,
 \item \code{corr}: KxK correlation matrix.
@@ -220,30 +220,27 @@ For \code{id}, \code{marker}, and \code{id_marker_cov$latent}, each block is a l
 
 \code{id_marker_cov} fields:
 \itemize{
-\item \code{latent}: latent marker-by-id random-effect block (same \code{sd}/\code{corr}
-schema as above); this is the base latent draw that is later transformed
-by subject-specific \code{L_i},
+\item \code{latent}: deprecated compatibility input. If supplied, its implied
+lower-triangular factor is folded into the baseline \code{alpha} intercepts
+before simulation. Marker-by-id latent seeds are still drawn as iid standard
+normal values. Prefer setting \code{alpha} directly in new code,
 \item \code{alpha}: baseline linear predictors for entries of subject-specific lower
-triangular \code{L_i} (baseline when \code{formulaCorr} covariates and latent
-perturbation are zero),
-\item \code{beta}: covariate effects from \code{formulaCorr} design matrix (systematic
+triangular \code{L_i} (baseline when \code{formulaVCov} covariates and subject-level
+covariance perturbation are zero),
+\item \code{beta}: covariate effects from \code{formulaVCov} design matrix (systematic
 subject-to-subject covariance shifts by observed covariates),
-\item \code{lambda}: scaling for subject-level latent perturbation,
-\item \code{sd_u} (alias \code{tau_u}): SD of latent subject perturbation,
+\item \code{lambda}: loading on an iid standard-normal subject latent perturbation,
 \item \code{diag_link}: diagonal link for \code{L_i} diagonals (\code{"softplus"} or \code{"exp"}).
 }
 
 Element-wise covariance-regression form is:
-\verb{eta_im = alpha_m + x_i^T beta_m + lambda_m * u_im}, with
-\code{u_im ~ Normal(0, sd_u_m^2)}. Diagonal entries of \code{L_i} apply \code{diag_link}
+\verb{eta_im = alpha_m + x_i^T beta_m + lambda_m * z_i}, with
+\code{z_i ~ Normal(0, 1)}. Diagonal entries of \code{L_i} apply \code{diag_link}
 to keep them positive; off-diagonal entries remain on identity scale.
-Base latent draws satisfy \code{z_id ~ Normal(0, Sigma_latent)}, where
-\code{Sigma_latent} is defined by \code{id_marker_cov$latent} (\code{sd}, \code{corr}).
-Final marker-by-id effects are obtained as \verb{b_id = L_i z_id}, so \code{latent}
-sets baseline RE scale/correlation and
-\code{alpha}/\code{beta}/\code{lambda}/\code{sd_u} control subject-specific reshaping.
-The latent-perturbation spread is controlled approximately by
-\verb{|lambda_m| * sd_u_m}.
+Marker-by-id latent seeds are sampled as iid standard normal values and the
+final marker-by-id effects are obtained as \verb{b_id = L_i z_id}. This means
+baseline and subject-specific covariance now both live in \code{L_i}, while
+\code{alpha}/\code{beta}/\code{lambda} control its level and heterogeneity.
 
 Dimension rules for \code{id_marker_cov} entries follow marker-by-id random-effect
 dimension \code{Q_idm}:

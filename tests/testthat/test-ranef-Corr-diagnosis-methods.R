@@ -55,7 +55,7 @@ test_that("marker_corr_depends_on_id follows fitted Q_idm", {
   expect_false(joinme:::.marker_corr_depends_on_id(fit_like_without_qidm))
 })
 
-test_that("corr.JoinMeDynPred works when Q_idm > 0 without formulaCorr terms", {
+test_that("corr.JoinMeDynPred works when Q_idm > 0 without formulaVCov terms", {
   skip_on_cran()
   skip_if_not_installed("cmdstanr")
 

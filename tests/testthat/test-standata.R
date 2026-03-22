@@ -120,3 +120,74 @@ test_that("standata builds vcov association metadata", {
   expect_equal(sd$assoc_vcov, 1L)
   expect_equal(sd$tf_mode_vcov, 0L)
 })
+
+test_that("vcov dimension follows nested marker-by-id basis, not top-level id covariance", {
+  sim <- simulate_joinme_joint_student_t_cvtotal(
+    n_id = 3,
+    D = 2,
+    n_t = 2,
+    seed = 206,
+    include_marker_only = TRUE
+  )
+
+  sd_one <- joinme_standata(
+    formulaLong = y ~ 1 + time + x1 +
+      (1 + time | id) +
+      (0 + (1 | id) | marker),
+    dataLong = sim$dataLong,
+    formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
+    dataEvent = sim$dataEvent,
+    assoc = c("vcov"),
+    transforms = joinme_tf(vcov = "identity")
+  )
+
+  expect_equal(sd_one$R_id, 2L)
+  expect_equal(sd_one$Q_idm, 1L)
+  expect_equal(sd_one$M_vcov_tf, 1L)
+
+  sd_three <- joinme_standata(
+    formulaLong = y ~ 1 + time + x1 +
+      (1 + time | id) +
+      (0 + (1 + time | id) | marker),
+    dataLong = sim$dataLong,
+    formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
+    dataEvent = sim$dataEvent,
+    assoc = c("vcov"),
+    transforms = joinme_tf(vcov = "identity")
+  )
+
+  expect_equal(sd_three$R_id, 2L)
+  expect_equal(sd_three$Q_idm, 2L)
+  expect_equal(sd_three$M_vcov_tf, 3L)
+  expect_equal(sd_three$M_corr_tf, 1L)
+})
+
+test_that("functional vcov constants remain vector-shaped for Stan data", {
+  sim <- simulate_joinme_joint_student_t_cvtotal(
+    n_id = 3,
+    D = 2,
+    n_t = 2,
+    seed = 205,
+    include_marker_only = TRUE
+  )
+
+  sd <- joinme_standata(
+    formulaLong = y ~ 1 + time + x1 +
+      (1 + time | id) +
+      (0 + x1 + (1 + time | id) | marker),
+    dataLong = sim$dataLong,
+    formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
+    dataEvent = sim$dataEvent,
+    assoc = c("vcov"),
+    transforms = joinme_tf(vcov = ~ log(1 + exp(x)))
+  )
+
+  expect_equal(sd$tf_mode_vcov, 1L)
+  expect_equal(sd$n_const_vcov, 1L)
+  expect_equal(as.numeric(sd$const_data_vcov), 1)
+
+  sd_stan <- joinme:::.coerce_rstan_vectors(sd, c("const_data_vcov"))
+  expect_true(is.array(sd_stan$const_data_vcov))
+  expect_equal(dim(sd_stan$const_data_vcov), 1)
+  expect_equal(as.numeric(sd_stan$const_data_vcov), 1)
+})

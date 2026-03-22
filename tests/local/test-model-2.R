@@ -95,10 +95,8 @@ run_fit <- function(label, alpha_prior, tau_spline) {
   w_vars <- if (sd$Q_idm > 0) paste0("w_idscaled[", i, ",", d, ",", seq_len(sd$Q_idm), "]") else character(0)
   alpha_vars <- c("alpha_cv_marker")
   cov_vars <- c(
-    paste0("tau_w[", seq_len(sd$Q_idm), "]"),
     paste0("alpha_L[", seq_len(sd$Q_idm), "]"),
-    paste0("lambda_L[", seq_len(sd$Q_idm), "]"),
-    "tau_L"
+    paste0("lambda_L[", seq_len(sd$Q_idm), "]")
   )
 
   draws_key <- get_draw_array(c(beta_vars, u_vars, v_vars, w_vars, alpha_vars, cov_vars))

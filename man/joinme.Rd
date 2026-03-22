@@ -9,7 +9,7 @@ joinme(
   dataLong,
   formulaEvent,
   dataEvent,
-  formulaCorr = ~1,
+  formulaVCov = ~1,
   formulaDist = NULL,
   control = list(),
   draws = NULL,
@@ -36,9 +36,12 @@ outcome, and covariates referenced in \code{formulaLong}.}
 \item{dataEvent}{One row per id event data with event time, event indicator, and
 covariates referenced in \code{formulaEvent}.}
 
-\item{formulaCorr}{Covariance regression formula for id-specific marker-by-id effects.
+\item{formulaVCov}{Covariance regression formula for id-specific marker-by-id effects.
 If the marker block omits the inner \code{( ... | id )}, marker-by-id effects are
-absent and \code{corr} associations are not allowed.}
+absent and covariance-style associations (\code{corr}, \code{vcov}) are not allowed.
+When present, \code{corr} associations use the resulting off-diagonal correlation
+features, whereas \code{vcov} associations use the lower-triangular entries of the
+subject-specific Cholesky factor \code{L} directly.}
 
 \item{formulaDist}{Optional list of formulas for distributional regression.
 Supported LHS parameters are:
@@ -85,7 +88,7 @@ For engine = "rstan", threading uses options(stan.thread = threads_per_chain).
 \item quadrature_nodes: optional positive integer total node target for survival
 integration. Allowed values are exactly 7/15/31/41/51/61. Only the node
 count is passed to Stan; GK nodes/weights are fixed in the Stan code.
-\item corr_diag_link: "softplus" or "exp" for covariance regression diagonals.
+\item vcov_diag_link: "softplus" or "exp" for covariance regression diagonals.
 \item tau_sde_fixed: optional fixed tau in (0,1) for skew-double-exponential.
 }}
 

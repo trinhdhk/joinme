@@ -31,7 +31,7 @@ test_that("summary.JoinMeDynPred reports rich subject-level outputs", {
     dataLong = sim$dataLong,
     formulaEvent = formulaEvent,
     dataEvent = sim$dataEvent,
-    formulaCorr = ~ x1,
+    formulaVCov = ~ x1,
     assoc = c("cv_total"),
     families = rep("gaussian", 2),
     transforms = list(cv_total = list(type = "identity")),

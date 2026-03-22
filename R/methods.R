@@ -817,9 +817,15 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     }
   }
 
+  corr_assoc_vars <- grep("^alpha_corr_eff\\[", all_vars, value = TRUE)
+  if (length(corr_assoc_vars) == 0L) corr_assoc_vars <- grep("^alpha_corr_used\\[", all_vars, value = TRUE)
+  if (length(corr_assoc_vars) == 0L) corr_assoc_vars <- grep("^alpha_corr\\[", all_vars, value = TRUE)
+  vcov_assoc_vars <- grep("^alpha_vcov_eff\\[", all_vars, value = TRUE)
+  if (length(vcov_assoc_vars) == 0L) vcov_assoc_vars <- grep("^alpha_vcov_used\\[", all_vars, value = TRUE)
+  if (length(vcov_assoc_vars) == 0L) vcov_assoc_vars <- grep("^alpha_vcov\\[", all_vars, value = TRUE)
   a_vars <- c("alpha_cv_total", "alpha_cv_mean", "alpha_cv_marker", "alpha_cs_total", "alpha_cs_mean", "alpha_cs_marker")
-  a_vars <- c(a_vars, grep("^alpha_corr\\[", all_vars, value = TRUE))
-  a_vars <- c(a_vars, grep("^alpha_vcov\\[", all_vars, value = TRUE))
+  a_vars <- c(a_vars, corr_assoc_vars)
+  a_vars <- c(a_vars, vcov_assoc_vars)
   a_vars <- a_vars[a_vars %in% all_vars]
   active_vars <- c(
     if (isTRUE(sd$assoc_cv_total == 1)) "alpha_cv_total",
@@ -828,8 +834,8 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     if (isTRUE(sd$assoc_cs_total == 1)) "alpha_cs_total",
     if (isTRUE(sd$assoc_cs_mean == 1)) "alpha_cs_mean",
     if (isTRUE(sd$assoc_cs_marker == 1)) "alpha_cs_marker",
-    if (isTRUE(sd$assoc_corr == 1)) grep("^alpha_corr\\[", a_vars, value = TRUE),
-    if (isTRUE(sd$assoc_vcov == 1)) grep("^alpha_vcov\\[", a_vars, value = TRUE)
+    if (isTRUE(sd$assoc_corr == 1)) corr_assoc_vars,
+    if (isTRUE(sd$assoc_vcov == 1)) vcov_assoc_vars
   )
   if (length(active_vars) > 0) {
     a_vars <- a_vars[a_vars %in% active_vars]
@@ -848,6 +854,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     )
     s_a$term <- assoc_map[s_a$variable]
     s_a$term[is.na(s_a$term)] <- sub("^alpha_", "", s_a$variable[is.na(s_a$term)])
+    s_a$term <- sub("_(?:eff|used)\\[", "[", s_a$term, perl = TRUE)
     s_a <- s_a[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
     s_a$Estimate <- round(s_a$Estimate, digits)
     s_a$Est.Error <- round(s_a$Est.Error, digits)
@@ -1014,52 +1021,6 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
         out
       }
 
-      summarize_latent_cov_matrix <- function() {
-        tau_vars <- paste0("tau_w[", seq_len(q_idm), "]")
-        L_vars <- as.vector(outer(seq_len(q_idm), seq_len(q_idm), function(r, c) paste0("Lcorr_w[", r, ",", c, "]")))
-        vars_needed <- c(tau_vars, L_vars)
-        vars_needed <- vars_needed[vars_needed %in% all_vars]
-        if (length(tau_vars[tau_vars %in% all_vars]) != q_idm) return(NULL)
-        if (length(L_vars[L_vars %in% all_vars]) != q_idm * q_idm) return(NULL)
-        dmat <- .get_draws_matrix(fit, variables = c(tau_vars, L_vars), draws = draws, seed = seed)
-        out <- list()
-        idx <- 1L
-        for (r in seq_len(q_idm)) {
-          for (c in seq_len(q_idm)) {
-            vals <- vapply(seq_len(nrow(dmat)), function(i) {
-              tau <- as.numeric(dmat[i, tau_vars])
-              L <- matrix(as.numeric(dmat[i, L_vars]), nrow = q_idm, ncol = q_idm, byrow = FALSE)
-              L[upper.tri(L)] <- 0
-              Corr <- L %*% t(L)
-              Sigma <- diag(tau, q_idm, q_idm) %*% Corr %*% diag(tau, q_idm, q_idm)
-              as.numeric(Sigma[r, c])
-            }, numeric(1))
-            ss <- .summarize_draw_col(vals)
-            rhat <- suppressWarnings(tryCatch(as.numeric(posterior::rhat(vals)), error = function(e) NA_real_))
-            ess_bulk <- suppressWarnings(tryCatch(as.numeric(posterior::ess_basic(vals)), error = function(e) NA_real_))
-            ess_tail <- suppressWarnings(tryCatch(as.numeric(posterior::ess_tail(vals)), error = function(e) NA_real_))
-            out[[idx]] <- data.frame(
-              block = "sigma_latent",
-              row = r,
-              col = c,
-              Estimate = round(as.numeric(ss[["Estimate"]]), digits),
-              Est.Error = round(as.numeric(ss[["Est.Error"]]), digits),
-              Q2.5 = round(as.numeric(ss[["Q2.5"]]), digits),
-              Q97.5 = round(as.numeric(ss[["Q97.5"]]), digits),
-              Rhat = round(rhat, 3),
-              ess_bulk = as.numeric(ess_bulk),
-              ess_tail = as.numeric(ess_tail),
-              stringsAsFactors = FALSE
-            )
-            idx <- idx + 1L
-          }
-        }
-        if (length(out) == 0) return(NULL)
-        do.call(rbind, out)
-      }
-
-      latent_tbl <- summarize_latent_cov_matrix()
-
       alpha_vars <- paste0("alpha_L[", seq_len(m_cov), "]")
       alpha_blocks <- rep("L[id:marker]", m_cov)
       alpha_tbl <- .summarize_block_parameters(
@@ -1105,24 +1066,14 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
       )
       if (!is.null(lambda_tbl)) reg_rows[[length(reg_rows) + 1L]] <- lambda_tbl
 
-      hyperparameter_tbl <- .summarize_block_parameters("tau_L", "id:marker", "sd_u")
-      if (!is.null(hyperparameter_tbl)) {
-        hyperparameter_tbl <- hyperparameter_tbl[, c("block", "term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
-      }
-
       reg_rows <- Filter(Negate(is.null), reg_rows)
       regression_tbl <- if (length(reg_rows) > 0) do.call(rbind, reg_rows) else NULL
       if (!is.null(regression_tbl)) {
         regression_tbl <- regression_tbl[, c("block", "row", "col", "term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
       }
-      if (isTRUE(any_re_indep)) {
-        latent_tbl <- .filter_diag_rows(latent_tbl)
-        regression_tbl <- NULL
-      }
       id_marker_cov_tables <- list(
-        latent = latent_tbl,
         regression = regression_tbl,
-        hyperparameters = hyperparameter_tbl
+        hyperparameters = NULL
       )
       id_marker_cov_tables <- id_marker_cov_tables[!vapply(id_marker_cov_tables, is.null, logical(1))]
       if (length(id_marker_cov_tables) == 0) id_marker_cov_tables <- NULL
@@ -1193,7 +1144,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     tmp$Q2.5 <- round(tmp$Q2.5, digits)
     tmp$Q97.5 <- round(tmp$Q97.5, digits)
     tmp$Rhat <- round(tmp$Rhat, 3)
-    transform_param_tables[[channel]] <- dplyr::arrange(tmp, channel, term)
+    transform_param_tables[[channel]] <- dplyr::arrange(tmp, .data$channel, .data$term)
   }
   transform_params <- if (length(transform_param_tables) > 0) {
     do.call(rbind, unname(transform_param_tables))
@@ -1258,7 +1209,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
 #' @param dataLong Optional updated longitudinal dataset.
 #' @param formulaEvent Optional updated survival formula (full or update form).
 #' @param dataEvent Optional updated event dataset.
-#' @param formulaCorr Optional updated covariance formula (full or update form).
+#' @param formulaVCov Optional updated covariance formula (full or update form).
 #' @param formulaDist Optional distributional regression formulas with parameter
 #'   names on the LHS (e.g., `sigma ~ 1 + time`).
 #' @param control Optional updated control list.
@@ -1277,7 +1228,7 @@ update.JoinMeFit <- function(
   dataLong = NULL,
   formulaEvent = NULL,
   dataEvent = NULL,
-  formulaCorr = NULL,
+  formulaVCov = NULL,
   formulaDist = NULL,
   control = NULL,
   draws = NULL,
@@ -1339,7 +1290,7 @@ update.JoinMeFit <- function(
 
   call_obj$formulaLong <- update_formula(object$formulaLong, formulaLong, "formulaLong")
   call_obj$formulaEvent <- update_formula(object$formulaEvent, formulaEvent, "formulaEvent")
-  call_obj$formulaCorr <- update_formula(object$formulaCorr, formulaCorr, "formulaCorr")
+  call_obj$formulaVCov <- update_formula(object$formulaVCov, formulaVCov, "formulaVCov")
   if (!is.null(formulaDist)) call_obj$formulaDist <- formulaDist
 
   if (!is.null(call_obj$formulaLong) && inherits(call_obj$formulaLong, "formula")) {
@@ -1429,7 +1380,7 @@ print.summary_JoinMeFit <- function(x, ...) {
   .cli_print_table_section("Distributional parameters", x$tables$distributional, level = 2L)
   .cli_print_table_section("Distributional regression", x$tables$distributional_regression, level = 2L)
   if (!is.null(x$tables$corr)) {
-    .cli_summary_heading("Covariance summaries", level = 2L)
+    .cli_summary_heading("Covariance summaries (diagonal entries are variances)", level = 2L)
     if (!is.null(x$tables$corr$id)) {
       .cli_summary_heading("id", level = 3L)
       .cli_print_table(x$tables$corr$id)
@@ -1441,9 +1392,6 @@ print.summary_JoinMeFit <- function(x, ...) {
   }
   if (!is.null(x$tables$id_marker_cov)) {
     .cli_summary_heading("id:marker covariance parameters", level = 2L)
-    if (!is.null(x$tables$id_marker_cov$latent)) {
-      .cli_print_table_section("latent covariance matrix", x$tables$id_marker_cov$latent, level = 3L)
-    }
     if (!is.null(x$tables$id_marker_cov$regression)) {
       .cli_print_table_section("covariance regression coefficients", x$tables$id_marker_cov$regression, level = 3L)
     }

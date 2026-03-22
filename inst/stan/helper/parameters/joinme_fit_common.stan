@@ -12,9 +12,7 @@
   cholesky_factor_corr[R_mk] Lcorr_v;    // Cholesky corr for marker REs
 
   /* marker-by-id latent effects */
-  array[n_id, D] vector[Q_idm] z_w_lat;  // latent standard normals per id, marker
-  vector<lower=0>[Q_idm] tau_w;          // marginal SDs for marker-id REs
-  cholesky_factor_corr[Q_idm] Lcorr_w;   // Cholesky corr for marker-id REs
+  array[n_id, D] vector[Q_idm] z_w_lat;  // iid standard normals per id, marker; baseline covariance now lives in L_i
 
   /* Cross-correlation mapping between v_marker and z_w */
   matrix[Q_idm, R_mk] B_cross;           // cross-loadings when crosscorr enabled
@@ -22,9 +20,8 @@
   /* id-specific covariance regression for L_i */
   vector[M_cov] alpha_L;                 // intercepts for each L_i element
   array[M_cov] vector[K_cov] beta_L;     // covariate slopes for each element
-  real<lower=0> tau_L;                   // scale for latent u_L
-  vector[M_cov] lambda_L;                // loadings for latent u_L
-  vector[n_id] z_L;                      // latent standard normals for u_L
+  vector<lower=0>[M_cov] lambda_L;       // nonnegative loadings for component-specific latent z_L (sign is absorbed into z_L)
+  array[n_id] vector[M_cov] z_L;         // latent standard normals for covariance regression, one per subject and L_i element
 
   /* baseline hazard (cause-specific) */
   array[K_event] vector[Kbs] bs_gamma_c; // spline coefficients for baseline hazard (includes intercept basis)
@@ -68,8 +65,8 @@
   real z_alpha_cs_mean;               // latent for mean CS association
   real z_alpha_cv_marker;              // latent for marker CV association
   real z_alpha_cs_marker;              // latent for marker CS association
-  vector[M_corr] alpha_corr;          // corr association coefficients (off-diagonal correlations)
-  vector[M_vcov] alpha_vcov;          // vcov association coefficients for lower-triangular L entries
+  vector[M_corr] alpha_corr;          // corr association coefficient latents (scaled by s_corr below)
+  vector[M_vcov] alpha_vcov;          // vcov association coefficient latents (scaled by s_vcov below)
 
   /* marker-weight perturbations (global across ids) */
   vector[D * estimate_marker_weights * use_marker_weight_assoc] z_marker_weights; // latent signed perturbations (active only when needed)

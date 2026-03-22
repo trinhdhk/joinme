@@ -41,7 +41,7 @@
 #' @param formulaEvent Survival formula for baseline covariates and event model.
 #' @param dataEvent One row per id event data with event time, event indicator, and
 #'   covariates referenced in `formulaEvent`.
-#' @param formulaCorr Covariance regression formula for id-specific marker-by-id effects.
+#' @param formulaVCov Covariance regression formula for id-specific marker-by-id effects.
 #'   If the marker block omits the inner `( ... | id )`, then marker-by-id effects
 #'   are absent and covariance-style associations (`corr`, `vcov`) are not allowed.
 #'   Downstream, `corr` uses off-diagonal correlation features derived from those
@@ -95,7 +95,7 @@
 #' @param quadrature_nodes Optional positive integer target for total quadrature
 #'   points. Allowed values are exactly `7`, `15`, `31`, `41`, `51`, and `61`.
 #'   Only the node count is passed to Stan; GK nodes/weights are fixed in Stan.
-#' @param corr_diag_link Link for covariance regression diagonals: "softplus" or "exp".
+#' @param vcov_diag_link Link for covariance regression diagonals: "softplus" or "exp".
 #' @param tau_sde_fixed Optional fixed tau for skew-double-exponential (0 < tau < 1).
 #' @param seed Optional random seed for deterministic components of standata.
 #' @export
@@ -107,7 +107,7 @@ joinme_standata <- function(
   dataLong,
   formulaEvent,
   dataEvent,
-  formulaCorr = ~1,
+  formulaVCov = ~1,
   formulaDist = NULL,
   id_var = "id",
   marker_var = "marker",
@@ -130,7 +130,7 @@ joinme_standata <- function(
   basehaz_formula = ~ 1 + time,
   tau_spline = 0.4,
   quadrature_nodes = NULL,
-  corr_diag_link = c("softplus", "exp"),
+  vcov_diag_link = c("softplus", "exp"),
   tau_sde_fixed = NULL,
   seed = NULL
 ) {
@@ -150,7 +150,7 @@ joinme_standata <- function(
   event_time <- as.numeric(event_vars$event_time)
   event_status <- event_vars$event_status
   basehaz <- match.arg(basehaz)
-  corr_diag_link <- match.arg(corr_diag_link)
+  vcov_diag_link <- match.arg(vcov_diag_link)
   quad_req <- .resolve_gk_request(nodes = quadrature_nodes %||% 15L)
 
   if (!is.logical(fixed_marker_weights) || length(fixed_marker_weights) != 1L || is.na(fixed_marker_weights)) {
@@ -438,7 +438,7 @@ joinme_standata <- function(
   fam_phi_beta <- .build_family_param_index("phi_beta")
   fam_tau_sde <- .build_family_param_index("tau_sde")
 
-  corr_diag_link_code <- if (corr_diag_link == "exp") 1L else 0L
+  vcov_diag_link_code <- if (vcov_diag_link == "exp") 1L else 0L
 
   use_tau_sde_fixed <- 0L
   tau_sde_fixed_value <- 0.5
@@ -590,36 +590,21 @@ joinme_standata <- function(
   W <- .mm_event(formulaEvent, dataEvent)
   p_w <- ncol(W)
 
-  # Covariance covariates Xcov (intercept-only -> Xcov=0)
-  # - used to build subject-specific L_i in Stan
-  if (length(reformulas::findbars(formulaCorr)) > 0) {
-    cli::cli_abort(c(
-      x = "{.arg formulaCorr} does not support random-effects terms.",
-      i = "Remove all ( ... | ... ) terms from {.arg formulaCorr}."
-    ))
-  }
-  fv_rhs <- stats::update(formulaCorr, . ~ .)
-  fv_rhs[[2]] <- NULL
-  if (length(fv_rhs) >= 3 && .expr_has_time(fv_rhs[[3]], time_var)) {
-    cli::cli_abort(c(
-      x = "{.arg formulaCorr} cannot include the time variable {.arg {time_var}}.",
-      i = "Remove time from {.arg formulaCorr} or move it to longitudinal formulas."
-    ))
-  }
-  Xtmp <- .mm(fv_rhs, dataEvent)
-  if (ncol(Xtmp) == 1 && colnames(Xtmp)[1] == "(Intercept)") {
-    K_cov <- 1L
-    Xcov <- matrix(0.0, nrow(dataEvent), 1)
-  } else {
-    if ("(Intercept)" %in% colnames(Xtmp)) Xtmp <- Xtmp[, colnames(Xtmp) != "(Intercept)", drop = FALSE]
-    if (ncol(Xtmp) < 1) {
-      K_cov <- 1L
-      Xcov <- matrix(0.0, nrow(dataEvent), 1)
-    } else {
-      K_cov <- ncol(Xtmp)
-      Xcov <- Xtmp
-    }
-  }
+  # Covariance covariates Xcov
+  # - used to build subject-specific lower-triangular factors L_i in Stan
+  formulaVCov <- .resolve_vcov_formula(
+    formulaVCov = formulaVCov,
+    default = ~ 1,
+    context = "joinme_standata()"
+  )
+  vcov_design <- .build_vcov_design(
+    formulaVCov = formulaVCov,
+    dataEvent = dataEvent,
+    time_var = time_var,
+    context = "joinme_standata()"
+  )
+  K_cov <- vcov_design$K_cov
+  Xcov <- vcov_design$Xcov
 
   # Survival outcomes (scaled)
   # - S_event is on [0,1] after scaling by tmax
@@ -840,7 +825,7 @@ joinme_standata <- function(
     M_corr_tf = as.integer(M_corr_tf),
     M_vcov_tf = as.integer(M_vcov_tf),
     allow_marker_crosscorr = as.integer(allow_marker_crosscorr),
-    corr_diag_link = as.integer(corr_diag_link_code),
+    vcov_diag_link = as.integer(vcov_diag_link_code),
     use_tau_sde_fixed = as.integer(use_tau_sde_fixed),
     tau_sde_fixed = as.numeric(tau_sde_fixed_value),
     p_w = as.integer(p_w),

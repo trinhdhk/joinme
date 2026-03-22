@@ -4,7 +4,7 @@ library(dplyr)
 sim <- simulate_joinme(
   formulaLong = y ~ 1 + time + x1 + (1 + time | id) + (0 + x1 + (1 + time | id) | marker),
   formulaEvent = survival::Surv(time, event) ~ x2,
-  formulaCorr = ~ x1,
+  formulaVCov = ~ x1,
   families = c("gaussian", "student_t", "student_t"),
   n_id = 100,
   n_obs_per_marker_per_id = 8,
@@ -21,8 +21,7 @@ sim <- simulate_joinme(
     id_marker_cov = list(
       latent = list(sd = c(0.7, 0.3)),
       alpha = c(-0.2, 0.0, -0.1),
-      lambda = 0.35,
-      sd_u = 0.5
+      lambda = 0.175
     ),
     dist = list(sigma = list(sd = 0.4))
   ),
@@ -34,7 +33,7 @@ sim <- simulate_joinme(
 fit <- joinme(
   formulaLong = y ~ 1 + time + x1 + (1 + time | id) + (0 + x1 + (1 + time | id) | marker),
   formulaEvent = survival::Surv(time, event) ~ x2,
-  formulaCorr = ~ x1,
+  formulaVCov = ~ x1,
   families = c("gaussian", "student_t", "student_t"),
   dataLong = sim$dataLong,
   dataEvent = sim$dataEvent,

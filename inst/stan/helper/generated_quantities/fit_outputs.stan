@@ -48,7 +48,7 @@
         }
       }
       real sig = (P_sigma > 0 || n_re_sigma > 0)
-                 ? exp(eta_sigma)
+                 ? exp(fmin(eta_sigma, 20))
                  : sigma_family[marker_to_sigma_family[d]];
       // sig: residual scale for Gaussian
       log_lik_long[n] = normal_lpdf(y_real[n] | mu_long, sig);
@@ -64,7 +64,7 @@
         }
       }
       real sig = (P_sigma > 0 || n_re_sigma > 0)
-                 ? exp(eta_sigma)
+                 ? exp(fmin(eta_sigma, 20))
                  : sigma_family[marker_to_sigma_family[d]];
       // sig: residual scale for Student-t
       real eta_nu = 0; // linear predictor for df (nu)
@@ -77,7 +77,7 @@
           eta_nu += dot_product(Z_nu[j][n, 1:K_nu[j]], b);
         }
       }
-      real nu = (P_nu > 0 || n_re_nu > 0) ? (2 + exp(eta_nu)) : nu_family[marker_to_nu_family[d]];
+      real nu = (P_nu > 0 || n_re_nu > 0) ? (2 + exp(fmin(eta_nu, 20))) : nu_family[marker_to_nu_family[d]];
       // nu: degrees of freedom for Student-t
       log_lik_long[n] = student_t_lpdf(y_real[n] | nu, mu_long, sig);
     } else if (family_long[d] == 3) {
@@ -124,7 +124,7 @@
         }
       }
       real sig = (P_sigma > 0 || n_re_sigma > 0)
-                 ? exp(eta_sigma)
+                 ? exp(fmin(eta_sigma, 20))
                  : sigma_family[marker_to_sigma_family[d]];
       // sig: residual scale for skew normal
       real eta_alpha = 0; // linear predictor for skew alpha
@@ -152,7 +152,7 @@
         }
       }
       real sig = (P_sigma > 0 || n_re_sigma > 0)
-                 ? exp(eta_sigma)
+                 ? exp(fmin(eta_sigma, 20))
                  : sigma_family[marker_to_sigma_family[d]];
       // sig: residual scale for Laplace
       log_lik_long[n] = double_exponential_lpdf(y_real[n] | mu_long, sig);
@@ -168,7 +168,7 @@
         }
       }
       real sig = (P_sigma > 0 || n_re_sigma > 0)
-                 ? exp(eta_sigma)
+                 ? exp(fmin(eta_sigma, 20))
                  : sigma_family[marker_to_sigma_family[d]];
       // sig: residual scale for skew Laplace
       real eta_tau = 0; // linear predictor for tau_sde

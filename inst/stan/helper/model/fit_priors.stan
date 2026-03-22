@@ -90,10 +90,10 @@
     to_vector(B_cross) ~ std_normal();
   }
   
-  /* Marker-by-id latent random effects (tau_w ORIGINAL scale) */
+  /* Marker-by-id latent random effects */
+  // These seeds are iid standard normal. Baseline covariance is carried by
+  // alpha_L rather than by a second global covariance layer.
   if (Q_idm > 0) {
-    tau_w ~ exponential(1);
-    Lcorr_w ~ lkj_corr_cholesky(lkj_eta);
     for (i in 1 : n_id)
       for (d in 1 : D)
         target += re_weight_idm[i] * std_normal_lpdf(z_w_lat[i, d]);
@@ -101,12 +101,12 @@
   
   /* Covariance regression priors */
   {
-    real corr_lp_scale = (corr_diag_link == 1) ? 0.2 : 0.3;
-    alpha_L ~ student_t(6, 0, corr_lp_scale);
+    real vcov_lp_scale = 1;
+    alpha_L ~ student_t(6, 0, vcov_lp_scale);
     for (m in 1 : M_cov) 
-      beta_L[m] ~ student_t(6, 0, corr_lp_scale);
-    tau_L ~ student_t(6, 0, corr_lp_scale);
-    lambda_L ~ student_t(6, 0, corr_lp_scale);
+      beta_L[m] ~ student_t(6, 0, vcov_lp_scale);
+    // lambda_L is constrained nonnegative; the sign alias is absorbed into z_L.
+    lambda_L ~ student_t(6, 0, vcov_lp_scale);
     for (i in 1 : n_id)
       target += re_weight_L[i] * std_normal_lpdf(z_L[i]);
   }
@@ -142,8 +142,12 @@
   sd_alpha_cs_mean ~ normal(0, 0.5);
   sd_alpha_cv_marker ~ normal(0, 0.5);
   sd_alpha_cs_marker ~ normal(0, 0.5);
-  s_corr ~ normal(0, 0.5);
-  s_vcov ~ normal(0, 0.5);
+  // s_corr / s_vcov are global half-normal scales for covariance-style
+  // association coefficients. alpha_corr / alpha_vcov are standardized
+  // coefficient latents, and the effective hazard coefficients are defined in
+  // transformed parameters as s_* times those latents.
+  s_corr ~ normal(0, 1);
+  s_vcov ~ normal(0, 1);
 
   
   /* Shrinkage family switch for corr weights */

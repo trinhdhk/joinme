@@ -11,18 +11,6 @@ test_that("print.summary_JoinMeFit uses bespoke covariance labels", {
         marker = data.frame(block = "marker", row = 1L, col = 1L, Estimate = 2)
       ),
       id_marker_cov = list(
-        latent = data.frame(
-          block = "sigma_latent",
-          row = c(1L, 2L),
-          col = c(1L, 1L),
-          Estimate = c(0.7, 0.1),
-          Est.Error = c(0.1, 0.05),
-          Q2.5 = c(0.5, -0.1),
-          Q97.5 = c(0.9, 0.25),
-          Rhat = rep(1.0, 2),
-          ess_bulk = rep(100, 2),
-          ess_tail = rep(100, 2)
-        ),
         regression = data.frame(
           block = c("L[id:marker]", "L[id:marker]", "L[id:marker]"),
           row = c(1L, 1L, 1L),
@@ -35,17 +23,6 @@ test_that("print.summary_JoinMeFit uses bespoke covariance labels", {
           Rhat = rep(1.0, 3),
           ess_bulk = rep(100, 3),
           ess_tail = rep(100, 3)
-        ),
-        hyperparameters = data.frame(
-          block = "global",
-          term = "sd_u",
-          Estimate = 0.6,
-          Est.Error = 0.08,
-          Q2.5 = 0.45,
-          Q97.5 = 0.75,
-          Rhat = 1.0,
-          ess_bulk = 100,
-          ess_tail = 100
         )
       )
     ),
@@ -56,12 +33,11 @@ test_that("print.summary_JoinMeFit uses bespoke covariance labels", {
   txt <- paste(capture.output(print(s)), collapse = "\n")
   expect_true(grepl("Joint mixed effects model summary", txt, fixed = TRUE))
   expect_true(grepl("Call: joinme(formulaLong = y ~ 1 + time)", txt, fixed = TRUE))
+  expect_true(grepl("Covariance summaries \\(diagonal entries are variances\\)", txt))
   expect_match(txt, "\\nid\\n")
   expect_match(txt, "\\nmarker\\n")
   expect_true(grepl("id:marker covariance parameters", txt, fixed = TRUE))
-  expect_true(grepl("latent covariance matrix", txt, fixed = TRUE))
   expect_true(grepl("covariance regression coefficients", txt, fixed = TRUE))
-  expect_true(grepl("sigma_latent", txt, fixed = TRUE))
   expect_true(grepl("block", txt, fixed = TRUE))
   expect_true(grepl("row", txt, fixed = TRUE))
   expect_true(grepl("col", txt, fixed = TRUE))
@@ -69,9 +45,60 @@ test_that("print.summary_JoinMeFit uses bespoke covariance labels", {
   expect_true(grepl("\\(Intercept\\)", txt))
   expect_true(grepl("x1", txt, fixed = TRUE))
   expect_true(grepl("lambda", txt, fixed = TRUE))
-  expect_true(grepl("covariance regression hyperparameters", txt, fixed = TRUE))
-  expect_true(grepl("sd_u", txt, fixed = TRUE))
+  expect_false(grepl("covariance regression hyperparameters", txt, fixed = TRUE))
+  expect_false(grepl("sd_u", txt, fixed = TRUE))
   expect_false(grepl("Sigma_u|Sigma_v|Sigma_w", txt))
+})
+
+test_that("summary.JoinMeFit retains covariance regression tables when top-level id REs are independent", {
+  skip_on_cran()
+  skip_if_not_installed("cmdstanr")
+
+  has_cmdstan <- FALSE
+  tryCatch({
+    has_cmdstan <- !is.null(cmdstanr::cmdstan_version())
+  }, error = function(e) {
+    has_cmdstan <- FALSE
+  })
+  if (!has_cmdstan) skip("CmdStan is not installed.")
+
+  sim <- simulate_joinme(
+    formulaLong = y ~ 1 + time + (1 + time || id) + (0 + (1 | id) | marker),
+    formulaEvent = survival::Surv(time, event) ~ 1,
+    families = c("gaussian", "gaussian", "gaussian"),
+    n_id = 8,
+    n_obs_per_marker_per_id = 3,
+    times_obs = seq(0, 3, length.out = 4),
+    assoc = "vcov",
+    assoc_coefs = list(vcov = 0.4),
+    seed = 551
+  )
+
+  fit <- joinme(
+    formulaLong = y ~ 1 + time + (1 + time || id) + (0 + (1 | id) | marker),
+    formulaEvent = survival::Surv(time, event) ~ 1,
+    dataLong = sim$dataLong,
+    dataEvent = sim$dataEvent,
+    families = c("gaussian", "gaussian", "gaussian"),
+    assoc = "vcov",
+    control = list(
+      engine = "cmdstanr",
+      chains = 1,
+      parallel_chains = 1,
+      iter_warmup = 50,
+      iter_sampling = 50,
+      refresh = 0,
+      force_recompile = FALSE,
+      seed = 551
+    )
+  )
+
+  s <- suppressWarnings(summary(fit))
+
+  expect_false(is.null(s$tables$id_marker_cov$regression))
+  expect_true(any(s$tables$id_marker_cov$regression$term == "(Intercept)"))
+  expect_true(any(s$tables$id_marker_cov$regression$term == "lambda"))
+  expect_null(s$tables$id_marker_cov$hyperparameters)
 })
 
 test_that("print.summary_JoinMeFit formats count diagnostics as integers", {

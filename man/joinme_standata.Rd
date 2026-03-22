@@ -9,7 +9,7 @@ joinme_standata(
   dataLong,
   formulaEvent,
   dataEvent,
-  formulaCorr = ~1,
+  formulaVCov = ~1,
   formulaDist = NULL,
   id_var = "id",
   marker_var = "marker",
@@ -32,7 +32,7 @@ joinme_standata(
   basehaz_formula = ~1 + time,
   tau_spline = 0.4,
   quadrature_nodes = NULL,
-  corr_diag_link = c("softplus", "exp"),
+  vcov_diag_link = c("softplus", "exp"),
   tau_sde_fixed = NULL,
   seed = NULL
 )
@@ -54,9 +54,12 @@ outcome, and covariates referenced in \code{formulaLong}.}
 \item{dataEvent}{One row per id event data with event time, event indicator, and
 covariates referenced in \code{formulaEvent}.}
 
-\item{formulaCorr}{Covariance regression formula for id-specific marker-by-id effects.
+\item{formulaVCov}{Covariance regression formula for id-specific marker-by-id effects.
 If the marker block omits the inner \code{( ... | id )}, then marker-by-id effects
-are absent and \code{corr} associations are not allowed.}
+are absent and covariance-style associations (\code{corr}, \code{vcov}) are not allowed.
+Downstream, \code{corr} uses off-diagonal correlation features derived from those
+marker-by-id effects, whereas \code{vcov} uses the lower-triangular entries of the
+subject-specific Cholesky factor \code{L} directly.}
 
 \item{formulaDist}{Optional list of formulas for distributional regression. Two
 forms are supported:
@@ -77,7 +80,7 @@ Grouping factors in distributional random-effects terms may also use
 \item{eps_fd}{Positive finite-difference step for association derivatives.}
 
 \item{assoc}{Character vector specifying association components
-(e.g., "cv_mean", "cs_total", "corr").}
+(e.g., "cv_mean", "cs_total", "corr", "vcov").}
 
 \item{families}{Optional marker-specific family specification. Can be
 character family names or \code{jm_family(...)} entries with per-marker links.
@@ -85,7 +88,7 @@ If NULL, all markers use Gaussian responses with identity link.
 Supported links/inverse-links: \code{identity}, \code{log}, \code{logit}, \code{probit}, \code{exp}.}
 
 \item{transforms}{Optional list specifying transformations for association terms.
-Each element (cv_total, cs_total, corr) is a list with a \code{type} and fields
+Each element (cv_total, cs_total, corr, vcov) is a list with a \code{type} and fields
 required by that type (see \code{build_standata_transforms()}).}
 
 \item{beta_prior}{Prior specification for longitudinal fixed effects.}
@@ -126,7 +129,7 @@ via signed additive perturbations,
 points. Allowed values are exactly \code{7}, \code{15}, \code{31}, \code{41}, \code{51}, and \code{61}.
 Only the node count is passed to Stan; GK nodes/weights are fixed in Stan.}
 
-\item{corr_diag_link}{Link for covariance regression diagonals: "softplus" or "exp".}
+\item{vcov_diag_link}{Link for covariance regression diagonals: "softplus" or "exp".}
 
 \item{tau_sde_fixed}{Optional fixed tau for skew-double-exponential (0 < tau < 1).}
 

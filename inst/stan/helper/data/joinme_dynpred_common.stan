@@ -21,6 +21,7 @@
   matrix[n_obs_long, n_random_id] mat_id_obs;               // id RE design
   matrix[n_obs_long, n_random_marker] mat_marker_obs;       // marker RE design
   matrix[n_obs_long, n_random_marker_id] mat_marker_id_obs; // marker-by-id RE
+  vector<lower=0>[n_random_marker_id] marker_id_row_scale;  // row scaling from original-time covariance regression to scaled-time marker-id coefficients
 
   /* Prediction grid identifiers */
   int<lower=1> n_obs_pred;                       // rows in prediction grid
@@ -47,8 +48,8 @@
   matrix[n_obs_pred, P_tau_sde] X_tau_sde_pred;  // tau_sde design pred
 
   /* Covariance regression covariates */
-  int<lower=1> n_cov_corr;                        // covariate count for corr
-  vector[n_cov_corr] vec_cov_corr;                // covariate vector (subject-level)
+  int<lower=1> n_cov_vcov;                        // covariate count for covariance regression
+  vector[n_cov_vcov] vec_cov_vcov;                // covariate vector (subject-level)
 
   /* Hazard covariates */
   int<lower=0> n_cov_hazard;                      // hazard covariate count
@@ -114,7 +115,7 @@
   int<lower=0> n_family_tau_sde;
   array[n_marker_types] int<lower=0, upper=n_family_tau_sde> marker_to_tau_sde_family;
   int<lower=0, upper=1> flag_resid_dim;                      // sigma dimension flag
-  int<lower=0, upper=1> corr_diag_link;                      // 0 softplus, 1 exp
+  int<lower=0, upper=1> vcov_diag_link;                      // 0 softplus, 1 exp
   int<lower=0, upper=1> use_tau_sde_fixed;                   // 1 use fixed tau
   real<lower=0, upper=1> tau_sde_fixed;                      // fixed tau value
 
@@ -123,15 +124,12 @@
   array[n_draws] matrix[n_random_id, n_random_id] Lcorr_id;   // id RE correlations
   array[n_draws] vector[n_random_marker] tau_marker;          // marker RE scales
   array[n_draws] matrix[n_random_marker, n_random_marker] Lcorr_marker; // marker RE corr
-  array[n_draws] vector[n_random_marker_id] tau_marker_id;    // marker-id RE scales
-  array[n_draws] matrix[n_random_marker_id, n_random_marker_id] Lcorr_marker_id; // marker-id corr
   array[n_draws] matrix[n_random_marker_id, n_random_marker] B_cross; // cross-corr map
 
   int<lower=0> num_unique_cov_entries;         // unique elements in L_i
-  array[n_draws] vector[num_unique_cov_entries] alpha_corr_reg; // intercepts
-  array[n_draws] vector[num_unique_cov_entries * n_cov_corr] beta_corr_reg_flat; // flattened slopes
-  array[n_draws] real tau_corr_reg;            // scale for latent corr effect
-  array[n_draws] vector[num_unique_cov_entries] lambda_corr_reg; // loadings
+  array[n_draws] vector[num_unique_cov_entries] alpha_vcov_reg; // intercepts
+  array[n_draws] vector[num_unique_cov_entries * n_cov_vcov] beta_vcov_reg_flat; // flattened slopes
+  array[n_draws] vector[num_unique_cov_entries] lambda_vcov_reg; // effective loadings
 
   int<lower=1> K_event;                        // number of competing risks
   array[n_draws, K_event] vector[n_basehaz_basis] bs_gamma_c; // spline coeffs

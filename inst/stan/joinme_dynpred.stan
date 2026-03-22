@@ -32,7 +32,6 @@ data {
 
   int flag_indep_id_re;
   int flag_indep_marker_re;
-  int flag_indep_marker_byid_latent_re;
   int flag_indep_idmarker_cov;
   int flag_allow_marker_crosscorr;
 
@@ -71,6 +70,7 @@ model {
     mat_id_obs,
     mat_marker_obs,
     mat_marker_id_obs,
+    marker_id_row_scale,
     /* Distributional regression design */
     P_sigma,
     X_sigma_obs,
@@ -85,8 +85,8 @@ model {
     P_tau_sde,
     X_tau_sde_obs,
     /* Covariance regression inputs */
-    n_cov_corr,
-    vec_cov_corr,
+    n_cov_vcov,
+    vec_cov_vcov,
     /* Hazard baseline inputs */
     n_cov_hazard,
     vec_cov_hazard,
@@ -125,7 +125,7 @@ model {
     n_family_tau_sde,
     marker_to_tau_sde_family,
     flag_resid_dim,
-    corr_diag_link,
+    vcov_diag_link,
     use_tau_sde_fixed,
     tau_sde_fixed,
     num_unique_cov_entries,
@@ -144,14 +144,11 @@ model {
     Lcorr_id,
     tau_marker,
     Lcorr_marker,
-    tau_marker_id,
-    Lcorr_marker_id,
     B_cross,
     /* Draw-specific covariance regression weights */
-    alpha_corr_reg,
-    beta_corr_reg_flat,
-    tau_corr_reg,
-    lambda_corr_reg,
+    alpha_vcov_reg,
+    beta_vcov_reg_flat,
+    lambda_vcov_reg,
     /* Draw-specific survival parameters */
     K_event,
     bs_gamma_c,
@@ -236,7 +233,6 @@ model {
     /* Flags and latent draws */
     flag_indep_id_re,
     flag_indep_marker_re,
-    flag_indep_marker_byid_latent_re,
     flag_indep_idmarker_cov,
     flag_allow_marker_crosscorr,
     z_u,
