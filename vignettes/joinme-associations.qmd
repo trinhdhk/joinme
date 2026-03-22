@@ -99,8 +99,8 @@ marker-aggregated association terms. The simulator reports them in
 
 ## Plotting fitted association curves
 
-`plot(fit, type = "association")` uses a compact association plotting payload
-stored on the fitted `JoinMeFit` object. The payload keeps only the posterior
+`plot(fit, type = "association")` uses a compact association plotting bundle
+stored on the fitted `JoinMeFit` object. The bundle keeps only the posterior
 quantities needed for plotting: active association coefficients, marker weights,
 transform coefficients, and cached model-implied raw support ranges.
 

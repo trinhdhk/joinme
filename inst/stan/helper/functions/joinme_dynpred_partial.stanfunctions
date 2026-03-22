@@ -457,10 +457,10 @@ real partial_draw(
     }
 
     // Transform marker-by-ID latent effects into actual random effects
-    matrix[n_random_marker_id, n_random_marker_id] Li_used = diag_pre_multiply(marker_id_row_scale, Li);
+    matrix[n_random_marker_id, n_random_marker_id] Li_eff = diag_pre_multiply(marker_id_row_scale, Li);
     array[n_marker_types] vector[n_random_marker_id] w_idscaled; // scaled marker-id REs
     for (d in 1 : n_marker_types)
-      w_idscaled[d] = Li_used * z_w[d];
+      w_idscaled[d] = Li_eff * z_w[d];
 
     // ---------------------------------------------------------------
     // STEP 4: Longitudinal log-likelihood for observed history
@@ -600,7 +600,7 @@ real partial_draw(
       zbar[q] = acc / n_marker_types;
     }
     // Convert unweighted latent effects into actual ID-by-marker REs
-    vector[n_random_marker_id] wbar_i = Li_used * zbar; // scaled unweighted mean
+    vector[n_random_marker_id] wbar_i = Li_eff * zbar; // scaled unweighted mean
 
     for (j in 1 : n_gk) {
       cvm[j] = dot_product(mat_fixed_gk_cond[j], beta_fixed[k]) + dot_product(mat_id_gk_cond[j], u_id);
@@ -644,7 +644,7 @@ real partial_draw(
     // CV total and CV marker are transformed per marker, then weighted-averaged.
     array[n_marker_types] vector[n_random_marker_id] w_draw;
     for (d in 1 : n_marker_types)
-      w_draw[d] = Li * z_w[d];
+      w_draw[d] = Li_eff * z_w[d];
 
     vector[n_gk] cv_tot_tf;
     vector[n_gk] cv_mean_tf = apply_transform_vector(cvm, tf_mode_cv_mean, functional_ops_cv_mean, const_data_cv_mean, knots_cv_mean, coeff_cv_mean[k], spline_degree_cv_mean);

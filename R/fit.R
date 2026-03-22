@@ -32,7 +32,7 @@
 #' `z_marker_weights ~ N(0, 1)`. The effective marker intensities are used directly
 #' from `w_raw` without additional normalisation and scale the association contributions.
 #'
-#' The returned `JoinMeFit` object stores a compact association plotting payload
+#' The returned `JoinMeFit` object stores a compact association plotting bundle
 #' containing only the posterior quantities needed to draw association curves
 #' (`alpha_*`, marker weights, spline coefficients, and cached model-implied raw
 #' support ranges). This keeps association plotting usable after serialization
@@ -578,7 +578,7 @@ joinme <- function(
     dataEvent = dataEvent
   )
 
-  # Store a compact, self-contained plotting payload so association plots remain
+  # Store a compact, self-contained plotting bundle so association plots remain
   # usable even when cmdstanr CSV outputs are no longer available.
   fit_obj$config$association_plot_payload <- tryCatch(
     .build_joinmefit_association_plot_payload(

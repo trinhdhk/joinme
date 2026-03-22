@@ -4,18 +4,25 @@
 \alias{vcov.JoinMeFit}
 \title{Extract posterior covariance summaries}
 \usage{
-\method{vcov}{JoinMeFit}(object, ...)
+\method{vcov}{JoinMeFit}(object, what = NULL, draws = NULL, ...)
 }
 \arguments{
 \item{object}{A joinme fit object.}
+\item{what}{Optional covariance block selector (\code{"id"}, \code{"marker"}).
+When \code{NULL} (default), returns a nested list for all covariance
+components in \code{formulaLong} and \code{formulaDist}.}
 
-\item{...}{Additional arguments passed to \code{\link[=corr]{corr()}}.}
+\item{draws}{Number of draws to use for summaries.}
+
+\item{...}{Unused.}
 }
 \value{
-Posterior covariance summary table(s).
+If \code{what} is supplied, a data frame for the requested covariance
+block. Otherwise, a nested list with \code{formulaLong} and \code{formulaDist}
+covariance summaries.
 }
 \description{
 Returns posterior covariance summaries for fitted joinme models.
-This method delegates to \code{\link[=corr]{corr()}} and supports selecting specific blocks
-through \code{...} (for example, \code{what = "id"}).
+Supports selecting specific blocks through \code{what}
+(for example, \code{what = "id"}).
 }

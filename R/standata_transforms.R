@@ -312,7 +312,7 @@ build_standata_transforms <- function(
   standata <- list()
   # Covariance-style channels can carry one transform per component. The same
   # user-facing spec is expanded across those components here so Stan receives a
-  # rectangular coefficient payload even when the user wrote only one spec.
+  # rectangular coefficient matrix even when the user wrote only one spec.
   component_counts <- list(
     corr = as.integer(n_corr_components %||% 1L),
     vcov = as.integer(n_vcov_components %||% 1L)
@@ -356,8 +356,8 @@ build_standata_transforms <- function(
   # Override with user specifications
   # Algorithm:
   #   Step 1: normalise the user-facing term name and transform type.
-  #   Step 2: convert the spec into a Stan mode code plus the required payload.
-  #   Step 3: for corr/vcov, replicate the coefficient payload across
+  #   Step 2: convert the spec into a Stan mode code plus the required inputs.
+  #   Step 3: for corr/vcov, replicate the coefficient matrix across
   #           components so each component can later evolve independently if the
   #           spline is estimated in Stan.
   #   Step 4: store the serialised result under the common standata schema.
@@ -417,7 +417,7 @@ build_standata_transforms <- function(
         # For corr/vcov, the same initial spline shape is copied to every
         # component. Stan later treats each component row as its own curve when
         # estimate_spline_* = 1, but this common initialisation keeps the R-side
-        # contract concise.
+        # layout concise.
         standata[[paste0("coeff_", short_suffix)]] <- if (term_name %in% c("corr", "vcov")) {
           matrix(
             rep(as.numeric(spec$coeff), times = n_components),

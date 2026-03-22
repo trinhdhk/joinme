@@ -261,8 +261,8 @@ diagnosis(fit)
 diagnosis(pred)
 ```
 
-`ranef(fit)`, `corr(fit)`, and `vcov(fit)` are nested by `formulaLong` and `formulaDist`.
-For prediction objects, `ranef(pred)`, `corr(pred)`, and `vcov(pred)` are available only when
+`ranef(fit)` and `vcov(fit)` are nested by `formulaLong` and `formulaDist`.
+For prediction objects, `ranef(pred)` and `vcov(pred)` are available only when
 marker covariance is configured to depend on id.
 
 ## Next steps

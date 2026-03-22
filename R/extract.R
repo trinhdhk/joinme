@@ -13,14 +13,15 @@ extract <- function(object, ...) {
 
 # File overview:
 # - Extract draw matrices from JoinMeFit by summary-like components.
-# - Extract draw matrices from JoinMeDynPred from stored draw payloads.
+# - Extract draw matrices from JoinMeDynPred from stored draw components.
 
 #' Extract posterior draws from a fitted joinme model
 #'
 #' @param object A `JoinMeFit` object.
 #' @param what Character component selector. One of
 #'   `"fixef"`, `"gamma_w"`, `"assoc"`, `"association_plot"`,
-#'   `"distributional"`, `"distributional_regression"`, or `"raw"`.
+#'   `"distributional"`, `"distributional_regression"`, `"likelihood_scale"`,
+#'   or `"raw"`.
 #' @param term Optional character vector of friendly term names (summary-style)
 #'   to subset extracted columns.
 #' @param variable Optional character vector of raw Stan variable names. This is
@@ -41,7 +42,7 @@ extract <- function(object, ...) {
 #'     support ranges used by association plotting.
 #' @export
 extract.JoinMeFit <- function(object,
-                              what = c("fixef", "gamma_w", "assoc", "association_plot", "distributional", "distributional_regression", "raw"),
+                              what = c("fixef", "gamma_w", "assoc", "association_plot", "distributional", "distributional_regression", "likelihood_scale", "raw"),
                               term = NULL,
                               variable = NULL,
                               draws = NULL,
@@ -57,7 +58,7 @@ extract.JoinMeFit <- function(object,
     payload <- .joinmefit_get_association_plot_payload(object, seed = seed)
     if (is.null(payload)) {
       cli::cli_abort(c(
-        x = "No association plotting payload is available.",
+        x = "No association plotting data is available.",
         i = "Fit a model with association terms or refit with posterior draws available."
       ))
     }
@@ -103,15 +104,9 @@ extract.JoinMeFit <- function(object,
   } else if (what == "assoc") {
     corr_assoc_vars <- grep("^alpha_corr_eff\\[", all_vars, value = TRUE)
     if (length(corr_assoc_vars) == 0L) {
-      corr_assoc_vars <- grep("^alpha_corr_used\\[", all_vars, value = TRUE)
-    }
-    if (length(corr_assoc_vars) == 0L) {
       corr_assoc_vars <- grep("^alpha_corr\\[", all_vars, value = TRUE)
     }
     vcov_assoc_vars <- grep("^alpha_vcov_eff\\[", all_vars, value = TRUE)
-    if (length(vcov_assoc_vars) == 0L) {
-      vcov_assoc_vars <- grep("^alpha_vcov_used\\[", all_vars, value = TRUE)
-    }
     if (length(vcov_assoc_vars) == 0L) {
       vcov_assoc_vars <- grep("^alpha_vcov\\[", all_vars, value = TRUE)
     }
@@ -137,7 +132,7 @@ extract.JoinMeFit <- function(object,
     )
     assoc_terms <- assoc_map[assoc_vars]
     assoc_terms[is.na(assoc_terms)] <- sub("^alpha_", "", assoc_vars[is.na(assoc_terms)])
-    assoc_terms <- sub("_(?:eff|used)\\[", "[", assoc_terms, perl = TRUE)
+    assoc_terms <- sub("_eff\\[", "[", assoc_terms, perl = TRUE)
 
     map <- data.frame(term = as.character(assoc_terms), variable = as.character(assoc_vars), stringsAsFactors = FALSE)
 
@@ -187,6 +182,58 @@ extract.JoinMeFit <- function(object,
       }
       map_rows[[length(map_rows) + 1L]] <- data.frame(term = terms, variable = vars, stringsAsFactors = FALSE)
     }
+    if (length(map_rows) > 0) map <- do.call(rbind, map_rows)
+  } else if (what == "likelihood_scale") {
+    map_rows <- list()
+
+    beta_vars <- paste0("beta_eff_in_likelihood[", seq_len(sd$P), "]")
+    beta_vars <- beta_vars[beta_vars %in% all_vars]
+    if (length(beta_vars) > 0) {
+      beta_terms <- sd$x_cols %||% beta_vars
+      if (length(beta_terms) != length(beta_vars)) beta_terms <- beta_vars
+      map_rows[[length(map_rows) + 1L]] <- data.frame(
+        term = paste0("beta_eff: ", as.character(beta_terms)),
+        variable = as.character(beta_vars),
+        stringsAsFactors = FALSE
+      )
+    }
+
+    tau_id_vars <- paste0("tau_u_eff[", seq_len(sd$R_id %||% 0L), "]")
+    tau_id_vars <- tau_id_vars[tau_id_vars %in% all_vars]
+    if (length(tau_id_vars) > 0) {
+      tau_id_terms <- sd$zid_cols %||% tau_id_vars
+      if (length(tau_id_terms) != length(tau_id_vars)) tau_id_terms <- tau_id_vars
+      map_rows[[length(map_rows) + 1L]] <- data.frame(
+        term = paste0("id_sd_eff: ", as.character(tau_id_terms)),
+        variable = as.character(tau_id_vars),
+        stringsAsFactors = FALSE
+      )
+    }
+
+    tau_marker_vars <- paste0("tau_v_eff[", seq_len(sd$R_mk %||% 0L), "]")
+    tau_marker_vars <- tau_marker_vars[tau_marker_vars %in% all_vars]
+    if (length(tau_marker_vars) > 0) {
+      tau_marker_terms <- sd$zmk_cols %||% tau_marker_vars
+      if (length(tau_marker_terms) != length(tau_marker_vars)) tau_marker_terms <- tau_marker_vars
+      map_rows[[length(map_rows) + 1L]] <- data.frame(
+        term = paste0("marker_sd_eff: ", as.character(tau_marker_terms)),
+        variable = as.character(tau_marker_vars),
+        stringsAsFactors = FALSE
+      )
+    }
+
+    row_scale_vars <- paste0("marker_id_row_scale_eff[", seq_len(sd$Q_idm %||% 0L), "]")
+    row_scale_vars <- row_scale_vars[row_scale_vars %in% all_vars]
+    if (length(row_scale_vars) > 0) {
+      row_scale_terms <- sd$zidm_cols %||% row_scale_vars
+      if (length(row_scale_terms) != length(row_scale_vars)) row_scale_terms <- row_scale_vars
+      map_rows[[length(map_rows) + 1L]] <- data.frame(
+        term = paste0("id_marker_row_scale_eff: ", as.character(row_scale_terms)),
+        variable = as.character(row_scale_vars),
+        stringsAsFactors = FALSE
+      )
+    }
+
     if (length(map_rows) > 0) map <- do.call(rbind, map_rows)
   } else if (what == "raw") {
     vars <- variable %||% all_vars
@@ -243,7 +290,7 @@ extract.JoinMeFit <- function(object,
   )
 }
 
-#' Extract draw payloads from dynamic prediction objects
+#' Extract stored posterior draw components from dynamic prediction objects
 #'
 #' @param object A `JoinMeDynPred` object.
 #' @param what Draw block selector: `"longitudinal"`, `"longitudinal_fitted"`,
@@ -275,16 +322,16 @@ extract.JoinMeDynPred <- function(object,
     dd <- dd[ids]
   }
 
-  # For random-effect payloads, return raw structured content with optional id filter.
+  # For random-effect components, return raw structured content with optional id filter.
   if (what %in% c("random_effects_id", "random_effects_marker_id")) {
     return(list(draws = dd, meta = list(what = what, ids = names(dd))))
   }
 
-  # Flatten longitudinal/survival payloads into matrices with informative column names.
+  # Flatten longitudinal/survival draw components into matrices with informative column names.
   flatten_one <- function(entry, id_label) {
     if (is.null(entry)) return(NULL)
 
-    # Multi-scale longitudinal payload (list keyed by scale).
+    # Multi-scale longitudinal draw block (list keyed by scale).
     if (is.list(entry) && !is.null(names(entry)) && any(names(entry) %in% c("epred", "linpred", "predict"))) {
       out_scale <- list()
       keep_scales <- if (is.null(scale)) names(entry) else intersect(names(entry), scale)

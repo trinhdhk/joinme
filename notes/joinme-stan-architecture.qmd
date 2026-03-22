@@ -13,13 +13,13 @@ format:
 
 # Overview
 
-The **JoinME** package implements a sophisticated joint model for multivariate longitudinal and time-to-event data using Stan. This document provides an in-depth technical explanation of the Stan model architecture, data flow, and computational algorithms.
+The **JoinME** package implements a joint model for multivariate longitudinal and time-to-event data using Stan. This document describes the model structure, data flow, and main computations.
 
 Association splines now have a dedicated bounded-domain path: `ispline_expit`
 and `ispline_expit_penalised` evaluate the raw association feature on
 `inv_logit(x)` in Stan, while expecting user-supplied spline `knots` and
 training `x` values to already be expressed on that bounded expit scale. This
-adds a new transform mode without changing the coefficient payload shape used by
+adds a new transform mode without changing the coefficient layout used by
 the existing I-spline machinery.
 
 ## Core Capabilities
@@ -36,7 +36,7 @@ Additional implementation details that are central to the interpretation:
 
 - User-facing transform declarations are normalised through `joinme_tf(...)`,
   and user-facing prior declarations through `joinme_priors(...)`, before the
-  lower-level standata builders validate and serialise them for Stan.
+  lower-level standata builders validate and encode them for Stan.
 
 - Marker-weighted contributions are formed as weighted means across markers.
   Base weights act as prior offsets and are used directly as effective intensities
@@ -62,17 +62,17 @@ Additional implementation details that are central to the interpretation:
 - Competing risks are supported through event-type indexing; the overall survival
   in prediction integrates the sum of cause-specific hazards.
 
-## Diagnostics and extraction contract
+## Diagnostics and extraction alignment
 
-The user-facing diagnostics and extraction APIs are intentionally aligned across
+The user-facing diagnostics and extraction tools are intentionally aligned across
 fit and prediction objects:
 
 - `diagnosis()` returns a common diagnostics table schema for both
   `JoinMeFit` and `JoinMeDynPred`.
-- `ranef()` and `corr()` on `JoinMeFit` return nested structures organised by
+- `ranef()` and `vcov()` on `JoinMeFit` return nested structures organised by
   `formulaLong` and `formulaDist` (including family-scoped distributional
   random-effect blocks).
-- `ranef()` and `corr()` on `JoinMeDynPred` are enabled only when marker
+- `ranef()` and `vcov()` on `JoinMeDynPred` are enabled only when marker
   covariance depends on id; they return per-id marker-by-id random effects and
   per-id predicted covariance summaries.
 

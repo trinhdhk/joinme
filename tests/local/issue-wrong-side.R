@@ -1,6 +1,6 @@
 devtools::load_all(quiet = TRUE)
 
-formula_long <- y ~ 1 + time + (1 + time | id) + (0 + (1 + time | id) | marker)
+formula_long <- y ~ 1 + time + (1 + time || id) + (0 + (1 + time | id) | marker)
 formula_event <- survival::Surv(time, event) ~ x1
 seed <- 2401
 
@@ -9,7 +9,7 @@ sim <- simulate_joinme(
   formulaEvent = formula_event,
   formulaVCov = ~ 1,
   families = c("gaussian", "gaussian", "gaussian"),
-  n_id = 500,
+  n_id = 400,
   n_obs_per_marker_per_id = 10,
   times_obs = seq(0, 8, length.out = 10),
   assoc = "vcov",
@@ -21,7 +21,7 @@ sim <- simulate_joinme(
   re_params = list(
     id = list(sd = c(1, 0.25)),
     id_marker_cov = list(
-      alpha = c(-0.5, 0.5, 1),
+      alpha = c(0.5, -0.5, -1),
       lambda = c(0.1, 0.15, 0.2)
     )
   ),
@@ -73,9 +73,9 @@ control <- list(
   chains = 2,
   parallel_chains = 2,
   iter_warmup = 800,
-  iter_sampling = 600,
+  iter_sampling = 800,
   threads_per_chain = 6,
-  adapt_delta = 0.75,
+  adapt_delta = 0.72,
   max_treedepth = 12,
   force_recompile = FALSE,
   refresh = 100,

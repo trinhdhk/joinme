@@ -248,7 +248,7 @@ plot.JoinMeDynPred <- function(
         # Multiple subjects
         if (isTRUE(combined)) {
             # Combine requested outcomes within each subject.
-            # Output contract for multiple subjects:
+            # Output structure for multiple subjects:
             # - preferred: list(id -> combined plot object)
             # - fallback: list(id -> uncombined per-subject plot list)
             out <- lapply(plots_list, function(sub_plots) {
@@ -2321,9 +2321,6 @@ plot.JoinMeFit <- function(x,
         if (term_key %in% c("corr", "vcov")) {
             corr_vars <- grep(paste0("^alpha_", term_key, "_eff\\["), posterior::variables(.get_draws_obj(fit)), value = TRUE)
             if (!length(corr_vars)) {
-                corr_vars <- grep(paste0("^alpha_", term_key, "_used\\["), posterior::variables(.get_draws_obj(fit)), value = TRUE)
-            }
-            if (!length(corr_vars)) {
                 corr_vars <- grep(paste0("^alpha_", term_key, "\\["), posterior::variables(.get_draws_obj(fit)), value = TRUE)
             }
             if (length(corr_vars)) {
@@ -2331,7 +2328,7 @@ plot.JoinMeFit <- function(x,
                 payload$term_map <- rbind(
                     payload$term_map,
                     data.frame(
-                        term = sub("_(?:eff|used)\\[", "[", sub("^alpha_", "", corr_vars), perl = TRUE),
+                        term = sub("_eff\\[", "[", sub("^alpha_", "", corr_vars), perl = TRUE),
                         variable = corr_vars,
                         stringsAsFactors = FALSE
                     )
@@ -2407,7 +2404,7 @@ plot.JoinMeFit <- function(x,
     }
 
     P <- as.integer(stan_data$P %||% ncol(stan_data$X_obs))
-    beta_vars <- paste0("beta_used_in_likelihood[", seq_len(P), "]")
+    beta_vars <- paste0("beta_eff_in_likelihood[", seq_len(P), "]")
     if (!all(beta_vars %in% var_names)) {
         beta_vars <- paste0("beta_scaled[", seq_len(P), "]")
     }

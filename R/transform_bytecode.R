@@ -74,7 +74,7 @@ parse_transform_expr <- function(expr) {
   # Step 1: normalise any supported expression input into a language object.
   expr_call <- .coerce_transform_expr(expr)
 
-  # Step 2: emit bytecode instructions and constant payload.
+  # Step 2: emit bytecode instructions and constant vector.
   bytecode <- integer()
   const_data <- numeric()
   result <- .emit_bytecode_expr(expr_call, bytecode, const_data)
@@ -423,7 +423,7 @@ eval_bytecode_vector <- function(x, bytecode = NULL, const_data = numeric(), opc
 #'
 #' @param bytecode Integer bytecode sequence or `NULL`.
 #' @param opcodes Legacy alias for bytecode.
-#' @param const_data Numeric constant payload.
+#' @param const_data Numeric constant vector.
 #' @return List with normalised `bytecode` and `const_data`.
 #' @keywords internal
 .normalize_bytecode_program <- function(bytecode = NULL, opcodes = NULL, const_data = numeric()) {

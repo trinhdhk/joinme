@@ -167,12 +167,30 @@ jm_family <- function(name, link = NULL, inv_link = NULL) {
 }
 
 #' @keywords internal
+.bytecode_is_monotone_on_reference_grid <- function(inv_link_bc,
+                                                    grid = seq(-8, 8, length.out = 257L),
+                                                    tol = 1e-10) {
+  vals <- tryCatch(
+    eval_bytecode_vector(grid, bytecode = inv_link_bc$bytecode %||% inv_link_bc$opcodes, const_data = inv_link_bc$const_data %||% numeric(0)),
+    error = function(e) NULL
+  )
+
+  if (is.null(vals) || length(vals) != length(grid) || any(!is.finite(vals))) {
+    return(FALSE)
+  }
+
+  diffs <- diff(as.numeric(vals))
+  all(diffs >= -tol) || all(diffs <= tol)
+}
+
+#' @keywords internal
 .warn_noninvertible_inv_link <- function(inv_link_bc, context) {
   # Issue an explicit identifiability warning when inverse-link program is not canonical
   # or uses operations that are frequently non-invertible in practical model domains.
   canonical_name <- .canonical_link_from_inv_link_bc(inv_link_bc)
   has_risky_ops <- .bytecode_has_potentially_noninvertible_ops(inv_link_bc)
-  if (!is.na(canonical_name) && !has_risky_ops) {
+  is_monotone <- .bytecode_is_monotone_on_reference_grid(inv_link_bc)
+  if ((!is.na(canonical_name) || is_monotone) && !has_risky_ops) {
     return(invisible(NULL))
   }
 

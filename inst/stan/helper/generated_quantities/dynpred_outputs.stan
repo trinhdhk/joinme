@@ -62,12 +62,12 @@ for (k in 1 : n_draws) {
     Li[r_, c_] = (r_ == c_) ? log1p_exp(lp) : lp;
   }
 
-  matrix[n_random_marker_id, n_random_marker_id] Li_used = diag_pre_multiply(marker_id_row_scale, Li);
+  matrix[n_random_marker_id, n_random_marker_id] Li_eff = diag_pre_multiply(marker_id_row_scale, Li);
 
   // Scale latent effects: w_idscaled
   array[n_marker_types] vector[n_random_marker_id] w_idscaled; // scaled marker-id REs
   for (d in 1 : n_marker_types)
-    w_idscaled[d] = Li_used * z_w[d];
+    w_idscaled[d] = Li_eff * z_w[d];
 
   // -------------------------------------------------------------
   // 2. Prepare for Association (Averages)
@@ -91,10 +91,10 @@ for (k in 1 : n_draws) {
       acc += z_w[d][q];
     zbar[q] = acc / n_marker_types;
   }
-  vector[n_random_marker_id] wbar_i = Li_used * zbar; // scaled mean marker-id effects
+  vector[n_random_marker_id] wbar_i = Li_eff * zbar; // scaled mean marker-id effects
     array[n_marker_types] vector[n_random_marker_id] w_draw;
     for (d in 1 : n_marker_types)
-      w_draw[d] = Li_used * z_w[d];
+      w_draw[d] = Li_eff * z_w[d];
 
   // Global Association Scales
   real a_cv_total = flag_assoc_cv_total * coeff_assoc_cv_total[k];

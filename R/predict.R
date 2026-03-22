@@ -1459,13 +1459,10 @@ posterior_predict.JoinMeFit <- function(object, ...) {
 
     corr_coef_vars <- grep("^alpha_corr_eff\\[", colnames(dmat), value = TRUE)
     if (length(corr_coef_vars) == 0) {
-        corr_coef_vars <- grep("^alpha_corr_used\\[", colnames(dmat), value = TRUE)
-    }
-    if (length(corr_coef_vars) == 0) {
         corr_coef_vars <- grep("^alpha_corr\\[", colnames(dmat), value = TRUE)
     }
     if (length(corr_coef_vars) > 0) {
-        corr_idx <- suppressWarnings(as.integer(sub("^alpha_corr(?:_(?:eff|used))?\\[(\\d+)\\]$", "\\1", corr_coef_vars)))
+        corr_idx <- suppressWarnings(as.integer(sub("^alpha_corr(?:_eff)?\\[(\\d+)\\]$", "\\1", corr_coef_vars)))
         corr_coef_vars <- corr_coef_vars[order(corr_idx)]
     }
     corr_coef_raw <- if (length(corr_coef_vars) > 0) get_mat(corr_coef_vars) else matrix(0, n, 0)
@@ -1481,13 +1478,10 @@ posterior_predict.JoinMeFit <- function(object, ...) {
 
     vcov_coef_vars <- grep("^alpha_vcov_eff\\[", colnames(dmat), value = TRUE)
     if (length(vcov_coef_vars) == 0) {
-        vcov_coef_vars <- grep("^alpha_vcov_used\\[", colnames(dmat), value = TRUE)
-    }
-    if (length(vcov_coef_vars) == 0) {
         vcov_coef_vars <- grep("^alpha_vcov\\[", colnames(dmat), value = TRUE)
     }
     if (length(vcov_coef_vars) > 0) {
-        vcov_idx <- suppressWarnings(as.integer(sub("^alpha_vcov(?:_(?:eff|used))?\\[(\\d+)\\]$", "\\1", vcov_coef_vars)))
+        vcov_idx <- suppressWarnings(as.integer(sub("^alpha_vcov(?:_eff)?\\[(\\d+)\\]$", "\\1", vcov_coef_vars)))
         vcov_coef_vars <- vcov_coef_vars[order(vcov_idx)]
     }
     vcov_coef_raw <- if (length(vcov_coef_vars) > 0) get_mat(vcov_coef_vars) else matrix(0, n, 0)
@@ -2315,7 +2309,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
             }
         }
 
-        l_i_used <- sweep(l_i, 1, marker_id_row_scale, `*`)
+        l_i_eff <- sweep(l_i, 1, marker_id_row_scale, `*`)
 
         draw_values <- numeric(n_marker_types * n_random_marker_id)
         col_offset <- 0L
@@ -2350,7 +2344,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
             }
 
             z_w <- cross + z_w_lat
-            w_idscaled <- as.numeric(l_i_used %*% z_w)
+            w_idscaled <- as.numeric(l_i_eff %*% z_w)
 
             idx <- (col_offset + 1L):(col_offset + n_random_marker_id)
             draw_values[idx] <- w_idscaled
@@ -2651,7 +2645,7 @@ ranef.JoinMeDynPred <- function(object, ...) {
     )
 }
 
-#' Extract predicted marker-by-id covariance from dynamic predictions
+#' Extract predicted covariance summaries
 #'
 #' @description
 #' Returns per-subject covariance summaries for marker-by-id random effects from
@@ -2662,8 +2656,9 @@ ranef.JoinMeDynPred <- function(object, ...) {
 #' @param ... Unused.
 #'
 #' @return A named list containing covariance summary tables.
+#' @method vcov JoinMeDynPred
 #' @export
-corr.JoinMeDynPred <- function(object, ...) {
+vcov.JoinMeDynPred <- function(object, ...) {
     assertthat::assert_that(inherits(object, "JoinMeDynPred"), msg = "Object must be a JoinMeDynPred instance.")
 
     if (!isTRUE(object$metadata$marker_corr_depends_on_id)) {
@@ -2679,22 +2674,6 @@ corr.JoinMeDynPred <- function(object, ...) {
             marker_by_id = sum_obj$tables$corr_marker_id
         )
     )
-}
-
-#' Extract predicted covariance summaries
-#'
-#' @description
-#' Returns covariance summaries from dynamic predictions. This delegates to
-#' [corr()] and is available only when marker covariance depends on id.
-#'
-#' @param object A `JoinMeDynPred` object.
-#' @param ... Unused.
-#'
-#' @return A named list containing covariance summary tables.
-#' @method vcov JoinMeDynPred
-#' @export
-vcov.JoinMeDynPred <- function(object, ...) {
-    corr(object, ...)
 }
 
 #' Print dynamic prediction results

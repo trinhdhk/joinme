@@ -196,7 +196,7 @@ knitr::kable(diag_tbl, digits = 3, caption = "Sampler diagnostics (scenario A)."
 
 # Fixed effects (beta)
 fixef_tbl <- sum_obj$tables$fixef
-truth_beta <- sim$truth$beta
+truth_beta <- sim$truth$beta_long
 
 fixef_tbl$truth <- truth_beta[fixef_tbl$term]
 fixef_tbl$bias <- fixef_tbl$Estimate - fixef_tbl$truth
@@ -209,7 +209,7 @@ knitr::kable(fixef_view, digits = 3, caption = "Fixed effects summary (scenario 
 # Survival covariates (gamma_w)
 if (!is.null(sum_obj$tables$gamma_w)) {
   gamma_tbl <- sum_obj$tables$gamma_w
-  truth_gamma <- sim$truth$gamma_w
+  truth_gamma <- sim$truth$beta_event
 
   gamma_tbl$truth <- truth_gamma[gamma_tbl$term]
   gamma_tbl$bias <- gamma_tbl$Estimate - gamma_tbl$truth
@@ -349,12 +349,12 @@ diagnosis(fit)
 diagnosis(pred_ep)
 ```
 
-For fitted models, `ranef()` and `corr()` are nested by `formulaLong` and
+For fitted models, `ranef()` and `vcov()` are nested by `formulaLong` and
 `formulaDist`:
 
 ```{r scenario-a-ranef-corr-fit}
 re_fit <- ranef(fit)
-vc_fit <- corr(fit)
+vc_fit <- vcov(fit)
 
 # Examples
 re_fit$formulaLong$id
@@ -367,7 +367,7 @@ only when marker covariance depends on id:
 ```{r scenario-a-ranef-corr-pred}
 if (isTRUE(pred_ep$metadata$marker_corr_depends_on_id)) {
   ranef(pred_ep)
-  corr(pred_ep)
+  vcov(pred_ep)
 }
 ```
 

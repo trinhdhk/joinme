@@ -15,6 +15,7 @@
 A named list containing covariance summary tables.
 }
 \description{
-Returns covariance summaries from dynamic predictions. This delegates to
-\code{\link[=corr]{corr()}} and is available only when marker covariance depends on id.
+Returns per-subject covariance summaries for marker-by-id random effects from
+a \code{JoinMeDynPred} object. This method is available only when marker covariance
+depends on id.
 }

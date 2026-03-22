@@ -597,6 +597,8 @@ gk_quadrature <- function(nodes = 15L) {
 #' @keywords internal
 .mm <- function(formula, data) {
   # Always return double matrices for Stan compatibility
+  data <- as.data.frame(data)
+  rownames(data) <- NULL
   X <- stats::model.matrix(formula, data = data)
   storage.mode(X) <- "double"
   X
@@ -605,6 +607,8 @@ gk_quadrature <- function(nodes = 15L) {
 #' Survival/event model matrix
 #' @keywords internal
 .mm_event <- function(formulaEvent, data) {
+  data <- as.data.frame(data)
+  rownames(data) <- NULL
   rhs <- stats::delete.response(stats::terms(formulaEvent))
   X <- stats::model.matrix(rhs, data = data)
   if ("(Intercept)" %in% colnames(X)) {

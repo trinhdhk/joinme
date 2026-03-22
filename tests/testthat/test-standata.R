@@ -162,6 +162,31 @@ test_that("vcov dimension follows nested marker-by-id basis, not top-level id co
   expect_equal(sd_three$M_corr_tf, 1L)
 })
 
+test_that("standata marks top-level id double-bar terms as independent id covariance", {
+  sim <- simulate_joinme_joint_student_t_cvtotal(
+    n_id = 3,
+    D = 3,
+    n_t = 2,
+    seed = 207,
+    include_marker_only = TRUE
+  )
+
+  sd <- joinme_standata(
+    formulaLong = y ~ 1 + time + x1 +
+      (1 + time || id) +
+      (0 + (1 + time | id) | marker),
+    dataLong = sim$dataLong,
+    formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
+    dataEvent = sim$dataEvent,
+    assoc = c("vcov"),
+    transforms = joinme_tf(vcov = "identity")
+  )
+
+  expect_equal(sd$indep_id_re, 1L)
+  expect_equal(sd$indep_marker_re, 0L)
+  expect_equal(sd$indep_idmarker_cov, 0L)
+})
+
 test_that("functional vcov constants remain vector-shaped for Stan data", {
   sim <- simulate_joinme_joint_student_t_cvtotal(
     n_id = 3,

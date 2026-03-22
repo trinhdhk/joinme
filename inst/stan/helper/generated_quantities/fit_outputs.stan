@@ -3,13 +3,16 @@
    * beta is on ORIGINAL time scale by construction.
    * beta_scaled is the coefficient vector actually used with scaled-time design matrices.
    */
-  vector[P] beta_used_in_likelihood = beta_scaled;
+  vector[P] beta_eff_in_likelihood = beta_scaled;
+  vector[R_id] tau_u_eff = tau_u_scaled;
+  vector[R_mk] tau_v_eff = tau_v_scaled;
+  vector[Q_idm] marker_id_row_scale_eff = row_scale_widm;
   
   /**
   * @brief Association coefficients actually used for totals.
    */
-  real alpha_cv_total_used = a_cv_total;
-  real alpha_cs_total_used = a_cs_total;
+  real alpha_cv_total_eff = a_cv_total;
+  real alpha_cs_total_eff = a_cs_total;
 
   /**
   * @brief Per-observation log-likelihoods for model assessment (loo/waic).

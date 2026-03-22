@@ -824,7 +824,7 @@ simulate_joinme <- function(
 
   .sim_resolve_re_block_cfg <- function(cfg, K, label) {
     if (K <= 0) {
-      return(list(sd = numeric(0), corr = matrix(0.0, 0, 0)))
+      return(list(sd = numeric(0), corr = matrix(0.0, 0, 0), cov = matrix(0.0, 0, 0), Lcorr = matrix(0.0, 0, 0)))
     }
 
     sd_vec <- cfg$sd
@@ -879,7 +879,10 @@ simulate_joinme <- function(
       }
     }
 
-    list(sd = sd_vec, corr = corr)
+    cov_mat <- diag(as.numeric(sd_vec), K, K) %*% corr %*% diag(as.numeric(sd_vec), K, K)
+    Lcorr <- t(chol(corr))
+
+    list(sd = sd_vec, corr = corr, cov = cov_mat, Lcorr = Lcorr)
   }
 
   .sim_inverse_diag_link <- function(x, diag_link) {
@@ -1027,6 +1030,17 @@ simulate_joinme <- function(
     }
     mats <- lapply(rhs_list, function(rhs) .mm(rhs, data))
     do.call(cbind, mats)
+  }
+
+  .sim_detect_time_cols <- function(mat_builder, prototype_df, time_var, tol = 1e-10) {
+    mat_ref <- mat_builder(prototype_df)
+    if (is.null(mat_ref) || ncol(mat_ref) == 0L) return(integer(0))
+
+    probe_df <- prototype_df
+    probe_df[[time_var]] <- probe_df[[time_var]] + 1
+    mat_probe <- mat_builder(probe_df)
+    changed <- colSums(abs(mat_probe - mat_ref) > tol) > 0
+    which(changed)
   }
 
   .sim_get_family_param <- function(fam_name, param_name, fallback) {
@@ -1661,6 +1675,11 @@ simulate_joinme <- function(
   Z_mk_proto <- .sim_rhs_matrix(mk_rhs_list, prototype)
   Z_idm_proto <- .sim_rhs_matrix(idm_rhs_list, prototype)
 
+  idx_time_beta <- .sim_detect_time_cols(function(df) .mm(fixed_rhs, df), prototype, time_var)
+  idx_time_uid <- .sim_detect_time_cols(function(df) .sim_rhs_matrix(id_rhs_list, df), prototype, time_var)
+  idx_time_vmk <- .sim_detect_time_cols(function(df) .sim_rhs_matrix(mk_rhs_list, df), prototype, time_var)
+  idx_time_widm <- .sim_detect_time_cols(function(df) .sim_rhs_matrix(idm_rhs_list, df), prototype, time_var)
+
   beta_long <- .sim_align_coef(colnames(X_proto), beta_long, sd_default = 0.35, intercept_default = 1.0)
 
   assoc_from_formula <- .sim_assoc_from_formula(formulaAssoc)
@@ -2118,7 +2137,7 @@ simulate_joinme <- function(
     # Expand a single user-facing covariance-style transform spec into a list of
     # per-component evaluators. Each component currently shares the same runtime
     # transform definition in simulation, which mirrors the common-input user
-    # contract used when building standata for Stan.
+    # layout used when building standata for Stan.
     n_components <- as.integer(n_components %||% 0L)
     if (n_components <= 0L) {
       return(list())
@@ -2161,7 +2180,7 @@ simulate_joinme <- function(
     fixed_part <- if (ncol(x_fix) > 0) as.numeric(x_fix %*% beta_long) else rep(0, D)
     id_part <- if (ncol(z_id) > 0) as.numeric(z_id %*% re_id[i, ]) else rep(0, D)
     mk_part <- if (ncol(z_mk) > 0) rowSums(z_mk * re_marker) else rep(0, D)
-    idm_part <- if (ncol(z_idm) > 0) rowSums(z_idm * re_idm[i, , ]) else rep(0, D)
+    idm_part <- if (ncol(z_idm) > 0) rowSums(z_idm * re_idm_scaled[i, , ]) else rep(0, D)
 
     mu_mean <- fixed_part + id_part
     mu_marker <- mk_part + idm_part
@@ -2278,7 +2297,7 @@ simulate_joinme <- function(
     }
     corr_assoc <- if (length(corr_vals_tf) > 0) sum(assoc_coef_corr * corr_vals_tf) else 0
     vcov_vals <- vcov_by_id[[i]]
-    # VCOV follows the same contract as CORR:
+    # VCOV follows the same calculation layout as CORR:
     #   Step 1: extract raw time-constant Cholesky features for subject i.
     #   Step 2: transform each component separately.
     #   Step 3: apply the corresponding association coefficient after the
@@ -2563,6 +2582,9 @@ simulate_joinme <- function(
   family_names_present <- vapply(sort(unique(family_codes)), .family_code_to_name, character(1))
   .validate_dist_formula_scopes(dist_formulas, family_names_present)
   dist_re_effective <- list()
+  dist_coef_effective <- list()
+  dist_eta_effective <- list()
+  dist_design_cols <- list()
   for (param_name in names(dist_formulas)) {
     X_param <- .build_dist_matrix(dist_formulas[[param_name]], dataLong, family_by_row = family_by_row)$X
     coef_spec <- .sim_dist_coef_spec(param_name, dist_coefs, dist_formulas[[param_name]])
@@ -2598,6 +2620,10 @@ simulate_joinme <- function(
       }
       dist_re_effective[[param_name]] <- list(terms = dist_re_effective_terms)
     }
+
+    dist_coef_effective[[param_name]] <- beta_param
+    dist_eta_effective[[param_name]] <- eta_param
+    dist_design_cols[[param_name]] <- colnames(X_param) %||% character(0)
 
     if (param_name == "sigma") sigma_vec <- exp(eta_param)
     if (param_name == "nu") nu_vec <- 2 + exp(eta_param)
@@ -2637,14 +2663,188 @@ simulate_joinme <- function(
 
   # ---- Final formatting and metadata
   dataLong[[marker_var]] <- factor(dataLong[[marker_var]], levels = marker_levels)
-  dataLong <- dataLong[order(dataLong[[id_var]], dataLong[[marker_var]], dataLong[[time_var]]), , drop = FALSE]
+  ord_long <- order(dataLong[[id_var]], dataLong[[marker_var]], dataLong[[time_var]])
+  dataLong <- dataLong[ord_long, , drop = FALSE]
+  family_by_row <- family_by_row[ord_long]
+  sigma_vec <- sigma_vec[ord_long]
+  nu_vec <- nu_vec[ord_long]
+  phi_vec <- phi_vec[ord_long]
+  alpha_vec <- alpha_vec[ord_long]
+  phi_beta_vec <- phi_beta_vec[ord_long]
+  tau_sde_vec <- tau_sde_vec[ord_long]
+  trials_vec <- trials_vec[ord_long]
   rownames(dataLong) <- NULL
+
+  dist_param_rowwise <- data.frame(
+    id = dataLong[[id_var]],
+    marker = dataLong[[marker_var]],
+    time = dataLong[[time_var]],
+    family = family_by_row,
+    sigma = sigma_vec,
+    nu = nu_vec,
+    phi = phi_vec,
+    phi_nb = phi_vec,
+    alpha = alpha_vec,
+    alpha_skew = alpha_vec,
+    skew = alpha_vec,
+    phi_beta = phi_beta_vec,
+    tau_sde = tau_sde_vec,
+    trials = as.integer(round(trials_vec)),
+    stringsAsFactors = FALSE
+  )
+
+  distributional_truth <- list(
+    family_by_row = family_by_row,
+    rowwise = dist_param_rowwise,
+    sigma = sigma_vec,
+    nu = nu_vec,
+    phi = phi_vec,
+    phi_nb = phi_vec,
+    alpha = alpha_vec,
+    alpha_skew = alpha_vec,
+    skew = alpha_vec,
+    phi_beta = phi_beta_vec,
+    tau_sde = tau_sde_vec,
+    trials = as.integer(round(trials_vec)),
+    coef = dist_coef_effective,
+    eta = dist_eta_effective,
+    design_cols = dist_design_cols,
+    family_defaults = family_params
+  )
+
+  tmax <- max(dataEvent[[event_time_var]])
+
+  beta_eff_in_likelihood <- beta_long
+  if (length(idx_time_beta) > 0L) {
+    beta_eff_in_likelihood[idx_time_beta] <- beta_eff_in_likelihood[idx_time_beta] * tmax
+  }
+
+  tau_u_eff <- re_id_effective$sd
+  if (length(idx_time_uid) > 0L) {
+    tau_u_eff[idx_time_uid] <- tau_u_eff[idx_time_uid] * tmax
+  }
+
+  tau_v_eff <- re_marker_effective$sd
+  if (length(idx_time_vmk) > 0L) {
+    tau_v_eff[idx_time_vmk] <- tau_v_eff[idx_time_vmk] * tmax
+  }
+
+  marker_id_row_scale_eff <- rep(1.0, K_idm)
+  if (length(idx_time_widm) > 0L) {
+    marker_id_row_scale_eff[idx_time_widm] <- tmax
+  }
+
+  family_codes_present <- sort(unique(family_codes))
+  family_names_present <- vapply(family_codes_present, .family_code_to_name, character(1))
+
+  .sim_family_param_truth <- function(param_name, fallback, include_families = NULL) {
+    fam_keep <- family_codes_present[vapply(
+      family_codes_present,
+      function(fc) param_name %in% .family_distrib_params(fc),
+      logical(1)
+    )]
+    if (!is.null(include_families)) {
+      fam_keep <- fam_keep[vapply(fam_keep, function(fc) .family_code_to_name(fc) %in% include_families, logical(1))]
+    }
+    if (length(fam_keep) == 0L) return(numeric(0))
+    fam_names_keep <- vapply(fam_keep, .family_code_to_name, character(1))
+    vals <- vapply(fam_names_keep, function(fam) .sim_get_family_param(fam, param_name, fallback), numeric(1))
+    names(vals) <- fam_names_keep
+    vals
+  }
+
+  sigma_family_truth <- .sim_family_param_truth("sigma", 1.0)
+  nu_family_truth <- .sim_family_param_truth("nu", 4.0)
+  phi_family_truth <- .sim_family_param_truth("phi", 2.0)
+  alpha_family_truth <- .sim_family_param_truth("alpha", 0.0)
+  phi_beta_family_truth <- .sim_family_param_truth("phi_beta", 10.0)
+  tau_sde_family_truth <- .sim_family_param_truth("tau_sde", 0.5)
+  trials_family_truth <- if (any(family_names_present == "binomial")) {
+    vals <- c(binomial = .sim_get_family_param("binomial", "trials", 10L))
+    as.numeric(setNames(vals, names(vals)))
+  } else {
+    numeric(0)
+  }
+  cutpoints_ord_truth <- if (any(family_names_present == "cumulative_logit")) {
+    as.numeric(family_params$cumulative_logit$cutpoints %||% c(-1, 1))
+  } else {
+    numeric(0)
+  }
+
+  marker_to_sigma_family <- setNames(match(family_names, names(sigma_family_truth), nomatch = 0L), marker_levels)
+  marker_to_nu_family <- setNames(match(family_names, names(nu_family_truth), nomatch = 0L), marker_levels)
+  marker_to_phi_family <- setNames(match(family_names, names(phi_family_truth), nomatch = 0L), marker_levels)
+  marker_to_alpha_family <- setNames(match(family_names, names(alpha_family_truth), nomatch = 0L), marker_levels)
+  marker_to_phi_beta_family <- setNames(match(family_names, names(phi_beta_family_truth), nomatch = 0L), marker_levels)
+  marker_to_tau_sde_family <- setNames(match(family_names, names(tau_sde_family_truth), nomatch = 0L), marker_levels)
+
+  stan_fit_truth <- list(
+    beta = beta_long,
+    beta_eff_in_likelihood = beta_eff_in_likelihood,
+    gamma_w = beta_event,
+    bs_gamma_c = beta_basehaz,
+    tau_u = re_id_effective$sd,
+    tau_u_eff = tau_u_eff,
+    Lcorr_u = re_id_effective$Lcorr,
+    Corr_u = re_id_effective$corr,
+    Sigma_u = re_id_effective$cov,
+    tau_v = re_marker_effective$sd,
+    tau_v_eff = tau_v_eff,
+    Lcorr_v = re_marker_effective$Lcorr,
+    Corr_v = re_marker_effective$corr,
+    Sigma_v = re_marker_effective$cov,
+    marker_id_row_scale_eff = marker_id_row_scale_eff,
+    alpha_cv_total_eff = unname(assoc_coef_scalar[["cv_total"]] %||% NA_real_),
+    alpha_cs_total_eff = unname(assoc_coef_scalar[["cs_total"]] %||% NA_real_),
+    alpha_cv_marker_eff = unname(assoc_coef_scalar[["cv_marker"]] %||% NA_real_),
+    alpha_cs_marker_eff = unname(assoc_coef_scalar[["cs_marker"]] %||% NA_real_),
+    alpha_corr_eff = assoc_coef_corr,
+    alpha_vcov_eff = assoc_coef_vcov,
+    sigma_family = sigma_family_truth,
+    nu_family = nu_family_truth,
+    phi_family = phi_family_truth,
+    alpha_family = alpha_family_truth,
+    phi_beta_family = phi_beta_family_truth,
+    tau_sde_family = tau_sde_family_truth,
+    trials_family = trials_family_truth,
+    cutpoints_ord = cutpoints_ord_truth,
+    marker_to_sigma_family = marker_to_sigma_family,
+    marker_to_nu_family = marker_to_nu_family,
+    marker_to_phi_family = marker_to_phi_family,
+    marker_to_alpha_family = marker_to_alpha_family,
+    marker_to_phi_beta_family = marker_to_phi_beta_family,
+    marker_to_tau_sde_family = marker_to_tau_sde_family
+  )
+
+  family_truth <- list(
+    by_marker = data.frame(
+      marker = marker_levels,
+      family = family_names,
+      family_code = family_codes,
+      marker_to_sigma_family = unname(marker_to_sigma_family),
+      marker_to_nu_family = unname(marker_to_nu_family),
+      marker_to_phi_family = unname(marker_to_phi_family),
+      marker_to_alpha_family = unname(marker_to_alpha_family),
+      marker_to_phi_beta_family = unname(marker_to_phi_beta_family),
+      marker_to_tau_sde_family = unname(marker_to_tau_sde_family),
+      stringsAsFactors = FALSE
+    ),
+    shared = stan_fit_truth[c(
+      "sigma_family",
+      "nu_family",
+      "phi_family",
+      "alpha_family",
+      "phi_beta_family",
+      "tau_sde_family",
+      "trials_family",
+      "cutpoints_ord"
+    )],
+    defaults = family_params
+  )
 
   true_params <- list(
     beta_long = beta_long,
     beta_event = beta_event,
-    beta = beta_long,
-    gamma_w = beta_event,
     alpha_cv_total = if ("cv_total" %in% names(assoc_coef_vec)) assoc_coef_vec[["cv_total"]] else NA_real_,
     assoc = assoc,
     assoc_coefs = assoc_coef_vec,
@@ -2661,6 +2861,9 @@ simulate_joinme <- function(
     formulaVCov = formulaVCov,
     formulaBasehaz = formulaBasehaz,
     beta_basehaz = beta_basehaz,
+    family = family_truth,
+    distributional_params = distributional_truth,
+    stan_fit = stan_fit_truth,
     dist_coefs = dist_coefs,
     dist_re_params = re_params$dist %||% list(),
     dist_re_effective = dist_re_effective %||% list(),
@@ -2726,8 +2929,6 @@ simulate_joinme <- function(
     cumhaz = cumhaz_i,
     survival_prob = function(i, t) exp(-cumhaz_i(i, t))
   )
-
-  tmax <- max(dataEvent[[event_time_var]])
 
   list(
     dataLong = dataLong,

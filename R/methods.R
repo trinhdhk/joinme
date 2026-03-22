@@ -11,17 +11,6 @@ NULL
 # - S3 methods for JoinMeFit and summary output.
 # - Internal helpers for diagnostics and draw summaries.
 
-#' Extract covariance summaries
-#'
-#' Generic for extracting covariance summaries from joinme objects.
-#'
-#' @param object A supported joinme object.
-#' @param ... Additional arguments passed to methods.
-#' @export
-corr <- function(object, ...) {
-  UseMethod("corr")
-}
-
 # ---- internal helpers -----------------------------------------------------
 
 #' @keywords internal
@@ -169,7 +158,7 @@ corr <- function(object, ...) {
   # Build a family-aware map from Stan variable names to human-readable
   # distributional summary terms.
   #
-  # Key contract:
+  # Key calculation rule:
   # - when no distributional regression is used for a parameter, report one
   #   family-level parameter per required family (shared across markers of the
   #   same family),
@@ -818,10 +807,8 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
   }
 
   corr_assoc_vars <- grep("^alpha_corr_eff\\[", all_vars, value = TRUE)
-  if (length(corr_assoc_vars) == 0L) corr_assoc_vars <- grep("^alpha_corr_used\\[", all_vars, value = TRUE)
   if (length(corr_assoc_vars) == 0L) corr_assoc_vars <- grep("^alpha_corr\\[", all_vars, value = TRUE)
   vcov_assoc_vars <- grep("^alpha_vcov_eff\\[", all_vars, value = TRUE)
-  if (length(vcov_assoc_vars) == 0L) vcov_assoc_vars <- grep("^alpha_vcov_used\\[", all_vars, value = TRUE)
   if (length(vcov_assoc_vars) == 0L) vcov_assoc_vars <- grep("^alpha_vcov\\[", all_vars, value = TRUE)
   a_vars <- c("alpha_cv_total", "alpha_cv_mean", "alpha_cv_marker", "alpha_cs_total", "alpha_cs_mean", "alpha_cs_marker")
   a_vars <- c(a_vars, corr_assoc_vars)
@@ -854,7 +841,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     )
     s_a$term <- assoc_map[s_a$variable]
     s_a$term[is.na(s_a$term)] <- sub("^alpha_", "", s_a$variable[is.na(s_a$term)])
-    s_a$term <- sub("_(?:eff|used)\\[", "[", s_a$term, perl = TRUE)
+    s_a$term <- sub("_eff\\[", "[", s_a$term, perl = TRUE)
     s_a <- s_a[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
     s_a$Estimate <- round(s_a$Estimate, digits)
     s_a$Est.Error <- round(s_a$Est.Error, digits)
@@ -1080,8 +1067,8 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     }
 
     corr_tables <- list(
-      id = corr(object, what = "id", draws = draws),
-      marker = if (sd$R_mk > 0) corr(object, what = "marker", draws = draws) else NULL
+      id = vcov(object, what = "id", draws = draws),
+      marker = if (sd$R_mk > 0) vcov(object, what = "marker", draws = draws) else NULL
     )
     if (isTRUE(any_re_indep)) {
       corr_tables <- lapply(corr_tables, .filter_diag_rows)
@@ -1668,7 +1655,11 @@ ranef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
 
 # ---- corr -----------------------------------------------------------------
 
-#' Extract covariance summaries
+#' Extract posterior covariance summaries
+#'
+#' @description
+#' Returns posterior covariance summaries for fitted joinme models. Supports
+#' selecting specific blocks through `what` (for example, `what = "id"`).
 #'
 #' @param object A joinme fit object.
 #' @param what Optional covariance block selector (`"id"`, `"marker"`).
@@ -1680,8 +1671,9 @@ ranef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
 #' @return If `what` is supplied, a data frame for the requested covariance
 #'   block. Otherwise, a nested list with `formulaLong` and `formulaDist`
 #'   covariance summaries.
+#' @method vcov JoinMeFit
 #' @export
-corr.JoinMeFit <- function(object, what = NULL, draws = NULL, ...) {
+vcov.JoinMeFit <- function(object, what = NULL, draws = NULL, ...) {
   assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
   fit <- object$fit
   sd <- object$stan_data
@@ -1691,7 +1683,7 @@ corr.JoinMeFit <- function(object, what = NULL, draws = NULL, ...) {
     what <- match.arg(what, choices = c("id", "marker"))
   }
 
-  summarize_cov_matrix <- function(tau_prefix, Lcorr_prefix, dim, label) {
+  summarize_cov_matrix <- function(tau_prefix, Lcorr_prefix, dim, label, diagonal_only = FALSE) {
     if (dim <= 0) {
       return(data.frame(
         block = label, row = integer(0), col = integer(0),
@@ -1712,9 +1704,13 @@ corr.JoinMeFit <- function(object, what = NULL, draws = NULL, ...) {
     Sigma_list <- vector("list", nD)
     for (i in seq_len(nD)) {
       tau <- as.numeric(tau_draws[i, ])
-      L <- matrix(as.numeric(L_draws[i, ]), nrow = dim, ncol = dim, byrow = FALSE)
-      L[upper.tri(L)] <- 0
-      Corr <- L %*% t(L)
+      if (isTRUE(diagonal_only)) {
+        Corr <- diag(dim)
+      } else {
+        L <- matrix(as.numeric(L_draws[i, ]), nrow = dim, ncol = dim, byrow = FALSE)
+        L[upper.tri(L)] <- 0
+        Corr <- L %*% t(L)
+      }
       Sigma_list[[i]] <- diag(tau, dim) %*% Corr %*% diag(tau, dim)
     }
 
@@ -1741,12 +1737,26 @@ corr.JoinMeFit <- function(object, what = NULL, draws = NULL, ...) {
   }
 
   if (!is.null(what)) {
-    if (what == "id") return(summarize_cov_matrix("tau_u", "Lcorr_u", sd$R_id, "id"))
+    if (what == "id") {
+      return(summarize_cov_matrix(
+        "tau_u",
+        "Lcorr_u",
+        sd$R_id,
+        "id",
+        diagonal_only = as.integer(sd$indep_id_re %||% 0L) == 1L
+      ))
+    }
     if (what == "marker") {
       if (sd$R_mk <= 0) {
         cli::cli_abort("Marker corr requested but R_mk = 0.")
       }
-      return(summarize_cov_matrix("tau_v", "Lcorr_v", sd$R_mk, "marker"))
+      return(summarize_cov_matrix(
+        "tau_v",
+        "Lcorr_v",
+        sd$R_mk,
+        "marker",
+        diagonal_only = as.integer(sd$indep_marker_re %||% 0L) == 1L
+      ))
     }
   }
 
@@ -1808,8 +1818,20 @@ corr.JoinMeFit <- function(object, what = NULL, draws = NULL, ...) {
 
   out <- list(
     formulaLong = list(
-      id = summarize_cov_matrix("tau_u", "Lcorr_u", sd$R_id, "id"),
-      marker = if (sd$R_mk > 0) summarize_cov_matrix("tau_v", "Lcorr_v", sd$R_mk, "marker") else NULL
+      id = summarize_cov_matrix(
+        "tau_u",
+        "Lcorr_u",
+        sd$R_id,
+        "id",
+        diagonal_only = as.integer(sd$indep_id_re %||% 0L) == 1L
+      ),
+      marker = if (sd$R_mk > 0) summarize_cov_matrix(
+        "tau_v",
+        "Lcorr_v",
+        sd$R_mk,
+        "marker",
+        diagonal_only = as.integer(sd$indep_marker_re %||% 0L) == 1L
+      ) else NULL
     ),
     formulaDist = list(
       sigma = summarize_dist_corr("sigma"),
@@ -1823,21 +1845,4 @@ corr.JoinMeFit <- function(object, what = NULL, draws = NULL, ...) {
   out$formulaLong <- out$formulaLong[!vapply(out$formulaLong, is.null, logical(1))]
   out$formulaDist <- out$formulaDist[!vapply(out$formulaDist, is.null, logical(1))]
   out
-}
-
-#' Extract posterior covariance summaries
-#'
-#' @description
-#' Returns posterior covariance summaries for fitted joinme models.
-#' This method delegates to [corr()] and supports selecting specific blocks
-#' through `...` (for example, `what = "id"`).
-#'
-#' @param object A joinme fit object.
-#' @param ... Additional arguments passed to [corr()].
-#'
-#' @return Posterior covariance summary table(s).
-#' @method vcov JoinMeFit
-#' @export
-vcov.JoinMeFit <- function(object, ...) {
-  corr(object, ...)
 }

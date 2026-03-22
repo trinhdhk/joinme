@@ -99,6 +99,11 @@ test_that("summary.JoinMeFit retains covariance regression tables when top-level
   expect_true(any(s$tables$id_marker_cov$regression$term == "(Intercept)"))
   expect_true(any(s$tables$id_marker_cov$regression$term == "lambda"))
   expect_null(s$tables$id_marker_cov$hyperparameters)
+
+  id_cov <- s$tables$corr$id
+  offdiag <- subset(id_cov, row != col)
+  expect_true(nrow(offdiag) > 0)
+  expect_equal(offdiag$Estimate, rep(0, nrow(offdiag)), tolerance = 1e-12)
 })
 
 test_that("print.summary_JoinMeFit formats count diagnostics as integers", {

@@ -16,7 +16,7 @@ For marker-aggregated association terms (`cv_total`, `cv_marker`, `cs_total`,
 in simulation, fitting, and prediction.
 
 Association plotting now follows the fitted model more closely: `plot(fit,
-type = "association")` uses a compact payload stored on the fitted object with
+type = "association")` uses a compact draw bundle stored on the fitted object with
 the posterior association coefficients, marker weights, spline coefficients,
 and cached model-implied raw support ranges. This avoids relying on transient
 CmdStan CSV files just to recover association curves and reduces unsupported
@@ -155,7 +155,7 @@ diagnosis(fit)
 
 # Random effects / covariance (nested by formula block)
 re_fit <- ranef(fit)
-vc_fit <- corr(fit)
+vc_fit <- vcov(fit)
 # Example accessors:
 # re_fit$formulaLong$id
 # re_fit$formulaDist$sigma$allFamilies
@@ -183,7 +183,7 @@ diagnosis(pred)
 # Available only when marker covariance depends on id
 if (isTRUE(pred$metadata$marker_corr_depends_on_id)) {
   re_pred <- ranef(pred)
-  vc_pred <- corr(pred)
+  vc_pred <- vcov(pred)
 }
 
 # Plot longitudinal and survival predictions

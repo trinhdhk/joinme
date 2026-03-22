@@ -140,7 +140,7 @@ weights using \code{marker_weights + z_marker_weights} with
 \code{z_marker_weights ~ N(0, 1)}. The effective marker intensities are used directly
 from \code{w_raw} without additional normalisation and scale the association contributions.
 
-The returned \code{JoinMeFit} object stores a compact association plotting payload
+The returned \code{JoinMeFit} object stores a compact association plotting bundle
 containing only the posterior quantities needed to draw association curves
 (\code{alpha_*}, marker weights, spline coefficients, and cached model-implied raw
 support ranges). This keeps association plotting usable after serialization

@@ -33,14 +33,14 @@ The current code implements the `vcov` association as:
 4. Zero-reference each transformed component by subtracting the same transform evaluated at raw value `0`.
 5. Sum the weighted transformed components into a single scalar hazard contribution.
 
-In symbols, the intended contract is:
+In symbols, the intended calculation is:
 
 $$
 \texttt{vcov\_assoc} = \sum_{m=1}^{M_{vcov}} a_{vcov,m}
 \left[f_{vcov,m}(\texttt{vcov\_raw}_m) - f_{vcov,m}(0)\right].
 $$
 
-That contract is already implemented in both simulation and the fitted Stan likelihood.
+That calculation is already implemented in both simulation and the fitted Stan likelihood.
 
 So the present evidence does **not** indicate that simulation is applying the `vcov` association on the wrong compartment or in the wrong order.
 
@@ -201,7 +201,7 @@ vcov_terms_tf = vcov_terms_tf - vcov_terms_ref;
 real vcov_assoc_scalar = dot_product(a_vcov, vcov_terms_tf);
 ```
 
-So Stan is using the same transform-first, zero-reference, weighted-sum contract as simulation.
+So Stan is using the same transform-first, zero-reference, weighted-sum calculation as simulation.
 
 ## Step 4: Add the scalar `vcov` contribution to the hazard
 

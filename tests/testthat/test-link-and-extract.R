@@ -64,6 +64,17 @@ test_that("jm_family link specs are mapped into standata link_long", {
   expect_equal(as.integer(sd3$inv_link_n_const[1]), 1L)
 })
 
+test_that("jm_family invertibility warning only triggers for likely non-injective inverse links", {
+  expect_no_warning(
+    jm_family("gaussian", inv_link = ~ exp(x) + 0.1)
+  )
+
+  expect_warning(
+    jm_family("gaussian", inv_link = ~ abs(x)),
+    "Custom inverse-link bytecode"
+  )
+})
+
 test_that("extract.JoinMeDynPred returns flattened draw payloads", {
   toy_draw <- matrix(rnorm(12), nrow = 3, ncol = 4)
   pred_obj <- JoinMeDynPred$new(
@@ -138,6 +149,12 @@ test_that("extract.JoinMeFit returns draw matrices by friendly names", {
   ex_assoc <- extract(fit, what = "assoc")
   expect_true(is.matrix(ex_assoc$draws))
   expect_true(any(grepl("cv_total", colnames(ex_assoc$draws))))
+
+  ex_eff <- extract(fit, what = "likelihood_scale", keep_chains = FALSE)
+  expect_true(is.matrix(ex_eff$draws))
+  expect_true(any(grepl("^beta_eff: time$", colnames(ex_eff$draws))))
+  expect_true(any(grepl("^id_sd_eff: time$", colnames(ex_eff$draws))))
+  expect_true(any(grepl("^id_marker_row_scale_eff: time$", colnames(ex_eff$draws))))
 })
 
 test_that("summary reports survival_process baseline covariates when present", {

@@ -75,19 +75,19 @@ subject contributions in the longitudinal and survival likelihood.
 For user-facing model specification, `JoinME` exposes `joinme_tf(...)` and
 `joinme_priors(...)` as validated wrappers around transformation and prior
 declarations. These wrappers improve transparency while still compiling to the
-same Stan-ready payloads used internally.
+same Stan-ready inputs used internally.
 
 Prediction plots separate fitted history from forecast intervals and surface multiple credible bands for longitudinal, survival, and cumulative hazard outputs.
 
-Model diagnostics and extraction methods follow a consistent interface across
+Model diagnostics and extraction methods follow a consistent structure across
 fitted and predicted objects:
 
 - `diagnosis(fit)` and `diagnosis(pred)` return the same diagnostics schema
   (`metric`, `value`) to simplify downstream monitoring.
-- `ranef(fit)` and `corr(fit)` return nested outputs grouped by
+- `ranef(fit)` and `vcov(fit)` return nested outputs grouped by
   `formulaLong` and `formulaDist`, with family-scoped blocks for
   distributional random effects.
-- `ranef(pred)` and `corr(pred)` expose marker-by-id predicted random effects
+- `ranef(pred)` and `vcov(pred)` expose marker-by-id predicted random effects
   and covariance only when marker covariance is subject-dependent.
 
 ## Family-Scoped Distributional Regression

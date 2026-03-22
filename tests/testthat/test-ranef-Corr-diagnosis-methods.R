@@ -1,4 +1,4 @@
-test_that("ranef/corr.JoinMeDynPred require id-dependent marker covariance", {
+test_that("ranef/vcov.JoinMeDynPred require id-dependent marker covariance", {
   pred_ok <- joinme::JoinMeDynPred$new(
     predictions = list(),
     quantiles = list(),
@@ -27,7 +27,7 @@ test_that("ranef/corr.JoinMeDynPred require id-dependent marker covariance", {
   )
 
   re_ok <- ranef(pred_ok)
-  vc_ok <- corr(pred_ok)
+  vc_ok <- vcov(pred_ok)
   expect_true(is.data.frame(re_ok$formulaLong$marker_by_id))
   expect_true(is.data.frame(vc_ok$formulaLong$marker_by_id))
   expect_true(all(c("id", "row", "col", "Estimate") %in% names(vc_ok$formulaLong$marker_by_id)))
@@ -44,7 +44,7 @@ test_that("ranef/corr.JoinMeDynPred require id-dependent marker covariance", {
   )
 
   expect_error(ranef(pred_bad), "depends on id")
-  expect_error(corr(pred_bad), "depends on id")
+  expect_error(vcov(pred_bad), "depends on id")
 })
 
 test_that("marker_corr_depends_on_id follows fitted Q_idm", {
@@ -55,7 +55,7 @@ test_that("marker_corr_depends_on_id follows fitted Q_idm", {
   expect_false(joinme:::.marker_corr_depends_on_id(fit_like_without_qidm))
 })
 
-test_that("corr.JoinMeDynPred works when Q_idm > 0 without formulaVCov terms", {
+test_that("vcov.JoinMeDynPred works when Q_idm > 0 without formulaVCov terms", {
   skip_on_cran()
   skip_if_not_installed("cmdstanr")
 
@@ -132,12 +132,12 @@ test_that("corr.JoinMeDynPred works when Q_idm > 0 without formulaVCov terms", {
   }
 
   expect_true(isTRUE(pred$metadata$marker_corr_depends_on_id))
-  expect_no_error(corr(pred))
-  vc <- corr(pred)
+  expect_no_error(vcov(pred))
+  vc <- vcov(pred)
   expect_true(is.data.frame(vc$formulaLong$marker_by_id))
 })
 
-test_that("ranef/corr.JoinMeFit include formulaDist random-effects blocks", {
+test_that("ranef/vcov.JoinMeFit include formulaDist random-effects blocks", {
   skip_on_cran()
   skip_if_not_installed("rstan")
 
@@ -174,7 +174,7 @@ test_that("ranef/corr.JoinMeFit include formulaDist random-effects blocks", {
   )
 
   re <- ranef(fit, draws = 20)
-  vc <- corr(fit, draws = 20)
+  vc <- vcov(fit, draws = 20)
   dg <- diagnosis(fit)
 
   expect_true(is.list(re$formulaLong))

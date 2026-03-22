@@ -1,0 +1,23 @@
+beta_long:
+    - truth: -1, 0.5
+    - est: -0.945, 0.512
+beta_event:
+    - truth: 0.5
+    - est: 0.456
+assoc_coef:
+    - truth: 1, -1, -1
+    - est: 1.08, -0.429, 0.235
+re_params:
+    id$sd:
+        - truth: 1, 0.25,
+        - est: 0.997, 0.0731***
+    id_marker_cov:
+        alpha:
+            - truth: 0.5, -0.5, -1
+            - est: 0.473, -0.496, -0.947
+        lambda:
+            - truth: 0.1, 0.15, 0.2
+            - est: 0.196, 0.088, 0.194
+sigma_long:
+    - truth: 1
+    - est: 0.997

@@ -151,6 +151,8 @@ test_that("simulate_joinme randomises omitted coefficients reproducibly and expo
   expect_equal(sim1$truth$assoc_coefs, sim2$truth$assoc_coefs)
   expect_equal(eff$id$sd, sim2$truth$re_effective$id$sd)
   expect_equal(eff$id$corr, sim2$truth$re_effective$id$corr)
+  expect_equal(eff$id$Lcorr, sim2$truth$re_effective$id$Lcorr)
+  expect_equal(eff$id$cov, sim2$truth$re_effective$id$cov)
   expect_equal(eff$id_marker_cov$latent$sd, sim2$truth$re_effective$id_marker_cov$latent$sd)
   expect_equal(eff$id_marker_cov$alpha, sim2$truth$re_effective$id_marker_cov$alpha)
   expect_true(all(eff$id$sd > 0))
@@ -231,4 +233,65 @@ test_that("simulate_joinme supports distributional random effects", {
   expect_true("sigma" %in% names(sim$truth$dist_re_params))
   expect_equal(sim$truth$dist_re_params$sigma$sd, 0.8)
   expect_true(all(is.finite(sim$dataLong$y)))
+})
+
+test_that("simulate_joinme saves realized distributional parameter truth and avoids duplicate beta aliases", {
+  sim <- simulate_joinme(
+    n_id = 8,
+    families = c("student_t", "skew_normal", "beta"),
+    n_obs_per_marker_per_id = 4,
+    times_obs = seq(0, 2, length.out = 5),
+    seed = 4411,
+    formulaDist = list(
+      sigma ~ 1 + time,
+      nu[family = student_t] ~ 1,
+      alpha[family = skew_normal] ~ 1,
+      phi_beta[family = beta] ~ 1
+    )
+  )
+
+  dp <- sim$truth$distributional_params
+
+  expect_true(is.list(dp))
+  expect_equal(nrow(dp$rowwise), nrow(sim$dataLong))
+  expect_equal(length(dp$sigma), nrow(sim$dataLong))
+  expect_equal(length(dp$nu), nrow(sim$dataLong))
+  expect_equal(length(dp$alpha_skew), nrow(sim$dataLong))
+  expect_equal(length(dp$phi_beta), nrow(sim$dataLong))
+  expect_equal(as.character(dp$rowwise$marker), as.character(sim$dataLong$marker))
+  expect_equal(as.numeric(dp$rowwise$time), as.numeric(sim$dataLong$time))
+  expect_true(all(is.finite(dp$sigma)))
+  expect_true(all(is.finite(dp$nu)))
+  expect_true(all(is.finite(dp$alpha_skew)))
+  expect_true(all(is.finite(dp$phi_beta)))
+  expect_false("beta" %in% names(sim$truth))
+  expect_false("gamma_w" %in% names(sim$truth))
+})
+
+test_that("simulate_joinme exposes fit-aligned truth for defaults and scaled parameters", {
+  sim <- simulate_joinme(
+    n_id = 8,
+    families = c("gaussian", "student_t", "beta", "cumulative_logit"),
+    n_obs_per_marker_per_id = 4,
+    times_obs = seq(0, 2, length.out = 5),
+    seed = 4412
+  )
+
+  fit_truth <- sim$truth$stan_fit
+  fam_truth <- sim$truth$family
+
+  expect_true(is.list(fit_truth))
+  expect_equal(unname(fit_truth$tau_u), sim$truth$re_effective$id$sd)
+  expect_equal(unname(fit_truth$Lcorr_u), sim$truth$re_effective$id$Lcorr)
+  expect_equal(unname(fit_truth$Sigma_u), sim$truth$re_effective$id$cov)
+  expect_equal(length(fit_truth$beta_eff_in_likelihood), length(sim$truth$beta_long))
+  expect_equal(length(fit_truth$marker_id_row_scale_eff), length(sim$truth$re_effective$id_marker_cov$latent$sd))
+  expect_true("student_t" %in% names(fit_truth$sigma_family))
+  expect_true("student_t" %in% names(fit_truth$nu_family))
+  expect_true("beta" %in% names(fit_truth$phi_beta_family))
+  expect_equal(unname(fit_truth$cutpoints_ord), c(-1, 1))
+  expect_equal(nrow(fam_truth$by_marker), 4)
+  expect_equal(fam_truth$by_marker$marker_to_sigma_family, c(1L, 2L, 0L, 0L))
+  expect_equal(fam_truth$by_marker$marker_to_nu_family, c(0L, 1L, 0L, 0L))
+  expect_equal(fam_truth$by_marker$marker_to_phi_beta_family, c(0L, 0L, 1L, 0L))
 })

@@ -15,7 +15,7 @@
 
 \item{opcodes}{Legacy alias for bytecode.}
 
-\item{const_data}{Numeric constant payload.}
+\item{const_data}{Numeric constant vector.}
 }
 \value{
 List with normalised \code{bytecode} and \code{const_data}.

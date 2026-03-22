@@ -99,12 +99,12 @@
     L_i[i] = Li;
   }
   
-  /* -------------------- marker-by-id scaled effects: w_idscaled[i,d] = L_i_used[i] * z_w[i,d] */
+  /* -------------------- marker-by-id scaled effects: w_idscaled[i,d] = L_i_eff[i] * z_w[i,d] */
   array[n_id, D] vector[Q_idm] w_idscaled; // scaled marker-id effects
   for (i in 1 : n_id) {
-    matrix[Q_idm, Q_idm] L_i_used = diag_pre_multiply(row_scale_widm, L_i[i]);
+    matrix[Q_idm, Q_idm] L_i_eff = diag_pre_multiply(row_scale_widm, L_i[i]);
     for (d in 1 : D)
-      w_idscaled[i, d] = L_i_used * z_w[i, d];
+      w_idscaled[i, d] = L_i_eff * z_w[i, d];
   }
   
   /* -------------------- marker weights (signed) */
