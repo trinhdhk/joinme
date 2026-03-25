@@ -22,12 +22,17 @@ common shorthands, and returns a structured object that can be passed directly
 as the \code{transforms} argument.
 
 Supported channels are \code{cv_total}, \code{cs_total}, \code{cv_mean}, \code{cs_mean},
-\code{cv_marker}, \code{cs_marker}, and \code{corr}.
+\code{cv_marker}, \code{cs_marker}, \code{corr}, and \code{vcov}. The \code{corr} channel refers to
+off-diagonal entries of the subject-specific Cholesky-correlation factor \code{K},
+while \code{vcov} refers to those same off-diagonal \code{K} entries together with the
+subject-specific standard deviations.
 
 Supported shorthands per channel:
 \itemize{
 \item \code{"identity"}, \code{"ispline"}, \code{"ispline_penalised"}, \code{"ispline_penalized"},
-\code{"pwlin"}, \code{"functional"}
+\code{"ispline_expit"}, \code{"ispline_expit_penalised"}, \code{"ispline_expit_penalized"},
+\code{"ispline_exp_penalised"}, \code{"ispline_exp_penalized"}, \code{"pwlin"},
+\code{"functional"}
 \item a formula such as \code{~ log1p(x)}, which is interpreted as
 \code{list(type = "functional", expr = ~ log1p(x))}
 \item a full named list specification such as
@@ -38,6 +43,7 @@ Supported shorthands per channel:
 tf <- joinme_tf(
   cv_total = "identity",
   corr = ~ -x,
+  vcov = "identity",
   cv_marker = list(type = "pwlin", x = c(-1, 0, 1), y = c(0.2, 1, 0.2))
 )
 print(tf)

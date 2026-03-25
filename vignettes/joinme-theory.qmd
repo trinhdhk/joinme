@@ -179,12 +179,12 @@ history using a small set of interpretable features:
 - **Current slope (CS)**: the derivative of the latent longitudinal linear
   predictor at time $t$.
 - **Correlation association (CORR)**: a subject-specific, time-constant summary
-  of the off-diagonal correlation structure from the marker-by-subject
-  covariance model.
+  of the off-diagonal entries of the Cholesky-correlation factor `K_i` from the
+  marker-by-subject covariance model.
 - **Variance-covariance association (VCOV)**: a subject-specific,
-  time-constant summary of lower-triangular Cholesky-factor entries from the
-  same marker-by-subject covariance model. This channel uses `L_i` directly,
-  rather than the reconstructed covariance matrix `L_i L_i^\\top`.
+  time-constant summary of those same off-diagonal `K_i` entries together with
+  the subject-specific standard deviations. This channel therefore avoids
+  double-counting information that would appear again in `L_i L_i^\top`.
 
 In implementation, CV and CS are evaluated at a default set of 15 Gauss-Kronrod
 nodes on the scaled time interval $[0, 1]$ (configurable). Only the node count

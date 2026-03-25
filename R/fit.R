@@ -14,9 +14,11 @@
 #' Transformations are provided through a single `transforms` argument.
 #' Each element (cv_total, cs_total, corr, vcov) is defined as a list specifying a type
 #' and type-specific fields (see `build_standata_transforms()` for details). For
-#' covariance-style associations, `corr` acts on off-diagonal correlation features,
-#' while `vcov` acts on the lower-triangular entries of the subject-specific
-#' Cholesky factor `L` directly rather than on reconstructed covariance entries.
+#' covariance-style associations, `corr` acts on the off-diagonal entries of the
+#' subject-specific Cholesky-correlation factor `K`, while `vcov` acts on those
+#' same off-diagonal `K` entries together with the subject-specific standard
+#' deviations. If both `corr` and `vcov` are requested, `vcov` is kept and
+#' `corr` is ignored with a warning.
 #'
 #' Distributional regression can be specified in two equivalent forms:
 #' 1. A named list with RHS-only formulas, e.g. `list(sigma = ~ 1 + time)`.
@@ -135,6 +137,9 @@
 #'   and the marker block. The marker block may optionally include an inner
 #'   `( ... | id )` term for marker-by-id random effects. When omitted,
 #'   marker-by-id effects are disabled (Q_idm = 0). Grouping terms may use
+#'   `||` at either level: outer `( ... || marker )` keeps marker-only and
+#'   marker-by-id blocks independent, while inner `( ... || id )` keeps the
+#'   marker-by-id covariance diagonal. Grouping terms may also use
 #'   `weighted(group, weights = <column>)` to declare
 #'   formula-scoped subject/group weights.
 #' @param dataLong Long-format longitudinal data with columns for id, marker, time,
@@ -145,10 +150,12 @@
 #' @param formulaVCov Covariance regression formula for id-specific marker-by-id effects.
 #'   If the marker block omits the inner `( ... | id )`, marker-by-id effects are
 #'   absent and covariance-style associations (`corr`, `vcov`) are not allowed.
-#'   When present, `corr` associations use the resulting off-diagonal correlation
-#'   features, whereas `vcov` associations use the lower-triangular entries of the
-#'   subject-specific Cholesky factor `L` directly. The default `~ 1` remains a
-#'   supported intercept-only covariance regression.
+#'   When present, `corr` associations use the off-diagonal entries of the
+#'   subject-specific Cholesky-correlation factor `K`, whereas `vcov`
+#'   associations use those same off-diagonal `K` entries together with the
+#'   subject-specific standard deviations. If both `corr` and `vcov` are
+#'   requested, `vcov` is kept and `corr` is ignored with a warning. The
+#'   default `~ 1` remains a supported intercept-only covariance regression.
 #' @param formulaDist Optional list of formulas for distributional regression.
 #'   Supported LHS parameters are:
 #'   - `sigma`

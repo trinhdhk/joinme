@@ -230,9 +230,10 @@
 #' Each transformation term (CV_total, CS_total, CV_mean, CS_mean, CV_marker,
 #' CS_marker, corr, vcov) can have its own independent specification, enabling
 #' flexibility in model building. For covariance-style channels, `corr`
-#' transformations act on off-diagonal correlation features, while `vcov`
-#' transformations act on lower-triangular Cholesky-factor entries from the
-#' subject-specific `L` matrix.
+#' transformations act on off-diagonal entries of the subject-specific
+#' Cholesky-correlation factor `K`, while `vcov` transformations act on those
+#' same off-diagonal `K` entries together with the subject-specific standard
+#' deviations.
 #'
 #' @param transform_list List with elements cv_total, cs_total, cv_mean, cs_mean,
 #'   cv_marker, cs_marker, corr, vcov, each specifying a transformation. See details.

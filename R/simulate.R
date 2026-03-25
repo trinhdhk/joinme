@@ -361,7 +361,9 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   Grouping terms may use `weighted(group, weights = <column>)` to mirror
 #'   fitting syntax. The referenced weight column
 #'   should be available in generated covariates (for example via
-#'   `covariate_formulas`).
+#'   `covariate_formulas`). In nested marker terms, outer `( ... || marker )`
+#'   keeps marker-only and marker-by-id blocks independent, while inner
+#'   `( ... || id )` makes the marker-by-id covariance diagonal.
 #' @param formulaEvent Event/survival formula (same role as in `joinme()`).
 #' @param formulaVCov Optional covariance-regression formula for the id-specific
 #'   marker-by-id covariance factor (same role as in `joinme_standata()`).
@@ -369,8 +371,9 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   must not include random-effect bars `( ... | ... )`, and must not include
 #'   the longitudinal time variable.
 #'
-#'   Internally, this formula drives subject-specific lower-triangular entries
-#'   of `L_i` used to scale marker-by-id latent effects; see `re_params$id_marker_cov`.
+#'   Internally, this formula drives subject-specific standard deviations and
+#'   Cholesky-correlation-factor rows used to build `L_i = SD_i * K_i`; see
+#'   `re_params$id_marker_cov`.
 #'   The default `~ 1` is supported and gives an intercept-only covariance regression.
 #' @param formulaDist Optional distributional regression formulas (same role as in `joinme()`).
 #'   Supported LHS parameters are `sigma`, `nu`, `phi`, `alpha` (aliases:
@@ -441,9 +444,18 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #' @param families Marker-specific family names.
 #'   Use `jm_family()` entries to supply custom `link`/`inv_link` expressions.
 #' @param marker_levels Optional marker names; defaults to `m1`, `m2`, ...
-#' @param n_obs_per_marker_per_id Target number of observations per (id, marker).
-#' @param times_obs Optional candidate observation time grid.
-#' @param n_t Optional alias for `n_obs_per_marker_per_id` for compatibility.
+#' @param times_obs Scheduled observation time grid used for every `(id, marker)`
+#'   before optional visit-time jitter and post-event censoring are applied.
+#' @param obs_time_noise_sd Optional Gaussian noise SD added independently to each
+#'   simulated observation time after the visit schedule is chosen; noisy visit
+#'   times are clipped to `[0, time_cens]`.
+#' @param censor_longitudinal_after_event Logical; if TRUE (default), simulated
+#'   longitudinal observations are truncated at the subject event time. If FALSE,
+#'   the longitudinal schedule may continue after the event time up to
+#'   `time_cens`.
+#' @param ... Additional unused compatibility arguments. Legacy observation-count
+#'   inputs are ignored; the number of scheduled observations is inferred from
+#'   `times_obs`.
 #' @param seed RNG seed.
 #' @param covariate_formulas Named or LHS formulas used to generate event-level covariates,
 #'   e.g. `list(x1 ~ rnorm(n_id), x2 ~ rt(n_id, df = 5))`.
@@ -453,19 +465,21 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   Meaning of each channel:
 #'   - `cv_*`: current-value channels from longitudinal trajectories,
 #'   - `cs_*`: current-slope channels from finite differences (`eps_cs`),
-#'   - `corr`: off-diagonal correlation features from marker-by-id random effects.
-#'   - `vcov`: lower-triangular Cholesky-factor entries from marker-by-id random
-#'     effects, taken directly from the subject-specific `L` matrix.
+#'   - `corr`: off-diagonal entries of the subject-specific Cholesky-correlation
+#'     factor `K` from marker-by-id random effects.
+#'   - `vcov`: the same off-diagonal `K` entries together with the
+#'     subject-specific standard deviations.
 #'
 #'   You can also provide `formulaAssoc = ~ ...` to select channels; when present,
 #'   it overrides `assoc`.
 #' @param assoc_coefs Association coefficients for hazard terms.
 #'   Non-`corr`/`vcov` terms accept scalar values. The `corr` term accepts a vector of
-#'   off-diagonal correlation coefficients ordered as `(2,1), (3,1), (3,2), ...`
-#'   in lower-triangular row-major order of the marker-by-id random-effect
-#'   covariance dimension. The `vcov` term accepts lower-triangular Cholesky-factor
-#'   entries ordered as `(1,1), (2,1), (2,2), ...)`; when `||` is used in the marker-by-id
-#'   random-effects block, only diagonal `L` entries are used.
+#'   off-diagonal `K` coefficients ordered as `(2,1), (3,1), (3,2), ...` in
+#'   lower-triangular row-major order of the marker-by-id random-effect
+#'   covariance dimension. The `vcov` term accepts the same off-diagonal `K`
+#'   entries followed by the subject-specific standard deviations,
+#'   `(2,1), (3,1), (3,2), ..., sd_1, sd_2, ...`; when `||` is used in the
+#'   marker-by-id random-effects block, only the standard deviation entries are used.
 #'
 #'   Accepted input forms:
 #'   - named numeric vector, e.g. `c(cv_total = 0.4, cs_mean = -0.2)`,
@@ -507,25 +521,28 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'     lower-triangular factor is folded into the baseline `alpha` intercepts
 #'     before simulation. Marker-by-id latent seeds are still drawn as iid
 #'     standard normal values. Prefer setting `alpha` directly in new code.
-#'   - `alpha`: baseline linear predictors for entries of subject-specific lower
-#'     triangular `L_i` (baseline when `formulaVCov` covariates and subject-level
-#'     covariance perturbation are zero),
+#'   - `alpha`: baseline linear predictors for the subject-specific covariance
+#'     regression entries. Diagonal positions control standard deviations;
+#'     off-diagonal positions control the row-wise correlation-factor regression,
+#'     on the tanh scale.
 #'   - `beta`: covariate effects from `formulaVCov` design matrix (systematic
 #'     subject-to-subject covariance shifts by observed covariates),
 #'   - `lambda`: non-negative loading on an iid standard-normal subject latent
 #'     perturbation; if a negative value is supplied, the simulator folds the
 #'     sign into the latent draw so the effective model remains unchanged but
 #'     follows the identified convention used during fitting,
-#'   - `diag_link`: diagonal link for `L_i` diagonals (`"softplus"` or `"exp"`).
+#'   - `diag_link`: link for the subject-specific standard deviations (`"softplus"`
+#'     or `"exp"`).
 #'
 #'   Element-wise covariance-regression form is:
 #'   `eta_{im} = alpha_m + x_i^T beta_m + lambda_m z_{im}`, with
-#'   `lambda_m >= 0` and `z_{im} ~ Normal(0, 1)`. Diagonal entries of `L_i` apply `diag_link`
-#'   to keep them positive; off-diagonal entries remain on identity scale.
-#'   Marker-by-id latent seeds are sampled as iid standard normal values and the
-#'   final marker-by-id effects are obtained as `b_id = L_i z_id`.
-#'   This means baseline and subject-specific covariance now both live in `L_i`,
-#'   while `alpha`/`beta`/`lambda` control its level and heterogeneity.
+#'   `lambda_m >= 0` and `z_{im} ~ Normal(0, 1)`. Diagonal entries apply
+#'   `diag_link` to give positive subject-specific standard deviations. Off-diagonal
+#'   entries are mapped through `tanh` and then assembled row by row into a valid
+#'   subject-specific Cholesky-correlation factor `K_i`. The covariance factor is
+#'   reconstructed as `L_i = SD_i * K_i`. Marker-by-id latent seeds are sampled as
+#'   iid standard normal values and the final marker-by-id effects are obtained as
+#'   `b_id = L_i z_id`.
 #'
 #'   Dimension rules for `id_marker_cov` entries follow marker-by-id random-effect
 #'   dimension `Q_idm`:
@@ -593,9 +610,10 @@ simulate_joinme <- function(
   n_id = 50,
   families = c("gaussian", "student_t", "binomial"),
   marker_levels = NULL,
-  n_obs_per_marker_per_id = 8,
   times_obs = seq(0, 5, length.out = 8),
-  n_t = NULL,
+  obs_time_noise_sd = 0,
+  censor_longitudinal_after_event = TRUE,
+  ...,
   seed = 42,
   covariate_formulas = list(
     x1 ~ rnorm(n_id),
@@ -658,6 +676,36 @@ simulate_joinme <- function(
   # 5) Simulate observation times, generate responses by family, and return truth.
   set.seed(seed)
   assoc_coefs_missing <- missing(assoc_coefs)
+  compat_args <- list(...)
+  unknown_args <- setdiff(names(compat_args), c("n_obs_per_marker_per_id", "n_t", ""))
+  if (length(unknown_args) > 0L) {
+    cli::cli_abort(c(
+      x = "Unknown argument{?s}: {.field {unknown_args}}.",
+      i = "Only compatibility arguments {.field n_obs_per_marker_per_id} and {.field n_t} are accepted via {.arg ...}."
+    ))
+  }
+  obs_time_noise_sd <- as.numeric(obs_time_noise_sd %||% 0)
+  if (length(obs_time_noise_sd) != 1L || !is.finite(obs_time_noise_sd) || obs_time_noise_sd < 0) {
+    cli::cli_abort(c(
+      x = "{.arg obs_time_noise_sd} must be one non-negative finite number.",
+      i = "Use 0 to disable observation-time jitter."
+    ))
+  }
+  if (!is.logical(censor_longitudinal_after_event) || length(censor_longitudinal_after_event) != 1L || is.na(censor_longitudinal_after_event)) {
+    cli::cli_abort(c(
+      x = "{.arg censor_longitudinal_after_event} must be TRUE/FALSE.",
+      i = "Set TRUE to truncate longitudinal measurements at the event time, or FALSE to keep them through {.arg time_cens}."
+    ))
+  }
+  times_obs <- as.numeric(times_obs %||% numeric(0))
+  times_obs <- times_obs[is.finite(times_obs)]
+  if (length(times_obs) == 0L) {
+    cli::cli_abort(c(
+      x = "{.arg times_obs} must contain at least one finite scheduled observation time.",
+      i = "The number of longitudinal observations is now inferred directly from {.arg times_obs}."
+    ))
+  }
+  times_obs <- sort(times_obs)
   # Base seed for deterministic parallel jobs when mirai is enabled.
   seed_base <- as.integer(seed %||% 1L)
   n_workers <- as.integer(n_workers)
@@ -1570,7 +1618,6 @@ simulate_joinme <- function(
   }
 
   # ---- Basic dimensions and marker metadata
-  if (!is.null(n_t)) n_obs_per_marker_per_id <- n_t
   if (length(families) == 1L && !is.null(marker_levels) && length(marker_levels) > 1L) {
     families <- rep(families, length(marker_levels))
   }
@@ -1701,6 +1748,10 @@ simulate_joinme <- function(
   idx_time_idm <- time_meta$idx_time_idm
 
   beta_long <- .sim_align_coef(colnames(X_proto), beta_long, sd_default = 0.35, intercept_default = 1.0)
+  beta_long_internal <- beta_long
+  if (length(idx_time_beta) > 0L) {
+    beta_long_internal[idx_time_beta] <- beta_long_internal[idx_time_beta] * time_scale_internal
+  }
 
   assoc_from_formula <- .sim_assoc_from_formula(formulaAssoc)
   assoc_effective <- if (!is.null(assoc_from_formula)) assoc_from_formula else assoc
@@ -1730,10 +1781,31 @@ simulate_joinme <- function(
   K_mk <- ncol(Z_mk_proto)
   K_idm <- ncol(Z_idm_proto)
 
+  .validate_assoc_cov_structure(
+    assoc = assoc_effective,
+    q_idm = K_idm,
+    diagonal_only = indep_flags$indep_idmarker_cov,
+    context = "simulate_joinme()"
+  )
+
   re_id_effective <- .sim_resolve_re_block_cfg(re_params$id %||% list(), K_id, "id")
   re_marker_effective <- .sim_resolve_re_block_cfg(re_params$marker %||% list(), K_mk, "marker")
-  re_id <- .sim_draw_re_block(n_id, K_id, re_params$id %||% list(), "id", resolved = re_id_effective)
-  re_marker <- .sim_draw_re_block(D, K_mk, re_params$marker %||% list(), "marker", resolved = re_marker_effective)
+  re_id_effective_internal <- re_id_effective
+  if (length(idx_time_uid) > 0L) {
+    re_id_effective_internal$sd[idx_time_uid] <- re_id_effective_internal$sd[idx_time_uid] * time_scale_internal
+    re_id_effective_internal$cov <- diag(as.numeric(re_id_effective_internal$sd), K_id, K_id) %*%
+      re_id_effective_internal$corr %*%
+      diag(as.numeric(re_id_effective_internal$sd), K_id, K_id)
+  }
+  re_marker_effective_internal <- re_marker_effective
+  if (length(idx_time_vmk) > 0L) {
+    re_marker_effective_internal$sd[idx_time_vmk] <- re_marker_effective_internal$sd[idx_time_vmk] * time_scale_internal
+    re_marker_effective_internal$cov <- diag(as.numeric(re_marker_effective_internal$sd), K_mk, K_mk) %*%
+      re_marker_effective_internal$corr %*%
+      diag(as.numeric(re_marker_effective_internal$sd), K_mk, K_mk)
+  }
+  re_id <- .sim_draw_re_block(n_id, K_id, re_params$id %||% list(), "id", resolved = re_id_effective_internal)
+  re_marker <- .sim_draw_re_block(D, K_mk, re_params$marker %||% list(), "marker", resolved = re_marker_effective_internal)
   re_cov_cfg <- re_params[["id_marker_cov", exact = TRUE]] %||% list()
   re_idm_cfg <- re_cov_cfg[["latent", exact = TRUE]]
   re_idm_legacy <- NULL
@@ -1786,42 +1858,22 @@ simulate_joinme <- function(
   }
 
   .sim_cov_lp_to_matrix <- function(lp_vec, q_idm, idx_row, idx_col, diag_link) {
-    mat <- matrix(0.0, nrow = q_idm, ncol = q_idm)
-    if (q_idm <= 0 || length(lp_vec) == 0) {
-      return(mat)
-    }
-    for (m in seq_along(lp_vec)) {
-      r_ <- idx_row[m]
-      c_ <- idx_col[m]
-      val <- as.numeric(lp_vec[m])
-      if (r_ == c_) {
-        val <- if (diag_link == "exp") exp(val) else log1p(exp(val))
-      }
-      mat[r_, c_] <- val
-    }
-    mat
+    .cov_lp_to_chol(
+      lp_vec = lp_vec,
+      q_idm = q_idm,
+      idx_row = idx_row,
+      idx_col = idx_col,
+      diag_link = diag_link
+    )
   }
 
   .sim_cov_matrix_to_alpha <- function(mat, idx_row, idx_col, diag_link) {
-    if (length(idx_row) == 0) return(numeric(0))
-    out <- numeric(length(idx_row))
-    for (m in seq_along(idx_row)) {
-      r_ <- idx_row[m]
-      c_ <- idx_col[m]
-      val <- mat[r_, c_]
-      if (r_ == c_) {
-        if (!is.finite(val) || val <= 0) {
-          cli::cli_abort(c(
-            x = "Translated baseline covariance produced a non-positive diagonal entry.",
-            i = "Check the supplied {.arg re_params$id_marker_cov$latent} values."
-          ))
-        }
-        out[m] <- .sim_inverse_diag_link(val, diag_link)
-      } else {
-        out[m] <- val
-      }
-    }
-    out
+    .cov_chol_to_lp(
+      L_i = mat,
+      idx_row = idx_row,
+      idx_col = idx_col,
+      diag_link = diag_link
+    )
   }
 
   .sim_align_len <- function(x, n, default) {
@@ -1968,6 +2020,10 @@ simulate_joinme <- function(
   beta_cov <- .sim_align_cov_beta(re_cov_cfg$beta, M_cov, K_cov)
 
   L_i <- array(0.0, dim = c(n_id, K_idm, K_idm))
+  marker_id_row_scale_internal <- rep(1.0, K_idm)
+  if (length(idx_time_idm) > 0L) {
+    marker_id_row_scale_internal[idx_time_idm] <- time_scale_internal
+  }
   z_cov <- matrix(0.0, nrow = n_id, ncol = max(1L, M_cov))
   lambda_cov_sign <- rep(1, M_cov)
   if (M_cov > 0 && K_idm > 0) {
@@ -1983,21 +2039,28 @@ simulate_joinme <- function(
     }
     lp_cov <- lp_cov + sweep(z_cov, 2L, lambda_cov, `*`)
 
-    for (m in seq_len(M_cov)) {
-      r_ <- idx_row_cov[m]
-      c_ <- idx_col_cov[m]
-      vals <- lp_cov[, m]
-      if (r_ == c_) {
-        vals <- if (diag_link_cov == "exp") exp(vals) else log1p(exp(vals))
-      }
-      L_i[cbind(seq_len(n_id), r_, c_)] <- vals
+    for (i in seq_len(n_id)) {
+      L_i[i, , ] <- .sim_cov_lp_to_matrix(
+        lp_vec = lp_cov[i, ],
+        q_idm = K_idm,
+        idx_row = idx_row_cov,
+        idx_col = idx_col_cov,
+        diag_link = diag_link_cov
+      )
+    }
+  }
+
+  L_i_eff <- L_i
+  if (K_idm > 0L && any(marker_id_row_scale_internal != 1)) {
+    for (i in seq_len(n_id)) {
+      L_i_eff[i, , ] <- sweep(L_i_eff[i, , ], 1L, marker_id_row_scale_internal, `*`)
     }
   }
 
   re_idm_scaled <- array(0.0, dim = c(n_id, D, K_idm))
   if (K_idm > 0) {
     for (i in seq_len(n_id)) {
-      Li <- matrix(L_i[i, , ], K_idm, K_idm)
+      Li <- matrix(L_i_eff[i, , ], K_idm, K_idm)
       re_idm_scaled[i, , ] <- re_idm[i, , ] %*% t(Li)
     }
   }
@@ -2197,7 +2260,7 @@ simulate_joinme <- function(
     z_mk <- .sim_rhs_matrix(mk_blueprints, row_df)
     z_idm <- .sim_rhs_matrix(idm_blueprints, row_df)
 
-    fixed_part <- if (ncol(x_fix) > 0) as.numeric(x_fix %*% beta_long) else rep(0, D)
+    fixed_part <- if (ncol(x_fix) > 0) as.numeric(x_fix %*% beta_long_internal) else rep(0, D)
     id_part <- if (ncol(z_id) > 0) as.numeric(z_id %*% re_id[i, ]) else rep(0, D)
     mk_part <- if (ncol(z_mk) > 0) rowSums(z_mk * re_marker) else rep(0, D)
     idm_part <- if (ncol(z_idm) > 0) rowSums(z_idm * re_idm_scaled[i, , ]) else rep(0, D)
@@ -2212,47 +2275,15 @@ simulate_joinme <- function(
   }
 
   .sim_corr_features <- function(i) {
-    # Build subject-level raw correlation features in the same lower-triangular
-    # ordering used by Stan: (2,1), (3,1), (3,2), ... .
+    # Build subject-level raw correlation-factor features in the same lower-
+    # triangular ordering used by Stan: (2,1), (3,1), (3,2), ... .
     #
-    # Important: this returns raw correlation features only.
-    # Association weighting (assoc_coef_corr) is applied later *after* the
-    # optional transform, so simulation matches Stan semantics:
-    #   sum_j a_corr[j] * transform(corr_raw[j])
+    # Important: this returns the off-diagonal entries of the subject-specific
+    # Cholesky-correlation factor K_i, not pairwise correlations from Sigma_i.
     if (K_idm < 2) return(numeric(0))
     Li <- matrix(L_i[i, , ], nrow = K_idm, ncol = K_idm)
     if (!all(is.finite(Li))) return(rep(0.0, M_corr))
-
-    sigma_i <- Li %*% t(Li)
-    corr_re <- matrix(0.0, nrow = K_idm, ncol = K_idm)
-    for (r in seq_len(K_idm)) {
-      var_r <- sigma_i[r, r]
-      if (!is.finite(var_r) || var_r <= 0) next
-      corr_re[r, r] <- 1.0
-      if (r > 1L) {
-        for (c in seq_len(r - 1L)) {
-          var_c <- sigma_i[c, c]
-          if (!is.finite(var_c) || var_c <= 0) next
-          denom <- sqrt(var_r * var_c)
-          if (!is.finite(denom) || denom <= 0) next
-          val <- sigma_i[r, c] / denom
-          if (!is.finite(val)) next
-          val <- max(-0.999999, min(0.999999, val))
-          corr_re[r, c] <- val
-          corr_re[c, r] <- val
-        }
-      }
-    }
-
-    out <- numeric(M_corr)
-    m <- 1L
-    for (r in 2:K_idm) {
-      for (c in 1:(r - 1L)) {
-        out[m] <- max(-0.999999, min(0.999999, corr_re[r, c]))
-        m <- m + 1L
-      }
-    }
-    out
+    .assoc_corr_features_from_chol(Li)
   }
 
   .sim_vcov_features <- function(i) {
@@ -2517,22 +2548,24 @@ simulate_joinme <- function(
   dataEvent[[event_var]] <- vapply(event_draws, function(x) as.integer(x$event), integer(1))
 
   # ---- Build longitudinal observation schedule conditional on event times
-  n_obs_target <- max(2L, as.integer(n_obs_per_marker_per_id))
   cov_names <- setdiff(colnames(dataEvent), c(id_var, event_time_var, event_var))
 
   .sim_obs_rows_for_id <- function(i) {
     obs_upper <- max(1e-8, min(dataEvent[[event_time_var]][i], time_cens))
     rows_i <- vector("list", D)
     for (d in seq_len(D)) {
-      if (!is.null(times_obs) && length(times_obs) > 0) {
-        candidate_times <- times_obs[times_obs <= obs_upper]
-        if (length(candidate_times) == 0) {
-          t_obs <- sort(stats::runif(n_obs_target, 0, obs_upper))
-        } else {
-          t_obs <- sort(sample(candidate_times, size = n_obs_target, replace = length(candidate_times) < n_obs_target))
-        }
-      } else {
-        t_obs <- sort(stats::runif(n_obs_target, 0, obs_upper))
+      t_obs <- times_obs
+
+      if (obs_time_noise_sd > 0) {
+        noise <- stats::rnorm(length(t_obs), mean = 0, sd = obs_time_noise_sd)
+        t_obs <- sort(pmin(time_cens, pmax(0, t_obs + noise)))
+      }
+      if (isTRUE(censor_longitudinal_after_event)) {
+        t_obs <- t_obs[t_obs <= obs_upper]
+      }
+      if (!length(t_obs)) {
+        rows_i[[d]] <- NULL
+        next
       }
 
       row_df <- data.frame(
@@ -2550,10 +2583,34 @@ simulate_joinme <- function(
       }
       rows_i[[d]] <- row_df
     }
+    rows_i <- Filter(Negate(is.null), rows_i)
+    if (!length(rows_i)) {
+      row_df <- data.frame(
+        id = dataEvent[[id_var]][i],
+        marker = factor(marker_levels[1], levels = marker_levels),
+        time = obs_upper,
+        stringsAsFactors = FALSE
+      )
+      names(row_df)[names(row_df) == "id"] <- id_var
+      names(row_df)[names(row_df) == "time"] <- time_var
+      names(row_df)[names(row_df) == "marker"] <- marker_var
+
+      for (cov_nm in cov_names) {
+        row_df[[cov_nm]] <- dataEvent[[cov_nm]][i]
+      }
+      return(row_df)
+    }
     do.call(rbind, rows_i)
   }
 
   obs_rows <- .sim_parallel_lapply(seq_len(n_id), .sim_obs_rows_for_id)
+  obs_rows <- Filter(Negate(is.null), obs_rows)
+  if (!length(obs_rows)) {
+    cli::cli_abort(c(
+      x = "No longitudinal observations remained after applying the schedule and event-time censoring.",
+      i = "Use a denser {.arg times_obs} grid, reduce {.arg obs_time_noise_sd}, or disable {.arg censor_longitudinal_after_event}."
+    ))
+  }
   dataLong <- do.call(rbind, obs_rows)
   rownames(dataLong) <- NULL
 
@@ -2568,7 +2625,7 @@ simulate_joinme <- function(
   id_index <- match(as.character(dataLong[[id_var]]), as.character(dataEvent[[id_var]]))
   marker_index <- match(as.character(dataLong[[marker_var]]), marker_levels)
 
-  mu_long <- as.numeric(X_long %*% beta_long)
+  mu_long <- as.numeric(X_long %*% beta_long_internal)
   if (K_id > 0) {
     mu_long <- mu_long + rowSums(Z_id_long * re_id[id_index, , drop = FALSE])
   }

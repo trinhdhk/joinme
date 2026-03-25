@@ -1235,12 +1235,239 @@ gk_quadrature <- function(nodes = 15L) {
 .validate_assoc_channels <- function(assoc, context = "association specification") {
   assoc <- unique(as.character(assoc %||% character(0)))
   if (all(c("corr", "vcov") %in% assoc)) {
-    cli::cli_abort(c(
-      x = "{.arg corr} and {.arg vcov} cannot be used together in {.field {context}}.",
-      i = "Choose {.arg corr} for off-diagonal correlation features or {.arg vcov} for lower-triangular Cholesky-factor features from {.arg L}."
+    cli::cli_warn(c(
+      x = "{.arg corr} is ignored because {.arg vcov} is also present in {.field {context}}.",
+      i = "{.arg vcov} already includes the off-diagonal correlation-factor terms together with the subject-specific standard deviations."
     ))
+    assoc <- assoc[assoc != "corr"]
   }
   assoc
+}
+
+#' Map covariance-regression diagonal link codes to standard names
+#' @keywords internal
+.cov_diag_link_name <- function(diag_link) {
+  if (is.character(diag_link)) {
+    diag_name <- tolower(trimws(diag_link[1]))
+    if (diag_name %in% c("softplus", "exp")) {
+      return(diag_name)
+    }
+  }
+
+  diag_code <- suppressWarnings(as.integer(diag_link[1]))
+  if (isTRUE(diag_code == 1L)) {
+    return("exp")
+  }
+  "softplus"
+}
+
+#' Apply the covariance-regression diagonal link
+#' @keywords internal
+.cov_diag_link_forward <- function(lp, diag_link = "softplus") {
+  diag_link <- .cov_diag_link_name(diag_link)
+  if (identical(diag_link, "exp")) {
+    return(exp(lp))
+  }
+  .softplus(lp)
+}
+
+#' Invert the covariance-regression diagonal link
+#' @keywords internal
+.cov_diag_link_inverse <- function(value, diag_link = "softplus") {
+  diag_link <- .cov_diag_link_name(diag_link)
+  value <- as.numeric(value)
+  if (any(!is.finite(value)) || any(value <= 0)) {
+    cli::cli_abort(c(
+      x = "Covariance-regression diagonal values must be finite and strictly positive.",
+      i = "Check the supplied standard deviation values before inverting the diagonal link."
+    ))
+  }
+  if (identical(diag_link, "exp")) {
+    return(log(value))
+  }
+  log(expm1(value))
+}
+
+#' Build one Cholesky-correlation row from row-specific partial correlations
+#' @keywords internal
+.cov_partial_row_to_chol_corr <- function(partials, row_index) {
+  row_index <- as.integer(row_index %||% 0L)
+  if (row_index <= 0L) {
+    return(numeric(0))
+  }
+
+  out <- numeric(row_index)
+  if (row_index == 1L) {
+    out[1] <- 1.0
+    return(out)
+  }
+
+  z_vals <- numeric(row_index - 1L)
+  if (length(partials) > 0L) {
+    n_copy <- min(length(partials), row_index - 1L)
+    z_vals[seq_len(n_copy)] <- as.numeric(partials[seq_len(n_copy)])
+  }
+  z_vals[!is.finite(z_vals)] <- 0.0
+  z_vals <- pmax(-0.999999, pmin(0.999999, z_vals))
+
+  scale_prod <- 1.0
+  for (c in seq_len(row_index - 1L)) {
+    out[c] <- scale_prod * z_vals[c]
+    scale_prod <- scale_prod * sqrt(pmax(1e-12, 1.0 - z_vals[c]^2))
+  }
+  out[row_index] <- scale_prod
+  out
+}
+
+#' Recover row-specific partial correlations from one Cholesky-correlation row
+#' @keywords internal
+.cov_chol_corr_row_to_partial_lp <- function(chol_row) {
+  chol_row <- as.numeric(chol_row)
+  row_index <- length(chol_row)
+  if (row_index <= 1L) {
+    return(numeric(0))
+  }
+
+  out <- numeric(row_index - 1L)
+  scale_prod <- 1.0
+  for (c in seq_len(row_index - 1L)) {
+    z_val <- if (abs(scale_prod) < 1e-12) 0.0 else chol_row[c] / scale_prod
+    z_val <- pmax(-0.999999, pmin(0.999999, z_val))
+    out[c] <- atanh(z_val)
+    scale_prod <- scale_prod * sqrt(pmax(1e-12, 1.0 - z_val^2))
+  }
+  out
+}
+
+#' Build a covariance Cholesky factor from covariance-regression predictors
+#' @keywords internal
+.cov_lp_to_chol <- function(lp_vec,
+                            q_idm,
+                            idx_row,
+                            idx_col,
+                            diag_link = "softplus") {
+  q_idm <- as.integer(q_idm %||% 0L)
+  if (q_idm <= 0L) {
+    return(matrix(0.0, nrow = 0L, ncol = 0L))
+  }
+
+  lp_vec <- as.numeric(lp_vec %||% numeric(0))
+  idx_row <- as.integer(idx_row %||% integer(0))
+  idx_col <- as.integer(idx_col %||% integer(0))
+  if (length(lp_vec) != length(idx_row) || length(lp_vec) != length(idx_col)) {
+    cli::cli_abort(c(
+      x = "Covariance-regression predictors and index maps must have the same length.",
+      i = "Check the marker-by-id covariance indexing before reconstructing the Cholesky factor."
+    ))
+  }
+
+  sd_vec <- rep(1.0, q_idm)
+  partials_by_row <- vector("list", q_idm)
+  for (m in seq_along(lp_vec)) {
+    r_ <- idx_row[m]
+    c_ <- idx_col[m]
+    if (r_ == c_) {
+      sd_vec[r_] <- .cov_diag_link_forward(lp_vec[m], diag_link = diag_link)
+    } else {
+      partials_by_row[[r_]] <- c(partials_by_row[[r_]], tanh(lp_vec[m]))
+    }
+  }
+
+  L_i <- matrix(0.0, nrow = q_idm, ncol = q_idm)
+  for (r in seq_len(q_idm)) {
+    k_row <- .cov_partial_row_to_chol_corr(partials_by_row[[r]], row_index = r)
+    L_i[r, seq_len(r)] <- sd_vec[r] * k_row
+  }
+
+  L_i
+}
+
+#' Split a covariance Cholesky factor into SD and Cholesky-correlation pieces
+#' @keywords internal
+.cov_sd_and_chol_corr_from_chol <- function(L_i) {
+  L_i <- as.matrix(L_i)
+  q_idm <- nrow(L_i)
+  if (!q_idm || ncol(L_i) != q_idm) {
+    return(list(sd = numeric(0), K = matrix(0.0, nrow = 0L, ncol = 0L)))
+  }
+
+  sd_vec <- numeric(q_idm)
+  K_i <- matrix(0.0, nrow = q_idm, ncol = q_idm)
+  for (r in seq_len(q_idm)) {
+    sd_r <- sqrt(sum(L_i[r, seq_len(r)]^2))
+    sd_vec[r] <- sd_r
+    if (is.finite(sd_r) && sd_r > 0) {
+      K_i[r, seq_len(r)] <- L_i[r, seq_len(r)] / sd_r
+    } else {
+      K_i[r, r] <- 1.0
+    }
+  }
+
+  list(sd = sd_vec, K = K_i)
+}
+
+#' Recover covariance-regression baseline predictors from a Cholesky factor
+#' @keywords internal
+.cov_chol_to_lp <- function(L_i,
+                            idx_row,
+                            idx_col,
+                            diag_link = "softplus") {
+  parts <- .cov_sd_and_chol_corr_from_chol(L_i)
+  idx_row <- as.integer(idx_row %||% integer(0))
+  idx_col <- as.integer(idx_col %||% integer(0))
+  if (length(idx_row) != length(idx_col)) {
+    cli::cli_abort(c(
+      x = "Covariance-regression row and column indices must have the same length.",
+      i = "Check the marker-by-id covariance indexing before translating the Cholesky factor."
+    ))
+  }
+
+  q_idm <- length(parts$sd)
+  partial_lp_by_row <- vector("list", q_idm)
+  if (q_idm > 1L) {
+    for (r in 2:q_idm) {
+      partial_lp_by_row[[r]] <- .cov_chol_corr_row_to_partial_lp(parts$K[r, seq_len(r)])
+    }
+  }
+
+  out <- numeric(length(idx_row))
+  row_pos <- rep.int(0L, q_idm)
+  for (m in seq_along(idx_row)) {
+    r_ <- idx_row[m]
+    c_ <- idx_col[m]
+    if (r_ == c_) {
+      out[m] <- .cov_diag_link_inverse(parts$sd[r_], diag_link = diag_link)
+    } else {
+      row_pos[r_] <- row_pos[r_] + 1L
+      if (length(partial_lp_by_row[[r_]]) >= row_pos[r_]) {
+        out[m] <- partial_lp_by_row[[r_]][row_pos[r_]]
+      } else {
+        out[m] <- 0.0
+      }
+    }
+  }
+  out
+}
+
+#' Extract raw corr-association features from a Cholesky factor
+#' @keywords internal
+.assoc_corr_features_from_chol <- function(L_i) {
+  parts <- .cov_sd_and_chol_corr_from_chol(L_i)
+  K_i <- parts$K
+  q_idm <- nrow(K_i)
+  if (!q_idm || q_idm < 2L) {
+    return(numeric(0))
+  }
+
+  out <- numeric(.assoc_cov_feature_count(q_idm, include_diag = FALSE))
+  pos <- 1L
+  for (r in 2:q_idm) {
+    for (c in seq_len(r - 1L)) {
+      out[pos] <- K_i[r, c]
+      pos <- pos + 1L
+    }
+  }
+  out
 }
 
 #' Covariance-association feature count
@@ -1321,24 +1548,16 @@ gk_quadrature <- function(nodes = 15L) {
 #' Extract raw vcov-association features from a Cholesky factor
 #' @keywords internal
 .assoc_vcov_features_from_chol <- function(L_i, diagonal_only = FALSE) {
-  L_i <- as.matrix(L_i)
-  q_idm <- nrow(L_i)
-  if (!q_idm || ncol(L_i) != q_idm) {
+  parts <- .cov_sd_and_chol_corr_from_chol(L_i)
+  q_idm <- length(parts$sd)
+  if (!q_idm) {
     return(numeric(0))
   }
   if (isTRUE(diagonal_only)) {
-    return(diag(L_i))
+    return(parts$sd)
   }
 
-  out <- numeric(.assoc_cov_feature_count(q_idm, include_diag = TRUE))
-  pos <- 1L
-  for (r in seq_len(q_idm)) {
-    for (c in seq_len(r)) {
-      out[pos] <- L_i[r, c]
-      pos <- pos + 1L
-    }
-  }
-  out
+  c(.assoc_corr_features_from_chol(L_i), parts$sd)
 }
 
 #' Validate transform flags
@@ -1585,11 +1804,15 @@ gk_quadrature <- function(nodes = 15L) {
 #' - Top-level `(... || id)` sets `indep_id_re = 1`.
 #' - `(... || marker)` sets `indep_marker_re = 1`.
 #' - Nested `(... || id)` inside a marker block sets `indep_idmarker_cov = 1`.
+#' - Outer `(... || marker)` around a nested marker block disables marker-to-
+#'   marker-by-id cross-correlation, even when the inner `( ... | id )` block
+#'   itself still has correlated components.
 #'
 #' @param formulaLong Longitudinal formula with random-effects terms.
 #' @param marker_var Marker grouping variable name.
 #' @param id_var Subject grouping variable name.
-#' @return Named list with `indep_id_re`, `indep_marker_re`, and `indep_idmarker_cov`.
+#' @return Named list with `indep_id_re`, `indep_marker_re`,
+#'   `indep_idmarker_cov`, and `indep_marker_id_crosscorr`.
 #'
 #' @keywords internal
 .resolve_re_independence <- function(formulaLong, marker_var, id_var) {
@@ -1604,9 +1827,16 @@ gk_quadrature <- function(nodes = 15L) {
     op <- as.character(expr[[1]])
     if (length(op) == 1L && op %in% c("|", "||")) {
       grp <- .group_name_from_expr(expr[[3]])
-      terms <- c(terms, list(list(op = op, group = grp, context = context)))
+      nested_terms <- .collect_re_terms(expr[[2]], context = grp)
+      nested_groups <- unique(vapply(nested_terms, function(term) term$group %||% "", character(1)))
+      terms <- c(terms, list(list(
+        op = op,
+        group = grp,
+        context = context,
+        nested_groups = nested_groups[nzchar(nested_groups)]
+      )))
       # Traverse the left-hand side within the current group context.
-      return(c(terms, .collect_re_terms(expr[[2]], context = grp)))
+      return(c(terms, nested_terms))
     }
 
     for (i in seq_along(expr)[-1]) {
@@ -1618,7 +1848,12 @@ gk_quadrature <- function(nodes = 15L) {
   rhs <- formulaLong[[3]]
   terms <- .collect_re_terms(rhs, context = NULL)
   if (length(terms) == 0) {
-    return(list(indep_id_re = 0L, indep_marker_re = 0L, indep_idmarker_cov = 0L))
+    return(list(
+      indep_id_re = 0L,
+      indep_marker_re = 0L,
+      indep_idmarker_cov = 0L,
+      indep_marker_id_crosscorr = 0L
+    ))
   }
 
   indep_id_re <- any(vapply(
@@ -1636,12 +1871,53 @@ gk_quadrature <- function(nodes = 15L) {
     function(t) t$op == "||" && t$group == id_var && !is.null(t$context) && t$context == marker_var,
     logical(1)
   ))
+  indep_marker_id_crosscorr <- any(vapply(
+    terms,
+    function(t) {
+      t$op == "||" &&
+        t$group == marker_var &&
+        id_var %in% (t$nested_groups %||% character(0))
+    },
+    logical(1)
+  ))
 
   list(
     indep_id_re = as.integer(indep_id_re),
     indep_marker_re = as.integer(indep_marker_re),
-    indep_idmarker_cov = as.integer(indep_idmarker_cov)
+    indep_idmarker_cov = as.integer(indep_idmarker_cov),
+    indep_marker_id_crosscorr = as.integer(indep_marker_id_crosscorr)
   )
+}
+
+#' Validate covariance-style association structure against marker-by-id geometry
+#' @keywords internal
+.validate_assoc_cov_structure <- function(assoc,
+                                         q_idm,
+                                         diagonal_only = FALSE,
+                                         context = "association specification") {
+  assoc <- unique(as.character(assoc %||% character(0)))
+  q_idm <- as.integer(q_idm %||% 0L)
+  diagonal_only <- isTRUE(as.integer(diagonal_only) == 1L || identical(diagonal_only, TRUE))
+
+  if (!("corr" %in% assoc)) {
+    return(invisible(NULL))
+  }
+
+  if (q_idm < 2L) {
+    cli::cli_abort(c(
+      x = "{.arg corr} requires at least two marker-by-id random-effect components in {.field {context}}.",
+      i = "Use {.arg vcov} for SD-only covariance associations, or include at least two marker-by-id basis terms inside the nested {.code (... | id)} block."
+    ))
+  }
+
+  if (diagonal_only) {
+    cli::cli_abort(c(
+      x = "{.arg corr} is not available when the nested marker-by-id covariance is diagonal in {.field {context}}.",
+      i = "A nested {.code (... || id)} term removes off-diagonal marker-by-id correlation terms, so only {.arg vcov} on the SD scale is defined."
+    ))
+  }
+
+  invisible(NULL)
 }
 
 #' Extract nested marker syntax terms

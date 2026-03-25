@@ -11,7 +11,7 @@ int M_cov = (indep_idmarker_cov == 1) ? Q_idm
 /* number of off-diagonal correlation association features */
 int M_corr = (Q_idm >= 2) ? ((Q_idm * (Q_idm - 1)) %/% 2) : 0;
 
-/* number of vcov association features (lower-triangular entries of L) */
+/* number of vcov association features (off-diagonal K entries plus SD entries) */
 int M_vcov = M_cov;
 
 /* mapping m -> (r,c) in the lower triangle of L_i */

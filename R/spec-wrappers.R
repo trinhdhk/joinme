@@ -8,8 +8,9 @@
 #'
 #' Supported channels are `cv_total`, `cs_total`, `cv_mean`, `cs_mean`,
 #' `cv_marker`, `cs_marker`, `corr`, and `vcov`. The `corr` channel refers to
-#' off-diagonal correlation features, while `vcov` refers to lower-triangular
-#' Cholesky-factor entries from the subject-specific `L` matrix.
+#' off-diagonal entries of the subject-specific Cholesky-correlation factor `K`,
+#' while `vcov` refers to those same off-diagonal `K` entries together with the
+#' subject-specific standard deviations.
 #'
 #' Supported shorthands per channel:
 #' - `"identity"`, `"ispline"`, `"ispline_penalised"`, `"ispline_penalized"`,

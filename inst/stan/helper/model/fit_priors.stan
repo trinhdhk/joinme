@@ -136,18 +136,18 @@
   
   /* Association priors */
  
-  sd_alpha_cv_total ~ normal(0, 0.5);
-  sd_alpha_cs_total ~ normal(0, 0.5);
-  sd_alpha_cv_mean ~ normal(0, 0.5);
-  sd_alpha_cs_mean ~ normal(0, 0.5);
-  sd_alpha_cv_marker ~ normal(0, 0.5);
-  sd_alpha_cs_marker ~ normal(0, 0.5);
+  sd_alpha_cv_total ~ exponential(1);
+  sd_alpha_cs_total ~ exponential(1);
+  sd_alpha_cv_mean ~ exponential(1);
+  sd_alpha_cs_mean ~ exponential(1);
+  sd_alpha_cv_marker ~ exponential(1);
+  sd_alpha_cs_marker ~ exponential(1);
   // s_corr / s_vcov are global half-normal scales for covariance-style
   // association coefficients. alpha_corr / alpha_vcov are standardized
   // coefficient latents, and the effective hazard coefficients are defined in
   // transformed parameters as s_* times those latents.
-  s_corr ~ normal(0, 1);
-  s_vcov ~ normal(0, 1);
+  s_corr ~ exponential(1);
+  s_vcov ~ exponential(1);
 
   
   /* Shrinkage family switch for corr weights */

@@ -2303,11 +2303,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
             }
         }
 
-        l_i <- matrix(0.0, nrow = n_random_marker_id, ncol = n_random_marker_id)
-
-        for (m in seq_len(m_cov)) {
-            r_ <- idx_row_cov[m]
-            c_ <- idx_col_cov[m]
+        lp_vec <- vapply(seq_len(m_cov), function(m) {
             b_slice_start <- (m - 1L) * length(vec_cov_vcov) + 1L
             b_slice_end <- m * length(vec_cov_vcov)
             b_vec <- if (length(vec_cov_vcov) > 0) {
@@ -2315,15 +2311,18 @@ posterior_predict.JoinMeFit <- function(object, ...) {
             } else {
                 numeric(0)
             }
-            lp <- as.numeric(alpha_vcov_reg[draw_index, m]) +
+            as.numeric(alpha_vcov_reg[draw_index, m]) +
                 if (length(vec_cov_vcov) > 0) sum(b_vec * vec_cov_vcov) else 0 +
                 as.numeric(lambda_vcov_reg[draw_index, m]) * as.numeric(z_l_draws[draw_index, m])
-            l_i[r_, c_] <- if (r_ == c_) {
-                if (as.integer(standata_subject$vcov_diag_link %||% 0L) == 1L) exp(lp) else log1p(exp(lp))
-            } else {
-                lp
-            }
-        }
+        }, numeric(1))
+
+        l_i <- .cov_lp_to_chol(
+            lp_vec = lp_vec,
+            q_idm = n_random_marker_id,
+            idx_row = idx_row_cov,
+            idx_col = idx_col_cov,
+            diag_link = standata_subject$vcov_diag_link
+        )
 
         l_i_eff <- sweep(l_i, 1, marker_id_row_scale, `*`)
 

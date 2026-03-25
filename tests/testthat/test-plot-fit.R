@@ -773,11 +773,11 @@ test_that("plot.JoinMeFit expands vcov association plots to all components", {
     transform_coeff_draws = list(),
     transform_specs = list(),
     support = data.frame(
-      term = "vcov",
-      marker = "all",
-      lower = -1,
-      upper = 1,
-      source = "theoretical",
+      term = c("vcov[1]", "vcov[2]"),
+      marker = c("all", "all"),
+      lower = c(-1, 0.1),
+      upper = c(1, 1.5),
+      source = c("theoretical", "model_implied"),
       stringsAsFactors = FALSE
     ),
     term_map = data.frame(
@@ -827,6 +827,68 @@ test_that("plot.JoinMeFit expands vcov association plots to all components", {
   median_col <- joinme:::.quantile_name_from_prob(0.5)
   expect_equal(plots[["vcov[1]"]]$data[[median_col]], x_grid, tolerance = 1e-8)
   expect_equal(plots[["vcov[2]"]]$data[[median_col]], 2 * x_grid, tolerance = 1e-8)
+})
+
+test_that("plot.JoinMeFit uses component-specific vcov support ranges", {
+  payload <- list(
+    coeff_draws = list(
+      vcov = structure(
+        matrix(c(rep(-1, 6), rep(-2, 6)), nrow = 6, ncol = 2),
+        dimnames = list(NULL, c("alpha_vcov_eff[1]", "alpha_vcov_eff[2]"))
+      )
+    ),
+    marker_weight_draws = NULL,
+    transform_coeff_draws = list(),
+    transform_specs = list(vcov = list(type = "identity")),
+    support = data.frame(
+      term = c("vcov[1]", "vcov[2]"),
+      marker = c("all", "all"),
+      lower = c(-0.8, 0.2),
+      upper = c(0.6, 1.1),
+      source = c("model_implied", "model_implied"),
+      stringsAsFactors = FALSE
+    ),
+    term_map = data.frame(
+      term = c("vcov[1]", "vcov[2]"),
+      variable = c("alpha_vcov_eff[1]", "alpha_vcov_eff[2]"),
+      stringsAsFactors = FALSE
+    )
+  )
+
+  testthat::local_mocked_bindings(
+    .joinmefit_get_association_plot_payload = function(x, seed = 1) payload,
+    .package = "joinme"
+  )
+
+  fit <- joinme::JoinMeFit$new(
+    fit = NULL,
+    stan_data = list(),
+    formulaLong = y ~ 1 + time,
+    formulaEvent = survival::Surv(time, event) ~ 1,
+    formulaVCov = NULL,
+    config = list(
+      assoc = list(vcov = TRUE),
+      transforms = list(),
+      transforms_spec = list(vcov = list(type = "identity"))
+    ),
+    call = quote(joinme::joinme(formulaLong = y ~ 1 + time)),
+    tmax = 1,
+    dataLong = data.frame(id = c(1, 1), time = c(0, 1), marker = "m1", y = c(1, 2)),
+    dataEvent = data.frame(id = 1, time = 1.2, event = 0L)
+  )
+
+  plots <- plot(
+    fit,
+    type = "association",
+    association_options = list(
+      association_term = "vcov",
+      association_metric = "hazard"
+    ),
+    combined = FALSE
+  )
+
+  expect_equal(range(plots[["vcov[1]"]]$data$x), c(-0.8, 0.6), tolerance = 1e-8)
+  expect_equal(range(plots[["vcov[2]"]]$data$x), c(0.2, 1.1), tolerance = 1e-8)
 })
 
 test_that("plot.JoinMeFit zero-references covariance-style hazard contributions", {

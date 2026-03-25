@@ -14,9 +14,10 @@ simulate_joinme(
   n_id = 50,
   families = c("gaussian", "student_t", "binomial"),
   marker_levels = NULL,
-  n_obs_per_marker_per_id = 8,
   times_obs = seq(0, 5, length.out = 8),
-  n_t = NULL,
+  obs_time_noise_sd = 0,
+  censor_longitudinal_after_event = TRUE,
+  ...,
   seed = 42,
   covariate_formulas = list(x1 ~ rnorm(n_id), x2 ~ rnorm(n_id)),
   marker_weights = NULL,
@@ -57,7 +58,9 @@ simulate_joinme(
 Grouping terms may use \verb{weighted(group, weights = <column>)} to mirror
 fitting syntax. The referenced weight column
 should be available in generated covariates (for example via
-\code{covariate_formulas}).}
+\code{covariate_formulas}). In nested marker terms, outer \code{( ... || marker )}
+keeps marker-only and marker-by-id blocks independent, while inner
+\code{( ... || id )} makes the marker-by-id covariance diagonal.}
 
 \item{formulaEvent}{Event/survival formula (same role as in \code{joinme()}).}
 
@@ -67,8 +70,10 @@ This formula is evaluated on event-level covariates (one row per subject),
 must not include random-effect bars \code{( ... | ... )}, and must not include
 the longitudinal time variable.
 
-Internally, this formula drives subject-specific lower-triangular entries
-of \code{L_i} used to scale marker-by-id latent effects; see \code{re_params$id_marker_cov}.}
+Internally, this formula drives subject-specific standard deviations and
+Cholesky-correlation-factor rows used to build \code{L_i = SD_i * K_i}; see
+\code{re_params$id_marker_cov}.
+The default \code{~ 1} is supported and gives an intercept-only covariance regression.}
 
 \item{formulaDist}{Optional distributional regression formulas (same role as in \code{joinme()}).
 Supported LHS parameters are \code{sigma}, \code{nu}, \code{phi}, \code{alpha} (aliases:
@@ -104,6 +109,11 @@ direct monotone I-spline; \code{degree} defaults to \code{3} if omitted.
 \item \code{list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), y = exp(seq(-2, 2, length.out = 50)), n_knots = 6, degree = 3, lambda = 1)}:
 penalised monotone I-spline; defaults are \code{n_knots = 6}, \code{degree = 3},
 and \code{lambda = 1} when omitted.
+\item \code{list(type = "ispline_expit", knots = c(0.05, 0.5, 0.95), coeff = c(0, 0.25, 0.8, 1.0, 1.1), degree = 3)}:
+monotone I-spline evaluated on \code{plogis(x)}; explicit knots are supplied
+on the expit scale.
+\item \code{list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), y = seq(0.02, 0.98, length.out = 50)^0.8, n_knots = 6, degree = 3, lambda = 1)}:
+penalised monotone I-spline on \code{plogis(x)} in legacy plug-in mode.
 \item \code{list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))}:
 piecewise-linear transform; \code{x} and \code{y} are required.
 }
@@ -116,8 +126,16 @@ For monotone spline transforms during simulation:
 training pairs \code{x} and \code{y}, plus
 smoothness penalty \code{lambda}. The simulator fits the monotone spline in R
 before evaluating the transformed association. The fitted plug-in spline
-uses anchored endpoint coefficients matching the Stan-estimated path
-(first coefficient \code{0}, last coefficient \code{1}).
+uses anchored endpoint coefficients matching the Stan-estimated path:
+increasing splines run from \code{0} to \code{1}, while decreasing splines run from
+\code{1} to \code{0}. If \code{direction} is omitted, the simulator infers it from the
+supplied \verb{(x, y)} pairs.
+\item \code{type = "ispline_expit"} / \code{"ispline_expit_penalised"}: same semantics
+as the ordinary I-spline variants above, except the spline basis is built
+on \code{plogis(x)} for a bounded-domain representation. Training \code{x} values
+and explicit \code{knots} for these transform types are specified on that
+bounded expit scale. This is useful
+when the raw association feature has long tails or steep nonlinear effects.
 }
 
 In other words, simulation currently uses the legacy plug-in spline mode;
@@ -129,11 +147,19 @@ it does not estimate spline coefficients jointly inside Stan.}
 
 \item{marker_levels}{Optional marker names; defaults to \code{m1}, \code{m2}, ...}
 
-\item{n_obs_per_marker_per_id}{Target number of observations per (id, marker).}
+\item{times_obs}{Scheduled observation time grid used for every \verb{(id, marker)}
+before optional visit-time jitter and post-event censoring are applied.}
 
-\item{times_obs}{Optional candidate observation time grid.}
+\item{obs_time_noise_sd}{Optional Gaussian noise SD added independently to each
+simulated observation time after the visit schedule is chosen; noisy visit
+times are clipped to \verb{[0, time_cens]}.}
 
-\item{n_t}{Optional alias for \code{n_obs_per_marker_per_id} for compatibility.}
+\item{censor_longitudinal_after_event}{Logical; if TRUE (default), simulated
+longitudinal observations are truncated at the subject event time. If FALSE,
+the longitudinal schedule may continue after the event time up to
+\code{time_cens}.}
+
+\item{...}{Additional arguments passed to fun.}
 
 \item{seed}{RNG seed.}
 
@@ -154,8 +180,10 @@ Meaning of each channel:
 \itemize{
 \item \verb{cv_*}: current-value channels from longitudinal trajectories,
 \item \verb{cs_*}: current-slope channels from finite differences (\code{eps_cs}),
-\item \code{corr}: off-diagonal correlation features from marker-by-id random effects.
-\item \code{vcov}: lower-triangular Cholesky-factor entries from marker-by-id random effects, taken directly from the subject-specific \code{L} matrix.
+\item \code{corr}: off-diagonal entries of the subject-specific Cholesky-correlation
+factor \code{K} from marker-by-id random effects.
+\item \code{vcov}: the same off-diagonal \code{K} entries together with the
+subject-specific standard deviations.
 }
 
 You can also provide \code{formulaAssoc = ~ ...} to select channels; when present,
@@ -163,11 +191,12 @@ it overrides \code{assoc}.}
 
 \item{assoc_coefs}{Association coefficients for hazard terms.
 Non-\code{corr}/\code{vcov} terms accept scalar values. The \code{corr} term accepts a vector of
-off-diagonal correlation coefficients ordered as \verb{(2,1), (3,1), (3,2), ...}
-in lower-triangular row-major order of the marker-by-id random-effect
-covariance dimension. The \code{vcov} term accepts lower-triangular Cholesky-factor entries
-ordered as \verb{(1,1), (2,1), (2,2), ...}; when \code{||} is used in the marker-by-id
-random-effects block, only diagonal \code{L} entries are used.
+off-diagonal \code{K} coefficients ordered as \verb{(2,1), (3,1), (3,2), ...} in
+lower-triangular row-major order of the marker-by-id random-effect
+covariance dimension. The \code{vcov} term accepts the same off-diagonal \code{K}
+entries followed by the subject-specific standard deviations,
+\verb{(2,1), (3,1), (3,2), ..., sd_1, sd_2, ...}; when \code{||} is used in the
+marker-by-id random-effects block, only the standard deviation entries are used.
 
 Accepted input forms:
 \itemize{
@@ -222,25 +251,31 @@ For \code{id} and \code{marker}, each block is a list:
 \itemize{
 \item \code{latent}: deprecated compatibility input. If supplied, its implied
 lower-triangular factor is folded into the baseline \code{alpha} intercepts
-before simulation. Marker-by-id latent seeds are still drawn as iid standard
-normal values. Prefer setting \code{alpha} directly in new code,
-\item \code{alpha}: baseline linear predictors for entries of subject-specific lower
-triangular \code{L_i} (baseline when \code{formulaVCov} covariates and subject-level
-covariance perturbation are zero),
+before simulation. Marker-by-id latent seeds are still drawn as iid
+standard normal values. Prefer setting \code{alpha} directly in new code.
+\item \code{alpha}: baseline linear predictors for the subject-specific covariance
+regression entries. Diagonal positions control standard deviations;
+off-diagonal positions control the row-wise correlation-factor regression,
+on the tanh scale.
 \item \code{beta}: covariate effects from \code{formulaVCov} design matrix (systematic
 subject-to-subject covariance shifts by observed covariates),
-\item \code{lambda}: loading on an iid standard-normal subject latent perturbation,
-\item \code{diag_link}: diagonal link for \code{L_i} diagonals (\code{"softplus"} or \code{"exp"}).
+\item \code{lambda}: non-negative loading on an iid standard-normal subject latent
+perturbation; if a negative value is supplied, the simulator folds the
+sign into the latent draw so the effective model remains unchanged but
+follows the identified convention used during fitting,
+\item \code{diag_link}: link for the subject-specific standard deviations (\code{"softplus"}
+or \code{"exp"}).
 }
 
 Element-wise covariance-regression form is:
-\verb{eta_im = alpha_m + x_i^T beta_m + lambda_m * z_i}, with
-\code{z_i ~ Normal(0, 1)}. Diagonal entries of \code{L_i} apply \code{diag_link}
-to keep them positive; off-diagonal entries remain on identity scale.
-Marker-by-id latent seeds are sampled as iid standard normal values and the
-final marker-by-id effects are obtained as \verb{b_id = L_i z_id}. This means
-baseline and subject-specific covariance now both live in \code{L_i}, while
-\code{alpha}/\code{beta}/\code{lambda} control its level and heterogeneity.
+\verb{eta_\{im\} = alpha_m + x_i^T beta_m + lambda_m z_\{im\}}, with
+\code{lambda_m >= 0} and \verb{z_\{im\} ~ Normal(0, 1)}. Diagonal entries apply
+\code{diag_link} to give positive subject-specific standard deviations. Off-diagonal
+entries are mapped through \code{tanh} and then assembled row by row into a valid
+subject-specific Cholesky-correlation factor \code{K_i}. The covariance factor is
+reconstructed as \code{L_i = SD_i * K_i}. Marker-by-id latent seeds are sampled as
+iid standard normal values and the final marker-by-id effects are obtained as
+\verb{b_id = L_i z_id}.
 
 Dimension rules for \code{id_marker_cov} entries follow marker-by-id random-effect
 dimension \code{Q_idm}:
@@ -295,8 +330,6 @@ from the main \code{seed} for reproducible simulations.}
 with \code{joinme_standata()} defaults.}
 
 \item{fun}{Function to apply.}
-
-\item{...}{Additional arguments passed to fun.}
 
 \item{x}{Numeric vector on link scale.}
 

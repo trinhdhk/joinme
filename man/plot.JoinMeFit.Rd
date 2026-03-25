@@ -99,16 +99,16 @@ palette_marker Passed to \code{plot.JoinMeDynPred()} for fitted-data plots.}
 \code{association_term}, \code{association_grid}, \code{association_range},
 \code{association_points}, and \code{association_metric}. When
 \code{association_grid} is not supplied, \code{plot.JoinMeFit()} uses cached
-model-implied raw support from the fitted association channels and only falls
-back to knot support or observed-data heuristics when that cache is
+model-implied raw support from the fitted association channels and only
+falls back to knot support or observed-data heuristics when that cache is
 unavailable. \code{association_range}, when supplied, overrides those default
 range heuristics and constructs an evenly spaced raw-scale grid over the
-requested interval. \code{association_metric = "hazard"} plots the posterior
-contribution used by the fitted model. For covariance-style channels
-(\code{corr}, \code{vcov}) this contribution is zero-referenced at raw value
-\code{0} before multiplying by $\alpha$; \code{association_metric = "transform"}
-plots the transform $f(x)$ alone and therefore omits the association-coefficient
-sign.}
+requested interval.
+\code{association_metric = "hazard"} plots the posterior contribution used by
+the fitted model. For covariance-style channels (\code{corr}, \code{vcov}) this
+contribution is zero-referenced at raw value \code{0} before multiplying by
+$\alpha$; \code{association_metric = "transform"} plots the transform $f(x)$
+alone and therefore omits the association-coefficient sign.}
 
 \item{...}{Unused.}
 }

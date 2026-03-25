@@ -96,9 +96,10 @@ Available channels:
 - `cs_mean`: mean current slope across markers,
 - `cs_marker`: marker-weighted marker-level current slope,
 - `cs_total`: marker-level total current slope,
-- `corr`: off-diagonal correlation features from marker-by-id random effects,
-- `vcov`: lower-triangular Cholesky-factor entries from marker-by-id random
-  effects, taken directly from the subject-specific `L` matrix.
+- `corr`: off-diagonal entries of the subject-specific Cholesky-correlation
+  factor `K` from marker-by-id random effects,
+- `vcov`: those same off-diagonal `K` entries together with the
+  subject-specific standard deviations.
 
 ## Named vector/list coefficient syntax
 

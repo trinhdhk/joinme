@@ -33,7 +33,9 @@
 #'   and the marker block. The marker block may optionally include an inner
 #'   `( ... | id )` term for marker-by-id random effects. When the inner term is
 #'   omitted, marker-by-id random effects are disabled (Q_idm = 0). Use `||` to
-#'   enforce diagonal random-effect covariance (e.g., `(1 + time || id)`). Grouping
+#'   enforce independence. In nested marker terms, outer `( ... || marker )`
+#'   keeps marker-only and marker-by-id blocks independent, while inner
+#'   `( ... || id )` makes the marker-by-id covariance diagonal. Grouping
 #'   terms may use `weighted(group, weights = <column>)`
 #'   to define formula-scoped positive subject/group weights.
 #' @param dataLong Long-format longitudinal data with columns for id, marker, time,
@@ -44,10 +46,12 @@
 #' @param formulaVCov Covariance regression formula for id-specific marker-by-id effects.
 #'   If the marker block omits the inner `( ... | id )`, then marker-by-id effects
 #'   are absent and covariance-style associations (`corr`, `vcov`) are not allowed.
-#'   Downstream, `corr` uses off-diagonal correlation features derived from those
-#'   marker-by-id effects, whereas `vcov` uses the lower-triangular entries of the
-#'   subject-specific Cholesky factor `L` directly. The default `~ 1` is valid and
-#'   yields an intercept-only covariance regression with no subject-level slope columns.
+#'   Downstream, `corr` uses the off-diagonal entries of the subject-specific
+#'   Cholesky-correlation factor `K`, whereas `vcov` uses those off-diagonal `K`
+#'   entries together with the subject-specific standard deviations. If both
+#'   `corr` and `vcov` are requested, `vcov` is kept and `corr` is ignored with a
+#'   warning. The default `~ 1` is valid and yields an intercept-only covariance
+#'   regression with no subject-level slope columns.
 #' @param formulaDist Optional list of formulas for distributional regression. Two
 #'   forms are supported:
 #'   1. Named list with RHS-only formulas, e.g. `list(sigma = ~ 1 + time)`.
@@ -61,8 +65,9 @@
 #' @param eps_fd Positive finite-difference step for association derivatives.
 #' @param assoc Character vector specifying association components
 #'   (e.g., "cv_mean", "cs_total", "corr", "vcov"). The `corr` channel
-#'   targets off-diagonal correlation features; the `vcov` channel targets the
-#'   lower-triangular entries of the subject-specific Cholesky factor `L`.
+#'   targets off-diagonal entries of the subject-specific Cholesky-correlation
+#'   factor `K`; the `vcov` channel targets those off-diagonal `K` entries
+#'   together with the subject-specific standard deviations.
 #' @param families Optional marker-specific family specification. Can be
 #'   character family names or `jm_family(...)` entries with per-marker links.
 #'   If NULL, all markers use Gaussian responses with identity link.
@@ -70,8 +75,8 @@
 #' @param transforms Optional list specifying transformations for association terms.
 #'   Each element (cv_total, cs_total, corr, vcov) is a list with a `type` and fields
 #'   required by that type (see `build_standata_transforms()`). For covariance-style
-#'   terms, transforms apply either to off-diagonal correlation features (`corr`) or
-#'   to lower-triangular Cholesky-factor entries (`vcov`).
+#'   terms, transforms apply either to off-diagonal `K` features (`corr`) or to the
+#'   combined off-diagonal `K` plus subject-specific SD features (`vcov`).
 #' @param beta_prior Prior specification for longitudinal fixed effects.
 #' @param alpha_prior Prior specification for association parameters.
 #' @param lkj_prior Prior specification for correlation structures.
@@ -96,7 +101,8 @@
 #' @param quadrature_nodes Optional positive integer target for total quadrature
 #'   points. Allowed values are exactly `7`, `15`, `31`, `41`, `51`, and `61`.
 #'   Only the node count is passed to Stan; GK nodes/weights are fixed in Stan.
-#' @param vcov_diag_link Link for covariance regression diagonals: "softplus" or "exp".
+#' @param vcov_diag_link Link for the subject-specific standard deviation regression:
+#'   "softplus" or "exp".
 #' @param tau_sde_fixed Optional fixed tau for skew-double-exponential (0 < tau < 1).
 #' @param seed Optional random seed for deterministic components of standata.
 #' @export
@@ -593,6 +599,13 @@ joinme_standata <- function(
     )
   }
 
+  .validate_assoc_cov_structure(
+    assoc = assoc,
+    q_idm = Q_idm,
+    diagonal_only = indep_flags$indep_idmarker_cov,
+    context = "joinme_standata()"
+  )
+
   # Prepare outcomes (mixed families)
   # - y_real/y_int mirror Stan data requirements
   y_real <- as.numeric(dl[[y_var]])
@@ -754,6 +767,21 @@ joinme_standata <- function(
   }
   beta_scale <- beta_scale[seq_len(P)]
 
+  allow_marker_crosscorr_effective <- as.integer(allow_marker_crosscorr)
+  if (!allow_marker_crosscorr_effective %in% c(0L, 1L)) {
+    cli::cli_abort(c(
+      x = "{.arg allow_marker_crosscorr} must be 0/1 or FALSE/TRUE.",
+      i = "Set it to 1 to allow marker-to-marker-by-id cross-correlation when the formula structure permits it."
+    ))
+  }
+  if (as.integer(indep_flags$indep_marker_id_crosscorr %||% 0L) == 1L && allow_marker_crosscorr_effective == 1L) {
+    cli::cli_warn(c(
+      x = "Marker-to-marker-by-id cross-correlation is disabled by nested {.code || marker} syntax.",
+      i = "The outer marker double-bar makes the marker-only and marker-by-id blocks independent, so {.arg allow_marker_crosscorr} is being set to 0."
+    ))
+    allow_marker_crosscorr_effective <- 0L
+  }
+
   # Family codes (vector by marker)
   family_long <- as.integer(family_codes)
 
@@ -845,7 +873,7 @@ joinme_standata <- function(
     indep_idmarker_cov = as.integer(indep_flags$indep_idmarker_cov),
     M_corr_tf = as.integer(M_corr_tf),
     M_vcov_tf = as.integer(M_vcov_tf),
-    allow_marker_crosscorr = as.integer(allow_marker_crosscorr),
+    allow_marker_crosscorr = as.integer(allow_marker_crosscorr_effective),
     vcov_diag_link = as.integer(vcov_diag_link_code),
     use_tau_sde_fixed = as.integer(use_tau_sde_fixed),
     tau_sde_fixed = as.numeric(tau_sde_fixed_value),

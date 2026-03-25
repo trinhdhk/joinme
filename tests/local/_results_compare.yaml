@@ -1,23 +1,27 @@
 beta_long:
     - truth: -1, 0.5
-    - est: -0.945, 0.512
+    - est: -0.804, 0.045***
 beta_event:
     - truth: 0.5
-    - est: 0.456
+    - est: 0.261*
 assoc_coef:
     - truth: 1, -1, -1
-    - est: 1.08, -0.429, 0.235
+    - est: 0.052, -1, 0.085
 re_params:
-    id$sd:
-        - truth: 1, 0.25,
-        - est: 0.997, 0.0731***
+    id:
+        variance(sd^2):
+            - truth: 1, 0.0625,
+            - est: 0.997, 0.000748 ***
+        cov:
+            - truth: -0.125
+            - est: -0.0189 ***
     id_marker_cov:
         alpha:
-            - truth: 0.5, -0.5, -1
-            - est: 0.473, -0.496, -0.947
+            - truth: 0.5, -0.5, -0.5
+            - est: 0.473, -0.785, -3.32***
         lambda:
-            - truth: 0.1, 0.15, 0.2
-            - est: 0.196, 0.088, 0.194
+            - truth: 1, 0.15, 0.2
+            - est: 1.05, 0.249, 0.247
 sigma_long:
     - truth: 1
-    - est: 0.997
+    - est: 1 

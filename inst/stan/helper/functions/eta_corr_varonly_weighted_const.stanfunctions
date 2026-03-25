@@ -1,10 +1,11 @@
 /**
  * @file eta_corr_varonly_weighted_const.stanfunctions
- * @brief Off-diagonal correlation extractor from subject-specific covariance factors.
+ * @brief Off-diagonal Cholesky-correlation extractor from subject-specific covariance factors.
  *
  * @details
- * Given a lower-triangular Cholesky factor L_i, this helper reconstructs
- * off-diagonal correlations Corr_{r,c} from Sigma_i = L_i * L_i'.
+ * Given a lower-triangular covariance Cholesky factor L_i = SD_i * K_i, this
+ * helper reconstructs the off-diagonal entries of the subject-specific
+ * Cholesky-correlation factor K_i.
  *
  * IMPORTANT semantic choice:
  * - This function returns RAW off-diagonal correlations only.
@@ -14,7 +15,7 @@
  * That ordering is handled by callers as:
  *   corr_terms_raw -> transform(corr_terms_raw) -> dot(a_corr, transformed_terms)
  *
- * This guarantees the model uses a_corr * transform(corr_raw), not
+ * This guarantees the model uses a_corr * transform(K_raw), not
  * transform(a_corr * corr_raw).
  *
  * @param L_i Subject-specific Cholesky factor (Q_idm x Q_idm).
@@ -26,33 +27,26 @@ vector eta_corr_varonly_weighted_const(matrix L_i) {
   int M = (Q * (Q - 1)) %/% 2;
   int m = 1;
   vector[M] corr_terms;
+  vector[Q] sd_terms;
 
   if (Q < 2)
     return corr_terms;
 
-  // Enumerate off-diagonal correlations in lower-triangular row-major order.
+  // Recover subject-specific SDs from the row norms of L_i.
+  for (r in 1 : Q) {
+    real sd_r = 0;
+    for (k in 1 : r)
+      sd_r += square(L_i[r, k]);
+    sd_terms[r] = sqrt(sd_r);
+  }
+
+  // Enumerate off-diagonal entries of K_i = diag(1 / sd_i) * L_i.
   for (r in 2 : Q) {
     for (c in 1 : (r - 1)) {
-      real var_r = 0;   // variance of component r
-      real var_c = 0;   // variance of component c
-      real cov_rc = 0;  // covariance between r and c
-      real corr_rc;
-
-      // var_r = sum_k L[r,k]^2 for k <= r
-      for (k in 1 : r)
-        var_r += square(L_i[r, k]);
-      // var_c = sum_k L[c,k]^2 for k <= c
-      for (k in 1 : c)
-        var_c += square(L_i[c, k]);
-      // cov_rc = sum_k L[r,k] * L[c,k] for k <= c
-      for (k in 1 : c)
-        cov_rc += L_i[r, k] * L_i[c, k];
-
-      // Correlation with light numerical guard and clipping.
-      corr_rc = cov_rc / sqrt(var_r * var_c + 1e-12);
-      // corr_rc = fmax(-0.999999, fmin(0.999999, corr_rc));
-
-      corr_terms[m] = corr_rc;
+      real k_rc = 0;
+      if (sd_terms[r] > 1e-12)
+        k_rc = L_i[r, c] / sd_terms[r];
+      corr_terms[m] = fmax(-0.999999, fmin(0.999999, k_rc));
       m += 1;
     }
   }

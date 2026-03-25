@@ -44,7 +44,8 @@ spec_corr_pen <- list(
   y = exp(seq(-2, 2, length.out = 50)),
   n_knots = 6,
   degree = 3,
-  lambda = 1.0
+  lambda = 1.0,
+  direction = "increasing"
 )
 
 # Example 5: Penalised monotone I-spline (Stan-estimated coefficients)
@@ -56,6 +57,17 @@ spec_corr_pen_stan <- list(
   n_knots = 6,
   degree = 3,
   lambda = 1.0
+)
+
+# Example 6: Penalised monotone I-spline on expit(x)
+spec_corr_expit <- list(
+  type = "ispline_expit_penalised",
+  x = seq(0.02, 0.98, length.out = 50),
+  y = seq(0.02, 0.98, length.out = 50)^0.75,
+  n_knots = 6,
+  degree = 3,
+  lambda = 1.0,
+  direction = "increasing"
 )
 
 # Combine and build standata

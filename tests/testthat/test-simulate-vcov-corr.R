@@ -77,11 +77,13 @@ test_that("vcov helper returns lower-triangular Cholesky-factor entries", {
     -0.2, 0.5
   ), nrow = 2, byrow = TRUE)
 
-  expect_equal(joinme:::.assoc_vcov_features_from_chol(Li), c(0.7, -0.2, 0.5))
-  expect_equal(joinme:::.assoc_vcov_features_from_chol(Li, diagonal_only = TRUE), c(0.7, 0.5))
+  sd2 <- sqrt(sum(Li[2, ]^2))
+  expect_equal(joinme:::.assoc_corr_features_from_chol(Li), c(Li[2, 1] / sd2), tolerance = 1e-8)
+  expect_equal(joinme:::.assoc_vcov_features_from_chol(Li), c(Li[2, 1] / sd2, 0.7, sd2), tolerance = 1e-8)
+  expect_equal(joinme:::.assoc_vcov_features_from_chol(Li, diagonal_only = TRUE), c(0.7, sd2), tolerance = 1e-8)
 })
 
-test_that("simulate_joinme vcov uses lower-triangular Cholesky-factor features", {
+test_that("simulate_joinme vcov uses correlation-factor and SD features", {
   vc <- c(0.2, -0.1, 0.3)
   sim <- simulate_joinme(
     formulaLong = y ~ 1 + time + x1 +
@@ -101,7 +103,8 @@ test_that("simulate_joinme vcov uses lower-triangular Cholesky-factor features",
 
   expect_length(raw$vcov_vals, 3)
   expect_true(all(is.finite(raw$vcov_vals)))
-  expect_true(all(raw$vcov_vals[c(1, 3)] > 0))
+  expect_true(all(raw$vcov_vals[2:3] > 0))
+  expect_true(abs(raw$vcov_vals[1]) <= 1)
   expect_equal(raw$vcov, sum(vc * raw$vcov_vals), tolerance = 1e-10)
 
   vc_names <- paste0("vcov[", seq_along(vc), "]")
@@ -211,9 +214,9 @@ test_that("simulate_joinme vcov respects diagonal-only marker-by-id independence
   expect_equal(raw$vcov, sum(c(0.4, 0.6) * raw$vcov_vals), tolerance = 1e-10)
 })
 
-test_that("simulate_joinme rejects corr and vcov together", {
-  expect_error(
-    simulate_joinme(
+test_that("simulate_joinme warns and ignores corr when vcov is also requested", {
+  expect_warning(
+    sim <- simulate_joinme(
       formulaLong = y ~ 1 + time + x1 +
         (1 + time | id) +
         (0 + x1 + (1 + time | id) | marker),
@@ -224,6 +227,26 @@ test_that("simulate_joinme rejects corr and vcov together", {
       seed = 3313,
       assoc = c("corr", "vcov")
     ),
-    "cannot be used together"
+    "corr.*ignored"
+  )
+
+  expect_false(any(grepl("^corr\\[", names(sim$truth$assoc_coefs))))
+  expect_true(any(grepl("^vcov\\[", names(sim$truth$assoc_coefs))))
+})
+
+test_that("simulate_joinme rejects corr when nested marker-by-id covariance is diagonal", {
+  expect_error(
+    simulate_joinme(
+      formulaLong = y ~ 1 + time + x1 +
+        (1 + time | id) +
+        (x1 + (1 + time || id) | marker),
+      formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
+      n_id = 4,
+      n_per_marker = 3,
+      time_max = 2,
+      seed = 3314,
+      assoc = c("corr")
+    ),
+    "corr"
   )
 })

@@ -55,32 +55,32 @@ extract.JoinMeFit <- function(object,
   cfg <- object$config
 
   if (what == "association_plot") {
-    payload <- .joinmefit_get_association_plot_payload(object, seed = seed)
-    if (is.null(payload)) {
+    data <- .get_association_plot_data(object, seed = seed)
+    if (is.null(data)) {
       cli::cli_abort(c(
         x = "No association plotting data is available.",
         i = "Fit a model with association terms or refit with posterior draws available."
       ))
     }
 
-    keep_terms <- term %||% names(payload$coeff_draws %||% list())
-    keep_terms <- intersect(keep_terms, names(payload$coeff_draws %||% list()))
-    term_map <- payload$term_map %||% data.frame(term = character(0), variable = character(0), stringsAsFactors = FALSE)
+    keep_terms <- term %||% names(data$coeff_draws %||% list())
+    keep_terms <- intersect(keep_terms, names(data$coeff_draws %||% list()))
+    term_map <- data$term_map %||% data.frame(term = character(0), variable = character(0), stringsAsFactors = FALSE)
     if (!is.null(term)) {
       term_map <- term_map[term_map$term %in% keep_terms, , drop = FALSE]
     }
-    support <- payload$support %||% data.frame()
+    support <- data$support %||% data.frame()
     if (!is.null(term) && nrow(support) > 0) {
       support <- support[support$term %in% keep_terms, , drop = FALSE]
     }
 
     return(list(
-      draws = payload$coeff_draws[keep_terms],
+      draws = data$coeff_draws[keep_terms],
       term_map = term_map,
       support = support,
-      marker_weight_draws = payload$marker_weight_draws,
-      transform_coeff_draws = payload$transform_coeff_draws,
-      transform_specs = payload$transform_specs
+      marker_weight_draws = data$marker_weight_draws,
+      transform_coeff_draws = data$transform_coeff_draws,
+      transform_specs = data$transform_specs
     ))
   }
 

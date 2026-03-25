@@ -225,9 +225,9 @@
     vector[n_gk] csm_raw = eta_fd(cvm_now, cvm_fwd, eps_fd) / tmax; // mean slope
     vector[n_gk] csk_raw; // marker slope (weighted across markers)
     int M_corr_local = num_elements(a_corr);
-    vector[M_corr_local] corr_terms_raw = eta_corr_varonly_weighted_const(L_i[i]); // raw off-diagonal corr terms
+    vector[M_corr_local] corr_terms_raw = eta_corr_varonly_weighted_const(L_i[i]); // raw off-diagonal K_i terms
     int M_vcov_local = num_elements(a_vcov);
-    vector[M_vcov_local] vcov_terms_raw = eta_vcov_weighted_const(L_i[i], (M_vcov_local == Q_idm)); // raw lower-triangular L entries
+    vector[M_vcov_local] vcov_terms_raw = eta_vcov_weighted_const(L_i[i], (M_vcov_local == Q_idm)); // raw K_i off-diagonals plus SD_i entries
 
     int D_mkrs = size(v_marker);
     vector[n_gk] cv_tot_tf;

@@ -2,7 +2,7 @@
 % Please edit documentation in R/extract.R
 \name{extract.JoinMeDynPred}
 \alias{extract.JoinMeDynPred}
-  itle{Extract stored posterior draw components from dynamic prediction objects}
+\title{Extract stored posterior draw components from dynamic prediction objects}
 \usage{
 \method{extract}{JoinMeDynPred}(
   object,

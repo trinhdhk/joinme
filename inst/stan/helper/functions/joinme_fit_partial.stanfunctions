@@ -51,10 +51,10 @@
  *      Time-rescale by dividing by tmax (since time scaled to [0,1] internally)
  *
  *   d. **Covariance-style associations (corr, vcov)**:
- *      corr = sum_{r>c} a_corr[m(r,c)] * Corr_i[r,c]
- *      vcov = sum_{r>=c} a_vcov[m(r,c)] * L_i[r,c]
- *      where Corr_i[r,c] is computed from Sigma_i = L_i*L_i'
- *      and the VCOV channel uses the lower-triangular entries of L_i directly.
+ *      corr = sum_{r>c} a_corr[m(r,c)] * K_i[r,c]
+ *      vcov = sum_m a_vcov[m] * c(K_i off-diagonal, SD_i)[m]
+ *      where L_i = SD_i * K_i and K_i is the subject-specific
+ *      Cholesky-correlation factor.
  *      These are constant across time for a given subject
  *
  *   e. **Aggregate Total Features**:

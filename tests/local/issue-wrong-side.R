@@ -1,6 +1,7 @@
 devtools::load_all(quiet = TRUE)
+library(dplyr)
 
-formula_long <- y ~ 1 + time + (1 + time || id) + (0 + (1 + time | id) | marker)
+formula_long <- y ~ 1 + time + (1 + time | id) + (0 + (1 + time | id) | marker)
 formula_event <- survival::Surv(time, event) ~ x1
 seed <- 2401
 
@@ -8,21 +9,24 @@ sim <- simulate_joinme(
   formulaLong = formula_long,
   formulaEvent = formula_event,
   formulaVCov = ~ 1,
-  families = c("gaussian", "gaussian", "gaussian"),
-  n_id = 400,
-  n_obs_per_marker_per_id = 20,
-  times_obs = seq(0, 8, length.out = 20),
+  families = rep('gaussian', 20),
+  # n_markers = 6,
+  n_id = 100,
+  times_obs = seq(0, 10, length.out = 10),
+  obs_time_noise_sd = 0.5,
+  time_cens = 10,
   assoc = "vcov",
   assoc_coefs = list(
-    vcov = c(1, -1, -1)),
+    vcov = c(2, -1, -1)),
   transforms = joinme_tf(vcov = ~ softplus(x)),
-  beta_long = c(-1, 0.5),
+   baseline_hazard = list(type = "weibull", shape = 0.8, scale = 10),
+  beta_long = c(-0.5, 0.5),
   beta_event = 0.5,
   re_params = list(
-    id = list(sd = c(1, 0.25), corr = matrix(c(1, -0.5, -0.5, 1), ncol=2)),
+    id = list(sd = c(1, 0.5), corr = matrix(c(1, -0.5, -0.5, 1), ncol=2)),
     id_marker_cov = list(
-      alpha = c(0.5, -0.5, -1),
-      lambda = c(0.1, 0.15, 0.2)
+      alpha = c(0.5, -0.2, -0.2),
+      lambda = c(1, 0.5, 0.25)
     )
   ),
   seed = seed,
@@ -30,13 +34,15 @@ sim <- simulate_joinme(
   n_workers = 10
 )
 
+sim$dataLong |> filter(marker=='m1') |> summarise(n(), .by=id)
+sim$dataEvent$time
 sd_check <- joinme_standata(
   formulaLong = formula_long,
   dataLong = sim$dataLong,
   formulaEvent = formula_event,
   dataEvent = sim$dataEvent,
   formulaVCov = ~ 1,
-  families = c("gaussian", "gaussian", "gaussian"),
+  families = 'gaussian',
   assoc = "vcov",
   transforms = joinme_tf(vcov = ~ log(1 + exp(x)))
 )
@@ -73,10 +79,11 @@ control <- list(
   chains = 2,
   parallel_chains = 2,
   iter_warmup = 1000,
-  iter_sampling = 800,
+  iter_sampling = 1200,
   threads_per_chain = 6,
-  adapt_delta = 0.72,
-  max_treedepth = 12,
+  adapt_delta = 0.7,
+  max_treedepth = 13,
+  init = 1,
   force_recompile = FALSE,
   refresh = 100,
   seed = seed
@@ -86,7 +93,7 @@ fit <- joinme(
   formulaLong = formula_long,
   formulaEvent = formula_event,
   formulaVCov = ~ 1,
-  families = c("gaussian", "gaussian", "gaussian"),
+  families = 'gaussian',
   dataLong = sim$dataLong,
   dataEvent = sim$dataEvent,
   assoc = "vcov",

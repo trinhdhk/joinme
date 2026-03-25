@@ -82,8 +82,8 @@ test_that("standata validates formula requirements", {
     "vcov"
   )
 
-  expect_error(
-    joinme_standata(
+  expect_warning(
+    sd <- joinme_standata(
       formulaLong = y ~ 1 + time + x1 +
         (1 + time | id) +
         (0 + x1 + (1 + time | id) | marker),
@@ -92,8 +92,10 @@ test_that("standata validates formula requirements", {
       dataEvent = sim$dataEvent,
       assoc = c("corr", "vcov")
     ),
-    "cannot be used together"
+    "corr.*ignored"
   )
+  expect_equal(sd$assoc_corr, 0L)
+  expect_equal(sd$assoc_vcov, 1L)
 })
 
 test_that("standata builds vcov association metadata", {
@@ -185,6 +187,74 @@ test_that("standata marks top-level id double-bar terms as independent id covari
   expect_equal(sd$indep_id_re, 1L)
   expect_equal(sd$indep_marker_re, 0L)
   expect_equal(sd$indep_idmarker_cov, 0L)
+  expect_equal(sd$allow_marker_crosscorr, 1L)
+})
+
+test_that("outer marker double-bar disables cross-correlation but keeps inner id covariance", {
+  sim <- simulate_joinme_joint_student_t_cvtotal(
+    n_id = 3,
+    D = 3,
+    n_t = 2,
+    seed = 208,
+    include_marker_only = TRUE
+  )
+
+  expect_warning(
+    sd <- joinme_standata(
+      formulaLong = y ~ 1 + time + x1 +
+        (1 + time | id) +
+        (x1 + (1 + time | id) || marker),
+      dataLong = sim$dataLong,
+      formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
+      dataEvent = sim$dataEvent,
+      assoc = c("corr"),
+      allow_marker_crosscorr = 1L
+    ),
+    "cross-correlation.*set to 0"
+  )
+
+  expect_equal(sd$indep_marker_re, 1L)
+  expect_equal(sd$indep_idmarker_cov, 0L)
+  expect_equal(sd$allow_marker_crosscorr, 0L)
+  expect_equal(sd$assoc_corr, 1L)
+})
+
+test_that("inner id double-bar rejects corr and keeps cross-correlation available", {
+  sim <- simulate_joinme_joint_student_t_cvtotal(
+    n_id = 3,
+    D = 3,
+    n_t = 2,
+    seed = 209,
+    include_marker_only = TRUE
+  )
+
+  expect_error(
+    joinme_standata(
+      formulaLong = y ~ 1 + time + x1 +
+        (1 + time | id) +
+        (x1 + (1 + time || id) | marker),
+      dataLong = sim$dataLong,
+      formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
+      dataEvent = sim$dataEvent,
+      assoc = c("corr")
+    ),
+    "corr"
+  )
+
+  sd <- joinme_standata(
+    formulaLong = y ~ 1 + time + x1 +
+      (1 + time | id) +
+      (x1 + (1 + time || id) | marker),
+    dataLong = sim$dataLong,
+    formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
+    dataEvent = sim$dataEvent,
+    assoc = c("vcov")
+  )
+
+  expect_equal(sd$indep_marker_re, 0L)
+  expect_equal(sd$indep_idmarker_cov, 1L)
+  expect_equal(sd$allow_marker_crosscorr, 1L)
+  expect_equal(sd$M_vcov_tf, sd$Q_idm)
 })
 
 test_that("functional vcov constants remain vector-shaped for Stan data", {

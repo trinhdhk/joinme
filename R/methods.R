@@ -1009,7 +1009,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
       }
 
       alpha_vars <- paste0("alpha_L[", seq_len(m_cov), "]")
-      alpha_blocks <- rep("L[id:marker]", m_cov)
+      alpha_blocks <- ifelse(rc_map[, 1] == rc_map[, 2], "SD[id:marker]", "K[id:marker]")
       alpha_tbl <- .summarize_block_parameters(
         alpha_vars,
         block_labels = alpha_blocks,
@@ -1026,7 +1026,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
           cov_labels <- paste0("k", seq_len(k_cov))
         }
         beta_vars <- as.vector(outer(seq_len(m_cov), seq_len(k_cov), function(m, k) paste0("beta_L[", m, ",", k, "]")))
-        beta_blocks <- rep("L[id:marker]", length(beta_vars))
+        beta_blocks <- rep(alpha_blocks, each = k_cov)
         beta_rows <- as.vector(outer(seq_len(m_cov), seq_len(k_cov), function(m, k) rc_map[m, 1]))
         beta_cols <- as.vector(outer(seq_len(m_cov), seq_len(k_cov), function(m, k) rc_map[m, 2]))
         beta_terms <- as.vector(outer(seq_len(m_cov), seq_len(k_cov), function(m, k) {
@@ -1043,7 +1043,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
       }
 
       lambda_vars <- paste0("lambda_L[", seq_len(m_cov), "]")
-      lambda_blocks <- rep("L[id:marker]", m_cov)
+      lambda_blocks <- alpha_blocks
       lambda_tbl <- .summarize_block_parameters(
         lambda_vars,
         block_labels = lambda_blocks,

@@ -442,9 +442,11 @@ real partial_draw(
     // ---------------------------------------------------------------
     // STEP 3: Build subject-specific covariance Cholesky factor L_i
     // ---------------------------------------------------------------
-    // L_i is built via covariance regression with covariates vec_cov_vcov
-    // and component-specific latent standard normals z_L[k][m] for additional variability.
+    // L_i is built as SD_i * K_i, with diagonal SD regression and tanh-linked
+    // row-wise correlation-factor regression for the off-diagonal structure.
     matrix[n_random_marker_id, n_random_marker_id] Li = rep_matrix(0.0, n_random_marker_id, n_random_marker_id);
+    vector[n_random_marker_id] sd_i = rep_vector(1.0, n_random_marker_id);
+    int m_pos = 1;
     for (m in 1 : num_unique_cov_entries) {
       int r_ = idx_row_cov[m];
       int c_ = idx_col_cov[m];
@@ -453,12 +455,40 @@ real partial_draw(
         vector[n_cov_vcov] bL_m = beta_vcov_reg_flat[k][((m - 1) * n_cov_vcov + 1) : (m * n_cov_vcov)];
         beta_contrib = dot_product(bL_m, vec_cov_vcov);
       }
-      real lp_i = alpha_vcov_reg[k][m] + beta_contrib + lambda_vcov_reg[k][m] * z_L[k][m];
-      // lp_i: linear predictor for L_i element (r_, c_)
       if (r_ == c_) {
-        Li[r_, c_] = (vcov_diag_link == 1) ? exp(lp_i) : log1p_exp(lp_i);
+        real lp_i = alpha_vcov_reg[k][m] + beta_contrib + lambda_vcov_reg[k][m] * z_L[k][m];
+        sd_i[r_] = (vcov_diag_link == 1) ? exp(lp_i) : log1p_exp(lp_i);
+      }
+    }
+
+    for (r in 1 : n_random_marker_id) {
+      if (r == 1) {
+        Li[1, 1] = sd_i[1];
+        if (flag_indep_idmarker_cov == 0)
+          m_pos += 1;
+      } else if (flag_indep_idmarker_cov == 1) {
+        Li[r, r] = sd_i[r];
+        m_pos += 1;
       } else {
-        Li[r_, c_] = lp_i;
+        real scale_prod = 1.0;
+        for (c in 1 : r) {
+          if (c < r) {
+            real beta_contrib = 0.0;
+            if (n_cov_vcov > 0) {
+              vector[n_cov_vcov] bL_m = beta_vcov_reg_flat[k][((m_pos - 1) * n_cov_vcov + 1) : (m_pos * n_cov_vcov)];
+              beta_contrib = dot_product(bL_m, vec_cov_vcov);
+            }
+            {
+              real lp_i = alpha_vcov_reg[k][m_pos] + beta_contrib + lambda_vcov_reg[k][m_pos] * z_L[k][m_pos];
+              real z_rc = tanh(lp_i);
+              Li[r, c] = sd_i[r] * scale_prod * z_rc;
+              scale_prod *= sqrt(fmax(1e-12, 1.0 - square(z_rc)));
+            }
+          } else {
+            Li[r, r] = sd_i[r] * scale_prod;
+          }
+          m_pos += 1;
+        }
       }
     }
 

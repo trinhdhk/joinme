@@ -25,6 +25,9 @@ joinme(
 and the marker block. The marker block may optionally include an inner
 \code{( ... | id )} term for marker-by-id random effects. When omitted,
 marker-by-id effects are disabled (Q_idm = 0). Grouping terms may use
+\code{||} at either level: outer \code{( ... || marker )} keeps marker-only and
+marker-by-id blocks independent, while inner \code{( ... || id )} keeps the
+marker-by-id covariance diagonal. Grouping terms may also use
 \verb{weighted(group, weights = <column>)} to declare
 formula-scoped subject/group weights.}
 
@@ -39,9 +42,12 @@ covariates referenced in \code{formulaEvent}.}
 \item{formulaVCov}{Covariance regression formula for id-specific marker-by-id effects.
 If the marker block omits the inner \code{( ... | id )}, marker-by-id effects are
 absent and covariance-style associations (\code{corr}, \code{vcov}) are not allowed.
-When present, \code{corr} associations use the resulting off-diagonal correlation
-features, whereas \code{vcov} associations use the lower-triangular entries of the
-subject-specific Cholesky factor \code{L} directly.}
+When present, \code{corr} associations use the off-diagonal entries of the
+subject-specific Cholesky-correlation factor \code{K}, whereas \code{vcov}
+associations use those same off-diagonal \code{K} entries together with the
+subject-specific standard deviations. If both \code{corr} and \code{vcov} are
+requested, \code{vcov} is kept and \code{corr} is ignored with a warning. The
+default \code{~ 1} remains a supported intercept-only covariance regression.}
 
 \item{formulaDist}{Optional list of formulas for distributional regression.
 Supported LHS parameters are:
@@ -121,8 +127,13 @@ scaling metadata.
 }
 \details{
 Transformations are provided through a single \code{transforms} argument.
-Each element (cv_total, cs_total, corr) is defined as a list specifying a type
-and type-specific fields (see \code{build_standata_transforms()} for details).
+Each element (cv_total, cs_total, corr, vcov) is defined as a list specifying a type
+and type-specific fields (see \code{build_standata_transforms()} for details). For
+covariance-style associations, \code{corr} acts on the off-diagonal entries of the
+subject-specific Cholesky-correlation factor \code{K}, while \code{vcov} acts on those
+same off-diagonal \code{K} entries together with the subject-specific standard
+deviations. If both \code{corr} and \code{vcov} are requested, \code{vcov} is kept and
+\code{corr} is ignored with a warning.
 
 Distributional regression can be specified in two equivalent forms:
 \enumerate{
@@ -142,7 +153,7 @@ from \code{w_raw} without additional normalisation and scale the association con
 
 The returned \code{JoinMeFit} object stores a compact association plotting bundle
 containing only the posterior quantities needed to draw association curves
-(\code{alpha_*}, marker weights, spline coefficients, and cached model-implied raw
+(\verb{alpha_*}, marker weights, spline coefficients, and cached model-implied raw
 support ranges). This keeps association plotting usable after serialization
 without needing the full transient CmdStan CSV outputs.
 
@@ -179,7 +190,7 @@ The typical workflow is:
 }
 
 Example:
-\code{list(cv_total = list(type = "functional", expr = ~ log1p(x)), cs_total = list(type = "identity"), corr = list(type = "pwlin", x = c(-2, 0, 2), y = c(0.2, 1, 0.2)))}
+\code{list(cv_total = list(type = "functional", expr = ~ log1p(x)), cs_total = list(type = "identity"), corr = list(type = "pwlin", x = c(-2, 0, 2), y = c(0.2, 1, 0.2)), vcov = list(type = "identity"))}
 
 Transformation parameterisation cheat sheet:
 \itemize{
@@ -195,6 +206,14 @@ penalised monotone I-spline in legacy plug-in mode; defaults are
 \item \code{list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), n_knots = 6, degree = 3, lambda = 1)}:
 penalised monotone I-spline with Stan-estimated coefficients; if \code{knots}
 are omitted they are derived from \code{x} quantiles using \code{n_knots = 6} by default.
+\item \code{list(type = "ispline_expit", knots = c(0.05, 0.5, 0.95), coeff = c(0, 0.25, 0.8, 1.0, 1.1), degree = 3)}:
+monotone I-spline evaluated on \code{plogis(x)}; explicit \code{knots} are specified
+on the expit scale because the spline basis itself lives on that bounded
+\code{expit(x)} domain.
+\item \code{list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), y = seq(0.02, 0.98, length.out = 50)^0.8, n_knots = 6, degree = 3, lambda = 1)}:
+penalised monotone I-spline on \code{plogis(x)} in legacy plug-in mode.
+\item \code{list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), n_knots = 6, degree = 3, lambda = 1)}:
+penalised monotone I-spline on \code{plogis(x)} with Stan-estimated coefficients.
 \item \code{list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))}:
 piecewise-linear transform; both \code{x} and \code{y} are required and there are no
 additional defaults.
@@ -210,15 +229,28 @@ spline structure through \code{knots} (or \code{n_knots}) and smoothness penalty
 \item If \code{y} is supplied, \code{joinme} first fits the monotone spline to training
 pairs \verb{(x, y)} in R and passes fixed coefficients to Stan. These plug-in
 coefficients use the same anchored convention as the Stan-estimated path:
-first coefficient \code{0}, last coefficient \code{1}.
+increasing splines run from \code{0} to \code{1}, while decreasing splines run from
+\code{1} to \code{0}.
 \item If \code{y} is omitted, Stan estimates the monotone spline coefficients
-directly.
+directly. Use \code{direction = "decreasing"} when the monotone transform
+should fall as the raw association feature increases.
 }
 \item \code{x}: raw association-feature values used either to define training pairs or
 to help derive knot locations.
 \item \code{y}: optional target transformed values at those \code{x} points. Supplying \code{y}
 activates the legacy plug-in fit; omitting it activates Stan estimation.
 \item \code{lambda}: smoothness control (larger = smoother transform).
+\item \code{direction}: monotone orientation for penalised spline families. Accepted
+values are \code{"increasing"} and \code{"decreasing"}. When \code{y} is supplied, the
+plug-in fit infers the direction from the training pairs if you omit it.
+When \code{y} is omitted and Stan estimates the spline directly, the default
+remains \code{"increasing"} for backward compatibility.
+\item \code{type = "ispline_expit"} / \code{"ispline_expit_penalised"}:
+same semantics as the I-spline variants above, except the spline basis is
+built on \code{plogis(x)}. This keeps the spline input on the bounded interval
+$(0, 1)$ and is often more numerically stable when the raw association
+feature spans a wide range. Explicit \code{knots} and training \code{x} values must
+be specified on that expit scale.
 }
 
 Additional arguments are forwarded to \code{joinme_standata()} (e.g., \code{assoc},

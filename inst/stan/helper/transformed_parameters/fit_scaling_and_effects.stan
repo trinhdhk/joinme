@@ -81,21 +81,51 @@
     }
   }
   
-  /* -------------------- id-specific Cholesky factors L_i */
-  array[n_id] matrix[Q_idm, Q_idm] L_i; // subject-specific Cholesky factor
+  /* -------------------- id-specific Cholesky factors L_i = SD_i * K_i */
+  array[n_id] matrix[Q_idm, Q_idm] L_i; // subject-specific covariance Cholesky factor
   for (i in 1 : n_id) {
     matrix[Q_idm, Q_idm] Li = rep_matrix(0.0, Q_idm, Q_idm); // local accumulator
+    vector[Q_idm] sd_i = rep_vector(1.0, Q_idm); // subject-specific standard deviations
+    int m_pos = 1;
+
+    // Step 1: reconstruct the subject-specific SD regression on the diagonal.
     for (m in 1 : M_cov) {
       int r = r_idx[m];
       int c = c_idx[m];
-      real lp = alpha_L[m] + dot_product(beta_L[m], to_vector(Xcov[i]'))
-        + lambda_L[m] * z_L[i][m]; // linear predictor for L_i element
       if (r == c) {
-        Li[r, c] = (vcov_diag_link == 1) ? exp(lp) : log1p_exp(lp);
-      } else {
-        Li[r, c] = lp;
+        real lp = alpha_L[m] + dot_product(beta_L[m], to_vector(Xcov[i]'))
+          + lambda_L[m] * z_L[i][m];
+        sd_i[r] = (vcov_diag_link == 1) ? exp(lp) : log1p_exp(lp);
       }
     }
+
+    // Step 2: rebuild the Cholesky-correlation rows from tanh-linked
+    // row-specific partial correlations. This keeps K_i valid for every subject.
+    for (r in 1 : Q_idm) {
+      if (r == 1) {
+        Li[1, 1] = sd_i[1];
+        if (indep_idmarker_cov == 0)
+          m_pos += 1;
+      } else if (indep_idmarker_cov == 1) {
+        Li[r, r] = sd_i[r];
+        m_pos += 1;
+      } else {
+        real scale_prod = 1.0;
+        for (c in 1 : r) {
+          if (c < r) {
+            real lp = alpha_L[m_pos] + dot_product(beta_L[m_pos], to_vector(Xcov[i]'))
+              + lambda_L[m_pos] * z_L[i][m_pos];
+            real z_rc = tanh(lp);
+            Li[r, c] = sd_i[r] * scale_prod * z_rc;
+            scale_prod *= sqrt(fmax(1e-12, 1.0 - square(z_rc)));
+          } else {
+            Li[r, r] = sd_i[r] * scale_prod;
+          }
+          m_pos += 1;
+        }
+      }
+    }
+
     L_i[i] = Li;
   }
   

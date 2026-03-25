@@ -105,6 +105,18 @@ test_that("marker-id draw reconstruction uses scaled-time rows only in w_idm", {
 
   out <- joinme:::.reconstruct_subject_marker_id_draws(draws_matrix, standata_subject, n_draws_target = 1)
 
-  expect_equal(unname(out$matrix[1, ]), c(10, 430))
-  expect_equal(out$corr[1, , ], matrix(c(4, 6, 6, 25), nrow = 2, byrow = TRUE))
+  k21 <- tanh(3)
+  l_i <- matrix(
+    c(
+      2, 0,
+      4 * k21, 4 * sqrt(1 - k21^2)
+    ),
+    nrow = 2,
+    byrow = TRUE
+  )
+  l_i_eff <- sweep(l_i, 1, c(1, 10), `*`)
+  expected_w <- as.numeric(l_i_eff %*% c(5, 7))
+
+  expect_equal(unname(out$matrix[1, ]), expected_w, tolerance = 1e-8)
+  expect_equal(out$corr[1, , ], l_i %*% t(l_i), tolerance = 1e-8)
 })

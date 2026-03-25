@@ -4,7 +4,17 @@
 \alias{.make_time_index_metadata}
 \title{Build time-index metadata list for Stan}
 \usage{
-.make_time_index_metadata(x_cols, zid_cols, zmk_cols, zidm_cols, time_var)
+.make_time_index_metadata(
+  x_cols = NULL,
+  zid_cols = NULL,
+  zmk_cols = NULL,
+  zidm_cols = NULL,
+  time_var,
+  fixed_design = NULL,
+  id_design = NULL,
+  marker_design = NULL,
+  idm_design = NULL
+)
 }
 \value{
 named list with n_time_* and idx_time_* values.

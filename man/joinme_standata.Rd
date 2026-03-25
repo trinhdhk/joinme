@@ -42,7 +42,9 @@ joinme_standata(
 and the marker block. The marker block may optionally include an inner
 \code{( ... | id )} term for marker-by-id random effects. When the inner term is
 omitted, marker-by-id random effects are disabled (Q_idm = 0). Use \code{||} to
-enforce diagonal random-effect covariance (e.g., \code{(1 + time || id)}). Grouping
+enforce independence. In nested marker terms, outer \code{( ... || marker )}
+keeps marker-only and marker-by-id blocks independent, while inner
+\code{( ... || id )} makes the marker-by-id covariance diagonal. Grouping
 terms may use \verb{weighted(group, weights = <column>)}
 to define formula-scoped positive subject/group weights.}
 
@@ -57,9 +59,12 @@ covariates referenced in \code{formulaEvent}.}
 \item{formulaVCov}{Covariance regression formula for id-specific marker-by-id effects.
 If the marker block omits the inner \code{( ... | id )}, then marker-by-id effects
 are absent and covariance-style associations (\code{corr}, \code{vcov}) are not allowed.
-Downstream, \code{corr} uses off-diagonal correlation features derived from those
-marker-by-id effects, whereas \code{vcov} uses the lower-triangular entries of the
-subject-specific Cholesky factor \code{L} directly.}
+Downstream, \code{corr} uses the off-diagonal entries of the subject-specific
+Cholesky-correlation factor \code{K}, whereas \code{vcov} uses those off-diagonal \code{K}
+entries together with the subject-specific standard deviations. If both
+\code{corr} and \code{vcov} are requested, \code{vcov} is kept and \code{corr} is ignored with a
+warning. The default \code{~ 1} is valid and yields an intercept-only covariance
+regression with no subject-level slope columns.}
 
 \item{formulaDist}{Optional list of formulas for distributional regression. Two
 forms are supported:
@@ -80,7 +85,10 @@ Grouping factors in distributional random-effects terms may also use
 \item{eps_fd}{Positive finite-difference step for association derivatives.}
 
 \item{assoc}{Character vector specifying association components
-(e.g., "cv_mean", "cs_total", "corr", "vcov").}
+(e.g., "cv_mean", "cs_total", "corr", "vcov"). The \code{corr} channel
+targets off-diagonal entries of the subject-specific Cholesky-correlation
+factor \code{K}; the \code{vcov} channel targets those off-diagonal \code{K} entries
+together with the subject-specific standard deviations.}
 
 \item{families}{Optional marker-specific family specification. Can be
 character family names or \code{jm_family(...)} entries with per-marker links.
@@ -89,7 +97,9 @@ Supported links/inverse-links: \code{identity}, \code{log}, \code{logit}, \code{
 
 \item{transforms}{Optional list specifying transformations for association terms.
 Each element (cv_total, cs_total, corr, vcov) is a list with a \code{type} and fields
-required by that type (see \code{build_standata_transforms()}).}
+required by that type (see \code{build_standata_transforms()}). For covariance-style
+terms, transforms apply either to off-diagonal \code{K} features (\code{corr}) or to the
+combined off-diagonal \code{K} plus subject-specific SD features (\code{vcov}).}
 
 \item{beta_prior}{Prior specification for longitudinal fixed effects.}
 
@@ -129,7 +139,8 @@ via signed additive perturbations,
 points. Allowed values are exactly \code{7}, \code{15}, \code{31}, \code{41}, \code{51}, and \code{61}.
 Only the node count is passed to Stan; GK nodes/weights are fixed in Stan.}
 
-\item{vcov_diag_link}{Link for covariance regression diagonals: "softplus" or "exp".}
+\item{vcov_diag_link}{Link for the subject-specific standard deviation regression:
+"softplus" or "exp".}
 
 \item{tau_sde_fixed}{Optional fixed tau for skew-double-exponential (0 < tau < 1).}
 
@@ -148,7 +159,7 @@ index vectors indicating which columns correspond to time.
 \item n_time_beta, idx_time_beta
 \item n_time_uid,  idx_time_uid
 \item n_time_vmk,  idx_time_vmk
-\item n_time_idm, idx_time_idm
+\item n_time_idm,  idx_time_idm
 }
 }
 }

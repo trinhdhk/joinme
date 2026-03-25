@@ -14,7 +14,8 @@
 \item{id_var}{Subject grouping variable name.}
 }
 \value{
-Named list with \code{indep_id_re}, \code{indep_marker_re}, and \code{indep_idmarker_cov}.
+Named list with \code{indep_id_re}, \code{indep_marker_re},
+\code{indep_idmarker_cov}, and \code{indep_marker_id_crosscorr}.
 }
 \description{
 Uses lme4-style \code{||} parsing to determine which random-effects blocks should
@@ -23,6 +24,9 @@ be modelled with diagonal covariance structures. The resolution rules are:
 \item Top-level \code{(... || id)} sets \code{indep_id_re = 1}.
 \item \code{(... || marker)} sets \code{indep_marker_re = 1}.
 \item Nested \code{(... || id)} inside a marker block sets \code{indep_idmarker_cov = 1}.
+\item Outer \code{(... || marker)} around a nested marker block disables marker-to-
+marker-by-id cross-correlation, even when the inner \code{( ... | id )} block
+itself still has correlated components.
 }
 }
 \keyword{internal}

@@ -47,19 +47,55 @@ for (k in 1 : n_draws) {
     z_w[d] = cross + z_w_lat[k, d];
   }
 
-  // Use covariance regression to construct L_i directly from component-specific z_L[k][m]
+  // Use covariance regression to construct L_i = SD_i * K_i.
   matrix[n_random_marker_id, n_random_marker_id] Li = rep_matrix(0.0,
                                                                  n_random_marker_id,
                                                                  n_random_marker_id);
+  vector[n_random_marker_id] sd_i = rep_vector(1.0, n_random_marker_id);
+  int m_pos = 1;
   for (m in 1 : num_unique_cov_entries) {
     int r_ = idx_row_cov[m];
     int c_ = idx_col_cov[m];
-    // unpack flattened beta
-    vector[n_cov_vcov] bL_m = beta_vcov_reg_flat[k][((m - 1) * n_cov_vcov
-                             + 1) : (m * n_cov_vcov)];
-        real lp = alpha_vcov_reg[k][m] + dot_product(bL_m, vec_cov_vcov)
-          + lambda_vcov_reg[k][m] * z_L[k][m];
-    Li[r_, c_] = (r_ == c_) ? log1p_exp(lp) : lp;
+    real beta_contrib = 0.0;
+    if (n_cov_vcov > 0) {
+      vector[n_cov_vcov] bL_m = beta_vcov_reg_flat[k][((m - 1) * n_cov_vcov
+                               + 1) : (m * n_cov_vcov)];
+      beta_contrib = dot_product(bL_m, vec_cov_vcov);
+    }
+    real lp = alpha_vcov_reg[k][m] + beta_contrib + lambda_vcov_reg[k][m] * z_L[k][m];
+    if (r_ == c_)
+      sd_i[r_] = (vcov_diag_link == 1) ? exp(lp) : log1p_exp(lp);
+  }
+
+  for (r in 1 : n_random_marker_id) {
+    if (r == 1) {
+      Li[1, 1] = sd_i[1];
+      if (flag_indep_idmarker_cov == 0)
+        m_pos += 1;
+    } else if (flag_indep_idmarker_cov == 1) {
+      Li[r, r] = sd_i[r];
+      m_pos += 1;
+    } else {
+      real scale_prod = 1.0;
+      for (c in 1 : r) {
+        if (c < r) {
+            real beta_contrib = 0.0;
+            if (n_cov_vcov > 0) {
+              vector[n_cov_vcov] bL_m = beta_vcov_reg_flat[k][((m_pos - 1) * n_cov_vcov + 1) : (m_pos * n_cov_vcov)];
+              beta_contrib = dot_product(bL_m, vec_cov_vcov);
+            }
+            {
+              real lp = alpha_vcov_reg[k][m_pos] + beta_contrib + lambda_vcov_reg[k][m_pos] * z_L[k][m_pos];
+              real z_rc = tanh(lp);
+              Li[r, c] = sd_i[r] * scale_prod * z_rc;
+              scale_prod *= sqrt(fmax(1e-12, 1.0 - square(z_rc)));
+            }
+        } else {
+          Li[r, r] = sd_i[r] * scale_prod;
+        }
+        m_pos += 1;
+      }
+    }
   }
 
   matrix[n_random_marker_id, n_random_marker_id] Li_eff = diag_pre_multiply(marker_id_row_scale, Li);

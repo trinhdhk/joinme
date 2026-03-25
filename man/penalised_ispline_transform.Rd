@@ -12,6 +12,7 @@ penalised_ispline_transform(
   n_knots = 6,
   degree = 3,
   lambda = 1,
+  direction = NULL,
   weights = NULL,
   diff_order = 2
 )
@@ -34,6 +35,10 @@ penalized_ispline_transform(...)
 Larger values produce smoother fitted transforms; smaller values allow
 more local curvature.}
 
+\item{direction}{Monotone direction. Accepted values are \code{"increasing"}
+and \code{"decreasing"}. When omitted, the direction is inferred from the
+supplied \verb{(x, y)} pairs.}
+
 \item{weights}{Optional non-negative weights (same length as x).}
 
 \item{diff_order}{Integer difference order for penalty (default 2).}
@@ -49,8 +54,9 @@ This helper is the legacy plug-in constructor for \code{type = "ispline_penalise
 Its defaults are \code{n_knots = 6}, \code{degree = 3}, \code{lambda = 1.0},
 \code{weights = NULL} (equal weights), and \code{diff_order = 2}.
 Returned coefficients follow the same anchored convention as the Stan-
-estimated path: the first coefficient is fixed at \code{0}, the last coefficient
-is fixed at \code{1}, and interior coefficients are monotone increasing.
+estimated path: increasing splines run from \code{0} to \code{1}, decreasing splines
+run from \code{1} to \code{0}, and interior coefficients stay monotone in the chosen
+direction.
 Example:
 \code{penalised_ispline_transform(x = seq(-2, 2, length.out = 50), y = exp(seq(-2, 2, length.out = 50)))}
 }
