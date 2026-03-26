@@ -2,14 +2,14 @@ devtools::load_all(quiet = TRUE)
 library(dplyr)
 
 formula_long <- y ~ 1 + time + (1 + time | id) + (0 + (1 + time | id) | marker)
-formula_event <- survival::Surv(time, event) ~ x1
+formula_event <- survival::Surv(time, event) ~ splines::ns(x1, knots=2)
 seed <- 2401
 
 sim <- simulate_joinme(
   formulaLong = formula_long,
   formulaEvent = formula_event,
   formulaVCov = ~ 1,
-  families = rep('gaussian', 20),
+  families = rep('gaussian', 30),
   # n_markers = 6,
   n_id = 100,
   times_obs = seq(0, 10, length.out = 10),
@@ -81,7 +81,7 @@ control <- list(
   iter_warmup = 1000,
   iter_sampling = 1200,
   threads_per_chain = 6,
-  adapt_delta = 0.7,
+  adapt_delta = 0.68,
   max_treedepth = 13,
   init = 1,
   force_recompile = FALSE,
