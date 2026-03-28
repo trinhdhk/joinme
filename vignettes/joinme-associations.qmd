@@ -112,6 +112,24 @@ This has two practical consequences:
   available, with spline plots falling back to knot support only when the fitted
   spline support is narrower than the model-implied raw range.
 
+## Posterior association extraction and covariance-style labels
+
+Use `posterior_assoc(fit, summary = TRUE)` (or `assoc(fit, summary = TRUE)`) to
+extract association-specific posterior summaries without scanning the full model
+summary. Use `summary = FALSE` to obtain posterior draws per association term.
+
+For covariance-style channels (`corr`, `vcov`):
+
+- summaries now report readable `row` and `col` labels taken from the relevant
+  model matrices rather than raw numeric indices,
+- printed posterior association output groups `corr` and `vcov` terms in a
+  matrix-like layout,
+- the reported coefficient names correspond to the effective hazard-scale
+  quantities used by the model.
+
+This means the public posterior summaries, plotting labels, and the fitted
+hazard contribution now use the same user-facing covariance component names.
+
 # Association coefficients and naming
 
 Association coefficients are denoted with the $\alpha$ prefix (e.g., `alpha_cv_total`).

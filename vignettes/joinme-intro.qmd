@@ -214,8 +214,15 @@ fit <- joinme(
 
 ```{r intro-summaries}
 summary(fit)
+posterior_summary(fit)
 fixef(fit)
+posterior_assoc(fit, summary = TRUE)
 ```
+
+`posterior_summary()` is an alias for `summary()`. `posterior_assoc()` returns
+association-specific posterior output in a format that stays close to the main
+summary tables. For covariance-style channels (`corr`, `vcov`), the printed and
+tabular output now uses readable matrix labels instead of raw numeric indices.
 
 ### Step 6: Dynamic prediction for one subject
 
@@ -248,11 +255,27 @@ pred <- rstantools::posterior_epred(
 
 ```{r intro-plot}
 plot(pred, type = c("longitudinal", "survival"), scale = "epred", combined = TRUE)
+
+# Alternative display for the longitudinal process
+plot(
+  fit,
+  type = "longitudinal",
+  longitudinal_style = "heatmap",
+  scale = "epred",
+  threshold = 0.05
+)
 ```
 
 If `patchwork`/`cowplot` is unavailable, `combined = TRUE` falls back to the
 standard per-subject structured return (grouped by subject and outcome) instead
 of any flattened helper list.
+
+The heatmap is an alternative to the usual separated marker curves. It orders
+markers by the magnitude of posterior mean change and makes tiles transparent
+when the posterior sign certainty does not exceed `1 - threshold`.
+
+When you want to evaluate fitted curves or heatmaps at named baseline profiles,
+pass `condition = make_conditions(...)` to `plot(fit, ...)`.
 
 ### Step 8: Diagnostics and extraction helpers
 

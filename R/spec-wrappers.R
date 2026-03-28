@@ -140,6 +140,25 @@ print.joinme_priors <- function(x, ...) {
   invisible(x)
 }
 
+#' Build named plotting conditions
+#'
+#' @description
+#' `make_conditions()` is a thin wrapper around [brms::make_conditions()] so the
+#' resulting condition tables can be passed directly to `plot.JoinMeFit()`
+#' through its `condition` argument. This keeps the conditioning workflow close
+#' to `brms::conditional_effects()` while staying within the joinme interface.
+#'
+#' @param x A data frame containing the baseline covariates used to define the
+#'   conditioning rows.
+#' @param ... Additional arguments passed to [brms::make_conditions()].
+#'
+#' @return A data frame with one row per requested condition.
+#' @export
+#' @importFrom brms make_conditions
+make_conditions <- function(x, ...) {
+  brms::make_conditions(x = x, ...)
+}
+
 #' @keywords internal
 .normalise_joinme_tf_input <- function(transforms = NULL, validate = TRUE) {
   if (is.null(transforms)) {

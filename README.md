@@ -189,12 +189,38 @@ if (isTRUE(pred$metadata$marker_corr_depends_on_id)) {
 # Plot longitudinal and survival predictions
 plot(pred, type = c("longitudinal", "survival"), combined = TRUE)
 
+# Alternative longitudinal display: posterior mean change heatmap
+plot(
+  fit,
+  type = "longitudinal",
+  longitudinal_style = "heatmap",
+  scale = "epred",
+  threshold = 0.05
+)
+
+# Conditioned plotting, compatible with brms::conditional_effects workflows
+cond <- make_conditions(sim$dataEvent, vars = "x1")
+plot(
+  fit,
+  type = "longitudinal",
+  longitudinal_style = "heatmap",
+  condition = cond,
+  scale = "epred"
+)
+
+# Posterior summary/extraction helpers
+posterior_summary(fit)
+posterior_assoc(fit, summary = TRUE)
+
 # For multiple subjects with combined=TRUE: returns one combined plot per subject
 # (named list). If combiner packages are unavailable, falls back to the
 # standard subject/outcome nested list.
 # New marker levels in newdataLong are rejected; prediction marker levels must
 # match training levels. Dynamic prediction summaries marginalize latent
 # augmentation noise by averaging across dynpred posterior rows per stored draw.
+
+# Concordance uses a dense per-subject survival grid internally for stable
+# dynamic prediction at the requested horizon.
 ```
 
 Trinh Dong, 2026

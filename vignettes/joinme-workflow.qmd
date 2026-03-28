@@ -311,6 +311,12 @@ preds <- tryCatch(
 if (!is.null(preds)) head(preds$survival)
 ```
 
+`concordance(fit, ...)` now evaluates dynamic prediction on a dense per-subject
+survival grid between the landmark and the requested horizon. This keeps the
+discrimination calculation aligned with the same prediction machinery used by
+the fitted plotting helpers and avoids the instability that can arise from
+endpoint-only event prediction.
+
 Finally, we visualise the predicted survival curve. The shaded area represents the 95% credible interval, accounting for uncertainty in both the parameters and the random effects.
 
 ```{r predict-plot}
@@ -320,6 +326,34 @@ if (!is.null(preds)) {
     geom_vline(xintercept = dataEvent$time[dataEvent$id == target_id], linetype = "dashed", color = "red") +
     annotate("text", x = dataEvent$time[dataEvent$id == target_id], y = 0.1, label = "Observed event time", color = "red", hjust = 1.1)
 }
+```
+
+For fitted longitudinal displays, the heatmap is now an alternative to the
+usual separated marker curves:
+
+```{r predict-heatmap, eval=FALSE}
+plot(
+  fit,
+  type = "longitudinal",
+  longitudinal_style = "heatmap",
+  scale = "epred",
+  threshold = 0.05
+)
+```
+
+When you want those fitted displays at named baseline profiles, build them with
+`make_conditions()` and pass the result through `condition = ...`:
+
+```{r predict-conditions, eval=FALSE}
+cond <- make_conditions(dataEvent, vars = c("x1", "x2"))
+
+plot(
+  fit,
+  type = "longitudinal",
+  longitudinal_style = "heatmap",
+  condition = cond,
+  scale = "epred"
+)
 ```
 
 # Conclusion

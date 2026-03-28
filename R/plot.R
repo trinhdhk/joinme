@@ -1076,7 +1076,9 @@ plot.JoinMeDynPred <- function(
 #' @param type Plot type. Diagnostic types are `"rhat"`, `"ess_bulk"`,
 #'   `"ess_tail"`, `"mcse_mean"`, `"mcse_sd"`, `"running_mean"`, and
 #'   `"running_quantile"`. Fitted-data types are `"longitudinal"`,
-#'   `"survival"`, `"cumhaz"`, and `"association"`.
+#'   `"survival"`, `"cumhaz"`, and `"association"`. The compatibility alias
+#'   `"longitudinal_heatmap"` is treated as
+#'   `type = "longitudinal", longitudinal_style = "heatmap"`.
 #' @param pars Optional character vector of parameter names to include for
 #'   diagnostic plots.
 #' @param regex_pars Optional regular expression for parameter selection for
@@ -1092,6 +1094,21 @@ plot.JoinMeDynPred <- function(
 #'   markers.
 #' @param scale Longitudinal scale for fitted-data plots. One of `"epred"`,
 #'   `"linpred"`, or `"predict"`.
+#' @param longitudinal_style Display style for fitted longitudinal plots.
+#'   `"curves"` shows the existing separated trajectory curves with credible
+#'   bands. `"heatmap"` shows marker-level mean change over time using draw-level
+#'   aggregation across the selected subjects. The heatmap is therefore an
+#'   alternative display for the longitudinal process rather than a separate
+#'   modelling target.
+#' @param condition Optional conditioning specification for fitted-data plots.
+#'   Supply either a named list for one condition or a data frame with one row
+#'   per condition, such as the output of [make_conditions()]. Each condition
+#'   row may contain baseline covariates from the longitudinal data, the event
+#'   data, or both. For ordinary fitted trajectories, multiple rows return a
+#'   named list of condition-specific plots unless a single plot type is
+#'   requested with `combined = TRUE`, in which case the condition-specific
+#'   panels are combined. For `longitudinal_style = "heatmap"`, multiple
+#'   condition rows are shown as separate facets.
 #' @param conditioning Conditioning-time convention when `time_start` is not
 #'   supplied. `"last"` uses each subject's last observed longitudinal time,
 #'   `"origin"` uses the first observed time, and `"auto"` chooses `"last"`
@@ -1103,6 +1120,11 @@ plot.JoinMeDynPred <- function(
 #' @param time_horizon Optional prediction horizon for fitted-data prediction.
 #' @param pred_control Named list passed to `predict.JoinMeFit()` for fitted-data
 #'   plotting. By default this uses a modest draw count for plotting.
+#' @param threshold Posterior sign-certainty threshold for
+#'   `longitudinal_style = "heatmap"`. A tile is shown as significant when the
+#'   posterior probability of either a positive or a negative change, relative
+#'   to the earliest plotted time for that marker, is at least `1 - threshold`.
+#'   Tiles that do not meet that criterion are drawn transparently.
 #' @param smooth_trajectory,smooth_method,smooth_span,ci_levels,ci_type,
 #'   observed_first,facet_by,facet_scales,combined,show_data,
 #'   show_observed_line,observed_style,prediction_style,theme_fn,
@@ -1133,11 +1155,14 @@ plot.JoinMeFit <- function(x,
                            subject = NULL,
                            marker = NA,
                            scale = NULL,
+                           longitudinal_style = c("curves", "heatmap"),
+                           condition = NULL,
                            conditioning = c("auto", "last", "origin"),
                            time_start = NULL,
                            times = NULL,
                            time_horizon = NULL,
                            pred_control = list(n_samples = 100),
+                           threshold = 0.05,
                            smooth_trajectory = TRUE,
                            smooth_method = c("loess", "spline"),
                            smooth_span = 0.3,
@@ -1167,7 +1192,7 @@ plot.JoinMeFit <- function(x,
                            ...) {
     dots <- list(...)
     diagnostic_types <- c("rhat", "ess_bulk", "ess_tail", "mcse_mean", "mcse_sd", "running_mean", "running_quantile")
-    fitted_types <- c("longitudinal", "survival", "cumhaz", "association")
+    fitted_types <- c("longitudinal", "survival", "cumhaz", "association", "longitudinal_heatmap")
 
     if (!inherits(x, "JoinMeFit")) {
         cli::cli_abort("{.arg x} must be a JoinMeFit object.")
@@ -1193,7 +1218,6 @@ plot.JoinMeFit <- function(x,
             i = "Call {.fn plot} separately for diagnostics and fitted trajectories."
         ))
     }
-
     if (all(type %in% diagnostic_types)) {
         if (length(type) != 1L) {
             cli::cli_abort(c(
@@ -1213,10 +1237,24 @@ plot.JoinMeFit <- function(x,
         ))
     }
 
+    longitudinal_style <- match.arg(longitudinal_style)
     conditioning <- match.arg(conditioning)
     smooth_method <- match.arg(smooth_method)
     facet_by <- match.arg(facet_by)
     ci_type <- match.arg(ci_type)
+
+    if ("longitudinal_heatmap" %in% type) {
+        longitudinal_style <- "heatmap"
+        type <- unique(c(setdiff(type, "longitudinal_heatmap"), "longitudinal"))
+    }
+
+    if (identical(longitudinal_style, "heatmap") && (!all(type %in% c("longitudinal")) || length(type) != 1L)) {
+        cli::cli_abort(c(
+            x = "{.arg longitudinal_style = 'heatmap'} requires {.arg type = 'longitudinal'}.",
+            i = "Use the heatmap as an alternative longitudinal display, not in combination with survival, cumulative hazard, or association plots."
+        ))
+    }
+
     marker_var <- .joinmefit_call_arg_chr(x$call, "marker_var", "marker")
     marker_levels <- if (!is.null(x$dataLong) && marker_var %in% names(x$dataLong)) {
         unique(as.character(stats::na.omit(x$dataLong[[marker_var]])))
@@ -1253,11 +1291,14 @@ plot.JoinMeFit <- function(x,
         subject = subject,
         marker = marker,
         scale = scale,
+        longitudinal_style = longitudinal_style,
+        condition = condition,
         conditioning = conditioning,
         time_start = time_start,
         times = times,
         time_horizon = time_horizon,
         pred_control = pred_control,
+        threshold = threshold,
         seed = seed,
         smooth_trajectory = smooth_trajectory,
         smooth_method = smooth_method,
@@ -1275,6 +1316,277 @@ plot.JoinMeFit <- function(x,
         theme_fn = theme_fn,
         palette_marker = palette_marker
     )
+}
+
+.normalize_joinmefit_plot_conditions <- function(condition) {
+    if (is.null(condition)) {
+        return(list(rows = list(NULL), labels = NULL))
+    }
+
+    if (inherits(condition, "data.frame")) {
+        condition_df <- condition
+    } else if (is.list(condition)) {
+        condition_df <- as.data.frame(condition, stringsAsFactors = FALSE)
+    } else {
+        cli::cli_abort(c(
+            x = "{.arg condition} must be NULL, a named list, or a data frame.",
+            i = "Use a one-row named list for one condition, or pass the result of {.fn make_conditions}."
+        ))
+    }
+
+    if (!nrow(condition_df)) {
+        cli::cli_abort(c(
+            x = "{.arg condition} must contain at least one row.",
+            i = "Provide one or more condition rows to define the plotted covariate profile."
+        ))
+    }
+
+    labels <- rownames(condition_df)
+    labels[is.na(labels) | !nzchar(labels)] <- paste("Condition", which(is.na(labels) | !nzchar(labels)))
+    if (is.null(labels)) {
+        labels <- paste("Condition", seq_len(nrow(condition_df)))
+    }
+
+    rows <- lapply(seq_len(nrow(condition_df)), function(i) {
+        row_i <- condition_df[i, , drop = FALSE]
+        keep <- vapply(row_i, function(col) !all(is.na(col)), logical(1))
+        as.list(row_i[, keep, drop = FALSE])
+    })
+
+    list(rows = rows, labels = labels)
+}
+
+.coerce_joinmefit_condition_value <- function(template, value, n) {
+    value <- value[[1L]]
+
+    if (is.factor(template)) {
+        return(factor(rep(as.character(value), n), levels = levels(template), ordered = is.ordered(template)))
+    }
+    if (inherits(template, "Date")) {
+        return(rep(as.Date(value), n))
+    }
+    if (inherits(template, "POSIXct")) {
+        tz <- attr(template, "tzone") %||% ""
+        return(rep(as.POSIXct(value, tz = tz), n))
+    }
+    if (is.integer(template)) {
+        return(as.integer(rep(value, n)))
+    }
+    if (is.numeric(template)) {
+        return(as.numeric(rep(value, n)))
+    }
+    if (is.logical(template)) {
+        return(as.logical(rep(value, n)))
+    }
+
+    rep(value, n)
+}
+
+.apply_joinmefit_plot_condition <- function(data_long, data_event, condition_row, protected_columns = character(0)) {
+    if (is.null(condition_row) || !length(condition_row)) {
+        return(list(longitudinal = data_long, event = data_event))
+    }
+
+    condition_names <- names(condition_row)
+    allowed_long <- setdiff(names(data_long), protected_columns)
+    allowed_event <- setdiff(names(data_event), protected_columns)
+    unknown <- setdiff(condition_names, union(allowed_long, allowed_event))
+    if (length(unknown) > 0L) {
+        cli::cli_abort(c(
+            x = "Unknown {.arg condition} column{?s}: {paste(unknown, collapse = ', ')}.",
+            i = "Condition columns must match baseline covariates in the longitudinal or event data."
+        ))
+    }
+
+    for (nm in condition_names) {
+        if (nm %in% allowed_long && nrow(data_long) > 0L) {
+            data_long[[nm]] <- .coerce_joinmefit_condition_value(data_long[[nm]], condition_row[[nm]], nrow(data_long))
+        }
+        if (nm %in% allowed_event && nrow(data_event) > 0L) {
+            data_event[[nm]] <- .coerce_joinmefit_condition_value(data_event[[nm]], condition_row[[nm]], nrow(data_event))
+        }
+    }
+
+    list(longitudinal = data_long, event = data_event)
+}
+
+.joinmefit_longitudinal_draw_scale <- function(draw_obj, scale) {
+    if (is.null(draw_obj)) {
+        return(NULL)
+    }
+    if (!is.null(draw_obj$matrix) && !is.null(draw_obj$scale)) {
+        return(draw_obj)
+    }
+    draw_obj[[scale]] %||% NULL
+}
+
+.joinmefit_longitudinal_heatmap_data <- function(pred, scale, threshold, marker = NULL) {
+    if (!is.numeric(threshold) || length(threshold) != 1L || !is.finite(threshold) || threshold <= 0 || threshold >= 1) {
+        cli::cli_abort(c(
+            x = "{.arg threshold} must be a single number strictly between 0 and 1.",
+            i = "A common choice is {.code threshold = 0.05} for a 95% posterior sign-certainty rule."
+        ))
+    }
+
+    draws_long <- pred$draws$longitudinal
+    if (is.null(draws_long) || !length(draws_long)) {
+        cli::cli_abort(c(
+            x = "Longitudinal draw-level predictions are required for {.val longitudinal_heatmap}.",
+            i = "Call {.fn plot} on a fitted JoinMe model so the helper can build draw-level predictions automatically."
+        ))
+    }
+
+    marker_var <- pred$metadata$marker_var %||% "marker"
+    marker_source <- pred$data$longitudinal[[marker_var]]
+    marker_levels <- if (is.factor(marker_source)) {
+        levels(marker_source)
+    } else {
+        sort(unique(as.character(stats::na.omit(marker_source))))
+    }
+
+    reference_layout <- NULL
+    aggregated_matrix <- NULL
+    n_subjects <- 0L
+
+    for (id in names(draws_long)) {
+        draw_scale <- .joinmefit_longitudinal_draw_scale(draws_long[[id]], scale)
+        if (is.null(draw_scale) || is.null(draw_scale$matrix)) {
+            next
+        }
+
+        layout_i <- data.frame(
+            time = as.numeric(draw_scale$time),
+            marker = marker_levels[as.integer(draw_scale$marker_idx)],
+            stringsAsFactors = FALSE
+        )
+
+        if (!is.null(marker)) {
+            keep_cols <- as.character(layout_i$marker) %in% marker
+            layout_i <- layout_i[keep_cols, , drop = FALSE]
+            draw_scale$matrix <- draw_scale$matrix[, keep_cols, drop = FALSE]
+        }
+
+        if (!nrow(layout_i)) {
+            next
+        }
+
+        if (is.null(reference_layout)) {
+            reference_layout <- layout_i
+            aggregated_matrix <- draw_scale$matrix
+        } else {
+            same_marker <- identical(as.character(reference_layout$marker), as.character(layout_i$marker))
+            same_time <- isTRUE(all.equal(reference_layout$time, layout_i$time, tolerance = 1e-10))
+            if (!same_marker || !same_time) {
+                cli::cli_abort(c(
+                    x = "All subjects must share the same time-marker prediction grid for {.val longitudinal_heatmap}.",
+                    i = "Supply a common {.arg times} grid or use subjects with compatible marker schedules."
+                ))
+            }
+            aggregated_matrix <- aggregated_matrix + draw_scale$matrix
+        }
+        n_subjects <- n_subjects + 1L
+    }
+
+    if (is.null(reference_layout) || is.null(aggregated_matrix) || n_subjects == 0L) {
+        cli::cli_abort(c(
+            x = "No longitudinal predictions were available for the requested heatmap.",
+            i = "Check the requested {.arg subject}, {.arg marker}, and {.arg scale} filters."
+        ))
+    }
+
+    aggregated_matrix <- aggregated_matrix / n_subjects
+    by_marker <- split(seq_len(nrow(reference_layout)), as.character(reference_layout$marker))
+
+    heatmap_df <- do.call(rbind, lapply(names(by_marker), function(marker_name) {
+        idx <- by_marker[[marker_name]]
+        idx <- idx[order(reference_layout$time[idx])]
+        baseline <- aggregated_matrix[, idx[1L], drop = FALSE]
+        change_matrix <- sweep(aggregated_matrix[, idx, drop = FALSE], 1L, baseline[, 1L], FUN = "-")
+        prob_positive <- colMeans(change_matrix > 0, na.rm = TRUE)
+        prob_negative <- colMeans(change_matrix < 0, na.rm = TRUE)
+        posterior_sign_prob <- pmax(prob_positive, prob_negative)
+
+        data.frame(
+            time = reference_layout$time[idx],
+            marker = marker_name,
+            change = colMeans(change_matrix, na.rm = TRUE),
+            posterior_sign_prob = posterior_sign_prob,
+            significant = posterior_sign_prob >= (1 - threshold),
+            alpha = ifelse(posterior_sign_prob >= (1 - threshold), 1, 0),
+            stringsAsFactors = FALSE
+        )
+    }))
+
+    marker_order <- data.frame(
+        marker = names(split(heatmap_df$change, heatmap_df$marker)),
+        order_value = vapply(split(abs(heatmap_df$change), heatmap_df$marker), max, numeric(1), na.rm = TRUE),
+        stringsAsFactors = FALSE
+    )
+    marker_order <- marker_order[order(-marker_order$order_value, marker_order$marker), , drop = FALSE]
+
+    heatmap_df$marker <- factor(heatmap_df$marker, levels = marker_order$marker)
+    heatmap_df
+}
+
+.plot_joinmefit_longitudinal_heatmap <- function(x, subject, marker, scale, condition, conditioning,
+                                                 time_start, times, time_horizon, pred_control,
+                                                 threshold, seed, ci_levels, theme_fn) {
+    scale_use <- .normalize_prediction_scales(scale %||% "epred")[[1L]]
+    condition_spec <- .normalize_joinmefit_plot_conditions(condition)
+
+    plot_data <- do.call(rbind, lapply(seq_along(condition_spec$rows), function(i) {
+        pred <- .build_joinmefit_plot_prediction(
+            x = x,
+            which = "longitudinal",
+            subject = subject,
+            scale = scale_use,
+            condition = condition_spec$rows[[i]],
+            conditioning = conditioning,
+            time_start = time_start,
+            times = times,
+            time_horizon = time_horizon,
+            pred_control = pred_control,
+            seed = seed,
+            ci_levels = ci_levels,
+            pred_type = "per_marker_id"
+        )
+
+        data_i <- .joinmefit_longitudinal_heatmap_data(
+            pred = pred,
+            scale = scale_use,
+            threshold = threshold,
+            marker = marker
+        )
+        data_i$condition_label <- condition_spec$labels[[i]] %||% "Observed data"
+        data_i
+    }))
+
+    p <- ggplot2::ggplot(
+        plot_data,
+        ggplot2::aes(x = .data$time, y = .data$marker, fill = .data$change, alpha = .data$alpha)
+    ) +
+        ggplot2::geom_tile(color = NA) +
+        ggplot2::scale_alpha_identity() +
+        ggplot2::scale_fill_gradient2(
+            low = "#2166AC",
+            mid = "#F7F7F7",
+            high = "#B2182B",
+            midpoint = 0,
+            name = paste0("Change (", scale_use, ")")
+        ) +
+        ggplot2::labs(
+            x = "Time",
+            y = "Marker",
+            title = "Longitudinal mean change",
+            subtitle = "Change is measured relative to the earliest plotted time for each marker"
+        ) +
+        theme_fn()
+
+    if (length(unique(plot_data$condition_label)) > 1L) {
+        p <- p + ggplot2::facet_wrap(ggplot2::vars(.data$condition_label), scales = "free_y")
+    }
+
+    p
 }
 
 .normalize_joinmefit_association_options <- function(association_options = NULL, dots = list()) {
@@ -1414,29 +1726,105 @@ plot.JoinMeFit <- function(x,
         ggplot2::theme_minimal()
 }
 
-.plot_joinmefit_fitted <- function(x, type, subject, marker, scale, conditioning, time_start, times, time_horizon,
-                                   pred_control, seed, smooth_trajectory, smooth_method, smooth_span,
+.plot_joinmefit_fitted <- function(x, type, subject, marker, scale, longitudinal_style, condition, conditioning, time_start, times, time_horizon,
+                                   pred_control, threshold, seed, smooth_trajectory, smooth_method, smooth_span,
                                    ci_levels, ci_type, observed_first, facet_by, facet_scales, combined,
                                    show_data, show_observed_line, observed_style, prediction_style,
                                    theme_fn, palette_marker) {
+    if (identical(longitudinal_style, "heatmap")) {
+        return(.plot_joinmefit_longitudinal_heatmap(
+            x = x,
+            subject = subject,
+            marker = marker,
+            scale = scale,
+            condition = condition,
+            conditioning = conditioning,
+            time_start = time_start,
+            times = times,
+            time_horizon = time_horizon,
+            pred_control = pred_control,
+            threshold = threshold,
+            seed = seed,
+            ci_levels = ci_levels,
+            theme_fn = theme_fn
+        ))
+    }
+
+    condition_spec <- .normalize_joinmefit_plot_conditions(condition)
+    plot_types <- intersect(type, c("longitudinal", "survival", "cumhaz"))
+
+    if (length(condition_spec$rows) > 1L) {
+        plots <- lapply(seq_along(condition_spec$rows), function(i) {
+            pred <- .build_joinmefit_plot_prediction(
+                x = x,
+                which = type,
+                subject = subject,
+                scale = scale,
+                condition = condition_spec$rows[[i]],
+                conditioning = conditioning,
+                time_start = time_start,
+                times = times,
+                time_horizon = time_horizon,
+                pred_control = pred_control,
+                seed = seed,
+                ci_levels = ci_levels,
+                pred_type = "per_marker_id"
+            )
+
+            out_i <- plot(pred,
+                type = plot_types,
+                subject = subject,
+                marker = if (is.null(marker)) NA else marker,
+                scale = scale,
+                smooth_trajectory = smooth_trajectory,
+                smooth_method = smooth_method,
+                smooth_span = smooth_span,
+                ci_levels = ci_levels,
+                ci_type = ci_type,
+                observed_first = observed_first,
+                facet_by = facet_by,
+                facet_scales = facet_scales,
+                combined = combined,
+                show_data = show_data,
+                show_observed_line = show_observed_line,
+                observed_style = observed_style,
+                prediction_style = prediction_style,
+                theme_fn = theme_fn,
+                palette_marker = palette_marker)
+
+            if (inherits(out_i, "ggplot")) {
+                out_i <- out_i + ggplot2::labs(subtitle = condition_spec$labels[[i]])
+            }
+            out_i
+        })
+        names(plots) <- condition_spec$labels
+
+        if (isTRUE(combined) && length(plot_types) == 1L && all(vapply(plots, inherits, logical(1), what = "ggplot"))) {
+            return(.combine_plot_grid(plots, fallback = "input"))
+        }
+        return(plots)
+    }
+
     pred <- .build_joinmefit_plot_prediction(
         x = x,
-    which = type,
+        which = type,
         subject = subject,
         scale = scale,
+        condition = condition_spec$rows[[1L]],
         conditioning = conditioning,
         time_start = time_start,
         times = times,
         time_horizon = time_horizon,
         pred_control = pred_control,
         seed = seed,
-        ci_levels = ci_levels
+        ci_levels = ci_levels,
+        pred_type = "per_marker_id"
     )
 
     plot(pred,
-            type = intersect(type, c("longitudinal", "survival", "cumhaz")),
+         type = plot_types,
          subject = subject,
-            marker = if (is.null(marker)) NA else marker,
+         marker = if (is.null(marker)) NA else marker,
          scale = scale,
          smooth_trajectory = smooth_trajectory,
          smooth_method = smooth_method,
@@ -1455,10 +1843,13 @@ plot.JoinMeFit <- function(x,
          palette_marker = palette_marker)
 }
 
-.build_joinmefit_plot_prediction <- function(x, which, subject, scale, conditioning, time_start, times,
-                                             time_horizon, pred_control, seed, ci_levels) {
+.build_joinmefit_plot_prediction <- function(x, which, subject, scale, condition, conditioning, time_start, times,
+                                             time_horizon, pred_control, seed, ci_levels, pred_type = "per_marker_id") {
     id_var <- .joinmefit_call_arg_chr(x$call, "id_var", "id")
     time_var <- .joinmefit_call_arg_chr(x$call, "time_var", "time")
+    marker_var <- .joinmefit_call_arg_chr(x$call, "marker_var", "marker")
+    response_var <- tryCatch(all.vars(x$formulaLong)[1], error = function(e) NA_character_)
+    event_outcome_vars <- tryCatch(all.vars(x$formulaEvent[[2]]), error = function(e) character(0))
 
     data_long <- x$dataLong
     data_event <- x$dataEvent
@@ -1467,6 +1858,19 @@ plot.JoinMeFit <- function(x,
         data_long <- data_long[as.character(data_long[[id_var]]) %in% keep_ids, , drop = FALSE]
         data_event <- data_event[as.character(data_event[[id_var]]) %in% keep_ids, , drop = FALSE]
     }
+
+    data_long_plot <- data_long
+    data_event_plot <- data_event
+
+    protected_columns <- unique(stats::na.omit(c(id_var, time_var, marker_var, response_var, event_outcome_vars)))
+    conditioned_data <- .apply_joinmefit_plot_condition(
+        data_long = data_long,
+        data_event = data_event,
+        condition_row = condition,
+        protected_columns = protected_columns
+    )
+    data_long <- conditioned_data$longitudinal
+    data_event <- conditioned_data$event
 
     time_start_use <- .resolve_joinmefit_plot_time_start(
         data_long = data_long,
@@ -1478,20 +1882,20 @@ plot.JoinMeFit <- function(x,
     )
 
     process <- c(
-        if ("longitudinal" %in% which) "longitudinal",
-        if ("longitudinal" %in% which || any(c("survival", "cumhaz") %in% which)) "event"
+        if (any(c("longitudinal", "longitudinal_heatmap") %in% which)) "longitudinal",
+        if (any(c("longitudinal", "longitudinal_heatmap") %in% which) || any(c("survival", "cumhaz") %in% which)) "event"
     )
     process <- unique(process)
 
-    scale_use <- if ("longitudinal" %in% which) .normalize_prediction_scales(scale %||% c("epred", "linpred", "predict")) else NULL
+    scale_use <- if (any(c("longitudinal", "longitudinal_heatmap") %in% which)) .normalize_prediction_scales(scale %||% c("epred", "linpred", "predict")) else NULL
     control_use <- utils::modifyList(list(n_samples = 100L), pred_control %||% list())
 
-    predict.JoinMeFit(
+    pred <- predict.JoinMeFit(
         object = x,
         newdataLong = data_long,
         newdataEvent = data_event,
         process = process,
-        pred_type = "per_marker_id",
+        pred_type = pred_type,
         scale = scale_use,
         times = times,
         time_start = time_start_use,
@@ -1500,6 +1904,11 @@ plot.JoinMeFit <- function(x,
         control = control_use,
         seed = seed
     )
+
+    pred$data$longitudinal <- data_long_plot
+    pred$data$event <- data_event_plot
+    pred$metadata$plot_condition <- condition
+    pred
 }
 
 .joinmefit_call_arg_chr <- function(call_obj, arg, default = NULL) {
