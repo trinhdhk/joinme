@@ -1,7 +1,6 @@
 #' Build Stan data for joinme (time-internal scaling)
 #'
 #' @importFrom stats predict setNames
-#' @importFrom dplyr %>% .data all_of
 #'
 #' @description
 #' Standata builder for the joinme joint model (multivariate longitudinal + survival).
@@ -219,14 +218,15 @@ joinme_standata <- function(
   dataEvent$id_int <- as.integer(id_map[as.character(dataEvent[[id_var]])])
   dataLong$id_int <- as.integer(id_map[as.character(dataLong[[id_var]])])
 
-  dataLong <- dataLong |>
-    dplyr::filter(
-      !is.na(.data$id_int),
-      is.finite(.data[[time_var]]),
-      is.finite(.data[[y_var]]),
-      !is.na(.data[[marker_var]])
-    ) |>
-    dplyr::arrange(.data$id_int, .data[[marker_var]], .data[[time_var]])
+  keep_long <- !is.na(dataLong$id_int) &
+    is.finite(dataLong[[time_var]]) &
+    is.finite(dataLong[[y_var]]) &
+    !is.na(dataLong[[marker_var]])
+  dataLong <- dataLong[keep_long, , drop = FALSE]
+  if (nrow(dataLong) > 0L) {
+    ord_long <- order(dataLong$id_int, dataLong[[marker_var]], dataLong[[time_var]])
+    dataLong <- dataLong[ord_long, , drop = FALSE]
+  }
 
   dataLong[[marker_var]] <- factor(dataLong[[marker_var]])
   marker_levels <- levels(dataLong[[marker_var]])

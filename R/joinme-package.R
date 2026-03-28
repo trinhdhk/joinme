@@ -9,7 +9,6 @@
 #'
 #' @name joinme-package
 #' @aliases joinme
-#' @useDynLib joinme, .registration = TRUE
 #' @import methods
 #' @import Rcpp
 #' @importFrom rstan sampling
@@ -20,3 +19,4 @@
 #' Stan Development Team (NA). RStan: the R interface to Stan. R package version 2.36.0.9000. https://mc-stan.org
 #'
 "_PACKAGE"  # roxygen entry point for package-level docs
+## @useDynLib joinme, .registration = TRUE

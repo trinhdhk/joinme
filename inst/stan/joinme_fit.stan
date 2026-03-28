@@ -222,6 +222,7 @@ model {
     vbar,
     marker_weights_eff,
     L_i,
+    row_scale_idm,
     a_cv_total,
     a_cs_total,
     a_cv_mean,

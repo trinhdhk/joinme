@@ -171,10 +171,12 @@ if (quiet_require("cmdstanr")) {
 }
 
 # ---- RStan precompile -------------------------------------------
+
 if (quiet_require("rstan") && (Sys.getenv('JOINME_SKIP_RSTAN') != 1 || !compiled_in_cmdstanr)) {
     quack(
         " - Precompiling Stan models with RStan... You shall expect chaotic output here."
     )
+    cat('useDynLib(joinme, .registration = TRUE)\n', file = 'NAMESPACE', append = TRUE)
     options(stan.threads = 2)
     rstantools::rstan_config()
     # system("echo \"PKG_CXXFLAGS += -Wa,-mbig-obj\" >> ./src/Makevars.win")
@@ -202,7 +204,6 @@ if (quiet_require("rstan") && (Sys.getenv('JOINME_SKIP_RSTAN') != 1 || !compiled
     #       saveRDS(mod, rds_path)
     #     }))
     #   }
-}
-
+} 
 
 quit(save = "no", status = 0)

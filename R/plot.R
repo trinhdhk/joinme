@@ -1,7 +1,7 @@
 #' Enhanced Plot Method for Dynamic Prediction from Joint Models
 #'
 #' @importFrom stats na.omit
-#' @importFrom dplyr %>% all_of
+#' @importFrom stats setNames
 #'
 #' @description
 #' Produces publication-ready ggplot2 visualisations of dynamic predictions from
@@ -421,12 +421,10 @@ plot.JoinMeDynPred <- function(
     t_cond <- .conditioning_time_for_id(x, id)
 
     # Initialise plot data
-    df_pred <- quant_df |>
-        dplyr::mutate(
-            type = "prediction",
-            segment = "predict",
-            marker = as.character(.data$marker)
-        )
+    df_pred <- quant_df
+    df_pred$type <- "prediction"
+    df_pred$segment <- "predict"
+    df_pred$marker <- as.character(df_pred$marker)
 
     # Prepare observed or fitted data for the left-of-time_start region
     df_obs <- NULL
@@ -443,13 +441,10 @@ plot.JoinMeDynPred <- function(
                 if (nrow(fit_df) > 0) {
                     median_col <- .quantile_name_from_prob(0.5)
                     if (!(median_col %in% names(fit_df))) median_col <- "mean"
-                    df_obs <- fit_df |>
-                        dplyr::select(time, marker, all_of(median_col)) |>
-                        dplyr::rename(value = all_of(median_col)) |>
-                        dplyr::mutate(
-                            type = ifelse(.data$time <= t_cond, "fitted", "fitted_future"),
-                            marker = as.character(.data$marker)
-                        )
+                    df_obs <- fit_df[, c("time", "marker", median_col), drop = FALSE]
+                    names(df_obs)[names(df_obs) == median_col] <- "value"
+                    df_obs$type <- ifelse(df_obs$time <= t_cond, "fitted", "fitted_future")
+                    df_obs$marker <- as.character(df_obs$marker)
                 }
             }
             if (is.null(df_obs) || nrow(df_obs) == 0) df_obs <- NULL
@@ -463,14 +458,10 @@ plot.JoinMeDynPred <- function(
                     i = "Check the prediction input data and column names."
                 ))
             } else {
-                df_obs <- data_long_id |>
-                    dplyr::select(all_of(c(time_var, marker_var, resp_var))) |>
-                    dplyr::rename(time = all_of(time_var), marker = all_of(marker_var)) |>
-                    dplyr::mutate(
-                        type = ifelse(.data$time <= t_cond, "observed", "observed_future"),
-                        marker = as.character(.data$marker)
-                    ) |>
-                    dplyr::rename(value = all_of(resp_var))
+                df_obs <- data_long_id[, c(time_var, marker_var, resp_var), drop = FALSE]
+                names(df_obs) <- c("time", "marker", "value")
+                df_obs$type <- ifelse(df_obs$time <= t_cond, "observed", "observed_future")
+                df_obs$marker <- as.character(df_obs$marker)
             }
         }
     }
@@ -502,7 +493,7 @@ plot.JoinMeDynPred <- function(
             }
         }
         df_pred <- if (!is.null(df_pred_hist)) {
-            dplyr::bind_rows(df_pred_hist, df_pred_future)
+            tidytable::bind_rows(df_pred_hist, df_pred_future)
         } else {
             df_pred_future
         }
@@ -531,9 +522,8 @@ plot.JoinMeDynPred <- function(
             p_names <- .quantile_names_from_ci(level)
 
             if (all(p_names %in% names(df_pred))) {
-                df_ribbon <- df_pred |>
-                    dplyr::select(time, marker, all_of(p_names)) |>
-                    dplyr::rename(ymin = all_of(p_names[1]), ymax = all_of(p_names[2]))
+                df_ribbon <- df_pred[, c("time", "marker", p_names), drop = FALSE]
+                names(df_ribbon)[3:4] <- c("ymin", "ymax")
 
                 p <- p + ggplot2::geom_ribbon(
                     ggplot2::aes(x = .data$time, ymin = .data$ymin, ymax = .data$ymax,
@@ -552,8 +542,8 @@ plot.JoinMeDynPred <- function(
             q_cols <- .quantile_names_from_ci(level)
             for (qcol in q_cols) {
                 if (qcol %in% names(df_pred)) {
-                    df_line <- df_pred |> dplyr::select(time, marker, all_of(qcol)) |>
-                        dplyr::rename(value = all_of(qcol))
+                    df_line <- df_pred[, c("time", "marker", qcol), drop = FALSE]
+                    names(df_line)[3] <- "value"
                     p <- p + ggplot2::geom_line(
                         ggplot2::aes(x = .data$time, y = .data$value, color = .data$marker),
                         data = df_line,
@@ -1130,7 +1120,7 @@ plot.JoinMeDynPred <- function(
 #'   `association_metric = "hazard"` plots the posterior contribution used by
 #'   the fitted model. For covariance-style channels (`corr`, `vcov`) this
 #'   contribution is zero-referenced at raw value `0` before multiplying by
-#'   $\alpha$; `association_metric = "transform"` plots the transform $f(x)$
+#'   \eqn{\alpha}; `association_metric = "transform"` plots the transform $f(x)$
 #'   alone and therefore omits the association-coefficient sign.
 #' @param ... Unused.
 #'
@@ -1801,9 +1791,10 @@ plot.JoinMeFit <- function(x,
     }
 
     # Use different labels for hazard-scale contributions vs pure transforms so
-    # the viewer can immediately tell whether alpha has been applied.
+    # the viewer can immediately tell whether the plot is on the hazard scale
+    # or shows the transform alone.
     y_lab <- if (identical(association_metric, "hazard")) {
-        latex2exp::TeX(paste0("$\\beta \\times f(", term, ")$"))
+        latex2exp::TeX("$\\delta \\log H$")
     } else {
         paste0("f(", term, ")")
     }
@@ -2700,6 +2691,12 @@ plot.JoinMeFit <- function(x,
             matrix(0, nrow = nrow(vcov_map), ncol = 0L)
         }
         xcov <- as.matrix(stan_data$Xcov %||% matrix(0, nrow = n_id, ncol = k_cov))
+        marker_id_row_scale <- rep(1, as.integer(stan_data$Q_idm %||% 0L))
+        idx_time_idm <- as.integer(stan_data$idx_time_idm %||% integer(0))
+        idx_time_idm <- idx_time_idm[is.finite(idx_time_idm) & idx_time_idm >= 1L & idx_time_idm <= length(marker_id_row_scale)]
+        if (length(idx_time_idm) > 0L) {
+            marker_id_row_scale[idx_time_idm] <- as.numeric(stan_data$tmax %||% 1)
+        }
         li_terms <- lapply(seq_len(n_id), function(i) {
             if (nrow(vcov_map) == 0L) {
                 return(numeric(0))
@@ -2716,6 +2713,7 @@ plot.JoinMeFit <- function(x,
                 idx_col = vcov_map[, 2],
                 diag_link = stan_data$vcov_diag_link
             )
+            li <- sweep(li, 1L, marker_id_row_scale, `*`)
             .assoc_vcov_features_from_chol(
                 li,
                 diagonal_only = as.integer(stan_data$indep_idmarker_cov %||% 0L) == 1L

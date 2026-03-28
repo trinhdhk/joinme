@@ -67,6 +67,9 @@
  * @param mat_id_obs Random effects design matrix (subject-level).
  * @param mat_marker_obs Random effects design matrix (marker-level).
  * @param mat_marker_id_obs Random effects design matrix (subject-marker interact).
+ * @param marker_id_row_scale Row scaling that maps time-indexed marker-ID
+ *   covariance rows from the internal scaled-time basis back to the effective
+ *   likelihood scale.
  * @param P_sigma Number of coefficients for sigma regression.
  * @param X_sigma_obs Design matrix for sigma regression.
  * @param P_nu Number of coefficients for nu regression.
@@ -85,6 +88,7 @@
  * @param vec_cov_hazard Vector of covariates for hazard baseline.
  * @param n_basehaz_basis Number of basis functions for baseline hazard.
  * @param time_condition The conditioning time T_cond (last observation time).
+ * @param n_gk Number of Gauss-Kronrod nodes used for survival integration.
  * @param mat_basis_gk_cond Basis functions evaluated at Gauss-Kronrod nodes (0 to T_cond).
  * @param mat_fixed_gk_cond Fixed effects design matrix at GK nodes.
  * @param mat_id_gk_cond ID random effects design matrix at GK nodes.
@@ -96,6 +100,25 @@
  * @param mat_marker_id_gk_cond_fwd Forward ID-Marker random effects design matrix at GK nodes.
  * @param eps_finite_diff Epsilon for finite difference derivative approximation.
  * @param family_long Array of family codes for each observation.
+ * @param link_long Array of canonical link codes for each observation.
+ * @param max_inv_link_ops Maximum bytecode length across inverse-link programs.
+ * @param inv_link_n_ops Number of inverse-link bytecode operations per marker.
+ * @param inv_link_ops Inverse-link bytecode programs by marker.
+ * @param max_inv_link_const Maximum constant count across inverse-link programs.
+ * @param inv_link_n_const Number of inverse-link constants per marker.
+ * @param inv_link_const Inverse-link constants by marker.
+ * @param n_family_sigma Number of sigma-family parameter groups.
+ * @param marker_to_sigma_family Mapping from marker to sigma-family index.
+ * @param n_family_nu Number of nu-family parameter groups.
+ * @param marker_to_nu_family Mapping from marker to nu-family index.
+ * @param n_family_phi Number of phi-family parameter groups.
+ * @param marker_to_phi_family Mapping from marker to phi-family index.
+ * @param n_family_alpha Number of alpha-family parameter groups.
+ * @param marker_to_alpha_family Mapping from marker to alpha-family index.
+ * @param n_family_phi_beta Number of phi-beta-family parameter groups.
+ * @param marker_to_phi_beta_family Mapping from marker to phi-beta-family index.
+ * @param n_family_tau_sde Number of tau-SDE-family parameter groups.
+ * @param marker_to_tau_sde_family Mapping from marker to tau-SDE-family index.
  * @param flag_resid_dim Flag for residual dimension handling.
  * @param vcov_diag_link Link flag for covariance-regression diagonal (0 softplus, 1 exp).
  * @param use_tau_sde_fixed Flag to use fixed tau for SDE.
@@ -121,20 +144,20 @@
  * @param K_event Number of competing risks.
  * @param bs_gamma_c Array of baseline hazard spline coefficients (per draw).
  * @param gamma_hazard Array of hazard covariate coefficients (per draw).
- * @param sigma_y_shared Array of shared residual standard deviations (per draw).
- * @param sigma_marker_specific Array of marker-specific residual standard deviations (per draw).
- * @param nu_marker Array of marker-specific degrees of freedom (per draw).
- * @param phi_nb_marker Array of marker-specific dispersion parameters (per draw).
- * @param alpha_skew_marker Array of marker-specific skewness parameters (per draw).
- * @param phi_beta_marker Array of marker-specific beta precision parameters (per draw).
- * @param tau_sde_marker Array of marker-specific diffusion parameters (per draw).
+ * @param sigma_family Array of family-level residual standard deviations (per draw).
+ * @param nu_family Array of family-level degrees of freedom (per draw).
+ * @param phi_family Array of family-level dispersion parameters (per draw).
+ * @param alpha_family Array of family-level skewness parameters (per draw).
+ * @param phi_beta_family Array of family-level beta precision parameters (per draw).
+ * @param tau_sde_family Array of family-level skew-double-exponential asymmetry parameters (per draw).
  * @param coeff_assoc_cv_total Array of association coefficients for Total Current Value (per draw).
  * @param coeff_assoc_cs_total Array of association coefficients for Total Current Slope (per draw).
  * @param coeff_assoc_cv_mean Array of association coefficients for Mean Current Value (per draw).
  * @param coeff_assoc_cs_mean Array of association coefficients for Mean Current Slope (per draw).
  * @param coeff_assoc_cv_marker Array of association coefficients for Marker Current Value (per draw).
  * @param coeff_assoc_cs_marker Array of association coefficients for Marker Current Slope (per draw).
- * @param coeff_assoc_corr Array of association coefficients for Variance (per draw).
+ * @param coeff_assoc_corr Array of association coefficients for correlation components (per draw).
+ * @param coeff_assoc_vcov Array of association coefficients for variance-covariance components (per draw).
  * @param K_ord Number of ordinal categories.
  * @param cutpoints_ord Array of ordinal cutpoints (per draw).
  * @param flag_assoc_cv_total Flag for Total Current Value association.
@@ -142,11 +165,13 @@
  * @param flag_assoc_cv_mean Flag for Mean Current Value association.
  * @param flag_assoc_cv_marker Flag for Marker Current Value association.
  * @param flag_assoc_cs_mean Flag for Mean Current Slope association.
+ * @param flag_assoc_vcov Flag for variance-covariance association.
  * @param flag_assoc_cs_marker Flag for Marker Current Slope association.
- * @param flag_assoc_corr Flag for Variance association.
+ * @param flag_assoc_corr Flag for correlation association.
  * @param tf_mode_cv_tot Transform mode for Total Current Value.
+ * @param tf_mode_vcov Transform mode for variance-covariance association.
  * @param tf_mode_cs_tot Transform mode for Total Current Slope.
- * @param tf_mode_corr Transform mode for Variance.
+ * @param tf_mode_corr Transform mode for correlation association.
  * @param tf_mode_cv_mean Transform mode for Mean Current Value.
  * @param tf_mode_cv_marker Transform mode for Marker Current Value.
  * @param tf_mode_cs_mean Transform mode for Mean Current Slope.
@@ -161,11 +186,16 @@
  * @param knots_cs Knots for Slope transforms.
  * @param coeff_cs Coefficients for Slope transforms.
  * @param spline_degree_cs Spline degree for Slope transforms.
- * @param functional_ops_corr Function bytecode for Variance transforms.
- * @param const_data_corr Constants for Variance transforms.
- * @param knots_corr Knots for Variance transforms.
- * @param coeff_corr Coefficients for Variance transforms.
- * @param spline_degree_corr Spline degree for Variance transforms.
+ * @param functional_ops_corr Function bytecode for correlation transforms.
+ * @param const_data_corr Constants for correlation transforms.
+ * @param knots_corr Knots for correlation transforms.
+ * @param coeff_corr Coefficients for correlation transforms.
+ * @param spline_degree_corr Spline degree for correlation transforms.
+ * @param functional_ops_vcov Function bytecode for variance-covariance transforms.
+ * @param const_data_vcov Constants for variance-covariance transforms.
+ * @param knots_vcov Knots for variance-covariance transforms.
+ * @param coeff_vcov Coefficients for variance-covariance transforms.
+ * @param spline_degree_vcov Spline degree for variance-covariance transforms.
  * @param functional_ops_cv_mean Function bytecode for Mean Value transforms.
  * @param const_data_cv_mean Constants for Mean Value transforms.
  * @param knots_cv_mean Knots for Mean Value transforms.
@@ -188,6 +218,7 @@
  * @param spline_degree_cs_marker Spline degree for Marker Slope transforms.
  * @param flag_indep_id_re Flag for independent ID random effects.
  * @param flag_indep_marker_re Flag for independent Marker random effects.
+ * @param flag_indep_idmarker_cov Flag for diagonal-only marker-ID covariance.
  * @param flag_allow_marker_crosscorr Flag allowing cross-correlation between levels.
  * @param z_u Array of standard normal draws for ID random effects.
  * @param z_v Array of standard normal draws for Marker random effects.
@@ -310,13 +341,13 @@ real partial_draw(
     int flag_assoc_cv_mean,
     int flag_assoc_cv_marker,
     int flag_assoc_cs_mean,
-    int flag_assoc_vcov,
     int flag_assoc_cs_marker,
     int flag_assoc_corr,
+    int flag_assoc_vcov,
     int tf_mode_cv_tot,
-    int tf_mode_vcov,
     int tf_mode_cs_tot,
     int tf_mode_corr,
+    int tf_mode_vcov,
     int tf_mode_cv_mean,
     int tf_mode_cv_marker,
     int tf_mode_cs_mean,
@@ -660,7 +691,7 @@ real partial_draw(
     int M_corr_local = num_elements(coeff_assoc_corr[k]);
     vector[M_corr_local] corr_terms_raw = eta_corr_varonly_weighted_const(Li);
     int M_vcov_local = num_elements(coeff_assoc_vcov[k]);
-    vector[M_vcov_local] vcov_terms_raw = eta_vcov_weighted_const(Li, flag_indep_idmarker_cov);
+    vector[M_vcov_local] vcov_terms_raw = eta_vcov_weighted_const(Li_eff, flag_indep_idmarker_cov);
 
     // Apply association flags (0 disables the term)
     real a_cv_total = flag_assoc_cv_total * coeff_assoc_cv_total[k];

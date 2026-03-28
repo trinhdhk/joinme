@@ -56,6 +56,10 @@ sites/
 *~
 .#*
 docs
+*.json
+*.log
+*.csv
+*.txt
 
 # rstan crap
 src/

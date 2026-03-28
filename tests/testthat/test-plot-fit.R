@@ -788,7 +788,7 @@ test_that("plot.JoinMeFit expands vcov association plots to all components", {
   )
 
   testthat::local_mocked_bindings(
-    .joinmefit_get_association_plot_payload = function(x, seed = 1) payload,
+    .get_association_plot_data = function(x, seed = 1) payload,
     .package = "joinme"
   )
 
@@ -856,7 +856,7 @@ test_that("plot.JoinMeFit uses component-specific vcov support ranges", {
   )
 
   testthat::local_mocked_bindings(
-    .joinmefit_get_association_plot_payload = function(x, seed = 1) payload,
+    .get_association_plot_data = function(x, seed = 1) payload,
     .package = "joinme"
   )
 
@@ -918,7 +918,7 @@ test_that("plot.JoinMeFit zero-references covariance-style hazard contributions"
   )
 
   testthat::local_mocked_bindings(
-    .joinmefit_get_association_plot_payload = function(x, seed = 1) payload,
+    .get_association_plot_data = function(x, seed = 1) payload,
     .package = "joinme"
   )
 
@@ -993,13 +993,13 @@ test_that("association plot payload prefers effective covariance coefficients", 
     .get_draws_matrix = function(fit, variables = NULL, draws = NULL, seed = 1) {
       as.matrix(posterior::subset_draws(draws_obj, variable = variables))
     },
-    .joinmefit_model_implied_support = function(fit, stan_data, config, dataLong, seed = 1) {
+    .model_implied_support = function(fit, stan_data, config, dataLong, seed = 1) {
       data.frame(term = "vcov", marker = "all", lower = -1, upper = 1, source = "mock", stringsAsFactors = FALSE)
     },
     .package = "joinme"
   )
 
-  payload <- joinme:::.build_joinmefit_association_plot_payload(
+  payload <- joinme:::.build_association_plot_data(
     fit = structure(list(), class = "mock_fit"),
     stan_data = list(Q_idm = 1L, indep_idmarker_cov = 1L, D = 1L),
     config = list(
@@ -1068,7 +1068,7 @@ test_that("plot.JoinMeFit uses cached association plotting payload when availabl
       transforms_spec = list(
         cv_total = list(type = "functional", expr = ~ expit(x))
       ),
-      association_plot_payload = list(
+      association_plot_data = list(
         coeff_draws = list(cv_total = matrix(rep(2, 6), ncol = 1)),
         marker_weight_draws = matrix(rep(1, 6), ncol = 1),
         transform_coeff_draws = list(),

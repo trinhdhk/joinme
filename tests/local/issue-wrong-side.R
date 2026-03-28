@@ -1,23 +1,24 @@
 devtools::load_all(quiet = TRUE)
 library(dplyr)
 
-formula_long <- y ~ 1 + time + (1 + time | id) + (0 + (1 + time | id) | marker)
-formula_event <- survival::Surv(time, event) ~ splines::ns(x1, knots=2)
+formula_long <- y ~ 1 + time + (1 + time | id) + (0 + (1 + time || id) | marker)
+formula_event <- survival::Surv(time, event) ~ 1
 seed <- 2401
 
 sim <- simulate_joinme(
   formulaLong = formula_long,
   formulaEvent = formula_event,
   formulaVCov = ~ 1,
-  families = rep('gaussian', 30),
+  families = rep('gaussian', 20),
   # n_markers = 6,
-  n_id = 100,
-  times_obs = seq(0, 10, length.out = 10),
+  n_id = 80,
+  times_obs = seq(0, 10, length.out = 8),
   obs_time_noise_sd = 0.5,
   time_cens = 10,
   assoc = "vcov",
   assoc_coefs = list(
-    vcov = c(2, -1, -1)),
+    vcov = c(2, -1)),
+    # vcov = c(2, -1, -1)),
   transforms = joinme_tf(vcov = ~ softplus(x)),
    baseline_hazard = list(type = "weibull", shape = 0.8, scale = 10),
   beta_long = c(-0.5, 0.5),
@@ -34,7 +35,9 @@ sim <- simulate_joinme(
   n_workers = 10
 )
 
-sim$dataLong |> filter(marker=='m1') |> summarise(n(), .by=id)
+sim$dataLong |>
+  tidytable::filter(marker == "m1") |>
+  tidytable::summarize(n = tidytable::n(), .by = id)
 sim$dataEvent$time
 sd_check <- joinme_standata(
   formulaLong = formula_long,
@@ -78,8 +81,8 @@ control <- list(
   engine = "cmdstanr",
   chains = 2,
   parallel_chains = 2,
-  iter_warmup = 1000,
-  iter_sampling = 1200,
+  iter_warmup = 800,
+  iter_sampling = 800,
   threads_per_chain = 6,
   adapt_delta = 0.68,
   max_treedepth = 13,
@@ -104,7 +107,9 @@ fit <- joinme(
 draw_vars <- c(
   paste0("alpha_L[", seq_len(sd_check$M_vcov_tf), "]"),
   paste0("lambda_L[", seq_len(sd_check$M_vcov_tf), "]"),
-  paste0("alpha_vcov[", seq_len(sd_check$M_vcov_tf), "]")
+  paste0("alpha_vcov_eff[", seq_len(sd_check$M_vcov_tf), "]"),
+  paste0("alpha_vcov[", seq_len(sd_check$M_vcov_tf), "]"),
+  "s_vcov"
 )
 
 draws <- joinme:::.get_draws_matrix(
@@ -117,7 +122,9 @@ draws_df <- posterior::as_draws_df(joinme:::.get_draws_obj(fit$fit))
 tracked_vars <- c(
   paste0("alpha_L[", seq_len(sd_check$M_vcov_tf), "]"),
   paste0("lambda_L[", seq_len(sd_check$M_vcov_tf), "]"),
-  paste0("alpha_vcov[", seq_len(sd_check$M_vcov_tf), "]")
+  paste0("alpha_vcov_eff[", seq_len(sd_check$M_vcov_tf), "]"),
+  paste0("alpha_vcov[", seq_len(sd_check$M_vcov_tf), "]"),
+  "s_vcov"
 )
 
 chain_tbl <- data.frame(
@@ -151,7 +158,15 @@ truth_map <- c(
   stats::setNames(sim$truth$id_marker_cov_effective$lambda, paste0("lambda_L[", seq_len(sd_check$M_vcov_tf), "]")),
   sim$truth$assoc_coefs[paste0("vcov[", seq_len(sd_check$M_vcov_tf), "]")]
 )
-names(truth_map)[grepl("^vcov\\[", names(truth_map))] <- paste0("alpha_vcov[", seq_len(sd_check$M_vcov_tf), "]")
+names(truth_map)[grepl("^vcov\\[", names(truth_map))] <- paste0("alpha_vcov_eff[", seq_len(sd_check$M_vcov_tf), "]")
+truth_map[["s_vcov"]] <- NA_real_
+
+raw_assoc_truth <- data.frame(
+  parameter = paste0("alpha_vcov[", seq_len(sd_check$M_vcov_tf), "]"),
+  note = "raw latent; compare alpha_vcov_eff to hazard-scale truth",
+  row.names = NULL,
+  check.names = FALSE
+)
 
 recovery_tbl <- do.call(rbind, lapply(tracked_vars, function(var_name) {
   data.frame(
@@ -162,6 +177,7 @@ recovery_tbl <- do.call(rbind, lapply(tracked_vars, function(var_name) {
     check.names = FALSE
   )
 }))
+recovery_tbl <- tidytable::left_join(recovery_tbl, raw_assoc_truth, by = "parameter")
 
 prior_scale <- 1
 set.seed(seed)
@@ -180,6 +196,7 @@ chain_summary <- stats::aggregate(chain_tbl[, tracked_vars, drop = FALSE], by = 
 
 cat("== Recovery summary ==\n")
 print(recovery_tbl, row.names = FALSE, digits = 4)
+cat("\nNote: alpha_vcov_eff[...] is the hazard-scale association; alpha_vcov[...] is the raw latent before multiplying by s_vcov.\n")
 cat("\n== Chain means ==\n")
 print(chain_summary, row.names = FALSE, digits = 4)
 cat("\n== Prior reference (current Stan priors) ==\n")
@@ -189,7 +206,7 @@ print(utils::head(path_tbl[, c("draw", tracked_vars), drop = FALSE], 12), row.na
 cat("\n== Late draw path ==\n")
 print(utils::tail(path_tbl[, c("draw", tracked_vars), drop = FALSE], 12), row.names = FALSE, digits = 4)
 
-fit_summary <- suppressWarnings(summary(fit, draws = 100, seed = seed))
+fit_summary <- suppressWarnings(summary(fit, seed = seed))
 
 cat("\n== Summary table: association ==\n")
 print(subset(fit_summary$tables$assoc, grepl("^vcov\\[", term)), row.names = FALSE)

@@ -1131,7 +1131,8 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     tmp$Q2.5 <- round(tmp$Q2.5, digits)
     tmp$Q97.5 <- round(tmp$Q97.5, digits)
     tmp$Rhat <- round(tmp$Rhat, 3)
-    transform_param_tables[[channel]] <- dplyr::arrange(tmp, .data$channel, .data$term)
+    ord_tmp <- order(tmp$channel, tmp$term)
+    transform_param_tables[[channel]] <- tmp[ord_tmp, , drop = FALSE]
   }
   transform_params <- if (length(transform_param_tables) > 0) {
     do.call(rbind, unname(transform_param_tables))

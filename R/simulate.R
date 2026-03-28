@@ -728,6 +728,11 @@ simulate_joinme <- function(
     constants <- as.numeric(const_data %||% numeric(0))
     if (length(code) == 0L) return(as.numeric(x))
 
+    unary_ops <- c(6L, 7L, 8L, 9L, 10L, 11L, 13L, 14L, 15L, 16L, 17L, 18L, 19L, 20L, 21L, 22L, 23L, 24L, 25L, 26L)
+    if (code[[1]] %in% unary_ops) {
+      code <- c(0L, code)
+    }
+
     stack <- numeric(0)
     const_idx <- 1L
     for (op in code) {
@@ -1790,6 +1795,19 @@ simulate_joinme <- function(
 
   re_id_effective <- .sim_resolve_re_block_cfg(re_params$id %||% list(), K_id, "id")
   re_marker_effective <- .sim_resolve_re_block_cfg(re_params$marker %||% list(), K_mk, "marker")
+  if (K_id > 1L && as.integer(indep_flags$indep_id_re %||% 0L) == 1L) {
+    id_corr_offdiag <- re_id_effective$corr
+    diag(id_corr_offdiag) <- 0
+    if (any(abs(id_corr_offdiag) > 1e-8)) {
+      cli::cli_warn(c(
+        x = "Top-level {.code || id} requests independent subject-level random effects in {.fn simulate_joinme}.",
+        i = "Ignoring nonzero off-diagonal entries in {.arg re_params$id$corr}."
+      ))
+    }
+    re_id_effective$corr <- diag(K_id)
+    re_id_effective$cov <- diag(as.numeric(re_id_effective$sd), K_id, K_id)^2
+    re_id_effective$Lcorr <- diag(K_id)
+  }
   re_id_effective_internal <- re_id_effective
   if (length(idx_time_uid) > 0L) {
     re_id_effective_internal$sd[idx_time_uid] <- re_id_effective_internal$sd[idx_time_uid] * time_scale_internal
@@ -1876,7 +1894,7 @@ simulate_joinme <- function(
     )
   }
 
-  .sim_align_len <- function(x, n, default) {
+  .sim_align_len <- function(x, n, default, arg_name = "parameter") {
     if (n <= 0) return(numeric(0))
     if (is.null(x)) {
       default <- as.numeric(default)
@@ -1889,11 +1907,18 @@ simulate_joinme <- function(
     }
     x <- as.numeric(x)
     if (length(x) == 1L) return(rep(x, n))
-    if (length(x) != n) {
+    if (length(x) < n) {
       cli::cli_abort(c(
         x = "Length mismatch in covariance-regression parameter specification.",
         i = "Expected length {n}, got {length(x)}."
       ))
+    }
+    if (length(x) > n) {
+      cli::cli_warn(c(
+        x = "Ignoring extra covariance-regression values in {.arg {arg_name}}.",
+        i = "The current marker-by-id covariance structure uses {n} component{?s}, but {length(x)} value{?s} were supplied."
+      ))
+      return(x[seq_len(n)])
     }
     x
   }
@@ -1992,8 +2017,8 @@ simulate_joinme <- function(
   } else {
     numeric(0)
   }
-  alpha_cov <- .sim_align_len(re_cov_cfg$alpha, M_cov, default = default_alpha_cov)
-  lambda_cov <- .sim_align_len(re_cov_cfg$lambda, M_cov, default = default_lambda_cov)
+  alpha_cov <- .sim_align_len(re_cov_cfg$alpha, M_cov, default = default_alpha_cov, arg_name = "re_params$id_marker_cov$alpha")
+  lambda_cov <- .sim_align_len(re_cov_cfg$lambda, M_cov, default = default_lambda_cov, arg_name = "re_params$id_marker_cov$lambda")
   if (any(!is.finite(alpha_cov))) {
     cli::cli_abort(c(
       x = "{.arg re_params$id_marker_cov$alpha} must contain only finite values.",
@@ -2288,7 +2313,7 @@ simulate_joinme <- function(
 
   .sim_vcov_features <- function(i) {
     if (K_idm < 1) return(numeric(0))
-    Li <- matrix(L_i[i, , ], nrow = K_idm, ncol = K_idm)
+    Li <- matrix(L_i_eff[i, , ], nrow = K_idm, ncol = K_idm)
     if (!all(is.finite(Li))) {
       return(rep(0.0, M_vcov))
     }

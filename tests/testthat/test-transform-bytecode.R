@@ -35,3 +35,14 @@ test_that("parse_transform_expr treats unary minus as 0-x", {
     c(2, 0, -3)
   )
 })
+
+test_that("legacy unary bytecode is normalised with implicit PUSH_X", {
+  legacy_softplus <- .normalize_bytecode_program(bytecode = 24L, const_data = numeric(0))
+
+  expect_equal(legacy_softplus$bytecode, c(0L, 24L))
+  expect_equal(eval_bytecode_scalar(2.5, legacy_softplus$bytecode, legacy_softplus$const_data), .softplus(2.5))
+  expect_equal(
+    eval_bytecode_vector(c(-2, 0, 3), 24L, numeric(0)),
+    .softplus(c(-2, 0, 3))
+  )
+})

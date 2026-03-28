@@ -52,8 +52,8 @@
  *
  *   d. **Covariance-style associations (corr, vcov)**:
  *      corr = sum_{r>c} a_corr[m(r,c)] * K_i[r,c]
- *      vcov = sum_m a_vcov[m] * c(K_i off-diagonal, SD_i)[m]
- *      where L_i = SD_i * K_i and K_i is the subject-specific
+ *      vcov = sum_m a_vcov[m] * c(K_i off-diagonal, SD_i_eff)[m]
+ *      where L_i_eff = SD_i_eff * K_i and K_i is the subject-specific
  *      Cholesky-correlation factor.
  *      These are constant across time for a given subject
  *
@@ -122,6 +122,25 @@
  * @param y_int Array of integer response values (for ordinal/count).
  * @param trials Array of trial counts for binomial outcomes.
  * @param family_long Array of family codes for each observation.
+ * @param link_long Array of canonical link codes for each observation.
+ * @param max_inv_link_ops Maximum bytecode length across inverse-link programs.
+ * @param inv_link_n_ops Number of inverse-link bytecode operations per marker.
+ * @param inv_link_ops Inverse-link bytecode programs by marker.
+ * @param max_inv_link_const Maximum constant count across inverse-link programs.
+ * @param inv_link_n_const Number of inverse-link constants per marker.
+ * @param inv_link_const Inverse-link constants by marker.
+ * @param n_family_sigma Number of sigma-family parameter groups.
+ * @param marker_to_sigma_family Mapping from marker to sigma-family index.
+ * @param n_family_nu Number of nu-family parameter groups.
+ * @param marker_to_nu_family Mapping from marker to nu-family index.
+ * @param n_family_phi Number of phi-family parameter groups.
+ * @param marker_to_phi_family Mapping from marker to phi-family index.
+ * @param n_family_alpha Number of alpha-family parameter groups.
+ * @param marker_to_alpha_family Mapping from marker to alpha-family index.
+ * @param n_family_phi_beta Number of phi-beta-family parameter groups.
+ * @param marker_to_phi_beta_family Mapping from marker to phi-beta-family index.
+ * @param n_family_tau_sde Number of tau-SDE-family parameter groups.
+ * @param marker_to_tau_sde_family Mapping from marker to tau-SDE-family index.
  * @param flag_resid_dim Integer flag for residual dimension options.
  * @param use_tau_sde_fixed Integer flag to use fixed tau for SDE.
  * @param tau_sde_fixed Fixed tau value for SDE (0 < tau < 1).
@@ -196,13 +215,12 @@
  * @param v_marker Random effects (marker-level).
  * @param w_idm Random effects (scaled subject-marker).
  * @param wbar_i Mean of random effects per subject (for centring).
- * @param sigma_y Base residual standard deviation.
- * @param sigma_marker Marker-specific residual scales.
- * @param nu_marker Marker-specific degrees of freedom (t-dist).
- * @param phi_nb_marker Marker-specific dispersion (neg-binomial).
- * @param alpha_skew_marker Marker-specific skewness (skew-normal).
- * @param phi_beta_marker Marker-specific precision (beta).
- * @param tau_sde_marker Marker-specific SDE diffusion scales.
+ * @param sigma_family Family-level residual standard deviations.
+ * @param nu_family Family-level degrees of freedom.
+ * @param phi_family Family-level dispersion parameters.
+ * @param alpha_family Family-level skewness parameters.
+ * @param phi_beta_family Family-level beta precision parameters.
+ * @param tau_sde_family Family-level skew-double-exponential asymmetry parameters.
  * @param K_ord Number of ordinal categories.
  * @param cutpoints_ord Cutpoints for ordinal models.
  * @param p_w Number of survival covariates.
@@ -214,9 +232,11 @@
  * @param Bs_gk_c B-spline basis at Gauss-Kronrod nodes.
  * @param S_event Event times.
  * @param d_event Event indicators.
+ * @param subject_weights Per-subject likelihood weights.
  * @param K_event Number of competing risks.
  * @param event_type Type of event for each subject.
  * @param eps_fd Finite difference epsilon step size.
+ * @param n_gk Number of Gauss-Kronrod nodes used for survival integration.
  * @param X_gk_now Design matrix at GK nodes (current).
  * @param X_gk_fwd Design matrix at GK nodes (forward).
  * @param Z_id_gk_now Random effect design matrix at GK nodes (id, current).
@@ -236,6 +256,8 @@
  * @param vbar Mean of random effects (global).
  * @param marker_weights_eff Signed marker weights used in marker-aggregated association channels.
  * @param L_i Cholesky factors for random effects.
+ * @param row_scale_idm Row scaling that maps time-indexed marker-by-id covariance
+ *   rows from the internal scaled-time basis back to the effective likelihood scale.
  * @param a_cv_total Association weight (Total Current Value).
  * @param a_cs_total Association weight (Total Current Slope).
  * @param a_cv_mean Association weight (Mean Current Value).
@@ -247,6 +269,7 @@
  * @param tf_mode_cv_tot Transformation mode (CV Total).
  * @param tf_mode_cs_tot Transformation mode (CS Total).
  * @param tf_mode_corr Transformation mode (CORR).
+ * @param tf_mode_vcov Transformation mode (VCOV).
  * @param tf_mode_cv_mean Transformation mode (CV Mean).
  * @param tf_mode_cv_marker Transformation mode (CV Marker).
  * @param tf_mode_cs_mean Transformation mode (CS Mean).
@@ -266,6 +289,11 @@
  * @param knots_corr Spline knots (CORR).
  * @param coeff_corr Spline coefficients (CORR).
  * @param spline_degree_corr Spline degree (CORR).
+ * @param functional_ops_vcov Functional operations (VCOV).
+ * @param const_data_vcov Constant data (VCOV).
+ * @param knots_vcov Spline knots (VCOV).
+ * @param coeff_vcov Spline coefficients (VCOV).
+ * @param spline_degree_vcov Spline degree (VCOV).
  * @param functional_ops_cv_mean Functional operations (CV Mean).
  * @param const_data_cv_mean Constant data (CV Mean).
  * @param knots_cv_mean Spline knots (CV Mean).
@@ -435,6 +463,7 @@ real partial_joinme(
     vector vbar,
     vector marker_weights_eff,
     array[] matrix L_i,
+    vector row_scale_idm,
     real a_cv_total,
     real a_cs_total,
     real a_cv_mean,
@@ -854,7 +883,8 @@ real partial_joinme(
     int M_corr_local = num_elements(a_corr);
     vector[M_corr_local] corr_terms_raw = eta_corr_varonly_weighted_const(L_i[i]);
     int M_vcov_local = num_elements(a_vcov);
-    vector[M_vcov_local] vcov_terms_raw = eta_vcov_weighted_const(L_i[i], (M_vcov_local == Q_idm));
+    matrix[Q_idm, Q_idm] L_i_eff_assoc = diag_pre_multiply(row_scale_idm, L_i[i]);
+    vector[M_vcov_local] vcov_terms_raw = eta_vcov_weighted_const(L_i_eff_assoc, (M_vcov_local == Q_idm));
 
     // STEP 2.4: Apply nonlinear transformations
     // Each association feature can be transformed flexibly before entering hazard

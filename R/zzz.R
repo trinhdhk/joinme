@@ -1,9 +1,9 @@
 # File overview:
-# - Registers NSE symbols used in dplyr pipelines.
+# - Registers NSE symbols used in tidy evaluation helpers.
 # - Prevents R CMD check notes for predict/plot helpers.
 
-# Global variable bindings for dplyr NSE and other functions
-# These are used in dplyr pipelines and prevent R CMD check warnings
+# Global variable bindings for tidy evaluation helpers
+# These are used in tidytable/dplyr-style code and prevent R CMD check warnings
 
 #' @keywords internal
 utils::globalVariables(c(
@@ -11,9 +11,9 @@ utils::globalVariables(c(
   # dplyr NSE variables used in predict and plot functions
   "time", "marker", "id", 
   "variable", "metric", "iteration", "value", "chain", "stat",
-  "Estimate", "Median", "Est.Error", "L95", "U95",
+  "Estimate", "Median", "Est.Error", "L95", "U95", "marker_idx",
   # Additional variables used in internal functions
-  ".data"
+  ".data", ".by", ".SD", ".", ":="
 ))
 
 

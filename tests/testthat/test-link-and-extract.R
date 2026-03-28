@@ -157,6 +157,38 @@ test_that("extract.JoinMeFit returns draw matrices by friendly names", {
   expect_true(any(grepl("^id_marker_row_scale_eff: time$", colnames(ex_eff$draws))))
 })
 
+test_that("extract.JoinMeFit assoc prefers effective vcov coefficients", {
+  draws_obj <- posterior::as_draws_matrix(stats::setNames(
+    data.frame(
+      raw = c(0.1, 0.1, 0.1),
+      eff = c(0.4, 0.5, 0.6),
+      check.names = FALSE
+    ),
+    c("alpha_vcov[1]", "alpha_vcov_eff[1]")
+  ))
+
+  fit_obj <- structure(list(
+    fit = structure(list(), class = "mock_fit"),
+    stan_data = list(assoc_vcov = 1L, assoc_corr = 0L, assoc_cv_total = 0L, assoc_cv_mean = 0L,
+                     assoc_cv_marker = 0L, assoc_cs_total = 0L, assoc_cs_mean = 0L, assoc_cs_marker = 0L,
+                     D = 0L),
+    config = list()
+  ), class = "JoinMeFit")
+
+  testthat::local_mocked_bindings(
+    .get_draws_obj = function(fit, variables = NULL, draws = NULL, seed = 1, keep_chains = FALSE) {
+      if (is.null(variables)) return(draws_obj)
+      posterior::subset_draws(draws_obj, variable = variables)
+    },
+    .package = "joinme"
+  )
+
+  ex_assoc <- extract(fit_obj, what = "assoc", keep_chains = FALSE)
+  expect_equal(colnames(ex_assoc$draws), "vcov[1]")
+  expect_equal(as.numeric(ex_assoc$draws[, 1]), c(0.4, 0.5, 0.6))
+  expect_equal(as.character(ex_assoc$term_map$variable), "alpha_vcov_eff[1]")
+})
+
 test_that("summary reports survival_process baseline covariates when present", {
   skip_on_cran()
   skip_if_not_installed("cmdstanr")

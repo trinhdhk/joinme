@@ -32,6 +32,7 @@ Imports:
     splines2,
     survival,
     stats,
+    tidytable,
     bridgesampling,
     ggplot2,
     latex2exp,

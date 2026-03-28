@@ -192,3 +192,67 @@ test_that("ranef/vcov.JoinMeFit include formulaDist random-effects blocks", {
   expect_true(is.data.frame(dg))
   expect_true(all(c("metric", "value") %in% names(dg)))
 })
+
+test_that("concordance.JoinMeFit reports the concordance engine pair count", {
+  testthat::local_mocked_bindings(
+    predict.JoinMeFit = function(object, newdataLong, newdataEvent, process, times, time_start,
+                                 control, seed, ...) {
+      expect_equal(length(times[[1]]), 50L)
+      expect_equal(unname(times[[1]][1]), 1)
+      expect_equal(unname(utils::tail(times[[1]], 1)), 2)
+      joinme::JoinMeDynPred$new(
+        predictions = list(
+          survival = data.frame(
+            id = c(1, 2),
+            time = c(2, 2),
+            Survival = c(0.2, 0.8),
+            stringsAsFactors = FALSE
+          )
+        ),
+        quantiles = list(),
+        draws = list(),
+        data = list(longitudinal = newdataLong, event = newdataEvent),
+        metadata = list(id_var = "id", time_var = "time", marker_var = "marker", response_var = "y"),
+        call = quote(predict(fit_obj)),
+        tmax = 2,
+        n_samples = if (is.null(control$n_samples)) 10 else control$n_samples
+      )
+    },
+    .package = "joinme"
+  )
+  testthat::local_mocked_bindings(
+    concordance = function(object, ...) {
+      list(
+        concordance = 0.75,
+        count = c(concordant = 2, discordant = 1, tied.x = 0, tied.y = 0, tied.xy = 0)
+      )
+    },
+    .package = "survival"
+  )
+
+  fit <- joinme::JoinMeFit$new(
+    fit = NULL,
+    stan_data = list(),
+    formulaLong = y ~ 1 + time,
+    formulaEvent = survival::Surv(time, event) ~ 1,
+    formulaVCov = NULL,
+    config = list(transforms = list(), transforms_spec = list()),
+    call = quote(joinme::joinme(formulaLong = y ~ 1 + time)),
+    tmax = 2,
+    dataLong = data.frame(id = c(1, 1, 2, 2), time = c(0, 1, 0, 1), marker = "m1", y = c(1, 2, 1.5, 2.5)),
+    dataEvent = data.frame(id = c(1, 2), time = c(1.5, 3), event = c(1L, 0L))
+  )
+
+  out <- concordance(
+    fit,
+    time_start = 1,
+    time_horizon = 2,
+    n_samples = 5,
+    seed = 1
+  )
+
+  expect_equal(out$n_cases, 1)
+  expect_equal(out$n_controls, 1)
+  expect_equal(out$n_pairs, 3)
+  expect_equal(out$concordance, 0.75)
+})

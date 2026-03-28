@@ -17,8 +17,6 @@ NULL
 #'
 #' @description
 #' Resolve the expected cached CmdStanR executable path for a Stan program.
-#' This helper only checks the cache naming convention; it does not handle the
-#' Windows-versus-WSL fallback logic used by [.get_cmdstan_exe()].
 #'
 #' @param stan_file Path to the Stan source file used to derive the executable name.
 #'

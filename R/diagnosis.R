@@ -521,7 +521,11 @@ concordance.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NUL
 	}
 
 	# Prepare per-subject time grids
-	times_map <- stats::setNames(as.list(as.numeric(time_horizon_map[ids])), ids)
+	times_map <- stats::setNames(lapply(ids, function(id) {
+		t_start_i <- as.numeric(time_start_map[[id]])
+		t_horizon_i <- as.numeric(time_horizon_map[[id]])
+		seq(t_start_i, t_horizon_i, length.out = 50L)
+	}), ids)
 
 	pred <- predict(
 		object,
@@ -597,6 +601,11 @@ concordance.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NUL
 		survival::Surv(concord_data$time_window, concord_data$event_window) ~ concord_data$risk,
 		timewt = timewt
 	)
+	comparable_pairs <- if (!is.null(conc$count)) {
+		sum(as.numeric(conc$count), na.rm = TRUE)
+	} else {
+		NA_real_
+	}
 
 	data.frame(
 		time_start = as.numeric(time_start)[1],
@@ -604,7 +613,7 @@ concordance.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NUL
 		concordance = conc$concordance,
 		n_cases = n_cases,
 		n_controls = n_controls,
-		n_pairs = n_cases * n_controls
+		n_pairs = comparable_pairs
 	)
 }
 

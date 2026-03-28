@@ -335,7 +335,7 @@ for (k in 1 : n_draws) {
     int M_corr_local = num_elements(a_corr);
     vector[M_corr_local] corr_terms_raw = eta_corr_varonly_weighted_const(Li);
     int M_vcov_local = num_elements(a_vcov);
-    vector[M_vcov_local] vcov_terms_raw = eta_vcov_weighted_const(Li, flag_indep_idmarker_cov);
+    vector[M_vcov_local] vcov_terms_raw = eta_vcov_weighted_const(Li_eff, flag_indep_idmarker_cov);
 
     vector[n_gk] cv_tot = cvm + cvk; // total current value
 
@@ -505,7 +505,7 @@ for (k in 1 : n_draws) {
     int M_corr_local2 = num_elements(a_corr);
     vector[M_corr_local2] corr_terms_raw = eta_corr_varonly_weighted_const(Li);
     int M_vcov_local2 = num_elements(a_vcov);
-    vector[M_vcov_local2] vcov_terms_raw = eta_vcov_weighted_const(Li, flag_indep_idmarker_cov);
+    vector[M_vcov_local2] vcov_terms_raw = eta_vcov_weighted_const(Li_eff, flag_indep_idmarker_cov);
 
     vector[n_gk] cv_tot = cvm + cvk; // total current value
 

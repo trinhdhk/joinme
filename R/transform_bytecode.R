@@ -302,6 +302,10 @@ verify_opcodes <- function(opcodes, const_data) {
   return(TRUE)
 }
 
+.bytecode_unary_ops <- function() {
+  c(6L, 7L, 8L, 9L, 10L, 11L, 13L, 14L, 15L, 16L, 17L, 18L, 19L, 20L, 21L, 22L, 23L, 24L, 25L, 26L)
+}
+
 #' Evaluate bytecode for a scalar input
 #'
 #' @description
@@ -435,9 +439,19 @@ eval_bytecode_vector <- function(x, bytecode = NULL, const_data = numeric(), opc
     code <- integer(0)
   }
 
+  code <- as.integer(code)
+  constants <- as.numeric(const_data %||% numeric(0))
+
+  # Backward compatibility: some legacy saved transforms encoded unary maps like
+  # softplus(x) as [SOFTPLUS] rather than [PUSH_X, SOFTPLUS]. Prepend PUSH_X so
+  # replay in R and Stan stays stable for old fitted objects used in prediction.
+  if (length(code) > 0L && code[[1]] %in% .bytecode_unary_ops()) {
+    code <- c(0L, code)
+  }
+
   list(
-    bytecode = as.integer(code),
-    const_data = as.numeric(const_data %||% numeric(0))
+    bytecode = code,
+    const_data = constants
   )
 }
 

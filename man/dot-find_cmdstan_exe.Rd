@@ -15,7 +15,5 @@ A character scalar with the cached executable path if it exists, or
 }
 \description{
 Resolve the expected cached CmdStanR executable path for a Stan program.
-This helper only checks the cache naming convention; it does not handle the
-Windows-versus-WSL fallback logic used by \code{\link[=.get_cmdstan_exe]{.get_cmdstan_exe()}}.
 }
 \keyword{internal}

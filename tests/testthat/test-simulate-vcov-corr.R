@@ -184,6 +184,30 @@ test_that("simulate_joinme zero-references vcov functional transforms at raw zer
   expect_equal(raw$vcov, sum(vc * expected_tf), tolerance = 1e-10)
 })
 
+test_that("simulate_joinme vcov uses effective time-scaled SD features", {
+  sim <- simulate_joinme(
+    formulaLong = y ~ 1 + time + x1 +
+      (1 + time | id) +
+      (0 + x1 + (1 + time | id) | marker),
+    n_id = 4,
+    families = c("gaussian", "gaussian"),
+    n_obs_per_marker_per_id = 4,
+    times_obs = seq(0, 3, length.out = 5),
+    seed = 3316,
+    assoc = "vcov",
+    assoc_coefs = list(vcov = c(0.2, -0.1, 0.3)),
+    transforms = list(vcov = list(type = "identity"))
+  )
+
+  raw <- sim$helpers$assoc_components_raw(1, 1.2)
+  row_scale <- sim$truth$stan_fit$marker_id_row_scale_eff
+  li_eff <- sweep(sim$truth$L_i[1, , ], 1L, row_scale, `*`)
+  expected <- joinme:::.assoc_vcov_features_from_chol(li_eff)
+
+  expect_equal(raw$vcov_vals, expected, tolerance = 1e-10)
+  expect_gt(raw$vcov_vals[3], joinme:::.assoc_vcov_features_from_chol(sim$truth$L_i[1, , ])[3])
+})
+
 test_that("simulate_joinme vcov respects diagonal-only marker-by-id independence under mirai", {
   skip_if_not_installed("mirai")
 
@@ -234,6 +258,32 @@ test_that("simulate_joinme warns and ignores corr when vcov is also requested", 
   expect_true(any(grepl("^vcov\\[", names(sim$truth$assoc_coefs))))
 })
 
+test_that("simulate_joinme warns and diagonalizes id correlation under top-level || id", {
+  expect_warning(
+    sim <- simulate_joinme(
+      formulaLong = y ~ 1 + time +
+        (1 + time || id) +
+        (0 + (1 | id) | marker),
+      n_id = 6,
+      families = c("gaussian", "gaussian"),
+      n_obs_per_marker_per_id = 3,
+      times_obs = seq(0, 2, length.out = 4),
+      seed = 3317,
+      re_params = list(
+        id = list(
+          sd = c(0.5, 0.3),
+          corr = matrix(c(1, 0.4, 0.4, 1), nrow = 2)
+        )
+      )
+    ),
+    "Ignoring nonzero off-diagonal entries in `re_params\\$id\\$corr`"
+  )
+
+  expect_equal(sim$truth$stan_fit$Corr_u, diag(2), tolerance = 1e-10)
+  expect_equal(sim$truth$stan_fit$Lcorr_u, diag(2), tolerance = 1e-10)
+  expect_equal(sim$truth$stan_fit$Sigma_u, diag(c(0.5, 0.3)^2), tolerance = 1e-10)
+})
+
 test_that("simulate_joinme rejects corr when nested marker-by-id covariance is diagonal", {
   expect_error(
     simulate_joinme(
@@ -242,11 +292,39 @@ test_that("simulate_joinme rejects corr when nested marker-by-id covariance is d
         (x1 + (1 + time || id) | marker),
       formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
       n_id = 4,
-      n_per_marker = 3,
-      time_max = 2,
+      families = c("gaussian", "gaussian"),
+      n_obs_per_marker_per_id = 3,
+      times_obs = seq(0, 2, length.out = 4),
       seed = 3314,
       assoc = c("corr")
     ),
     "corr"
   )
+})
+
+test_that("simulate_joinme warns and truncates extra covariance-regression terms under nested || id", {
+  expect_warning(
+    sim <- simulate_joinme(
+      formulaLong = y ~ 1 + time +
+        (1 + time | id) +
+        (0 + (1 + time || id) | marker),
+      formulaEvent = survival::Surv(time, event) ~ 1,
+      n_id = 6,
+      families = c("gaussian", "gaussian"),
+      n_obs_per_marker_per_id = 3,
+      times_obs = seq(0, 2, length.out = 4),
+      seed = 3318,
+      re_params = list(
+        id_marker_cov = list(
+          alpha = c(0.5, -0.2, -0.2),
+          lambda = c(1, 0.5, 0.25)
+        )
+      )
+    ),
+    "re_params\\$id_marker_cov\\$(alpha|lambda)",
+    all = TRUE
+  )
+
+  expect_equal(sim$truth$id_marker_cov_effective$alpha, c(0.5, -0.2), tolerance = 1e-10)
+  expect_equal(sim$truth$id_marker_cov_effective$lambda, c(1, 0.5), tolerance = 1e-10)
 })

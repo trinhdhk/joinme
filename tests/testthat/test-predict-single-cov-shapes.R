@@ -35,15 +35,14 @@ test_that("posterior_predict handles single-covariate hazard/corr shapes", {
   )
 
   last_time <- sim$dataLong |>
-    dplyr::group_by(id) |>
-    dplyr::summarize(time_start = max(time), .groups = "drop")
+    tidytable::summarize(time_start = max(time), .by = id)
 
-  ndE <- dplyr::left_join(sim$dataEvent, last_time, by = "id")
+  ndE <- tidytable::left_join(sim$dataEvent, last_time, by = "id")
 
   pred <- posterior_predict(
     fit,
-    newdataLong = dplyr::filter(sim$dataLong, id %in% c(1, 2)),
-    newdataEvent = dplyr::filter(ndE, id %in% c(1, 2)),
+    newdataLong = tidytable::filter(sim$dataLong, id %in% c(1, 2)),
+    newdataEvent = tidytable::filter(ndE, id %in% c(1, 2)),
     time_start = "time_start",
     time_horizon = 4,
     control = list(

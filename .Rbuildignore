@@ -3,3 +3,9 @@
 ^pkgdown$
 ^\.github$
 ^notes
+^src$
+tmp
+^tests$
+\.RDS$
+\.rds$
+test$

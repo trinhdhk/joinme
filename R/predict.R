@@ -2,7 +2,7 @@
 #'
 #' @importFrom stats predict median sd quantile na.omit optim terms
 #' @importFrom utils head modifyList
-#' @importFrom dplyr %>% all_of
+#' @importFrom stats setNames
 #' @keywords internal
 #' @name predict.JoinMeFit
 NULL
@@ -798,55 +798,63 @@ predict.JoinMeFit <- function(object,
             results_long_combined <- do.call(rbind, results_long)
             
             if (pred_type == "marginal_marker") {
-                # Average across subjects for each marker-time combination
-                results_long_aggregated <- results_long_combined |>
-                    dplyr::group_by(scale, time, marker) |>
-                    dplyr::summarise(
+                # Average posterior summaries over subjects within each
+                # marker-time cell to obtain a marker-specific marginal mean.
+                results_long_aggregated <- tidytable::as_tidytable(results_long_combined) |>
+                    tidytable::summarize(
                         Estimate = mean(Estimate, na.rm = TRUE),
                         Median = mean(Median, na.rm = TRUE),
                         Est.Error = mean(Est.Error, na.rm = TRUE),
                         L95 = mean(L95, na.rm = TRUE),
                         U95 = mean(U95, na.rm = TRUE),
-                        .groups = "drop"
+                        .by = c(scale, time, marker)
                     ) |>
-                    dplyr::mutate(id = "Marginal_Marker", .before = time)
+                    tidytable::mutate(id = "Marginal_Marker") |>
+                    tidytable::relocate(id, scale, time, marker, Estimate, Median, Est.Error, L95, U95)
             } else if (pred_type == "marginal_id") {
-                # Average across markers for each subject-time combination
-                results_long_aggregated <- results_long_combined |>
-                    dplyr::group_by(scale, id, time) |>
-                    dplyr::summarise(
+                # Average posterior summaries over markers within each
+                # subject-time cell to obtain a subject-specific marginal mean.
+                results_long_aggregated <- tidytable::as_tidytable(results_long_combined) |>
+                    tidytable::summarize(
                         Estimate = mean(Estimate, na.rm = TRUE),
                         Median = mean(Median, na.rm = TRUE),
                         Est.Error = mean(Est.Error, na.rm = TRUE),
                         L95 = mean(L95, na.rm = TRUE),
                         U95 = mean(U95, na.rm = TRUE),
-                        .groups = "drop"
+                        .by = c(scale, id, time)
                     )
             }
             # else per_marker_id: keep as is (results_long will be used)
         }
         
         # Group by time and marker, average quantiles across subjects
-        quantiles_long_marker_pop <- all_marker_preds |>
-            dplyr::group_by(scale, time, marker) |>
-            dplyr::summarise(
-                dplyr::across(dplyr::all_of(q_cols), ~ mean(.x, na.rm = TRUE)),
+        quantiles_long_marker_pop <- tidytable::as_tidytable(all_marker_preds) |>
+            tidytable::summarize(
+                tidytable::across(tidytable::any_of(q_cols), ~ mean(.x, na.rm = TRUE)),
                 mean = mean(mean, na.rm = TRUE),
                 sd = mean(sd, na.rm = TRUE),
-                .groups = "drop"
-            ) |>
-            dplyr::mutate(id = "Population_Marker", marker_idx = NA_integer_)
+                .by = c(scale, time, marker)
+            )
+        quantiles_long_marker_pop$id <- "Population_Marker"
+        quantiles_long_marker_pop$marker_idx <- NA_integer_
+        quantiles_long_marker_pop <- quantiles_long_marker_pop[
+            , c("id", "scale", "time", "marker", q_cols, "mean", "sd", "marker_idx"), drop = FALSE
+        ]
         
         # Overall population trajectory (average across subjects and markers)
-        quantiles_long_overall_pop <- all_marker_preds |>
-            dplyr::group_by(scale, time) |>
-            dplyr::summarise(
-                dplyr::across(dplyr::all_of(q_cols), ~ mean(.x, na.rm = TRUE)),
+        quantiles_long_overall_pop <- tidytable::as_tidytable(all_marker_preds) |>
+            tidytable::summarize(
+                tidytable::across(tidytable::any_of(q_cols), ~ mean(.x, na.rm = TRUE)),
                 mean = mean(mean, na.rm = TRUE),
                 sd = mean(sd, na.rm = TRUE),
-                .groups = "drop"
-            ) |>
-            dplyr::mutate(id = "Population_Overall", marker = "All", marker_idx = NA_integer_)
+                .by = c(scale, time)
+            )
+        quantiles_long_overall_pop$id <- "Population_Overall"
+        quantiles_long_overall_pop$marker <- "All"
+        quantiles_long_overall_pop$marker_idx <- NA_integer_
+        quantiles_long_overall_pop <- quantiles_long_overall_pop[
+            , c("id", "scale", "time", "marker", q_cols, "mean", "sd", "marker_idx"), drop = FALSE
+        ]
     }
 
     # Prepare metadata
