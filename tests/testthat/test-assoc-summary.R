@@ -110,7 +110,8 @@ test_that("summary prefers effective vcov association coefficients", {
       Q_idm = 1L,
       indep_id_re = 0L,
       indep_marker_re = 0L,
-      indep_idmarker_cov = 1L
+      indep_idmarker_cov = 1L,
+      family_names = "gaussian"
     ),
     config = list(draws_default = NULL),
     cache_get = function(key) NULL,

@@ -634,6 +634,607 @@ NULL
   out
 }
 
+#' Round summary tables using the standard joinme summary schema
+#'
+#' @description
+#' Applies the same rounding rules used throughout joinme summaries so new
+#' posterior reports remain directly comparable to [summary.JoinMeFit()].
+#'
+#' The rounded columns are the inferential columns that users typically inspect
+#' first: posterior mean, posterior standard deviation, interval bounds, and
+#' convergence diagnostics. Columns not listed in the schema are left unchanged.
+#'
+#' @param tbl A data frame built from posterior draws.
+#' @param digits Number of decimal places used for posterior location and
+#'   interval summaries.
+#'
+#' @return The same data frame with rounded summary columns.
+#' @keywords internal
+.round_joinme_summary_table <- function(tbl, digits = 3) {
+  if (is.null(tbl) || !is.data.frame(tbl) || nrow(tbl) == 0L) {
+    return(tbl)
+  }
+
+  rounded <- tbl
+  for (col_name in intersect(c("Estimate", "Est.Error", "Q2.5", "Q97.5"), names(rounded))) {
+    rounded[[col_name]] <- round(rounded[[col_name]], digits)
+  }
+  if ("Rhat" %in% names(rounded)) {
+    rounded$Rhat <- round(rounded$Rhat, 3)
+  }
+  rounded
+}
+
+#' Find the first posterior variable available in a candidate set
+#'
+#' @description
+#' Many fitted objects retain both raw and effective-scale parameter names. This
+#' helper selects the first available variable name from a priority-ordered
+#' character vector.
+#'
+#' @param all_vars Character vector of posterior variable names available in the
+#'   fitted object.
+#' @param candidates Character vector ordered from preferred to fallback names.
+#'
+#' @return A single character scalar, or `NULL` when none of the candidates are
+#'   present.
+#' @keywords internal
+.first_available_draw_var <- function(all_vars, candidates) {
+  candidates <- as.character(candidates %||% character(0))
+  hit <- candidates[candidates %in% all_vars]
+  if (!length(hit)) {
+    return(NULL)
+  }
+  hit[[1]]
+}
+
+#' Build readable labels for covariance-style association components
+#'
+#' @description
+#' Converts the internal lower-triangular indexing used for covariance-style
+#' association channels into term labels that refer to the underlying random
+#' effect basis. This keeps downstream reports aligned with the design-matrix
+#' terms seen in model summaries.
+#'
+#' @param term_key Association channel name. Supported values are `"corr"` and
+#'   `"vcov"`.
+#' @param sd Stan-data list stored in a `JoinMeFit` object.
+#' @param n_components Optional expected number of components. When supplied,
+#'   the output is truncated to this length.
+#'
+#' @return A character vector of human-readable component labels.
+#' @keywords internal
+.assoc_component_display_labels <- function(term_key, sd, n_components = NULL) {
+  term_key <- as.character(term_key %||% "")[1]
+  q_idm <- as.integer(sd$Q_idm %||% 0L)
+  diagonal_only <- identical(term_key, "vcov") && as.integer(sd$indep_idmarker_cov %||% 0L) == 1L
+  include_diag <- identical(term_key, "vcov")
+
+  n_expected <- .assoc_transform_component_count(term_key, q_idm, diagonal_only = diagonal_only)
+  if (is.null(n_components)) {
+    n_components <- n_expected
+  }
+  n_components <- as.integer(n_components %||% 0L)
+  if (n_components <= 0L) {
+    return(character(0))
+  }
+
+  base_terms <- as.character(sd$zidm_cols %||% paste0("term_", seq_len(max(q_idm, 1L))))
+  if (length(base_terms) < q_idm) {
+    base_terms <- c(base_terms, paste0("term_", seq.int(length(base_terms) + 1L, q_idm)))
+  }
+  base_terms <- base_terms[seq_len(max(q_idm, 1L))]
+
+  feature_map <- .assoc_cov_feature_map(
+    q_idm = q_idm,
+    diagonal_only = diagonal_only,
+    include_diag = include_diag
+  )
+  if (is.null(dim(feature_map)) || nrow(feature_map) == 0L) {
+    return(.assoc_transform_component_labels(term_key, n_components))
+  }
+
+  feature_map <- feature_map[seq_len(min(nrow(feature_map), n_components)), , drop = FALSE]
+  row_idx <- if (!is.null(colnames(feature_map)) && "row" %in% colnames(feature_map)) {
+    feature_map[, "row"]
+  } else {
+    feature_map[, 1]
+  }
+  col_idx <- if (!is.null(colnames(feature_map)) && "col" %in% colnames(feature_map)) {
+    feature_map[, "col"]
+  } else {
+    feature_map[, 2]
+  }
+  paste0(
+    term_key,
+    "[",
+    base_terms[row_idx],
+    ", ",
+    base_terms[col_idx],
+    "]"
+  )
+}
+
+#' Build explicit metadata for covariance-style association components
+#'
+#' @description
+#' Covariance-style association channels are indexed over lower-triangular
+#' coordinates of the marker-by-id random-effect basis. This helper reconstructs
+#' those coordinates using the fitted random-effect term labels so posterior
+#' displays can show both a compact combined term and the underlying row and
+#' column terms.
+#'
+#' @param term_key Association channel name. Supported values are `"corr"` and
+#'   `"vcov"`.
+#' @param sd Stan-data list stored in the fitted object.
+#' @param n_components Number of covariance-style components to report.
+#'
+#' @return A data frame with columns `component`, `row`, `col`, and `term`.
+#' @keywords internal
+.assoc_component_metadata <- function(term_key, sd, n_components) {
+  term_key <- as.character(term_key %||% "")[1]
+  n_components <- as.integer(n_components %||% 0L)
+  if (!(term_key %in% c("corr", "vcov")) || n_components <= 0L) {
+    return(NULL)
+  }
+
+  q_idm <- as.integer(sd$Q_idm %||% 0L)
+  diagonal_only <- identical(term_key, "vcov") && as.integer(sd$indep_idmarker_cov %||% 0L) == 1L
+  feature_map <- .assoc_cov_feature_map(
+    q_idm = q_idm,
+    diagonal_only = diagonal_only,
+    include_diag = identical(term_key, "vcov")
+  )
+  if (is.null(dim(feature_map)) || nrow(feature_map) == 0L) {
+    return(NULL)
+  }
+
+  feature_map <- feature_map[seq_len(min(nrow(feature_map), n_components)), , drop = FALSE]
+  row_idx <- if (!is.null(colnames(feature_map)) && "row" %in% colnames(feature_map)) {
+    feature_map[, "row"]
+  } else {
+    feature_map[, 1]
+  }
+  col_idx <- if (!is.null(colnames(feature_map)) && "col" %in% colnames(feature_map)) {
+    feature_map[, "col"]
+  } else {
+    feature_map[, 2]
+  }
+  base_terms <- as.character(sd$zidm_cols %||% paste0("term_", seq_len(max(q_idm, 1L))))
+  if (length(base_terms) < q_idm) {
+    base_terms <- c(base_terms, paste0("term_", seq.int(length(base_terms) + 1L, q_idm)))
+  }
+  base_terms <- base_terms[seq_len(max(q_idm, 1L))]
+
+  data.frame(
+    component = seq_len(nrow(feature_map)),
+    row = base_terms[row_idx],
+    col = base_terms[col_idx],
+    term = .assoc_component_display_labels(term_key, sd, n_components = nrow(feature_map)),
+    stringsAsFactors = FALSE
+  )
+}
+
+#' Convert integer covariance indices into model-term labels
+#'
+#' @description
+#' The low-level covariance extractors return matrix coordinates as integer row
+#' and column positions. For console summaries, those positions are harder to
+#' interpret than the corresponding random-effect terms. This helper replaces the
+#' raw indices with term labels recovered from the same model matrix basis.
+#'
+#' @param tbl Covariance summary table containing `row` and `col` columns.
+#' @param term_labels Character vector of basis labels.
+#'
+#' @return The same data frame with labelled `row` and `col` columns.
+#' @keywords internal
+.label_covariance_summary_table <- function(tbl, term_labels) {
+  if (is.null(tbl) || !is.data.frame(tbl) || nrow(tbl) == 0L) {
+    return(tbl)
+  }
+  if (!all(c("row", "col") %in% names(tbl))) {
+    return(tbl)
+  }
+
+  term_labels <- as.character(term_labels %||% character(0))
+  if (!length(term_labels)) {
+    return(tbl)
+  }
+
+  out <- tbl
+  row_index <- suppressWarnings(as.integer(out$row))
+  col_index <- suppressWarnings(as.integer(out$col))
+  row_default <- as.character(out$row)
+  col_default <- as.character(out$col)
+
+  valid_row <- !is.na(row_index) & row_index >= 1L & row_index <= length(term_labels)
+  valid_col <- !is.na(col_index) & col_index >= 1L & col_index <= length(term_labels)
+
+  row_default[valid_row] <- term_labels[row_index[valid_row]]
+  col_default[valid_col] <- term_labels[col_index[valid_col]]
+
+  out$row <- row_default
+  out$col <- col_default
+  out
+}
+
+#' Retrieve marker-weight draws on the effective likelihood scale
+#'
+#' @description
+#' Weighted association channels combine a shared posterior association strength
+#' with marker-specific signed weights. This helper returns the marker weights on
+#' the same draw grid used for posterior extraction so the combined hazard-scale
+#' association effect can be reconstructed draw by draw.
+#'
+#' The algorithm proceeds in three steps:
+#' 1. prefer posterior draws of `marker_weights_eff`,
+#' 2. fall back to fixed standata weights when the model treats marker weights as
+#'    fixed quantities,
+#' 3. otherwise use the stored base weights as a deterministic fallback.
+#'
+#' @param object A `JoinMeFit` object.
+#' @param draws Optional posterior-draw subset size.
+#' @param seed Random seed used when subsetting draws.
+#' @param all_vars Character vector of available posterior variable names.
+#'
+#' @return A three-dimensional numeric array with dimensions
+#'   iteration x chain x marker.
+#' @keywords internal
+.association_marker_weight_array <- function(object, draws = NULL, seed = 1, all_vars = NULL) {
+  sd <- object$stan_data
+  n_markers <- as.integer(sd$D %||% 0L)
+  if (n_markers <= 0L) {
+    return(NULL)
+  }
+
+  if (is.null(all_vars)) {
+    all_vars <- tryCatch(posterior::variables(.get_draws_obj(object$fit)), error = function(e) character(0))
+  }
+
+  weight_vars <- paste0("marker_weights_eff[", seq_len(n_markers), "]")
+  weight_vars <- weight_vars[weight_vars %in% all_vars]
+  if (length(weight_vars) == n_markers) {
+    return(.get_draws_array(object$fit, variables = weight_vars, draws = draws, seed = seed))
+  }
+
+  probe_var <- .first_available_draw_var(
+    all_vars,
+    c(
+      "alpha_cv_total_eff", "alpha_cv_total",
+      "alpha_cs_total_eff", "alpha_cs_total",
+      "alpha_cv_marker_eff", "alpha_cv_marker",
+      "alpha_cs_marker_eff", "alpha_cs_marker"
+    )
+  )
+  if (is.null(probe_var)) {
+    return(NULL)
+  }
+
+  probe_arr <- .get_draws_array(object$fit, variables = probe_var, draws = draws, seed = seed)
+  base_weights <- as.numeric(sd$marker_weights_eff %||% sd$marker_weights %||% rep(1, n_markers))
+  if (length(base_weights) < n_markers) {
+    base_weights <- c(base_weights, rep(1, n_markers - length(base_weights)))
+  }
+  base_weights <- base_weights[seq_len(n_markers)]
+
+  out <- array(
+    rep(base_weights, each = dim(probe_arr)[1] * dim(probe_arr)[2]),
+    dim = c(dim(probe_arr)[1], dim(probe_arr)[2], n_markers),
+    dimnames = list(
+      iteration = dimnames(probe_arr)[[1]],
+      chain = dimnames(probe_arr)[[2]],
+      variable = paste0("marker_weights_eff[", seq_len(n_markers), "]")
+    )
+  )
+  out
+}
+
+#' Summarise a derived posterior draw array with MCMC diagnostics
+#'
+#' @description
+#' Derived association effects do not necessarily exist as named Stan variables.
+#' This helper converts an iteration x chain x term array into the same summary
+#' schema used elsewhere in joinme: posterior mean, posterior standard
+#' deviation, central 95% interval, split-chain R-hat, and bulk/tail effective
+#' sample sizes.
+#'
+#' @param draw_array Numeric array with dimensions iteration x chain x term.
+#' @param term_labels Character vector naming the third dimension.
+#' @param digits Number of decimal places used for posterior location and
+#'   interval summaries.
+#'
+#' @return A data frame with columns `term`, `Estimate`, `Est.Error`, `Q2.5`,
+#'   `Q97.5`, `Rhat`, `ess_bulk`, and `ess_tail`.
+#' @keywords internal
+.assoc_summary_from_draw_array <- function(draw_array, term_labels, digits = 3) {
+  if (is.null(draw_array) || length(dim(draw_array)) != 3L || dim(draw_array)[3] == 0L) {
+    return(NULL)
+  }
+
+  term_labels <- as.character(term_labels %||% paste0("term_", seq_len(dim(draw_array)[3])))
+  dimnames(draw_array) <- list(
+    iteration = dimnames(draw_array)[[1]] %||% as.character(seq_len(dim(draw_array)[1])),
+    chain = dimnames(draw_array)[[2]] %||% as.character(seq_len(dim(draw_array)[2])),
+    variable = term_labels
+  )
+
+  draws_obj <- posterior::as_draws_array(draw_array)
+  draws_df <- posterior::as_draws_df(draws_obj)
+  sum_df <- data.frame(
+    term = term_labels,
+    do.call(rbind, lapply(term_labels, function(label) .summarize_draw_col(draws_df[[label]]))),
+    row.names = NULL,
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  diag_df <- suppressWarnings(tryCatch(
+    posterior::summarise_draws(draws_obj, "rhat", "ess_bulk", "ess_tail"),
+    error = function(e) NULL
+  ))
+  if (!is.null(diag_df)) {
+    diag_df <- diag_df[, c("variable", "rhat", "ess_bulk", "ess_tail"), drop = FALSE]
+    names(diag_df) <- c("term", "Rhat", "ess_bulk", "ess_tail")
+    sum_df <- merge(sum_df, diag_df, by = "term", all.x = TRUE, sort = FALSE)
+  } else {
+    sum_df$Rhat <- NA_real_
+    sum_df$ess_bulk <- NA_real_
+    sum_df$ess_tail <- NA_real_
+  }
+
+  .round_joinme_summary_table(sum_df, digits = digits)
+}
+
+#' Flatten a derived posterior draw array into an MCMC sample matrix
+#'
+#' @description
+#' Returns posterior samples as a draws-by-term matrix so each association term
+#' can be inspected directly without an additional summary step.
+#'
+#' @param draw_array Numeric array with dimensions iteration x chain x term.
+#' @param term_labels Character vector naming the third dimension.
+#'
+#' @return A numeric matrix with one column per term label.
+#' @keywords internal
+.assoc_matrix_from_draw_array <- function(draw_array, term_labels) {
+  if (is.null(draw_array) || length(dim(draw_array)) != 3L || dim(draw_array)[3] == 0L) {
+    return(NULL)
+  }
+
+  term_labels <- as.character(term_labels %||% paste0("term_", seq_len(dim(draw_array)[3])))
+  dimnames(draw_array) <- list(
+    iteration = dimnames(draw_array)[[1]] %||% as.character(seq_len(dim(draw_array)[1])),
+    chain = dimnames(draw_array)[[2]] %||% as.character(seq_len(dim(draw_array)[2])),
+    variable = term_labels
+  )
+
+  out <- posterior::as_draws_matrix(posterior::as_draws_array(draw_array))
+  out[, term_labels, drop = FALSE]
+}
+
+#' Build posterior association effects for a fitted joinme model
+#'
+#' @description
+#' Reconstructs the posterior association effects that enter the survival linear
+#' predictor.
+#'
+#' For weighted current-value and current-slope channels (`cv_total`,
+#' `cs_total`, `cv_marker`, `cs_marker`), the returned effect is the draw-wise
+#' product of the association coefficient and the marker weight, divided by the
+#' number of markers to match the scale used in the fitted hazard contribution.
+#'
+#' For scalar channels (`cv_mean`, `cs_mean`) the returned effect is simply the
+#' posterior coefficient. For covariance-style channels (`corr`, `vcov`) the
+#' returned effects are grouped by their labelled covariance component.
+#'
+#' @param object A `JoinMeFit` object.
+#' @param draws Optional number of posterior draws to retain.
+#' @param seed Random seed used when subsetting posterior draws.
+#' @param digits Number of digits used when `summary = TRUE`.
+#' @param summary Logical. If `TRUE`, return posterior summaries with the same
+#'   inferential columns as [summary.JoinMeFit()]. If `FALSE`, return raw MCMC
+#'   sample matrices.
+#' @param ... Unused.
+#'
+#' @return A named list with class `PosteriorAssoc`. Each list element contains
+#'   either a posterior summary table or a draws-by-term matrix for one
+#'   association channel.
+#' @export
+assoc <- function(object, ...) {
+  UseMethod("assoc")
+}
+
+#' @rdname assoc
+#' @export
+posterior_assoc <- function(object, ...) {
+  assoc(object, ...)
+}
+
+#' @rdname assoc
+#' @export
+assoc.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
+  assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
+
+  sd <- object$stan_data
+  fit <- object$fit
+  if (is.null(draws)) {
+    draws <- object$config$draws_default
+  }
+  assertthat::assert_that(is.logical(summary) && length(summary) == 1L && !is.na(summary),
+                          msg = "summary must be TRUE or FALSE.")
+  assertthat::assert_that(is.numeric(digits) && digits >= 0, msg = "digits must be non-negative.")
+
+  cache_key <- if (isTRUE(summary)) {
+    paste0("posterior_assoc_summary_", draws, "_", digits)
+  } else {
+    paste0("posterior_assoc_draws_", draws)
+  }
+  cached <- object$cache_get(cache_key)
+  if (!is.null(cached)) {
+    return(cached)
+  }
+
+  all_vars <- tryCatch(posterior::variables(.get_draws_obj(fit)), error = function(e) character(0))
+  marker_levels <- as.character(sd$marker_levels %||% paste0("marker_", seq_len(as.integer(sd$D %||% 0L))))
+  n_markers <- length(marker_levels)
+  weight_array <- .association_marker_weight_array(object, draws = draws, seed = seed, all_vars = all_vars)
+  weighted_divisor <- if (n_markers > 0L) n_markers else 1L
+
+  build_scalar_term <- function(var_name, label) {
+    if (is.null(var_name)) {
+      return(NULL)
+    }
+    draw_arr <- .get_draws_array(fit, variables = var_name, draws = draws, seed = seed)
+    if (isTRUE(summary)) {
+      .assoc_summary_from_draw_array(draw_arr, term_labels = label, digits = digits)
+    } else {
+      .assoc_matrix_from_draw_array(draw_arr, term_labels = label)
+    }
+  }
+
+  build_weighted_term <- function(var_name) {
+    if (is.null(var_name) || is.null(weight_array) || n_markers == 0L) {
+      return(NULL)
+    }
+    alpha_arr <- .get_draws_array(fit, variables = var_name, draws = draws, seed = seed)
+    effect_arr <- array(
+      NA_real_,
+      dim = c(dim(alpha_arr)[1], dim(alpha_arr)[2], n_markers),
+      dimnames = list(
+        iteration = dimnames(alpha_arr)[[1]],
+        chain = dimnames(alpha_arr)[[2]],
+        variable = marker_levels
+      )
+    )
+
+    for (marker_index in seq_len(n_markers)) {
+      effect_arr[, , marker_index] <- alpha_arr[, , 1] * weight_array[, , marker_index] / weighted_divisor
+    }
+
+    if (isTRUE(summary)) {
+      .assoc_summary_from_draw_array(effect_arr, term_labels = marker_levels, digits = digits)
+    } else {
+      .assoc_matrix_from_draw_array(effect_arr, term_labels = marker_levels)
+    }
+  }
+
+  build_vector_term <- function(var_names, term_labels, component_meta = NULL) {
+    var_names <- as.character(var_names %||% character(0))
+    if (!length(var_names)) {
+      return(NULL)
+    }
+    draw_arr <- .get_draws_array(fit, variables = var_names, draws = draws, seed = seed)
+    if (isTRUE(summary)) {
+      out_tbl <- .assoc_summary_from_draw_array(draw_arr, term_labels = term_labels, digits = digits)
+      if (!is.null(component_meta) && !is.null(out_tbl)) {
+        idx <- match(out_tbl$term, component_meta$term)
+        out_tbl$component <- component_meta$component[idx]
+        out_tbl$row <- component_meta$row[idx]
+        out_tbl$col <- component_meta$col[idx]
+        out_tbl <- out_tbl[, c("component", "row", "col", "term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
+      }
+      out_tbl
+    } else {
+      .assoc_matrix_from_draw_array(draw_arr, term_labels = term_labels)
+    }
+  }
+
+  corr_assoc_vars <- grep("^alpha_corr_eff\\[", all_vars, value = TRUE)
+  if (length(corr_assoc_vars) == 0L) {
+    corr_assoc_vars <- grep("^alpha_corr\\[", all_vars, value = TRUE)
+  }
+  vcov_assoc_vars <- grep("^alpha_vcov_eff\\[", all_vars, value = TRUE)
+  if (length(vcov_assoc_vars) == 0L) {
+    vcov_assoc_vars <- grep("^alpha_vcov\\[", all_vars, value = TRUE)
+  }
+
+  out <- list(
+    cv_total = if (isTRUE(sd$assoc_cv_total == 1L)) {
+      build_weighted_term(.first_available_draw_var(all_vars, c("alpha_cv_total_eff", "alpha_cv_total")))
+    } else NULL,
+    cv_mean = if (isTRUE(sd$assoc_cv_mean == 1L)) {
+      build_scalar_term(.first_available_draw_var(all_vars, c("alpha_cv_mean_eff", "alpha_cv_mean")), "cv_mean")
+    } else NULL,
+    cv_marker = if (isTRUE(sd$assoc_cv_marker == 1L)) {
+      build_weighted_term(.first_available_draw_var(all_vars, c("alpha_cv_marker_eff", "alpha_cv_marker")))
+    } else NULL,
+    cs_total = if (isTRUE(sd$assoc_cs_total == 1L)) {
+      build_weighted_term(.first_available_draw_var(all_vars, c("alpha_cs_total_eff", "alpha_cs_total")))
+    } else NULL,
+    cs_mean = if (isTRUE(sd$assoc_cs_mean == 1L)) {
+      build_scalar_term(.first_available_draw_var(all_vars, c("alpha_cs_mean_eff", "alpha_cs_mean")), "cs_mean")
+    } else NULL,
+    cs_marker = if (isTRUE(sd$assoc_cs_marker == 1L)) {
+      build_weighted_term(.first_available_draw_var(all_vars, c("alpha_cs_marker_eff", "alpha_cs_marker")))
+    } else NULL,
+    corr = if (isTRUE(sd$assoc_corr == 1L)) {
+      corr_meta <- .assoc_component_metadata("corr", sd, length(corr_assoc_vars))
+      build_vector_term(
+        corr_assoc_vars,
+        term_labels = corr_meta$term %||% .assoc_component_display_labels("corr", sd, length(corr_assoc_vars)),
+        component_meta = corr_meta
+      )
+    } else NULL,
+    vcov = if (isTRUE(sd$assoc_vcov == 1L)) {
+      vcov_meta <- .assoc_component_metadata("vcov", sd, length(vcov_assoc_vars))
+      build_vector_term(
+        vcov_assoc_vars,
+        term_labels = vcov_meta$term %||% .assoc_component_display_labels("vcov", sd, length(vcov_assoc_vars)),
+        component_meta = vcov_meta
+      )
+    } else NULL
+  )
+  out <- out[!vapply(out, is.null, logical(1))]
+
+  if (!length(out)) {
+    cli::cli_abort(c(
+      x = "No association effects are available in this fitted object.",
+      i = "Fit a model with association terms such as {.val cv_total}, {.val cv_mean}, {.val corr}, or {.val vcov}."
+    ))
+  }
+
+  out <- structure(
+    out,
+    class = "PosteriorAssoc",
+    metadata = list(
+      summary = isTRUE(summary),
+      draws = draws,
+      digits = digits,
+      marker_levels = marker_levels
+    )
+  )
+
+  object$cache_set(cache_key, out)
+  out
+}
+
+#' Posterior summary alias for joinme objects
+#'
+#' @description
+#' Provides a user-facing alias to [summary()] so posterior summaries can be
+#' requested with terminology that emphasizes Bayesian output.
+#'
+#' @param object A joinme object.
+#' @param ... Additional arguments forwarded to [summary()].
+#'
+#' @return The same object that [summary()] would return for the supplied class.
+#' @export
+posterior_summary <- function(object, ...) {
+  UseMethod("posterior_summary")
+}
+
+#' @rdname posterior_summary
+#' @export
+posterior_summary.JoinMeFit <- function(object, ...) {
+  summary(object, ...)
+}
+
+#' @rdname posterior_summary
+#' @export
+posterior_summary.JoinMeDynPred <- function(object, ...) {
+  summary(object, ...)
+}
+
 # ---- print/summary --------------------------------------------------------
 
 #' Print a joinme object
@@ -665,6 +1266,93 @@ print.JoinMeFit <- function(x, ...) {
     cat("tmax: ", x$tmax, "\n", sep = "")
   }
   cat("Use summary() for parameter summaries.\n")
+  invisible(x)
+}
+
+#' Format covariance-style posterior association summaries for printing
+#'
+#' @description
+#' `corr` and `vcov` posterior association summaries are easier to read when the
+#' lower-triangular components are displayed in row-wise groups rather than as a
+#' single flat list. This helper keeps the returned object unchanged and only
+#' prepares grouped tables for console output.
+#'
+#' @param tbl Posterior association summary table.
+#'
+#' @return A named list of data frames, one per matrix row label.
+#' @keywords internal
+.posterior_assoc_matrix_groups <- function(tbl) {
+  if (is.null(tbl) || !is.data.frame(tbl) || nrow(tbl) == 0L) {
+    return(list())
+  }
+  if (!all(c("row", "col") %in% names(tbl))) {
+    return(list())
+  }
+
+  row_levels <- unique(as.character(tbl$row))
+  row_levels <- row_levels[!is.na(row_levels) & nzchar(row_levels)]
+  groups <- lapply(row_levels, function(row_label) {
+    block <- tbl[as.character(tbl$row) == row_label, , drop = FALSE]
+    block <- block[, c(
+      intersect(c("col", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), names(block))
+    ), drop = FALSE]
+    names(block)[names(block) == "col"] <- "term"
+    block
+  })
+  names(groups) <- row_levels
+  groups
+}
+
+#' Print posterior association effects
+#'
+#' @description
+#' Prints association-effect summaries or raw posterior sample availability in a
+#' layout aligned with [print.summary_JoinMeFit()].
+#'
+#' @param x A `PosteriorAssoc` object returned by [assoc()] or
+#'   [posterior_assoc()].
+#' @param ... Unused.
+#'
+#' @return Invisibly returns `x`.
+#' @export
+print.PosteriorAssoc <- function(x, ...) {
+  meta <- attr(x, "metadata") %||% list()
+
+  .cli_summary_heading("Posterior association effects", level = 1L)
+  .cli_print_bullets(c(
+    if (!is.null(meta$draws)) paste0("Posterior draws: ", meta$draws) else NULL,
+    paste0("Returned scale: ", if (isTRUE(meta$summary)) "posterior summary" else "MCMC samples")
+  ))
+
+  if (!length(x)) {
+    return(invisible(x))
+  }
+
+  for (term_name in names(x)) {
+    .cli_summary_heading(paste0("Association term: ", term_name), level = 2L)
+    if (isTRUE(meta$summary)) {
+      term_tbl <- x[[term_name]]
+      if (term_name %in% c("corr", "vcov") && is.data.frame(term_tbl) && all(c("row", "col") %in% names(term_tbl))) {
+        .cli_print_bullets("Displayed by matrix row using fitted random-effect term labels.")
+        matrix_groups <- .posterior_assoc_matrix_groups(term_tbl)
+        for (row_label in names(matrix_groups)) {
+          .cli_summary_heading(paste0("row = ", row_label), level = 3L)
+          .cli_print_table(matrix_groups[[row_label]])
+        }
+      } else {
+        .cli_print_table(term_tbl)
+      }
+    } else {
+      draw_block <- x[[term_name]]
+      desc <- data.frame(
+        term = colnames(draw_block) %||% character(0),
+        draws = rep(nrow(draw_block), ncol(draw_block)),
+        stringsAsFactors = FALSE
+      )
+      .cli_print_table(desc)
+    }
+  }
+
   invisible(x)
 }
 
@@ -1073,6 +1761,14 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     if (isTRUE(any_re_indep)) {
       corr_tables <- lapply(corr_tables, .filter_diag_rows)
     }
+    corr_tables$id <- .label_covariance_summary_table(
+      corr_tables$id,
+      term_labels = as.character(sd$zid_cols %||% paste0("id_re_", seq_len(as.integer(sd$R_id %||% 0L))))
+    )
+    corr_tables$marker <- .label_covariance_summary_table(
+      corr_tables$marker,
+      term_labels = as.character(sd$zmk_cols %||% paste0("marker_re_", seq_len(as.integer(sd$R_mk %||% 0L))))
+    )
   }
 
   transform_param_specs <- list(
@@ -1142,6 +1838,13 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
 
   transform_specs <- cfg$transforms_spec %||% object$call$transforms
   transform_formulas <- .transform_formulas_from_specs(transform_specs, sd = sd)
+
+  if (!is.null(id_marker_cov_tables) && !is.null(id_marker_cov_tables$regression)) {
+    id_marker_cov_tables$regression <- .label_covariance_summary_table(
+      id_marker_cov_tables$regression,
+      term_labels = as.character(sd$zidm_cols %||% paste0("id_marker_re_", seq_len(as.integer(sd$Q_idm %||% 0L))))
+    )
+  }
 
   term_diag <- .term_diagnostics_from_tables(list(s_beta, s_surv, s_a, transform_params, s_d, s_dr, corr_tables, id_marker_cov_tables))
   diag_table <- .build_common_diagnostics_table(
