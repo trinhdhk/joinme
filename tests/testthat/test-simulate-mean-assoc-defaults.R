@@ -48,3 +48,29 @@ test_that("simulate_joinme keeps event covariates for non-mean-only assoc", {
   expect_gt(stats::sd(sim$dataEvent$x2), 0)
   expect_false(all(abs(sim$truth$beta_event) < 1e-12))
 })
+
+test_that("simulate_joinme keeps spline-expanded event term labels in beta_event truth", {
+  sim <- simulate_joinme(
+    formulaLong = y ~ 1 + time + (1 | id),
+    formulaEvent = survival::Surv(time, event) ~ splines::bs(x1, df = 3) + x2,
+    n_id = 4,
+    families = rep("gaussian", 2),
+    time_cens = 1,
+    times_obs = seq(0, 1, length.out = 3),
+    n_obs_per_marker_per_id = 3,
+    assoc = c("cv_total"),
+    assoc_coefs = c(cv_total = 0),
+    seed = 5004,
+    use_mirai = FALSE
+  )
+
+  expect_equal(
+    names(sim$truth$beta_event),
+    c(
+      "splines::bs(x1, df = 3)1",
+      "splines::bs(x1, df = 3)2",
+      "splines::bs(x1, df = 3)3",
+      "x2"
+    )
+  )
+})

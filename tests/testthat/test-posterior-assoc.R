@@ -164,6 +164,71 @@ test_that("assoc propagates weighted association strength into marker-specific e
   expect_true(grepl("marker_b", printed, fixed = TRUE))
 })
 
+test_that("assoc uses different marker-weight structures for different weighted association terms", {
+  draws_obj <- posterior::as_draws_array(array(
+    c(
+      rep(2, 4),
+      rep(1, 4),
+      rep(3, 4),
+      rep(5, 4),
+      rep(2, 4),
+      rep(-2, 4)
+    ),
+    dim = c(2, 2, 6),
+    dimnames = list(
+      iteration = c("1", "2"),
+      chain = c("1", "2"),
+      variable = c(
+        "alpha_cv_total_eff",
+        "marker_weights_eff_cv_total[1]",
+        "marker_weights_eff_cv_total[2]",
+        "alpha_cs_total_eff",
+        "marker_weights_eff_cs_total[1]",
+        "marker_weights_eff_cs_total[2]"
+      )
+    )
+  ))
+
+  fit_bundle <- make_mock_joinme_fit(
+    draws_obj = draws_obj,
+    stan_data = list(
+      assoc_cv_total = 1L,
+      assoc_cv_mean = 0L,
+      assoc_cv_marker = 0L,
+      assoc_cs_total = 1L,
+      assoc_cs_mean = 0L,
+      assoc_cs_marker = 0L,
+      assoc_corr = 0L,
+      assoc_vcov = 0L,
+      D = 2L,
+      marker_levels = c("marker_a", "marker_b"),
+      shared_marker_weights = 0L,
+      Q_idm = 0L,
+      R_id = 0L,
+      R_mk = 0L
+    )
+  )
+
+  testthat::local_mocked_bindings(
+    .get_draws_obj = function(fit, variables = NULL, draws = NULL, seed = 1, keep_chains = FALSE) {
+      if (is.null(variables)) {
+        return(draws_obj)
+      }
+      posterior::subset_draws(draws_obj, variable = variables)
+    },
+    .get_draws_array = function(fit, variables, draws = NULL, seed = 1) {
+      mock_draws_array_subset(draws_obj, variables = variables)
+    },
+    .package = "joinme"
+  )
+
+  assoc_obj <- assoc(fit_bundle$object, summary = FALSE)
+  expect_equal(as.numeric(assoc_obj$cv_total[, "marker_a"]), rep(1, 4))
+  expect_equal(as.numeric(assoc_obj$cv_total[, "marker_b"]), rep(3, 4))
+  expect_equal(as.numeric(assoc_obj$cs_total[, "marker_a"]), rep(5, 4))
+  expect_equal(as.numeric(assoc_obj$cs_total[, "marker_b"]), rep(-5, 4))
+})
+
 test_that("summary labels covariance rows and columns with model terms", {
   draws_obj <- posterior::as_draws_array(array(
     c(0.1, 0.2, 0.3, 0.4),

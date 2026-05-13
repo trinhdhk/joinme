@@ -137,17 +137,33 @@ extract.JoinMeFit <- function(object,
     map <- data.frame(term = as.character(assoc_terms), variable = as.character(assoc_vars), stringsAsFactors = FALSE)
 
     # Marker-weight terms mirror summary naming when present.
-    mw_vars <- paste0("marker_weights_eff[", seq_len(sd$D %||% 0L), "]")
-    mw_vars <- mw_vars[mw_vars %in% all_vars]
-    if (length(mw_vars) > 0) {
-      marker_terms <- sd$marker_levels %||% paste0("marker_", seq_along(mw_vars))
-      if (length(marker_terms) != length(mw_vars)) marker_terms <- paste0("marker_", seq_along(mw_vars))
-      mw_map <- data.frame(
-        term = paste0("weight: ", marker_terms),
+    marker_terms <- sd$marker_levels %||% paste0("marker_", seq_len(sd$D %||% 0L))
+    shared_weights <- isTRUE(as.integer(sd$shared_marker_weights %||% 1L) == 1L)
+    weight_term_keys <- .active_weighted_assoc_terms(sd)
+    if (shared_weights && length(weight_term_keys) > 1L) {
+      weight_term_keys <- weight_term_keys[1L]
+    }
+    mw_rows <- list()
+    for (term_key in weight_term_keys) {
+      mw_vars <- paste0(.marker_weight_var_prefix(term_key, effective = TRUE), "[", seq_len(sd$D %||% 0L), "]")
+      mw_vars <- mw_vars[mw_vars %in% all_vars]
+      if (length(mw_vars) == 0L && shared_weights) {
+        mw_vars <- paste0("marker_weights_eff[", seq_len(sd$D %||% 0L), "]")
+        mw_vars <- mw_vars[mw_vars %in% all_vars]
+      }
+      if (length(mw_vars) == 0L) next
+      this_marker_terms <- marker_terms
+      if (length(this_marker_terms) != length(mw_vars)) this_marker_terms <- paste0("marker_", seq_along(mw_vars))
+      mw_rows[[length(mw_rows) + 1L]] <- data.frame(
+        term = vapply(this_marker_terms, function(marker_label) {
+          .marker_weight_summary_label(term_key, marker_label, shared_marker_weights = shared_weights)
+        }, character(1)),
         variable = as.character(mw_vars),
         stringsAsFactors = FALSE
       )
-      map <- rbind(map, mw_map)
+    }
+    if (length(mw_rows) > 0L) {
+      map <- rbind(map, do.call(rbind, mw_rows))
     }
   } else if (what == "distributional") {
     dist_map <- .distributional_term_map(sd, cfg, all_vars)

@@ -216,6 +216,7 @@ fit <- joinme(
 summary(fit)
 posterior_summary(fit)
 fixef(fit)
+coef(fit)
 posterior_assoc(fit, summary = TRUE)
 ```
 
@@ -223,6 +224,10 @@ posterior_assoc(fit, summary = TRUE)
 association-specific posterior output in a format that stays close to the main
 summary tables. For covariance-style channels (`corr`, `vcov`), the printed and
 tabular output now uses readable matrix labels instead of raw numeric indices.
+`coef()` returns coefficients on the model-matrix scale after adding the
+population-level contribution and the matching group-level deviation. As with
+`fixef()` and `ranef()`, use `summary = FALSE` to retrieve posterior draws
+instead of posterior summaries.
 
 ### Step 6: Dynamic prediction for one subject
 
@@ -284,9 +289,12 @@ diagnosis(fit)
 diagnosis(pred)
 ```
 
-`ranef(fit)` and `vcov(fit)` are nested by `formulaLong` and `formulaDist`.
-For prediction objects, `ranef(pred)` and `vcov(pred)` are available only when
-marker covariance is configured to depend on id.
+`ranef(fit)`, `coef(fit)`, and `vcov(fit)` are nested by `formulaLong` and
+`formulaDist`. The posterior aliases `posterior_fixef()`,
+`posterior_ranef()`, and `posterior_coef()` are short forms for requesting the
+draw-level output of those extractors. For prediction objects, `ranef(pred)`
+and `vcov(pred)` are available only when marker covariance is configured to
+depend on id.
 
 ## Next steps
 

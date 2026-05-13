@@ -20,11 +20,13 @@ joinme_standata(
   transforms = NULL,
   beta_prior = NULL,
   alpha_prior = NULL,
+  iota_prior = NULL,
   lkj_prior = NULL,
   allow_marker_crosscorr = 1L,
   shrinkage = 2L,
   marker_weights = NULL,
   fixed_marker_weights = FALSE,
+  shared_marker_weights = TRUE,
   flag_resid_dim = 0L,
   basehaz = c("bs", "ns", "formula"),
   n_knots = 5L,
@@ -99,11 +101,16 @@ Supported links/inverse-links: \code{identity}, \code{log}, \code{logit}, \code{
 Each element (cv_total, cs_total, corr, vcov) is a list with a \code{type} and fields
 required by that type (see \code{build_standata_transforms()}). For covariance-style
 terms, transforms apply either to off-diagonal \code{K} features (\code{corr}) or to the
-combined off-diagonal \code{K} plus subject-specific SD features (\code{vcov}).}
+combined off-diagonal \code{K} plus subject-specific SD features (\code{vcov}).
+Functional transforms may request fit-only affine-shift parameters through
+\code{intercept = TRUE} and/or \code{slope = TRUE} inside the transform formula.}
 
 \item{beta_prior}{Prior specification for longitudinal fixed effects.}
 
 \item{alpha_prior}{Prior specification for association parameters.}
+
+\item{iota_prior}{Prior specification for fit-only affine-shift intercept and
+slope parameters used by functional association transforms.}
 
 \item{lkj_prior}{Prior specification for correlation structures.}
 
@@ -111,17 +118,24 @@ combined off-diagonal \code{K} plus subject-specific SD features (\code{vcov}).}
 
 \item{shrinkage}{Integer flag controlling shrinkage behaviour for marker-by-id effects.}
 
-\item{marker_weights}{Optional numeric vector of length D giving base weights
-for marker-specific association components. These are used as prior offsets
-for latent marker intensities and are used directly in Stan, where
-\code{w_raw = marker_weights} or
-\code{marker_weights + z_marker_weights}. When NULL, base weights default to
-zeros for estimated weights and ones for fixed weights.}
+\item{marker_weights}{Optional base weights for marker-specific association
+components. If \code{shared_marker_weights = TRUE}, provide one numeric vector of
+length D (or one named numeric vector keyed by marker level) that is shared
+across all active weighted association terms. If
+\code{shared_marker_weights = FALSE}, you may instead provide a named list with
+entries \code{cv_total}, \code{cs_total}, \code{cv_marker}, and \code{cs_marker}. Each supplied
+entry is aligned to marker order and used only for the matching active
+weighted association term.}
 
 \item{fixed_marker_weights}{Logical; if TRUE, marker weights are kept fixed
 at \code{marker_weights} (no perturbation). If FALSE, marker weights are estimated
 via signed additive perturbations,
 \code{marker_weights + z_marker_weights}, with \code{z_marker_weights ~ N(0, 1)}.}
+
+\item{shared_marker_weights}{Logical; if TRUE, all active weighted
+marker-based association terms share one marker-weight structure. If FALSE,
+each active weighted marker-based association term gets its own marker-weight
+structure.}
 
 \item{flag_resid_dim}{Integer flag to include residual dimension checks.}
 

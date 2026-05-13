@@ -76,21 +76,31 @@
 #'   required by that type (see `build_standata_transforms()`). For covariance-style
 #'   terms, transforms apply either to off-diagonal `K` features (`corr`) or to the
 #'   combined off-diagonal `K` plus subject-specific SD features (`vcov`).
+#'   Functional transforms may request fit-only affine-shift parameters through
+#'   `intercept = TRUE` and/or `slope = TRUE` inside the transform formula.
 #' @param beta_prior Prior specification for longitudinal fixed effects.
 #' @param alpha_prior Prior specification for association parameters.
+#' @param iota_prior Prior specification for fit-only affine-shift intercept and
+#'   slope parameters used by functional association transforms.
 #' @param lkj_prior Prior specification for correlation structures.
 #' @param allow_marker_crosscorr Integer flag; 1 allows cross-marker correlation in marker RE.
 #' @param shrinkage Integer flag controlling shrinkage behaviour for marker-by-id effects.
-#' @param marker_weights Optional numeric vector of length D giving base weights
-#'   for marker-specific association components. These are used as prior offsets
-#'   for latent marker intensities and are used directly in Stan, where
-#'   `w_raw = marker_weights` or
-#'   `marker_weights + z_marker_weights`. When NULL, base weights default to
-#'   zeros for estimated weights and ones for fixed weights.
+#' @param marker_weights Optional base weights for marker-specific association
+#'   components. If `shared_marker_weights = TRUE`, provide one numeric vector of
+#'   length D (or one named numeric vector keyed by marker level) that is shared
+#'   across all active weighted association terms. If
+#'   `shared_marker_weights = FALSE`, you may instead provide a named list with
+#'   entries `cv_total`, `cs_total`, `cv_marker`, and `cs_marker`. Each supplied
+#'   entry is aligned to marker order and used only for the matching active
+#'   weighted association term.
 #' @param fixed_marker_weights Logical; if TRUE, marker weights are kept fixed
 #'   at `marker_weights` (no perturbation). If FALSE, marker weights are estimated
 #'   via signed additive perturbations,
 #'   `marker_weights + z_marker_weights`, with `z_marker_weights ~ N(0, 1)`.
+#' @param shared_marker_weights Logical; if TRUE, all active weighted
+#'   marker-based association terms share one marker-weight structure. If FALSE,
+#'   each active weighted marker-based association term gets its own marker-weight
+#'   structure.
 #' @param flag_resid_dim Integer flag to include residual dimension checks.
 #' @param basehaz Baseline hazard basis type: "bs", "ns", or "formula".
 #' @param n_knots Number of internal knots for spline baseline hazards.
@@ -124,11 +134,13 @@ joinme_standata <- function(
   transforms = NULL,
   beta_prior = NULL,
   alpha_prior = NULL,
+  iota_prior = NULL,
   lkj_prior = NULL,
   allow_marker_crosscorr = 1L,
   shrinkage = 2L,
   marker_weights = NULL,
   fixed_marker_weights = FALSE,
+  shared_marker_weights = TRUE,
   flag_resid_dim = 0L,
   basehaz = c("bs", "ns", "formula"),
   n_knots = 5L,
@@ -165,10 +177,16 @@ joinme_standata <- function(
       i = "Use TRUE to keep supplied marker weights fixed; FALSE to estimate marker-weight perturbations."
     ))
   }
+  if (!is.logical(shared_marker_weights) || length(shared_marker_weights) != 1L || is.na(shared_marker_weights)) {
+    cli::cli_abort(c(
+      x = "{.arg shared_marker_weights} must be TRUE/FALSE.",
+      i = "Use TRUE to share one marker-weight structure across weighted association terms, or FALSE to use one structure per active weighted association term."
+    ))
+  }
 
   # Workflow: parse formulas -> build matrices -> assemble survival basis -> pack list
   # Handle mixed families
-  priors <- .build_priors(beta_prior = beta_prior, alpha_prior = alpha_prior, lkj_prior = lkj_prior)
+  priors <- .build_priors(beta_prior = beta_prior, alpha_prior = alpha_prior, iota_prior = iota_prior, lkj_prior = lkj_prior)
   
   # Parse lme4 bars
   f_exp <- reformulas::expandDoubleVerts(formulaLong)
@@ -320,39 +338,17 @@ joinme_standata <- function(
 
   # Marker-weighted association channels use marker weights only for:
   # cv_total, cv_marker, cs_total, cs_marker.
-  marker_weight_assoc_active <- as.integer(any(c("cv_total", "cv_marker", "cs_total", "cs_marker") %in% assoc))
+  active_weight_terms <- .active_weighted_assoc_terms(assoc)
+  marker_weight_assoc_active <- as.integer(length(active_weight_terms) > 0L)
   estimate_marker_weights_active <- as.integer(!isTRUE(fixed_marker_weights) && marker_weight_assoc_active == 1L)
-
-  # Marker weights (for weighted means in CV/CS association components)
-  if (is.null(marker_weights)) {
-    # If marker-weight estimation is active, use zero base so latent perturbations
-    # represent the full weight value. Otherwise, use fixed unit weights.
-    marker_weights <- rep(as.numeric(!as.logical(estimate_marker_weights_active)), D)
-  } else {
-    if (!is.numeric(marker_weights)) {
-      cli::cli_abort(c(
-        x = "{.arg marker_weights} must be numeric.",
-        i = "Provide a numeric vector with length D or named by marker levels."
-      ))
-    }
-    if (!is.null(names(marker_weights))) {
-      marker_weights <- marker_weights[marker_levels]
-    }
-    if (length(marker_weights) != D) {
-      cli::cli_abort(c(
-        x = "{.arg marker_weights} must have length D={D}.",
-        i = "Use one weight per marker level."
-      ))
-    }
-    if (any(!is.finite(marker_weights))) {
-      cli::cli_abort(c(
-        x = "{.arg marker_weights} must be finite.",
-        i = "Weights may be positive or negative, but cannot be NA/Inf."
-      ))
-    }
-    # All-zero base weights are allowed; raw weights are used directly in Stan.
-    # yield a well-defined set of effective weights.
-  }
+  marker_weight_spec <- .resolve_marker_weight_structure(
+    marker_weights = marker_weights,
+    marker_levels = marker_levels,
+    active_terms = active_weight_terms,
+    shared_marker_weights = shared_marker_weights,
+    estimate_marker_weights = as.logical(estimate_marker_weights_active),
+    context = "joinme_standata()"
+  )
 
   # Marker-weight estimation controls
   # - estimate_marker_weights_active toggles whether shrinkage is applied in Stan
@@ -762,8 +758,10 @@ joinme_standata <- function(
 
   # Prior scales (align to P)
   beta_scale <- as.numeric(priors$beta_scale)
+  if (length(beta_scale) == 0) beta_scale <- 2.5
   if (length(beta_scale) < P) {
-    beta_scale <- c(beta_scale, rep(2.0, P - length(beta_scale)))
+    # beta_scale <- c(beta_scale, rep(2.0, P - length(beta_scale)))
+    beta_scale <- rep(beta_scale, length.out = P)
   }
   beta_scale <- beta_scale[seq_len(P)]
 
@@ -992,6 +990,7 @@ joinme_standata <- function(
     # --------------------------
     beta_scale = as.numeric(beta_scale),
     alpha_scale = as.numeric(priors$alpha_scale),
+    iota_scale = as.numeric(priors$iota_scale),
     lkj_eta = as.numeric(priors$lkj_eta),
 
     # --------------------------
@@ -999,7 +998,6 @@ joinme_standata <- function(
     # --------------------------
     tmax = as.numeric(tmax),
     tmax_internal = as.numeric(tmax),
-    tmax_reported = as.numeric(tmax),
     quadrature_nodes = as.integer(n_gk),
     n_time_beta = as.integer(time_meta$n_time_beta),
     idx_time_beta = as.array(as.integer(time_meta$idx_time_beta)),
@@ -1026,7 +1024,22 @@ joinme_standata <- function(
     ),
     time_var = time_var,
     marker_levels = marker_levels,
-    marker_weights = as.numeric(marker_weights),
+    marker_weights = if (isTRUE(shared_marker_weights)) {
+      as.numeric(marker_weight_spec$base_matrix[1, ])
+    } else {
+      NULL
+    },
+    marker_weights_by_term = marker_weight_spec$base_by_term,
+    marker_weights_cv_total = as.numeric(marker_weight_spec$base_by_term$cv_total),
+    marker_weights_cs_total = as.numeric(marker_weight_spec$base_by_term$cs_total),
+    marker_weights_cv_marker = as.numeric(marker_weight_spec$base_by_term$cv_marker),
+    marker_weights_cs_marker = as.numeric(marker_weight_spec$base_by_term$cs_marker),
+    shared_marker_weights = as.integer(isTRUE(marker_weight_spec$shared_marker_weights)),
+    n_marker_weight_sets = as.integer(marker_weight_spec$n_sets),
+    marker_weight_set_cv_total = as.integer(marker_weight_spec$set_index[["cv_total"]]),
+    marker_weight_set_cs_total = as.integer(marker_weight_spec$set_index[["cs_total"]]),
+    marker_weight_set_cv_marker = as.integer(marker_weight_spec$set_index[["cv_marker"]]),
+    marker_weight_set_cs_marker = as.integer(marker_weight_spec$set_index[["cs_marker"]]),
     estimate_marker_weights = as.integer(estimate_marker_weights_active),
     fixed_marker_weights = as.integer(!as.logical(estimate_marker_weights_active)),
     use_marker_weight_assoc = as.integer(marker_weight_assoc_active),

@@ -295,3 +295,30 @@ test_that("simulate_joinme exposes fit-aligned truth for defaults and scaled par
   expect_equal(fam_truth$by_marker$marker_to_nu_family, c(0L, 1L, 0L, 0L))
   expect_equal(fam_truth$by_marker$marker_to_phi_beta_family, c(0L, 0L, 1L, 0L))
 })
+
+test_that("simulate_joinme exposes public random-effect draws on the original-time scale", {
+  sim <- simulate_joinme(
+    formulaLong = y ~ 1 + time + (1 + time | id) + (1 + time + (1 + time | id) | marker),
+    n_id = 10,
+    families = rep("gaussian", 2),
+    n_obs_per_marker_per_id = 4,
+    times_obs = seq(0, 4, length.out = 5),
+    seed = 4421
+  )
+
+  scale_factor <- unname(sim$truth$stan_fit$tau_v_eff[2] / sim$truth$re_effective$marker$sd[2])
+  expect_true(is.finite(scale_factor))
+  expect_gt(scale_factor, 0)
+
+  expect_equal(sim$truth$re_draws$marker[, 1], sim$truth$re_draws_likelihood$marker[, 1])
+  expect_equal(
+    sim$truth$re_draws$marker[, 2] * scale_factor,
+    sim$truth$re_draws_likelihood$marker[, 2],
+    tolerance = 1e-8
+  )
+  expect_equal(
+    sim$truth$re_draws$id[, 2] * scale_factor,
+    sim$truth$re_draws_likelihood$id[, 2],
+    tolerance = 1e-8
+  )
+})

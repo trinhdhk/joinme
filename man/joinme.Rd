@@ -17,6 +17,7 @@ joinme(
   transforms = NULL,
   priors = joinme_priors(),
   fixed_marker_weights = FALSE,
+  shared_marker_weights = TRUE,
   ...
 )
 }
@@ -107,14 +108,23 @@ Supported links/inverse-links: \code{identity}, \code{log}, \code{logit}, \code{
 
 \item{transforms}{Transformation specifications for association terms.
 Prefer declaring them with \code{joinme_tf(...)}; raw named lists remain
-supported. See Details for \code{ispline} and \code{ispline_penalised} semantics.}
+supported. Fit-time functional transforms may also request a free affine
+shift through \code{intercept = TRUE} and/or \code{slope = TRUE}, for example
+\code{joinme_tf(cv_total = ~ expit(x, intercept = TRUE, slope = TRUE))}, which
+is fitted as \code{expit(iota_1 + iota_2 * x)}. This fit-only affine shift is
+not mirrored by \code{simulate_joinme()}.}
 
 \item{priors}{Prior declaration. Prefer \code{joinme_priors(...)}; raw named lists
-with components \code{beta}, \code{alpha}, and \code{lkj} remain supported.}
+with components \code{beta}, \code{alpha}, \code{iota}, and \code{lkj} remain supported.}
 
-\item{fixed_marker_weights}{Logical; if TRUE, marker weights are fixed at
-provided \code{marker_weights} (or defaults). If FALSE, marker-weight perturbations
-are estimated.}
+\item{fixed_marker_weights}{Logical; if TRUE, marker weights are fixed at the
+supplied base values. If FALSE, marker-weight perturbations are estimated.}
+
+\item{shared_marker_weights}{Logical; if TRUE, all weighted marker-based
+association terms share one marker-weight structure. If FALSE, each active
+weighted marker-based association term gets its own marker-weight structure.
+When \code{marker_weights} is a named list, use names \code{cv_total}, \code{cs_total},
+\code{cv_marker}, and \code{cs_marker}.}
 
 \item{...}{Additional args passed to joinme_standata().}
 }
@@ -146,10 +156,14 @@ are rescaled within Stan so fixed effects remain interpretable on the original s
 
 Marker weights (see \code{joinme_standata()}) are used to form marker-average summaries
 for both current value (CV) and current slope (CS) association components. When
-\code{fixed_marker_weights = FALSE}, signed perturbations are estimated around base
-weights using \code{marker_weights + z_marker_weights} with
-\code{z_marker_weights ~ N(0, 1)}. The effective marker intensities are used directly
-from \code{w_raw} without additional normalisation and scale the association contributions.
+\code{shared_marker_weights = TRUE}, all weighted marker-based association terms share
+one marker-weight structure. When \code{shared_marker_weights = FALSE}, each active
+weighted marker-based association term (\code{cv_total}, \code{cs_total}, \code{cv_marker},
+\code{cs_marker}) gets its own marker-weight structure. When
+\code{fixed_marker_weights = FALSE}, signed perturbations are estimated around the
+supplied base weights. The effective marker intensities are used directly,
+without additional normalisation, to scale the corresponding association
+contribution.
 
 The returned \code{JoinMeFit} object stores a compact association plotting bundle
 containing only the posterior quantities needed to draw association curves

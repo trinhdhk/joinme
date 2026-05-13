@@ -33,6 +33,35 @@ test_that("standata accepts spline time terms without raw-time rescaling", {
   expect_equal(ncol(probe_matrix), sd$P)
 })
 
+test_that("simulate_joinme keeps spline-expanded random-effect column labels in truth draws", {
+  sim <- simulate_joinme(
+    formulaLong = y ~ 1 + time +
+      (1 | id) +
+      (1 + splines::bs(time, knots = 0.5, degree = 2) + (1 | id) | marker),
+    formulaEvent = survival::Surv(time, event) ~ 1,
+    n_id = 4,
+    families = rep("gaussian", 2),
+    time_cens = 1,
+    times_obs = seq(0, 1, length.out = 3),
+    n_obs_per_marker_per_id = 3,
+    assoc = c("cv_total"),
+    assoc_coefs = c(cv_total = 0),
+    seed = 31015,
+    use_mirai = FALSE
+  )
+
+  expect_equal(
+    colnames(sim$truth$re_draws$marker),
+    c(
+      "(Intercept)",
+      "splines::bs(time, knots = 0.5, degree = 2)1",
+      "splines::bs(time, knots = 0.5, degree = 2)2",
+      "splines::bs(time, knots = 0.5, degree = 2)3"
+    )
+  )
+  expect_equal(rownames(sim$truth$re_draws$marker), sim$marker_info$names)
+})
+
 test_that("fit and prediction support spline time terms in formulaLong", {
   skip_on_cran()
   skip_if_not_installed("cmdstanr")

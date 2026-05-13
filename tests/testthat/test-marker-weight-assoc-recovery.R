@@ -47,7 +47,7 @@ test_that("fit recovers signed marker weights and alpha without passing marker_w
 
   assoc_tbl <- summary(fit)$tables$assoc
 
-  alpha_hat <- assoc_tbl$Estimate[assoc_tbl$term == "cv_total"]
+  alpha_hat <- assoc_tbl$Estimate[assoc_tbl$term == "cv_total (+)"]
   expect_true(is.finite(alpha_hat) && alpha_hat > 0)
 
   w_rows <- assoc_tbl[grepl("^weight:", assoc_tbl$term), , drop = FALSE]

@@ -8,7 +8,11 @@ eval_bytecode_scalar(
   x,
   bytecode = NULL,
   const_data = numeric(),
-  opcodes = NULL
+  opcodes = NULL,
+  iota_intercepts = numeric(0),
+  iota_slopes = numeric(0),
+  op_iota_intercept_idx = NULL,
+  op_iota_slope_idx = NULL
 )
 }
 \arguments{

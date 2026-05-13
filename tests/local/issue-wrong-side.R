@@ -1,7 +1,7 @@
 devtools::load_all(quiet = TRUE)
 library(dplyr)
 
-formula_long <- y ~ 1 + time + (1 + time | id) + (0 + (1 + time || id) | marker)
+formula_long <- y ~ 1 + time + (1 + time | id) + (1 + time + (1 + time | id) | marker)
 formula_event <- survival::Surv(time, event) ~ 1
 seed <- 2401
 

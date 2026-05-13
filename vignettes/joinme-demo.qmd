@@ -349,15 +349,17 @@ diagnosis(fit)
 diagnosis(pred_ep)
 ```
 
-For fitted models, `ranef()` and `vcov()` are nested by `formulaLong` and
-`formulaDist`:
+For fitted models, `ranef()`, `coef()`, and `vcov()` are nested by
+`formulaLong` and `formulaDist`:
 
 ```{r scenario-a-ranef-corr-fit}
 re_fit <- ranef(fit)
+cf_fit <- coef(fit)
 vc_fit <- vcov(fit)
 
 # Examples
 re_fit$formulaLong$id
+cf_fit$formulaLong$id
 vc_fit$formulaLong$id
 ```
 

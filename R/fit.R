@@ -29,10 +29,14 @@
 #'
 #' Marker weights (see `joinme_standata()`) are used to form marker-average summaries
 #' for both current value (CV) and current slope (CS) association components. When
-#' `fixed_marker_weights = FALSE`, signed perturbations are estimated around base
-#' weights using `marker_weights + z_marker_weights` with
-#' `z_marker_weights ~ N(0, 1)`. The effective marker intensities are used directly
-#' from `w_raw` without additional normalisation and scale the association contributions.
+#' `shared_marker_weights = TRUE`, all weighted marker-based association terms share
+#' one marker-weight structure. When `shared_marker_weights = FALSE`, each active
+#' weighted marker-based association term (`cv_total`, `cs_total`, `cv_marker`,
+#' `cs_marker`) gets its own marker-weight structure. When
+#' `fixed_marker_weights = FALSE`, signed perturbations are estimated around the
+#' supplied base weights. The effective marker intensities are used directly,
+#' without additional normalisation, to scale the corresponding association
+#' contribution.
 #'
 #' The returned `JoinMeFit` object stores a compact association plotting bundle
 #' containing only the posterior quantities needed to draw association curves
@@ -202,12 +206,20 @@
 #'   Supported links/inverse-links: `identity`, `log`, `logit`, `probit`, `exp`.
 #' @param transforms Transformation specifications for association terms.
 #'   Prefer declaring them with `joinme_tf(...)`; raw named lists remain
-#'   supported. See Details for `ispline` and `ispline_penalised` semantics.
+#'   supported. Fit-time functional transforms may also request a free affine
+#'   shift through `intercept = TRUE` and/or `slope = TRUE`, for example
+#'   `joinme_tf(cv_total = ~ expit(x, intercept = TRUE, slope = TRUE))`, which
+#'   is fitted as `expit(iota_1 + iota_2 * x)`. This fit-only affine shift is
+#'   not mirrored by `simulate_joinme()`.
 #' @param priors Prior declaration. Prefer `joinme_priors(...)`; raw named lists
-#'   with components `beta`, `alpha`, and `lkj` remain supported.
-#' @param fixed_marker_weights Logical; if TRUE, marker weights are fixed at
-#'   provided `marker_weights` (or defaults). If FALSE, marker-weight perturbations
-#'   are estimated.
+#'   with components `beta`, `alpha`, `iota`, and `lkj` remain supported.
+#' @param fixed_marker_weights Logical; if TRUE, marker weights are fixed at the
+#'   supplied base values. If FALSE, marker-weight perturbations are estimated.
+#' @param shared_marker_weights Logical; if TRUE, all weighted marker-based
+#'   association terms share one marker-weight structure. If FALSE, each active
+#'   weighted marker-based association term gets its own marker-weight structure.
+#'   When `marker_weights` is a named list, use names `cv_total`, `cs_total`,
+#'   `cv_marker`, and `cs_marker`.
 #' @param ... Additional args passed to joinme_standata().
 #'
 #' @examples
@@ -241,6 +253,7 @@ joinme <- function(
   transforms = NULL,
   priors = joinme_priors(),
   fixed_marker_weights = FALSE,
+  shared_marker_weights = TRUE,
   ...
 ) {
   if (!is.list(control)) {
@@ -280,8 +293,10 @@ joinme <- function(
     transforms = transforms,
     beta_prior = priors$beta,
     alpha_prior = priors$alpha,
+    iota_prior = priors$iota,
     lkj_prior = priors$lkj,
     fixed_marker_weights = fixed_marker_weights,
+    shared_marker_weights = shared_marker_weights,
     quadrature_nodes = quadrature_nodes,
     vcov_diag_link = vcov_diag_link,
     tau_sde_fixed = tau_sde_fixed,
@@ -554,9 +569,7 @@ joinme <- function(
     dims = c(n_id = sd$n_id, N = sd$N, D = sd$D, P = sd$P, R_id = sd$R_id, R_mk = sd$R_mk, Q_idm = sd$Q_idm),
     draws_default = draws,
     threads_per_chain = threads_per_chain,
-    tmax = sd$tmax_reported %||% sd$tmax,
-    tmax_internal = sd$tmax_internal %||% sd$tmax,
-    tmax_reported = sd$tmax_reported %||% sd$tmax,
+    tmax_internal = sd$tmax_internal,
     time_indices = list(
       idx_time_beta = sd$idx_time_beta,
       idx_time_uid = sd$idx_time_uid,
@@ -583,7 +596,7 @@ joinme <- function(
     formulaVCov = formulaVCov,
     config = cfg,
     call = match.call(),
-    tmax = sd$tmax_reported %||% sd$tmax,
+    tmax = sd$tmax_internal,
     dataLong = dataLong,
     dataEvent = dataEvent
   )

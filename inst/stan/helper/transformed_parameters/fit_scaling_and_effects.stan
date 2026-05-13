@@ -140,19 +140,48 @@
   /* -------------------- marker weights (signed) */
   // Goal:
   // - Allow positive and negative marker contributions.
-  // - Keep perturbation model simple and directly interpretable.
-  // - No normalisation is applied; raw weights are used directly.
-  // Rule:
-  // - Start from signed base weights (provided from standata) as a prior offset.
-  // - If estimation is enabled, add a signed standard-normal perturbation z.
-  // - Map to effective weights via w_raw (no normalisation).
-  // - Interpret marker_weights_eff as marker-intensity multipliers for association.
-  vector[D] marker_weights_eff; // effective signed marker weights
+  // - Support either one shared marker-weight structure across all weighted
+  //   marker-based association terms or one structure per active term.
+  // - Keep perturbation model directly interpretable by adding signed latent
+  //   perturbations to the supplied base weights.
+  matrix[n_marker_weight_sets, D] z_marker_weight_sets = rep_matrix(0.0, n_marker_weight_sets, D);
+  vector[D] marker_weights_eff_cv_total = marker_weights_cv_total;
+  vector[D] marker_weights_eff_cs_total = marker_weights_cs_total;
+  vector[D] marker_weights_eff_cv_marker = marker_weights_cv_marker;
+  vector[D] marker_weights_eff_cs_marker = marker_weights_cs_marker;
+  vector[D] marker_weights_eff = rep_vector(1.0, D); // legacy shared alias for backward-compatible extraction when relevant
   {
     if (estimate_marker_weights == 1 && use_marker_weight_assoc == 1) {
-      marker_weights_eff = marker_weights + z_marker_weights;
-    } else {
-      marker_weights_eff = marker_weights;
+      for (s in 1:n_marker_weight_sets) {
+        int start_pos = (s - 1) * D + 1;
+        int end_pos = s * D;
+        z_marker_weight_sets[s] = to_row_vector(z_marker_weights[start_pos:end_pos]);
+      }
+    }
+
+    if (assoc_cv_total == 1 && marker_weight_set_cv_total > 0) {
+      marker_weights_eff_cv_total = marker_weights_cv_total + to_vector(z_marker_weight_sets[marker_weight_set_cv_total]);
+    }
+    if (assoc_cs_total == 1 && marker_weight_set_cs_total > 0) {
+      marker_weights_eff_cs_total = marker_weights_cs_total + to_vector(z_marker_weight_sets[marker_weight_set_cs_total]);
+    }
+    if (assoc_cv_marker == 1 && marker_weight_set_cv_marker > 0) {
+      marker_weights_eff_cv_marker = marker_weights_cv_marker + to_vector(z_marker_weight_sets[marker_weight_set_cv_marker]);
+    }
+    if (assoc_cs_marker == 1 && marker_weight_set_cs_marker > 0) {
+      marker_weights_eff_cs_marker = marker_weights_cs_marker + to_vector(z_marker_weight_sets[marker_weight_set_cs_marker]);
+    }
+
+    if (shared_marker_weights == 1) {
+      if (assoc_cv_total == 1) {
+        marker_weights_eff = marker_weights_eff_cv_total;
+      } else if (assoc_cs_total == 1) {
+        marker_weights_eff = marker_weights_eff_cs_total;
+      } else if (assoc_cv_marker == 1) {
+        marker_weights_eff = marker_weights_eff_cv_marker;
+      } else if (assoc_cs_marker == 1) {
+        marker_weights_eff = marker_weights_eff_cs_marker;
+      }
     }
   }
 
@@ -222,6 +251,41 @@
     for (j in 2:n_coeff_cs_marker) coeff_cs_marker_eff[j] = coeff_cs_marker_eff[j - 1] + delta[j - 1];
   }
 
+  /* -------------------- fit-only affine shift for functional transforms */
+  vector[estimate_iota_intercept_cv] iota_intercept_cv_eff = rep_vector(0, estimate_iota_intercept_cv);
+  vector[estimate_iota_slope_cv] iota_slope_cv_eff = rep_vector(1, estimate_iota_slope_cv);
+  vector[estimate_iota_intercept_cs] iota_intercept_cs_eff = rep_vector(0, estimate_iota_intercept_cs);
+  vector[estimate_iota_slope_cs] iota_slope_cs_eff = rep_vector(1, estimate_iota_slope_cs);
+  vector[M_corr * estimate_iota_intercept_corr] iota_intercept_corr_eff = rep_vector(0, M_corr * estimate_iota_intercept_corr);
+  vector[M_corr * estimate_iota_slope_corr] iota_slope_corr_eff = rep_vector(1, M_corr * estimate_iota_slope_corr);
+  vector[M_vcov * estimate_iota_intercept_vcov] iota_intercept_vcov_eff = rep_vector(0, M_vcov * estimate_iota_intercept_vcov);
+  vector[M_vcov * estimate_iota_slope_vcov] iota_slope_vcov_eff = rep_vector(1, M_vcov * estimate_iota_slope_vcov);
+  vector[estimate_iota_intercept_cv_mean] iota_intercept_cv_mean_eff = rep_vector(0, estimate_iota_intercept_cv_mean);
+  vector[estimate_iota_slope_cv_mean] iota_slope_cv_mean_eff = rep_vector(1, estimate_iota_slope_cv_mean);
+  vector[estimate_iota_intercept_cv_marker] iota_intercept_cv_marker_eff = rep_vector(0, estimate_iota_intercept_cv_marker);
+  vector[estimate_iota_slope_cv_marker] iota_slope_cv_marker_eff = rep_vector(1, estimate_iota_slope_cv_marker);
+  vector[estimate_iota_intercept_cs_mean] iota_intercept_cs_mean_eff = rep_vector(0, estimate_iota_intercept_cs_mean);
+  vector[estimate_iota_slope_cs_mean] iota_slope_cs_mean_eff = rep_vector(1, estimate_iota_slope_cs_mean);
+  vector[estimate_iota_intercept_cs_marker] iota_intercept_cs_marker_eff = rep_vector(0, estimate_iota_intercept_cs_marker);
+  vector[estimate_iota_slope_cs_marker] iota_slope_cs_marker_eff = rep_vector(1, estimate_iota_slope_cs_marker);
+
+  if (estimate_iota_intercept_cv > 0) iota_intercept_cv_eff = iota_scale * z_iota_intercept_cv;
+  if (estimate_iota_slope_cv > 0) iota_slope_cv_eff = iota_scale * z_iota_slope_cv;
+  if (estimate_iota_intercept_cs > 0) iota_intercept_cs_eff = iota_scale * z_iota_intercept_cs;
+  if (estimate_iota_slope_cs > 0) iota_slope_cs_eff = iota_scale * z_iota_slope_cs;
+  if (estimate_iota_intercept_corr > 0 && M_corr > 0) iota_intercept_corr_eff = iota_scale * z_iota_intercept_corr;
+  if (estimate_iota_slope_corr > 0 && M_corr > 0) iota_slope_corr_eff = iota_scale * z_iota_slope_corr;
+  if (estimate_iota_intercept_vcov > 0 && M_vcov > 0) iota_intercept_vcov_eff = iota_scale * z_iota_intercept_vcov;
+  if (estimate_iota_slope_vcov > 0 && M_vcov > 0) iota_slope_vcov_eff = iota_scale * z_iota_slope_vcov;
+  if (estimate_iota_intercept_cv_mean > 0) iota_intercept_cv_mean_eff = iota_scale * z_iota_intercept_cv_mean;
+  if (estimate_iota_slope_cv_mean > 0) iota_slope_cv_mean_eff = iota_scale * z_iota_slope_cv_mean;
+  if (estimate_iota_intercept_cv_marker > 0) iota_intercept_cv_marker_eff = iota_scale * z_iota_intercept_cv_marker;
+  if (estimate_iota_slope_cv_marker > 0) iota_slope_cv_marker_eff = iota_scale * z_iota_slope_cv_marker;
+  if (estimate_iota_intercept_cs_mean > 0) iota_intercept_cs_mean_eff = iota_scale * z_iota_intercept_cs_mean;
+  if (estimate_iota_slope_cs_mean > 0) iota_slope_cs_mean_eff = iota_scale * z_iota_slope_cs_mean;
+  if (estimate_iota_intercept_cs_marker > 0) iota_intercept_cs_marker_eff = iota_scale * z_iota_intercept_cs_marker;
+  if (estimate_iota_slope_cs_marker > 0) iota_slope_cs_marker_eff = iota_scale * z_iota_slope_cs_marker;
+
   /* -------------------- marker averages for survival association (unweighted mean across markers) */
   // For transformed marker-aggregated CV terms, signed marker weights are applied
   // only after transformation. vbar/wbar_i stay unweighted means to avoid
@@ -252,23 +316,31 @@
   
   /* -------------------- Effective association coefficients (flags applied) */
   // Non-centred association construction with flexible sign constraints:
-  // if any marker-weight-involving association is active, only the first
-  // active latent in the order (cv_total, cs_total, cv_marker, cs_marker)
-  // is constrained positive; all others remain unconstrained.
+  // - when weighted marker-based association terms share one marker-weight
+  //   structure, only the first active weighted term is constrained positive;
+  // - when weighted marker-based association terms use separate weight
+  //   structures, every active weighted term is constrained positive.
   real z_alpha_cv_total_eff = z_alpha_cv_total;
   real z_alpha_cs_total_eff = z_alpha_cs_total;
   real z_alpha_cv_marker_eff = z_alpha_cv_marker;
   real z_alpha_cs_marker_eff = z_alpha_cs_marker;
 
   if ((assoc_cv_total + assoc_cs_total + assoc_cv_marker + assoc_cs_marker) > 0) {
-    if (assoc_cv_total == 1) {
-      z_alpha_cv_total_eff = abs(z_alpha_cv_total);
-    } else if (assoc_cs_total == 1) {
-      z_alpha_cs_total_eff = abs(z_alpha_cs_total);
-    } else if (assoc_cv_marker == 1) {
-      z_alpha_cv_marker_eff = abs(z_alpha_cv_marker);
-    } else if (assoc_cs_marker == 1) {
-      z_alpha_cs_marker_eff = abs(z_alpha_cs_marker);
+    if (shared_marker_weights == 1) {
+      if (assoc_cv_total == 1) {
+        z_alpha_cv_total_eff = abs(z_alpha_cv_total);
+      } else if (assoc_cs_total == 1) {
+        z_alpha_cs_total_eff = abs(z_alpha_cs_total);
+      } else if (assoc_cv_marker == 1) {
+        z_alpha_cv_marker_eff = abs(z_alpha_cv_marker);
+      } else if (assoc_cs_marker == 1) {
+        z_alpha_cs_marker_eff = abs(z_alpha_cs_marker);
+      }
+    } else {
+      if (assoc_cv_total == 1) z_alpha_cv_total_eff = abs(z_alpha_cv_total);
+      if (assoc_cs_total == 1) z_alpha_cs_total_eff = abs(z_alpha_cs_total);
+      if (assoc_cv_marker == 1) z_alpha_cv_marker_eff = abs(z_alpha_cv_marker);
+      if (assoc_cs_marker == 1) z_alpha_cs_marker_eff = abs(z_alpha_cs_marker);
     }
   }
 

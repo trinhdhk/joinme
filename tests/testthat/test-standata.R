@@ -98,6 +98,49 @@ test_that("standata validates formula requirements", {
   expect_equal(sd$assoc_vcov, 1L)
 })
 
+test_that("standata builds one marker-weight structure per active weighted association term", {
+  set.seed(111)
+  sim <- simulate_joinme_joint_student_t_cvtotal(
+    n_id = 3,
+    D = 3,
+    n_t = 2,
+    seed = 111,
+    include_marker_only = TRUE
+  )
+
+  formulaLong <- y ~ 1 + time + x1 +
+    (1 + time | id) +
+    (0 + x1 + (1 + time | id) | marker)
+  formulaEvent <- survival::Surv(time, event) ~ 1 + x1 + x2
+
+  weights_by_term <- list(
+    cv_total = c(m1 = 0.2, m2 = 0.5, m3 = 0.3),
+    cs_total = c(m1 = -0.5, m2 = 0.1, m3 = 0.8),
+    cv_marker = c(m1 = 1.0, m2 = 0.0, m3 = -1.0)
+  )
+  levels(sim$dataLong$marker) <- c("m1", "m2", "m3")
+
+  sd <- joinme_standata(
+    formulaLong = formulaLong,
+    dataLong = sim$dataLong,
+    formulaEvent = formulaEvent,
+    dataEvent = sim$dataEvent,
+    assoc = c("cv_total", "cs_total", "cv_marker"),
+    marker_weights = weights_by_term,
+    shared_marker_weights = FALSE
+  )
+
+  expect_equal(sd$shared_marker_weights, 0L)
+  expect_equal(sd$n_marker_weight_sets, 3L)
+  expect_equal(sd$marker_weight_set_cv_total, 1L)
+  expect_equal(sd$marker_weight_set_cs_total, 2L)
+  expect_equal(sd$marker_weight_set_cv_marker, 3L)
+  expect_equal(sd$marker_weight_set_cs_marker, 0L)
+  expect_equal(sd$marker_weights_by_term$cv_total, c(0.2, 0.5, 0.3), tolerance = 1e-8)
+  expect_equal(sd$marker_weights_by_term$cs_total, c(-0.5, 0.1, 0.8), tolerance = 1e-8)
+  expect_equal(sd$marker_weights_by_term$cv_marker, c(1.0, 0.0, -1.0), tolerance = 1e-8)
+})
+
 test_that("standata builds vcov association metadata", {
   sim <- simulate_joinme_joint_student_t_cvtotal(
     n_id = 3,

@@ -60,12 +60,65 @@ NULL
 }
 
 #' @keywords internal
+.transform_expr_with_affine_shift <- function(expr, iota_nodes = list()) {
+  if (is.null(iota_nodes) || !length(iota_nodes)) {
+    return(expr)
+  }
+
+  if (rlang::is_quosure(expr)) expr <- rlang::get_expr(expr)
+  if (inherits(expr, "formula")) expr <- expr[[2]]
+
+  iota_map <- if (length(iota_nodes)) {
+    stats::setNames(iota_nodes, vapply(iota_nodes, function(node) node$path %||% "", character(1)))
+  } else {
+    list()
+  }
+  build_iota_symbol <- function(prefix, idx) {
+    parse(text = paste0(prefix, "[", idx, "]"))[[1]]
+  }
+
+  rewrite_node <- function(node, path = "root") {
+    if (!is.call(node)) {
+      return(node)
+    }
+    parts <- as.list(node)
+    if (length(parts) > 1L) {
+      for (idx in seq_along(parts[-1])) {
+        parts[[idx + 1L]] <- rewrite_node(parts[[idx + 1L]], path = paste0(path, "/", idx))
+      }
+    }
+    info <- iota_map[[path]]
+    if (!is.null(info) && length(parts) >= 2L) {
+      base_expr <- parts[[2L]]
+      intercept_expr <- if (isTRUE((info$intercept_index %||% 0L) > 0L)) build_iota_symbol("iota_1", info$intercept_index) else NULL
+      slope_expr <- if (isTRUE((info$slope_index %||% 0L) > 0L)) build_iota_symbol("iota_2", info$slope_index) else NULL
+      shifted <- if (!is.null(intercept_expr) && !is.null(slope_expr)) {
+        bquote(.(intercept_expr) + .(slope_expr) * .(base_expr))
+      } else if (!is.null(intercept_expr)) {
+        bquote(.(intercept_expr) + .(base_expr))
+      } else if (!is.null(slope_expr)) {
+        bquote(.(slope_expr) * .(base_expr))
+      } else {
+        base_expr
+      }
+      parts[[2L]] <- shifted
+    }
+    as.call(parts)
+  }
+
+  rewrite_node(expr)
+}
+
+#' @keywords internal
 .format_transform_spec <- function(spec) {
   if (is.null(spec) || is.null(spec$type) || spec$type == "identity") {
     return("identity")
   }
   if (spec$type == "functional") {
-    return(.format_transform_expr(spec$expr))
+    return(.format_transform_expr(.transform_expr_with_affine_shift(
+      spec$expr,
+      iota_nodes = .transform_iota_nodes(spec)
+    )))
   }
   spec$type <- .canonicalise_transform_type(spec$type)
   if (spec$type %in% c("ispline", "ispline_penalised", "pmonospline", "pmono", "ispline_expit", "ispline_expit_penalised")) {
@@ -858,75 +911,24 @@ NULL
   out
 }
 
-#' Retrieve marker-weight draws on the effective likelihood scale
+#' Weighted association terms constrained positive in summary output
 #'
-#' @description
-#' Weighted association channels combine a shared posterior association strength
-#' with marker-specific signed weights. This helper returns the marker weights on
-#' the same draw grid used for posterior extraction so the combined hazard-scale
-#' association effect can be reconstructed draw by draw.
+#' @param sd Standata list stored in a fitted object.
 #'
-#' The algorithm proceeds in three steps:
-#' 1. prefer posterior draws of `marker_weights_eff`,
-#' 2. fall back to fixed standata weights when the model treats marker weights as
-#'    fixed quantities,
-#' 3. otherwise use the stored base weights as a deterministic fallback.
-#'
-#' @param object A `JoinMeFit` object.
-#' @param draws Optional posterior-draw subset size.
-#' @param seed Random seed used when subsetting draws.
-#' @param all_vars Character vector of available posterior variable names.
-#'
-#' @return A three-dimensional numeric array with dimensions
-#'   iteration x chain x marker.
+#' @return Character vector of weighted association term keys whose raw `alpha`
+#'   parameter is constrained positive in the fitted model.
 #' @keywords internal
-.association_marker_weight_array <- function(object, draws = NULL, seed = 1, all_vars = NULL) {
-  sd <- object$stan_data
-  n_markers <- as.integer(sd$D %||% 0L)
-  if (n_markers <= 0L) {
-    return(NULL)
+.positive_weighted_assoc_terms <- function(sd) {
+  active_terms <- .active_weighted_assoc_terms(sd)
+  if (!length(active_terms)) {
+    return(character(0))
   }
 
-  if (is.null(all_vars)) {
-    all_vars <- tryCatch(posterior::variables(.get_draws_obj(object$fit)), error = function(e) character(0))
+  if (isTRUE(as.integer(sd$shared_marker_weights %||% 1L) == 1L)) {
+    active_terms[[1L]]
+  } else {
+    active_terms
   }
-
-  weight_vars <- paste0("marker_weights_eff[", seq_len(n_markers), "]")
-  weight_vars <- weight_vars[weight_vars %in% all_vars]
-  if (length(weight_vars) == n_markers) {
-    return(.get_draws_array(object$fit, variables = weight_vars, draws = draws, seed = seed))
-  }
-
-  probe_var <- .first_available_draw_var(
-    all_vars,
-    c(
-      "alpha_cv_total_eff", "alpha_cv_total",
-      "alpha_cs_total_eff", "alpha_cs_total",
-      "alpha_cv_marker_eff", "alpha_cv_marker",
-      "alpha_cs_marker_eff", "alpha_cs_marker"
-    )
-  )
-  if (is.null(probe_var)) {
-    return(NULL)
-  }
-
-  probe_arr <- .get_draws_array(object$fit, variables = probe_var, draws = draws, seed = seed)
-  base_weights <- as.numeric(sd$marker_weights_eff %||% sd$marker_weights %||% rep(1, n_markers))
-  if (length(base_weights) < n_markers) {
-    base_weights <- c(base_weights, rep(1, n_markers - length(base_weights)))
-  }
-  base_weights <- base_weights[seq_len(n_markers)]
-
-  out <- array(
-    rep(base_weights, each = dim(probe_arr)[1] * dim(probe_arr)[2]),
-    dim = c(dim(probe_arr)[1], dim(probe_arr)[2], n_markers),
-    dimnames = list(
-      iteration = dimnames(probe_arr)[[1]],
-      chain = dimnames(probe_arr)[[2]],
-      variable = paste0("marker_weights_eff[", seq_len(n_markers), "]")
-    )
-  )
-  out
 }
 
 #' Summarise a derived posterior draw array with MCMC diagnostics
@@ -1077,7 +1079,6 @@ assoc.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary 
   all_vars <- tryCatch(posterior::variables(.get_draws_obj(fit)), error = function(e) character(0))
   marker_levels <- as.character(sd$marker_levels %||% paste0("marker_", seq_len(as.integer(sd$D %||% 0L))))
   n_markers <- length(marker_levels)
-  weight_array <- .association_marker_weight_array(object, draws = draws, seed = seed, all_vars = all_vars)
   weighted_divisor <- if (n_markers > 0L) n_markers else 1L
 
   build_scalar_term <- function(var_name, label) {
@@ -1092,7 +1093,8 @@ assoc.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary 
     }
   }
 
-  build_weighted_term <- function(var_name) {
+  build_weighted_term <- function(var_name, term_key) {
+    weight_array <- .association_marker_weight_array(object, term_key = term_key, draws = draws, seed = seed, all_vars = all_vars)
     if (is.null(var_name) || is.null(weight_array) || n_markers == 0L) {
       return(NULL)
     }
@@ -1150,22 +1152,22 @@ assoc.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary 
 
   out <- list(
     cv_total = if (isTRUE(sd$assoc_cv_total == 1L)) {
-      build_weighted_term(.first_available_draw_var(all_vars, c("alpha_cv_total_eff", "alpha_cv_total")))
+      build_weighted_term(.first_available_draw_var(all_vars, c("alpha_cv_total_eff", "alpha_cv_total")), term_key = "cv_total")
     } else NULL,
     cv_mean = if (isTRUE(sd$assoc_cv_mean == 1L)) {
       build_scalar_term(.first_available_draw_var(all_vars, c("alpha_cv_mean_eff", "alpha_cv_mean")), "cv_mean")
     } else NULL,
     cv_marker = if (isTRUE(sd$assoc_cv_marker == 1L)) {
-      build_weighted_term(.first_available_draw_var(all_vars, c("alpha_cv_marker_eff", "alpha_cv_marker")))
+      build_weighted_term(.first_available_draw_var(all_vars, c("alpha_cv_marker_eff", "alpha_cv_marker")), term_key = "cv_marker")
     } else NULL,
     cs_total = if (isTRUE(sd$assoc_cs_total == 1L)) {
-      build_weighted_term(.first_available_draw_var(all_vars, c("alpha_cs_total_eff", "alpha_cs_total")))
+      build_weighted_term(.first_available_draw_var(all_vars, c("alpha_cs_total_eff", "alpha_cs_total")), term_key = "cs_total")
     } else NULL,
     cs_mean = if (isTRUE(sd$assoc_cs_mean == 1L)) {
       build_scalar_term(.first_available_draw_var(all_vars, c("alpha_cs_mean_eff", "alpha_cs_mean")), "cs_mean")
     } else NULL,
     cs_marker = if (isTRUE(sd$assoc_cs_marker == 1L)) {
-      build_weighted_term(.first_available_draw_var(all_vars, c("alpha_cs_marker_eff", "alpha_cs_marker")))
+      build_weighted_term(.first_available_draw_var(all_vars, c("alpha_cs_marker_eff", "alpha_cs_marker")), term_key = "cs_marker")
     } else NULL,
     corr = if (isTRUE(sd$assoc_corr == 1L)) {
       corr_meta <- .assoc_component_metadata("corr", sd, length(corr_assoc_vars))
@@ -1530,6 +1532,11 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     s_a$term <- assoc_map[s_a$variable]
     s_a$term[is.na(s_a$term)] <- sub("^alpha_", "", s_a$variable[is.na(s_a$term)])
     s_a$term <- sub("_eff\\[", "[", s_a$term, perl = TRUE)
+    positive_terms <- .positive_weighted_assoc_terms(sd)
+    if (length(positive_terms) > 0L) {
+      positive_idx <- s_a$term %in% positive_terms
+      s_a$term[positive_idx] <- paste0(s_a$term[positive_idx], " (+)")
+    }
     s_a <- s_a[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
     s_a$Estimate <- round(s_a$Estimate, digits)
     s_a$Est.Error <- round(s_a$Est.Error, digits)
@@ -1546,28 +1553,33 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     isTRUE(sd$assoc_cs_marker == 1)
 
   if (sd$D > 0 && show_marker_weights) {
-    mw_vars <- paste0("marker_weights_eff[", seq_len(sd$D), "]")
-    mw_vars <- mw_vars[mw_vars %in% all_vars]
-    if (length(mw_vars) > 0) {
-      s_mw <- as.data.frame(.summarise_draws_diag(fit, mw_vars, draws = draws, seed = seed))
-      marker_terms <- sd$marker_levels %||% paste0("marker_", seq_len(sd$D))
-      if (length(marker_terms) == nrow(s_mw)) {
-        s_mw$term <- paste0("weight: ", marker_terms)
-      } else {
-        s_mw$term <- s_mw$variable
+    marker_terms <- sd$marker_levels %||% paste0("marker_", seq_len(sd$D))
+    shared_weights <- isTRUE(as.integer(sd$shared_marker_weights %||% 1L) == 1L)
+    weight_term_keys <- .active_weighted_assoc_terms(sd)
+    if (shared_weights && length(weight_term_keys) > 1L) {
+      weight_term_keys <- weight_term_keys[1L]
+    }
+
+    weight_tables <- lapply(weight_term_keys, function(term_key) {
+      weight_arr <- .association_marker_weight_array(object, term_key = term_key, draws = draws, seed = seed, all_vars = all_vars)
+      if (!is.null(weight_arr)) {
+        labels <- vapply(marker_terms, function(marker_label) {
+          .marker_weight_summary_label(term_key, marker_label, shared_marker_weights = shared_weights)
+        }, character(1))
+        return(.assoc_summary_from_draw_array(weight_arr, term_labels = labels, digits = digits))
       }
-      s_mw <- s_mw[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
-      s_mw$Estimate <- round(s_mw$Estimate, digits)
-      s_mw$Est.Error <- round(s_mw$Est.Error, digits)
-      s_mw$Q2.5 <- round(s_mw$Q2.5, digits)
-      s_mw$Q97.5 <- round(s_mw$Q97.5, digits)
-      s_mw$Rhat <- round(s_mw$Rhat, 3)
-      s_a <- if (is.null(s_a)) s_mw else rbind(s_a, s_mw)
-    } else if (isTRUE(as.logical(sd$fixed_marker_weights)) && !is.null(sd$marker_weights)) {
-      marker_terms <- sd$marker_levels %||% paste0("marker_", seq_len(sd$D))
-      s_mw <- data.frame(
-        term = paste0("weight: ", marker_terms),
-        Estimate = round(as.numeric(sd$marker_weights), digits),
+
+      base_by_term <- sd$marker_weights_by_term %||% list()
+      base_weights <- as.numeric(base_by_term[[term_key]] %||% sd$marker_weights %||% rep(1, sd$D))
+      if (length(base_weights) != sd$D) {
+        return(NULL)
+      }
+
+      data.frame(
+        term = vapply(marker_terms, function(marker_label) {
+          .marker_weight_summary_label(term_key, marker_label, shared_marker_weights = shared_weights)
+        }, character(1)),
+        Estimate = round(base_weights, digits),
         Est.Error = NA_real_,
         Q2.5 = NA_real_,
         Q97.5 = NA_real_,
@@ -1576,6 +1588,10 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
         ess_tail = NA_real_,
         stringsAsFactors = FALSE
       )
+    })
+    weight_tables <- Filter(Negate(is.null), weight_tables)
+    if (length(weight_tables) > 0L) {
+      s_mw <- do.call(rbind, weight_tables)
       s_a <- if (is.null(s_a)) s_mw else rbind(s_a, s_mw)
     }
   }
@@ -1830,6 +1846,83 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     ord_tmp <- order(tmp$channel, tmp$term)
     transform_param_tables[[channel]] <- tmp[ord_tmp, , drop = FALSE]
   }
+  iota_param_specs <- list(
+    cv_total = list(intercept = "iota_intercept_cv_eff", slope = "iota_slope_cv_eff", n_intercept = sd$estimate_iota_intercept_cv %||% 0L, n_slope = sd$estimate_iota_slope_cv %||% 0L),
+    cs_total = list(intercept = "iota_intercept_cs_eff", slope = "iota_slope_cs_eff", n_intercept = sd$estimate_iota_intercept_cs %||% 0L, n_slope = sd$estimate_iota_slope_cs %||% 0L),
+    corr = list(intercept = "iota_intercept_corr_eff", slope = "iota_slope_corr_eff", n_intercept = sd$estimate_iota_intercept_corr %||% 0L, n_slope = sd$estimate_iota_slope_corr %||% 0L),
+    vcov = list(intercept = "iota_intercept_vcov_eff", slope = "iota_slope_vcov_eff", n_intercept = sd$estimate_iota_intercept_vcov %||% 0L, n_slope = sd$estimate_iota_slope_vcov %||% 0L),
+    cv_mean = list(intercept = "iota_intercept_cv_mean_eff", slope = "iota_slope_cv_mean_eff", n_intercept = sd$estimate_iota_intercept_cv_mean %||% 0L, n_slope = sd$estimate_iota_slope_cv_mean %||% 0L),
+    cv_marker = list(intercept = "iota_intercept_cv_marker_eff", slope = "iota_slope_cv_marker_eff", n_intercept = sd$estimate_iota_intercept_cv_marker %||% 0L, n_slope = sd$estimate_iota_slope_cv_marker %||% 0L),
+    cs_mean = list(intercept = "iota_intercept_cs_mean_eff", slope = "iota_slope_cs_mean_eff", n_intercept = sd$estimate_iota_intercept_cs_mean %||% 0L, n_slope = sd$estimate_iota_slope_cs_mean %||% 0L),
+    cs_marker = list(intercept = "iota_intercept_cs_marker_eff", slope = "iota_slope_cs_marker_eff", n_intercept = sd$estimate_iota_intercept_cs_marker %||% 0L, n_slope = sd$estimate_iota_slope_cs_marker %||% 0L)
+  )
+  for (channel in names(iota_param_specs)) {
+    spec <- iota_param_specs[[channel]]
+    if (channel %in% c("corr", "vcov")) {
+      n_components <- .assoc_transform_component_count(
+        channel,
+        sd$Q_idm,
+        diagonal_only = identical(channel, "vcov") && isTRUE(as.integer(sd$indep_idmarker_cov %||% 0L) == 1L)
+      )
+      if (n_components < 1L) {
+        next
+      }
+      component_labels <- .assoc_transform_component_labels(channel, n_components)
+      n_intercept <- as.integer(spec$n_intercept %||% 0L)
+      n_slope <- as.integer(spec$n_slope %||% 0L)
+      var_map <- list(
+        intercept = if (n_intercept > 0L) paste0(spec$intercept, "[", seq_len(n_components * n_intercept), "]") else character(0),
+        slope = if (n_slope > 0L) paste0(spec$slope, "[", seq_len(n_components * n_slope), "]") else character(0)
+      )
+      var_names <- unlist(var_map, use.names = FALSE)
+      var_names <- var_names[var_names %in% all_vars]
+      if (!length(var_names)) {
+        if (n_intercept <= 1L) {
+          var_names <- c(var_names, paste0(spec$intercept, "[", seq_len(n_components), "]"))
+        }
+        if (n_slope <= 1L) {
+          var_names <- c(var_names, paste0(spec$slope, "[", seq_len(n_components), "]"))
+        }
+        var_names <- var_names[var_names %in% all_vars]
+      }
+      if (!length(var_names)) {
+        next
+      }
+      tmp <- as.data.frame(.summarise_draws_diag(fit, var_names, draws = draws, seed = seed))
+      raw_idx <- as.integer(sub("^.*\\[(\\d+)\\]$", "\\1", tmp$variable))
+      is_intercept <- grepl(paste0("^", spec$intercept, "\\["), tmp$variable)
+      count_use <- ifelse(is_intercept, max(1L, n_intercept), max(1L, n_slope))
+      tmp$channel <- component_labels[((raw_idx - 1L) %/% count_use) + 1L]
+      tmp$term <- paste0(ifelse(is_intercept, "iota_1", "iota_2"), "[", ((raw_idx - 1L) %% count_use) + 1L, "]")
+    } else {
+      var_map <- c(
+        if (as.integer(spec$n_intercept %||% 0L) > 0L) paste0(spec$intercept, "[", seq_len(as.integer(spec$n_intercept)), "]") else character(0),
+        if (as.integer(spec$n_slope %||% 0L) > 0L) paste0(spec$slope, "[", seq_len(as.integer(spec$n_slope)), "]") else character(0)
+      )
+      if (!length(var_map)) {
+        var_map <- c(spec$intercept, spec$slope)
+      }
+      var_names <- unname(var_map)[unname(var_map) %in% all_vars]
+      if (!length(var_names)) {
+        next
+      }
+      tmp <- as.data.frame(.summarise_draws_diag(fit, var_names, draws = draws, seed = seed))
+      tmp$channel <- channel
+      tmp$term <- ifelse(
+        grepl(paste0("^", spec$intercept, "(\\[|$)"), tmp$variable),
+        paste0("iota_1[", ifelse(grepl("\\[", tmp$variable), sub(paste0("^", spec$intercept, "\\[(\\d+)\\]$"), "\\1", tmp$variable), "1"), "]"),
+        paste0("iota_2[", ifelse(grepl("\\[", tmp$variable), sub(paste0("^", spec$slope, "\\[(\\d+)\\]$"), "\\1", tmp$variable), "1"), "]")
+      )
+    }
+    tmp <- tmp[, c("channel", "term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
+    tmp$Estimate <- round(tmp$Estimate, digits)
+    tmp$Est.Error <- round(tmp$Est.Error, digits)
+    tmp$Q2.5 <- round(tmp$Q2.5, digits)
+    tmp$Q97.5 <- round(tmp$Q97.5, digits)
+    tmp$Rhat <- round(tmp$Rhat, 3)
+    ord_tmp <- order(tmp$channel, tmp$term)
+    transform_param_tables[[paste0(channel, "_iota")]] <- tmp[ord_tmp, , drop = FALSE]
+  }
   transform_params <- if (length(transform_param_tables) > 0) {
     do.call(rbind, unname(transform_param_tables))
   } else {
@@ -1877,7 +1970,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     metadata = list(
       call = if (!is.null(object$call)) paste(deparse(object$call, width.cutoff = 500L), collapse = " ") else NULL,
       family = sd$family_names %||% .family_code_to_name(cfg$family_long),
-      tmax = sd$tmax %||% cfg$tmax %||% 1.0,
+      tmax = sd$tmax_internal %||% 1.0,
       draws = draws,
       transforms = cfg$transforms,
       transform_formulas = transform_formulas
@@ -2097,22 +2190,577 @@ print.summary_JoinMeFit <- function(x, ...) {
 
 # ---- fixef / ranef --------------------------------------------------------
 
+#' @keywords internal
+.joinme_draw_long_from_matrix <- function(draw_matrix, meta) {
+  if (is.null(draw_matrix) || !is.matrix(draw_matrix) || ncol(draw_matrix) == 0L || nrow(meta) == 0L) {
+    return(data.frame())
+  }
+  meta <- as.data.frame(meta, stringsAsFactors = FALSE)
+  meta_rep <- meta[rep(seq_len(nrow(meta)), each = nrow(draw_matrix)), , drop = FALSE]
+  data.frame(
+    draw = rep(seq_len(nrow(draw_matrix)), times = ncol(draw_matrix)),
+    meta_rep,
+    value = as.numeric(draw_matrix),
+    stringsAsFactors = FALSE,
+    row.names = NULL
+  )
+}
+
+#' @keywords internal
+.joinme_summarize_value <- function(values) {
+  values <- as.numeric(values)
+  values <- values[is.finite(values)]
+  if (!length(values)) {
+    return(c(
+      Estimate = NA_real_, Est.Error = NA_real_, Q2.5 = NA_real_, Q97.5 = NA_real_,
+      Rhat = NA_real_, ess_bulk = NA_real_, ess_tail = NA_real_
+    ))
+  }
+  qs <- stats::quantile(values, probs = c(0.025, 0.975), names = FALSE)
+  c(
+    Estimate = mean(values),
+    Est.Error = stats::sd(values),
+    Q2.5 = qs[1],
+    Q97.5 = qs[2],
+    Rhat = suppressWarnings(tryCatch(as.numeric(posterior::rhat(values)), error = function(e) NA_real_)),
+    ess_bulk = suppressWarnings(tryCatch(as.numeric(posterior::ess_basic(values)), error = function(e) NA_real_)),
+    ess_tail = suppressWarnings(tryCatch(as.numeric(posterior::ess_tail(values)), error = function(e) NA_real_))
+  )
+}
+
+#' @keywords internal
+.joinme_summarize_long_draws <- function(draws_df, group_cols, digits = 3, value_col = "value") {
+  if (is.null(draws_df) || !nrow(draws_df)) {
+    return(NULL)
+  }
+  group_cols <- unique(c(group_cols, value_col))
+  split_key <- interaction(draws_df[group_cols[group_cols != value_col]], drop = TRUE, lex.order = TRUE)
+  idx_split <- split(seq_len(nrow(draws_df)), split_key)
+  out_rows <- lapply(idx_split, function(idx) {
+    base_row <- draws_df[idx[1], setdiff(group_cols, value_col), drop = FALSE]
+    stats_row <- .joinme_summarize_value(draws_df[[value_col]][idx])
+    cbind(base_row, as.data.frame(as.list(stats_row), stringsAsFactors = FALSE), stringsAsFactors = FALSE)
+  })
+  out <- do.call(rbind, out_rows)
+  out$Estimate <- round(out$Estimate, digits)
+  out$Est.Error <- round(out$Est.Error, digits)
+  out$Q2.5 <- round(out$Q2.5, digits)
+  out$Q97.5 <- round(out$Q97.5, digits)
+  out$Rhat <- round(out$Rhat, 3)
+  rownames(out) <- NULL
+  out
+}
+
+#' @keywords internal
+.joinme_public_time_scale <- function(stan_data) {
+  scale_factor <- suppressWarnings(as.numeric(stan_data$tmax_internal %||% 1.0))
+  if (!is.finite(scale_factor) || length(scale_factor) != 1L || scale_factor <= 0) {
+    return(1.0)
+  }
+  scale_factor
+}
+
+#' @keywords internal
+.rescale_public_longitudinal_draws <- function(draws_df, stan_data, idx, term_labels) {
+  if (is.null(draws_df) || !nrow(draws_df)) return(draws_df)
+
+  scale_factor <- .joinme_public_time_scale(stan_data)
+  if (abs(scale_factor - 1.0) < 1e-12) return(draws_df)
+
+  idx <- as.integer(idx %||% integer(0))
+  idx <- idx[is.finite(idx) & idx >= 1L]
+  if (!length(idx)) return(draws_df)
+
+  term_labels <- as.character(term_labels %||% character(0))
+  if (length(term_labels) < max(idx)) return(draws_df)
+
+  time_terms <- unique(term_labels[idx])
+  keep <- draws_df$term %in% time_terms
+  if (!any(keep)) return(draws_df)
+
+  draws_df$value[keep] <- draws_df$value[keep] / scale_factor
+  draws_df
+}
+
+#' @keywords internal
+.rescale_public_longitudinal_summary <- function(summary_df, stan_data, idx, term_labels) {
+  if (is.null(summary_df) || !nrow(summary_df)) return(summary_df)
+
+  scale_factor <- .joinme_public_time_scale(stan_data)
+  if (abs(scale_factor - 1.0) < 1e-12) return(summary_df)
+
+  idx <- as.integer(idx %||% integer(0))
+  idx <- idx[is.finite(idx) & idx >= 1L]
+  if (!length(idx)) return(summary_df)
+
+  term_labels <- as.character(term_labels %||% character(0))
+  if (length(term_labels) < max(idx)) return(summary_df)
+
+  time_terms <- unique(term_labels[idx])
+  keep <- summary_df$term %in% time_terms
+  if (!any(keep)) return(summary_df)
+
+  value_cols <- intersect(c("Estimate", "Est.Error", "Q2.5", "Q97.5"), names(summary_df))
+  if (length(value_cols) == 0L) return(summary_df)
+
+  summary_df[keep, value_cols] <- lapply(summary_df[keep, value_cols, drop = FALSE], function(x) x / scale_factor)
+  summary_df
+}
+
+#' @keywords internal
+.joinme_id_labels <- function(object, n_id) {
+  ids <- object$dataLong$id %||% object$dataEvent$id %||% seq_len(n_id)
+  ids <- unique(as.character(ids))
+  if (length(ids) < n_id) {
+    ids <- c(ids, as.character(seq_len(n_id - length(ids)) + length(ids)))
+  }
+  ids[seq_len(n_id)]
+}
+
+#' @keywords internal
+.posterior_fixef_matrix <- function(object, draws = NULL, seed = 1) {
+  fit <- object$fit
+  sd <- object$stan_data
+  if (is.null(draws)) draws <- object$config$draws_default
+  all_vars <- tryCatch(posterior::variables(.get_draws_obj(fit)), error = function(e) character(0))
+
+  beta_vars <- paste0("beta[", seq_len(sd$P %||% 0L), "]")
+  beta_vars <- beta_vars[beta_vars %in% all_vars]
+  beta_terms <- sd$x_cols %||% beta_vars
+  if (length(beta_terms) != length(beta_vars)) beta_terms <- beta_vars
+
+  mats <- list()
+  labels <- character(0)
+  if (length(beta_vars) > 0L) {
+    mats[[length(mats) + 1L]] <- .get_draws_matrix(fit, variables = beta_vars, draws = draws, seed = seed)
+    labels <- c(labels, as.character(beta_terms))
+  }
+
+  show_marker_weights <- isTRUE(sd$assoc_cv_total == 1) ||
+    isTRUE(sd$assoc_cv_marker == 1) ||
+    isTRUE(sd$assoc_cs_total == 1) ||
+    isTRUE(sd$assoc_cs_marker == 1)
+  if (isTRUE(show_marker_weights) && isTRUE((sd$D %||% 0L) > 0L)) {
+    marker_terms <- sd$marker_levels %||% paste0("marker_", seq_len(sd$D))
+    shared_weights <- isTRUE(as.integer(sd$shared_marker_weights %||% 1L) == 1L)
+    weight_term_keys <- .active_weighted_assoc_terms(sd)
+    if (shared_weights && length(weight_term_keys) > 1L) weight_term_keys <- weight_term_keys[1L]
+    for (term_key in weight_term_keys) {
+      mw_vars <- paste0(.marker_weight_var_prefix(term_key, effective = TRUE), "[", seq_len(sd$D), "]")
+      mw_vars <- mw_vars[mw_vars %in% all_vars]
+      if (length(mw_vars) == 0L && shared_weights) {
+        mw_vars <- paste0("marker_weights_eff[", seq_len(sd$D), "]")
+        mw_vars <- mw_vars[mw_vars %in% all_vars]
+      }
+      if (!length(mw_vars)) next
+      mats[[length(mats) + 1L]] <- .get_draws_matrix(fit, variables = mw_vars, draws = draws, seed = seed)
+      labels <- c(labels, vapply(marker_terms[seq_along(mw_vars)], function(marker_label) {
+        .marker_weight_summary_label(term_key, marker_label, shared_marker_weights = shared_weights)
+      }, character(1)))
+    }
+  }
+
+  if (!length(mats)) {
+    return(matrix(0, nrow = 0L, ncol = 0L))
+  }
+  out <- do.call(cbind, lapply(mats, as.matrix))
+  colnames(out) <- labels
+  out
+}
+
+#' @keywords internal
+.posterior_event_coef_draws <- function(object, draws = NULL, seed = 1) {
+  fit <- object$fit
+  sd <- object$stan_data
+  if (is.null(draws)) draws <- object$config$draws_default
+  all_vars <- tryCatch(posterior::variables(.get_draws_obj(fit)), error = function(e) character(0))
+  if (!isTRUE((sd$p_w %||% 0L) > 0L)) return(NULL)
+
+  g_vars <- paste0("gamma_w[", seq_len(sd$p_w), "]")
+  g_vars <- g_vars[g_vars %in% all_vars]
+  if (length(g_vars) == 0L) {
+    k_event <- sd$K_event %||% 1L
+    g_vars <- as.vector(outer(seq_len(k_event), seq_len(sd$p_w), function(k, j) paste0("gamma_w[", k, ",", j, "]")))
+    g_vars <- g_vars[g_vars %in% all_vars]
+  }
+  if (!length(g_vars)) return(NULL)
+
+  dmat <- .get_draws_matrix(fit, variables = g_vars, draws = draws, seed = seed)
+  parse_idx <- regmatches(g_vars, regexec("^gamma_w\\[(\\d+)(?:,(\\d+))?\\]$", g_vars))
+  k_idx <- vapply(parse_idx, function(x) if (length(x) >= 2L) as.integer(x[2]) else 1L, integer(1))
+  j_idx <- vapply(parse_idx, function(x) if (length(x) >= 3L && nzchar(x[3])) as.integer(x[3]) else as.integer(x[2]), integer(1))
+  term_labels <- sd$w_cols %||% paste0("w_", seq_len(sd$p_w))
+  if (length(term_labels) < max(j_idx)) {
+    term_labels <- c(term_labels, paste0("w_", seq.int(length(term_labels) + 1L, max(j_idx))))
+  }
+  meta <- data.frame(
+    event = if ((sd$K_event %||% 1L) > 1L) paste0("event", k_idx) else rep("event", length(g_vars)),
+    term = as.character(term_labels[j_idx]),
+    stringsAsFactors = FALSE
+  )
+  .joinme_draw_long_from_matrix(dmat, meta)
+}
+
+#' @keywords internal
+.posterior_distreg_draws <- function(object, draws = NULL, seed = 1) {
+  fit <- object$fit
+  cfg <- object$config
+  if (is.null(draws)) draws <- object$config$draws_default
+  all_vars <- tryCatch(posterior::variables(.get_draws_obj(fit)), error = function(e) character(0))
+  dist_cols <- cfg$dist$dist_cols %||% list()
+  specs <- list(
+    sigma = list(prefix = "beta_sigma", cols = dist_cols$sigma %||% character(0)),
+    nu = list(prefix = "beta_nu", cols = dist_cols$nu %||% character(0)),
+    phi = list(prefix = "beta_phi", cols = dist_cols$phi %||% character(0)),
+    alpha = list(prefix = "beta_alpha", cols = dist_cols$alpha %||% character(0)),
+    phi_beta = list(prefix = "beta_phi_beta", cols = dist_cols$phi_beta %||% character(0)),
+    tau_sde = list(prefix = "beta_tau_sde", cols = dist_cols$tau_sde %||% character(0))
+  )
+
+  out <- list()
+  for (nm in names(specs)) {
+    spec <- specs[[nm]]
+    vars <- grep(paste0("^", spec$prefix, "\\["), all_vars, value = TRUE)
+    if (!length(vars)) next
+    dmat <- .get_draws_matrix(fit, variables = vars, draws = draws, seed = seed)
+    term_labels <- if (length(spec$cols) == length(vars)) spec$cols else vars
+    out[[nm]] <- .joinme_draw_long_from_matrix(dmat, data.frame(term = term_labels, stringsAsFactors = FALSE))
+  }
+  out
+}
+
+#' @keywords internal
+.posterior_ranef_joinmefit <- function(object, draws = NULL, seed = 1) {
+  fit <- object$fit
+  sd <- object$stan_data
+  cfg <- object$config
+  if (is.null(draws)) draws <- object$config$draws_default
+  all_vars <- tryCatch(posterior::variables(.get_draws_obj(fit)), error = function(e) character(0))
+  n_id <- as.integer(sd$n_id %||% 0L)
+  id_labels <- .joinme_id_labels(object, n_id)
+  marker_labels <- as.character(sd$marker_levels %||% paste0("marker_", seq_len(as.integer(sd$D %||% 0L))))
+
+  extract_grouped_draws <- function(var_builder, meta_builder) {
+    meta <- meta_builder()
+    if (is.null(meta) || !nrow(meta)) return(NULL)
+    vars <- meta$variable
+    keep <- vars %in% all_vars
+    meta <- meta[keep, , drop = FALSE]
+    if (!nrow(meta)) return(NULL)
+    dmat <- .get_draws_matrix(fit, variables = meta$variable, draws = draws, seed = seed)
+    meta$variable <- NULL
+    .joinme_draw_long_from_matrix(dmat, meta)
+  }
+
+  out_long <- list(
+    id = if (isTRUE((sd$R_id %||% 0L) > 0L) && isTRUE(n_id > 0L)) extract_grouped_draws(
+      NULL,
+      function() {
+        grid <- expand.grid(id_index = seq_len(n_id), term_index = seq_len(sd$R_id), KEEP.OUT.ATTRS = FALSE, stringsAsFactors = FALSE)
+        data.frame(
+          variable = paste0("u_id[", grid$id_index, ",", grid$term_index, "]"),
+          id = id_labels[grid$id_index],
+          term = as.character((sd$zid_cols %||% paste0("id_re_", seq_len(sd$R_id)))[grid$term_index]),
+          stringsAsFactors = FALSE
+        )
+      }
+    ) else NULL,
+    marker = if (isTRUE((sd$R_mk %||% 0L) > 0L) && isTRUE((sd$D %||% 0L) > 0L)) extract_grouped_draws(
+      NULL,
+      function() {
+        grid <- expand.grid(marker_index = seq_len(sd$D), term_index = seq_len(sd$R_mk), KEEP.OUT.ATTRS = FALSE, stringsAsFactors = FALSE)
+        data.frame(
+          variable = paste0("v_marker[", grid$marker_index, ",", grid$term_index, "]"),
+          marker = marker_labels[grid$marker_index],
+          term = as.character((sd$zmk_cols %||% paste0("marker_re_", seq_len(sd$R_mk)))[grid$term_index]),
+          stringsAsFactors = FALSE
+        )
+      }
+    ) else NULL,
+    marker_by_id = if (isTRUE((sd$Q_idm %||% 0L) > 0L) && isTRUE(n_id > 0L) && isTRUE((sd$D %||% 0L) > 0L)) extract_grouped_draws(
+      NULL,
+      function() {
+        grid <- expand.grid(id_index = seq_len(n_id), marker_index = seq_len(sd$D), term_index = seq_len(sd$Q_idm), KEEP.OUT.ATTRS = FALSE, stringsAsFactors = FALSE)
+        data.frame(
+          variable = paste0("w_idm[", grid$id_index, ",", grid$marker_index, ",", grid$term_index, "]"),
+          id = id_labels[grid$id_index],
+          marker = marker_labels[grid$marker_index],
+          term = as.character((sd$zidm_cols %||% paste0("id_marker_re_", seq_len(sd$Q_idm)))[grid$term_index]),
+          stringsAsFactors = FALSE
+        )
+      }
+    ) else NULL
+  )
+
+  out_long$id <- .rescale_public_longitudinal_draws(
+    out_long$id,
+    sd,
+    sd$idx_time_uid,
+    sd$zid_cols %||% character(0)
+  )
+  out_long$marker <- .rescale_public_longitudinal_draws(
+    out_long$marker,
+    sd,
+    sd$idx_time_vmk,
+    sd$zmk_cols %||% character(0)
+  )
+  out_long$marker_by_id <- .rescale_public_longitudinal_draws(
+    out_long$marker_by_id,
+    sd,
+    sd$idx_time_idm,
+    sd$zidm_cols %||% character(0)
+  )
+
+  show_marker_weights <- isTRUE(sd$assoc_cv_total == 1) ||
+    isTRUE(sd$assoc_cv_marker == 1) ||
+    isTRUE(sd$assoc_cs_total == 1) ||
+    isTRUE(sd$assoc_cs_marker == 1)
+  if (isTRUE(show_marker_weights) && isTRUE((sd$D %||% 0L) > 0L)) {
+    shared_weights <- isTRUE(as.integer(sd$shared_marker_weights %||% 1L) == 1L)
+    weight_term_keys <- .active_weighted_assoc_terms(sd)
+    if (shared_weights && length(weight_term_keys) > 1L) weight_term_keys <- weight_term_keys[1L]
+    weight_rows <- list()
+    for (term_key in weight_term_keys) {
+      vars <- paste0(.marker_weight_var_prefix(term_key, effective = TRUE), "[", seq_len(sd$D), "]")
+      vars <- vars[vars %in% all_vars]
+      if (length(vars) == 0L && shared_weights) {
+        vars <- paste0("marker_weights_eff[", seq_len(sd$D), "]")
+        vars <- vars[vars %in% all_vars]
+      }
+      if (!length(vars)) next
+      dmat <- .get_draws_matrix(fit, variables = vars, draws = draws, seed = seed)
+      meta <- data.frame(
+        term = vapply(marker_labels[seq_along(vars)], function(marker_label) {
+          .marker_weight_summary_label(term_key, marker_label, shared_marker_weights = shared_weights)
+        }, character(1)),
+        stringsAsFactors = FALSE
+      )
+      weight_rows[[length(weight_rows) + 1L]] <- .joinme_draw_long_from_matrix(dmat, meta)
+    }
+    if (length(weight_rows) > 0L) out_long$assoc_weight <- do.call(rbind, weight_rows)
+  }
+
+  summarize_dist_draws <- function(param_name) {
+    n_re <- as.integer(sd[[paste0("n_re_", param_name)]] %||% 0L)
+    if (n_re <= 0L) return(NULL)
+    K_vec <- as.integer(sd[[paste0("K_", param_name)]] %||% integer(0))
+    G_vec <- as.integer(sd[[paste0("G_", param_name)]] %||% integer(0))
+    if (length(K_vec) != n_re || length(G_vec) != n_re) return(NULL)
+
+    tau_prefix <- paste0("tau_", param_name)
+    z_prefix <- paste0("z_", param_name)
+    term_labels <- cfg$dist$dist_re_terms[[param_name]] %||% rep(NA_character_, n_re)
+    value_cols <- list()
+    meta_rows <- list()
+    idx <- 1L
+    required_vars <- character(0)
+    for (j in seq_len(n_re)) {
+      required_vars <- c(required_vars, paste0(tau_prefix, "[", j, ",", seq_len(K_vec[j]), "]"))
+      required_vars <- c(required_vars, as.vector(outer(seq_len(G_vec[j]), seq_len(K_vec[j]), function(g, k) {
+        paste0(z_prefix, "[", j, ",", g, ",", k, "]")
+      })))
+    }
+    required_vars <- unique(required_vars)
+    required_vars <- required_vars[required_vars %in% all_vars]
+    if (!length(required_vars)) return(NULL)
+    dmat <- .get_draws_matrix(fit, variables = required_vars, draws = draws, seed = seed)
+
+    for (j in seq_len(n_re)) {
+      for (g in seq_len(G_vec[j])) {
+        for (k in seq_len(K_vec[j])) {
+          tau_nm <- paste0(tau_prefix, "[", j, ",", k, "]")
+          z_nm <- paste0(z_prefix, "[", j, ",", g, ",", k, "]")
+          if (!(tau_nm %in% colnames(dmat)) || !(z_nm %in% colnames(dmat))) next
+          value_cols[[idx]] <- as.numeric(dmat[, tau_nm]) * as.numeric(dmat[, z_nm])
+          meta_rows[[idx]] <- data.frame(
+            group = as.character(g),
+            term = term_labels[j] %||% paste0("re_term_", j),
+            coefficient = k,
+            stringsAsFactors = FALSE
+          )
+          idx <- idx + 1L
+        }
+      }
+    }
+    if (!length(value_cols)) return(NULL)
+    out <- .joinme_draw_long_from_matrix(do.call(cbind, value_cols), do.call(rbind, meta_rows))
+    out$scope <- ifelse(grepl("^family=", out$term), sub("^family=([^:]+)::.*$", "\\1", out$term), "allFamilies")
+    out
+  }
+
+  out_dist <- list(
+    sigma = summarize_dist_draws("sigma"),
+    nu = summarize_dist_draws("nu"),
+    phi = summarize_dist_draws("phi"),
+    alpha = summarize_dist_draws("alpha"),
+    phi_beta = summarize_dist_draws("phi_beta"),
+    tau_sde = summarize_dist_draws("tau_sde")
+  )
+  out_dist <- out_dist[!vapply(out_dist, is.null, logical(1))]
+  if (length(out_dist) > 0L) {
+    out_dist <- lapply(out_dist, function(df) split(df[, setdiff(names(df), "scope"), drop = FALSE], df$scope))
+  }
+
+  out_vcov <- NULL
+  q_idm <- as.integer(sd$Q_idm %||% 0L)
+  if (q_idm > 0L) {
+    m_cov <- if (as.integer(sd$indep_idmarker_cov %||% 0L) == 1L) q_idm else (q_idm * (q_idm + 1L)) %/% 2L
+    z_vars <- as.vector(outer(seq_len(n_id), seq_len(m_cov), function(i, m) paste0("z_L[", i, ",", m, "]")))
+    z_vars <- z_vars[z_vars %in% all_vars]
+    lambda_vars <- paste0("lambda_L[", seq_len(m_cov), "]")
+    lambda_vars <- lambda_vars[lambda_vars %in% all_vars]
+    if (length(z_vars) > 0L && length(lambda_vars) > 0L) {
+      dmat <- .get_draws_matrix(fit, variables = unique(c(z_vars, lambda_vars)), draws = draws, seed = seed)
+      rc_map <- matrix(NA_integer_, nrow = m_cov, ncol = 2)
+      if (as.integer(sd$indep_idmarker_cov %||% 0L) == 1L) {
+        for (m in seq_len(m_cov)) rc_map[m, ] <- c(m, m)
+      } else {
+        pos <- 1L
+        for (r in seq_len(q_idm)) {
+          for (c in seq_len(r)) {
+            rc_map[pos, ] <- c(r, c)
+            pos <- pos + 1L
+          }
+        }
+      }
+      value_cols <- list()
+      meta_rows <- list()
+      idx <- 1L
+      for (i in seq_len(n_id)) {
+        for (m in seq_len(m_cov)) {
+          z_nm <- paste0("z_L[", i, ",", m, "]")
+          lambda_nm <- paste0("lambda_L[", m, "]")
+          if (!(z_nm %in% colnames(dmat)) || !(lambda_nm %in% colnames(dmat))) next
+          value_cols[[idx]] <- as.numeric(dmat[, z_nm]) * as.numeric(dmat[, lambda_nm])
+          meta_rows[[idx]] <- data.frame(
+            id = id_labels[i],
+            block = ifelse(rc_map[m, 1] == rc_map[m, 2], "SD[id:marker]", "K[id:marker]"),
+            row = rc_map[m, 1],
+            col = rc_map[m, 2],
+            term = "(Intercept)",
+            stringsAsFactors = FALSE
+          )
+          idx <- idx + 1L
+        }
+      }
+      if (length(value_cols) > 0L) {
+        out_vcov <- .joinme_draw_long_from_matrix(do.call(cbind, value_cols), do.call(rbind, meta_rows))
+      }
+    }
+  }
+
+  list(
+    formulaLong = out_long,
+    formulaDist = out_dist,
+    formulaVCov = out_vcov
+  )
+}
+
+#' @keywords internal
+.combine_fixed_random_long_draws <- function(random_draws, fixed_matrix) {
+  if (is.null(random_draws) || !nrow(random_draws)) return(NULL)
+  fixed_value <- numeric(nrow(random_draws))
+  if (!is.null(fixed_matrix) && is.matrix(fixed_matrix) && ncol(fixed_matrix) > 0L && nrow(fixed_matrix) > 0L) {
+    term_match <- match(random_draws$term, colnames(fixed_matrix))
+    keep <- !is.na(term_match) & random_draws$draw <= nrow(fixed_matrix)
+    if (any(keep)) {
+      fixed_value[keep] <- fixed_matrix[cbind(random_draws$draw[keep], term_match[keep])]
+    }
+  }
+  random_draws$fixed <- fixed_value
+  random_draws$random <- random_draws$value
+  random_draws$value <- random_draws$fixed + random_draws$random
+  random_draws
+}
+
+#' @keywords internal
+.posterior_coef_joinmefit <- function(object, draws = NULL, seed = 1) {
+  fixed_long <- .posterior_fixef_matrix(object, draws = draws, seed = seed)
+  beta_only <- fixed_long
+  if (is.matrix(beta_only) && ncol(beta_only) > 0L) {
+    weight_cols <- grepl("^weight", colnames(beta_only))
+    if (any(weight_cols)) beta_only <- beta_only[, !weight_cols, drop = FALSE]
+  }
+  ranef_draws <- .posterior_ranef_joinmefit(object, draws = draws, seed = seed)
+  dist_fixed <- .posterior_distreg_draws(object, draws = draws, seed = seed)
+  event_fixed <- .posterior_event_coef_draws(object, draws = draws, seed = seed)
+
+  out_long <- ranef_draws$formulaLong
+  out_long$id <- .combine_fixed_random_long_draws(out_long$id, beta_only)
+  out_long$marker <- .combine_fixed_random_long_draws(out_long$marker, beta_only)
+  out_long$marker_by_id <- .combine_fixed_random_long_draws(out_long$marker_by_id, beta_only)
+  out_long$population <- if (is.matrix(beta_only) && ncol(beta_only) > 0L) {
+    .joinme_draw_long_from_matrix(beta_only, data.frame(term = colnames(beta_only), stringsAsFactors = FALSE))
+  } else NULL
+
+  out_dist <- list()
+  if (length(dist_fixed) > 0L) {
+    out_dist$population <- dist_fixed
+  }
+  if (length(ranef_draws$formulaDist) > 0L) {
+    out_dist$group_specific <- lapply(names(ranef_draws$formulaDist), function(param_name) {
+      scope_list <- ranef_draws$formulaDist[[param_name]]
+      fixed_mat <- dist_fixed[[param_name]]
+      fixed_wide <- if (!is.null(fixed_mat) && nrow(fixed_mat) > 0L) {
+        reshape(
+          fixed_mat[, c("draw", "term", "value")],
+          idvar = "draw", timevar = "term", direction = "wide"
+        )
+      } else NULL
+      if (!is.null(fixed_wide)) {
+        draw_index <- fixed_wide$draw
+        fixed_wide$draw <- NULL
+        fixed_wide <- as.matrix(fixed_wide)
+        colnames(fixed_wide) <- sub("^value\\.", "", colnames(fixed_wide))
+        fixed_wide <- fixed_wide[order(draw_index), , drop = FALSE]
+      }
+      lapply(scope_list, .combine_fixed_random_long_draws, fixed_matrix = fixed_wide)
+    })
+    names(out_dist$group_specific) <- names(ranef_draws$formulaDist)
+  }
+
+  list(
+    formulaLong = out_long,
+    formulaEvent = event_fixed,
+    formulaDist = out_dist,
+    formulaVCov = list(
+      population = NULL,
+      id = ranef_draws$formulaVCov
+    )
+  )
+}
+
 #' Extract fixed effects
 #'
 #' @param object A joinme fit object.
 #' @param draws Number of draws to use for summaries.
 #' @param seed Random seed for subsetting draws.
 #' @param digits Number of digits to round summary values.
+#' @param summary Logical. If `TRUE`, return posterior summaries with the same
+#'   inferential columns used throughout the package. If `FALSE`, return the
+#'   posterior draw matrix.
 #' @param ... Unused.
 #'
-#' @return A data.frame of fixed effects summaries.
+#' @return When `summary = TRUE`, a data.frame of posterior summaries. When
+#'   `summary = FALSE`, a draws-by-term matrix.
 #' @importFrom lme4 fixef
 #' @export
-fixef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
+fixef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
   assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
+  assertthat::assert_that(is.logical(summary) && length(summary) == 1L && !is.na(summary),
+                          msg = "summary must be TRUE or FALSE.")
   fit <- object$fit
   sd <- object$stan_data
   if (is.null(draws)) draws <- object$config$draws_default
+
+  if (!isTRUE(summary)) {
+    cache_key <- paste0("posterior_fixef_", draws)
+    cached <- object$cache_get(cache_key)
+    if (!is.null(cached)) return(cached)
+    out <- .posterior_fixef_matrix(object, draws = draws, seed = seed)
+    object$cache_set(cache_key, out)
+    return(out)
+  }
 
   cache_key <- paste0("fixef_", draws, "_", digits)
   cached <- object$cache_get(cache_key)
@@ -2139,27 +2787,50 @@ fixef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
     isTRUE(sd$assoc_cs_marker == 1)
 
   if (sd$D > 0 && show_marker_weights) {
-    mw_vars <- paste0("marker_weights_eff[", seq_len(sd$D), "]")
-    mw_vars <- mw_vars[mw_vars %in% all_vars]
-    if (length(mw_vars) > 0) {
-      mw <- as.data.frame(.summarise_draws_diag(fit, mw_vars, draws = draws, seed = seed))
-      marker_terms <- sd$marker_levels %||% paste0("marker_", seq_len(sd$D))
-      if (length(marker_terms) == nrow(mw)) {
-        mw$term <- paste0("weight: ", marker_terms)
-      } else {
-        mw$term <- mw$variable
+    marker_terms <- sd$marker_levels %||% paste0("marker_", seq_len(sd$D))
+    shared_weights <- isTRUE(as.integer(sd$shared_marker_weights %||% 1L) == 1L)
+    weight_term_keys <- .active_weighted_assoc_terms(sd)
+    if (shared_weights && length(weight_term_keys) > 1L) {
+      weight_term_keys <- weight_term_keys[1L]
+    }
+    weight_rows <- list()
+    for (term_key in weight_term_keys) {
+      mw_vars <- paste0(.marker_weight_var_prefix(term_key, effective = TRUE), "[", seq_len(sd$D), "]")
+      mw_vars <- mw_vars[mw_vars %in% all_vars]
+      if (length(mw_vars) == 0L && shared_weights) {
+        mw_vars <- paste0("marker_weights_eff[", seq_len(sd$D), "]")
+        mw_vars <- mw_vars[mw_vars %in% all_vars]
       }
+      if (length(mw_vars) == 0L) next
+      mw <- as.data.frame(.summarise_draws_diag(fit, mw_vars, draws = draws, seed = seed))
+      mw$term <- vapply(marker_terms[seq_len(nrow(mw))], function(marker_label) {
+        .marker_weight_summary_label(term_key, marker_label, shared_marker_weights = shared_weights)
+      }, character(1))
       mw <- mw[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
       mw$Estimate <- round(mw$Estimate, digits)
       mw$Est.Error <- round(mw$Est.Error, digits)
       mw$Q2.5 <- round(mw$Q2.5, digits)
       mw$Q97.5 <- round(mw$Q97.5, digits)
       mw$Rhat <- round(mw$Rhat, 3)
-      out <- rbind(out, mw)
+      weight_rows[[length(weight_rows) + 1L]] <- mw
+    }
+    if (length(weight_rows) > 0L) {
+      out <- rbind(out, do.call(rbind, weight_rows))
     }
   }
   object$cache_set(cache_key, out)
   out
+}
+
+#' Posterior fixed-effect alias for fitted joinme models
+#'
+#' @param object A `JoinMeFit` object.
+#' @param ... Additional arguments forwarded to [fixef()].
+#'
+#' @return The same object returned by `fixef(object, summary = FALSE, ...)`.
+#' @export
+posterior_fixef <- function(object, ...) {
+  fixef(object, summary = FALSE, ...)
 }
 
 #' Extract random effects
@@ -2168,6 +2839,8 @@ fixef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
 #' @param draws Number of draws to use for summaries.
 #' @param seed Random seed for subsetting draws.
 #' @param digits Number of digits to round summary values.
+#' @param summary Logical. If `TRUE`, return posterior summaries. If `FALSE`,
+#'   return the posterior extraction on the coefficient scale.
 #' @param ... Unused.
 #'
 #' @return A nested list with top-level entries `formulaLong` and `formulaDist`.
@@ -2177,11 +2850,22 @@ fixef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
 #'   parameter and family scope (e.g., `sigma$student_t`, `nu$allFamilies`).
 #' @importFrom lme4 ranef
 #' @export
-ranef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
+ranef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
   assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
+  assertthat::assert_that(is.logical(summary) && length(summary) == 1L && !is.na(summary),
+                          msg = "summary must be TRUE or FALSE.")
   fit <- object$fit
   sd <- object$stan_data
   if (is.null(draws)) draws <- object$config$draws_default
+
+  if (!isTRUE(summary)) {
+    cache_key <- paste0("posterior_ranef_", draws)
+    cached <- object$cache_get(cache_key)
+    if (!is.null(cached)) return(cached)
+    out <- .posterior_ranef_joinmefit(object, draws = draws, seed = seed)
+    object$cache_set(cache_key, out)
+    return(out)
+  }
 
   cache_key <- paste0("ranef_", draws, "_", digits)
   cached <- object$cache_get(cache_key)
@@ -2207,12 +2891,22 @@ ranef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
     )
   }
 
-  summarize_block <- function(varnames, group) {
+  summarize_block <- function(varnames, group, term_labels = NULL) {
     if (length(varnames) == 0) return(NULL)
     s <- as.data.frame(.summarise_draws_diag(fit, varnames, draws = draws, seed = seed))
     out <- s[, c("variable", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
-    names(out)[1] <- "term"
+    names(out)[1] <- "variable"
+    term_out <- out$variable
+    term_labels <- as.character(term_labels %||% character(0))
+    if (length(term_labels) > 0L) {
+      term_index <- suppressWarnings(as.integer(sub("^.*,(\\d+)\\]$", "\\1", out$variable)))
+      keep <- is.finite(term_index) & term_index >= 1L & term_index <= length(term_labels)
+      term_out[keep] <- term_labels[term_index[keep]]
+    }
+    out$term <- term_out
     out$group <- group
+    out$variable <- NULL
+    out <- out[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail", "group"), drop = FALSE]
 
     out$Estimate <- round(out$Estimate, digits)
     out$Est.Error <- round(out$Est.Error, digits)
@@ -2227,9 +2921,22 @@ ranef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
   zw_vars <- vars[grepl("^z_w\\[", vars)]
 
   out_long <- list(
-    id = summarize_block(u_vars, "id"),
-    marker = if (sd$R_mk > 0) summarize_block(v_vars, "marker") else NULL,
-    marker_by_id_latent = summarize_block(zw_vars, "marker_by_id_latent")
+    id = summarize_block(u_vars, "id", term_labels = sd$zid_cols %||% character(0)),
+    marker = if (sd$R_mk > 0) summarize_block(v_vars, "marker", term_labels = sd$zmk_cols %||% character(0)) else NULL,
+    marker_by_id_latent = summarize_block(zw_vars, "marker_by_id_latent", term_labels = sd$zidm_cols %||% character(0))
+  )
+
+  out_long$id <- .rescale_public_longitudinal_summary(
+    out_long$id,
+    sd,
+    sd$idx_time_uid,
+    sd$zid_cols %||% character(0)
+  )
+  out_long$marker <- .rescale_public_longitudinal_summary(
+    out_long$marker,
+    sd,
+    sd$idx_time_vmk,
+    sd$zmk_cols %||% character(0)
   )
 
   show_marker_weights <- isTRUE(sd$assoc_cv_total == 1) ||
@@ -2355,6 +3062,96 @@ ranef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, ...) {
   )
   object$cache_set(cache_key, out)
   out
+}
+
+#' Posterior random-effect alias for fitted joinme models
+#'
+#' @param object A `JoinMeFit` object.
+#' @param ... Additional arguments forwarded to [ranef()].
+#'
+#' @return The same object returned by `ranef(object, summary = FALSE, ...)`.
+#' @export
+posterior_ranef <- function(object, ...) {
+  ranef(object, summary = FALSE, ...)
+}
+
+#' Combined posterior coefficients for fitted joinme models
+#'
+#' @description
+#' Returns posterior coefficients on the scale used by each model component.
+#'
+#' The guiding rule is simple:
+#' for every coefficient carried by a group-specific model matrix, the returned
+#' value is the sum of the population-level contribution and the matching
+#' group-level deviation. When no group-level deviation exists, the returned
+#' coefficient is the population-level coefficient itself.
+#'
+#' This mirrors the interpretation used in multilevel modelling:
+#' a subject-specific or marker-specific coefficient is the coefficient that
+#' would multiply the corresponding column of the model matrix for that unit.
+#'
+#' @param object A `JoinMeFit` object.
+#' @param draws Optional number of posterior draws to retain.
+#' @param seed Integer seed used when subsetting posterior draws.
+#' @param digits Number of digits used when `summary = TRUE`.
+#' @param summary Logical. If `TRUE`, return posterior summaries. If `FALSE`,
+#'   return posterior draw-level extractions.
+#' @param ... Unused.
+#'
+#' @return When `summary = FALSE`, a nested list of draw-level data frames for
+#'   the longitudinal, event, distributional, and covariance-regression parts of
+#'   the model. When `summary = TRUE`, the same structure is returned after
+#'   summarising each coefficient with posterior means, posterior uncertainty,
+#'   interval estimates, and MCMC diagnostics.
+#' @method coef JoinMeFit
+#' @export
+coef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
+  assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
+  assertthat::assert_that(is.logical(summary) && length(summary) == 1L && !is.na(summary),
+                          msg = "summary must be TRUE or FALSE.")
+  if (is.null(draws)) draws <- object$config$draws_default
+
+  cache_key <- if (isTRUE(summary)) {
+    paste0("coef_summary_", draws, "_", digits)
+  } else {
+    paste0("coef_draws_", draws)
+  }
+  cached <- object$cache_get(cache_key)
+  if (!is.null(cached)) return(cached)
+
+  out <- .posterior_coef_joinmefit(object, draws = draws, seed = seed)
+  if (isTRUE(summary)) {
+    summarize_component <- function(x) {
+      if (is.null(x)) return(NULL)
+      if (is.data.frame(x) && all(c("draw", "value") %in% names(x))) {
+        keep_cols <- setdiff(names(x), c("draw", "value", "fixed", "random"))
+        tbl <- .joinme_summarize_long_draws(x, group_cols = c(keep_cols, "value"), digits = digits)
+        if ("event" %in% names(tbl)) {
+          tbl$Hazard.Ratio <- round(exp(tbl$Estimate), digits)
+          tbl$HR.Q2.5 <- round(exp(tbl$Q2.5), digits)
+          tbl$HR.Q97.5 <- round(exp(tbl$Q97.5), digits)
+        }
+        return(tbl)
+      }
+      if (is.list(x)) return(lapply(x, summarize_component))
+      x
+    }
+    out <- summarize_component(out)
+  }
+
+  object$cache_set(cache_key, out)
+  out
+}
+
+#' Posterior coefficient alias for fitted joinme models
+#'
+#' @param object A `JoinMeFit` object.
+#' @param ... Additional arguments forwarded to [coef()].
+#'
+#' @return The same object returned by `coef(object, summary = FALSE, ...)`.
+#' @export
+posterior_coef <- function(object, ...) {
+  coef(object, summary = FALSE, ...)
 }
 
 # ---- corr -----------------------------------------------------------------

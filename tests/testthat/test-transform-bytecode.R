@@ -6,6 +6,12 @@ test_that("parse_transform_expr supports new bytecode ops", {
   bc_expit <- parse_transform_expr(~ expit(x))
   expect_equal(bc_expit$opcodes, c(0L, 9L))
 
+  bc_softmax <- parse_transform_expr(~ SoftMax(x))
+  expect_equal(bc_softmax$opcodes, c(0L, 9L))
+
+  bc_softmax_lower <- parse_transform_expr(~ softmax(x))
+  expect_equal(bc_softmax_lower$opcodes, bc_softmax$opcodes)
+
   bc_softplus <- parse_transform_expr(~ softplus(x))
   expect_equal(bc_softplus$opcodes, c(0L, 24L))
 
@@ -45,4 +51,24 @@ test_that("legacy unary bytecode is normalised with implicit PUSH_X", {
     eval_bytecode_vector(c(-2, 0, 3), 24L, numeric(0)),
     .softplus(c(-2, 0, 3))
   )
+})
+
+test_that("bytecode evaluator applies per-node affine shifts", {
+  tf <- joinme_tf(
+    cv_total = ~ softplus(expit(x, intercept = TRUE, slope = TRUE), intercept = TRUE, slope = TRUE)
+  )
+  bc <- parse_transform_expr(tf$cv_total$expr, iota_nodes = tf$cv_total$iota_nodes)
+
+  val <- eval_bytecode_scalar(
+    x = 0.3,
+    bytecode = bc$bytecode,
+    const_data = bc$const_data,
+    iota_intercepts = c(0.4, -0.2),
+    iota_slopes = c(1.5, 0.8),
+    op_iota_intercept_idx = bc$op_iota_intercept_idx,
+    op_iota_slope_idx = bc$op_iota_slope_idx
+  )
+
+  expected <- .softplus(-0.2 + 0.8 * stats::plogis(0.4 + 1.5 * 0.3))
+  expect_equal(val, expected)
 })

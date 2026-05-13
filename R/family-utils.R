@@ -673,11 +673,13 @@ jm_family <- function(name, link = NULL, inv_link = NULL) {
 #'   If list with 'scale' or 'sd': uses normal(0, sd) for all.
 #'   Example: list(scale = 2) or list(scale = c(2, 1, 1))
 #' @param alpha_prior Scale for baseline hazard coefficients. Default: normal(0, 2)
+#' @param iota_prior Scale for fit-only affine-shift intercept and slope
+#'   parameters in functional association transforms. Default: normal(0, 1)
 #' @param lkj_prior Concentration parameter for LKJ correlation prior. Default: 1 (uniform)
 #'
 #' @return List with prior specifications compatible with Stan
 #' @keywords internal
-.build_priors <- function(beta_prior = NULL, alpha_prior = NULL, lkj_prior = NULL) {
+.build_priors <- function(beta_prior = NULL, alpha_prior = NULL, iota_prior = NULL, lkj_prior = NULL) {
   # Create full prior spec list consumed by joinme_standata()
   priors <- list()
   
@@ -708,6 +710,17 @@ jm_family <- function(name, link = NULL, inv_link = NULL) {
     }
   } else {
     priors$alpha_scale <- 2.0  # Default
+  }
+
+  # Iota priors (fit-only functional transform intercept/slope shifts)
+  if (!is.null(iota_prior)) {
+    if (is.numeric(iota_prior)) {
+      priors$iota_scale <- iota_prior[1]
+    } else if (is.list(iota_prior)) {
+      priors$iota_scale <- iota_prior$scale %||% iota_prior$sd %||% 1
+    }
+  } else {
+    priors$iota_scale <- 1.0
   }
   
   # LKJ prior (correlation)

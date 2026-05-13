@@ -4,7 +4,13 @@
 \alias{joinme_priors}
 \title{Declare priors with validation}
 \usage{
-joinme_priors(beta = NULL, alpha = NULL, lkj = NULL, .validate = TRUE)
+joinme_priors(
+  beta = NULL,
+  alpha = NULL,
+  iota = NULL,
+  lkj = NULL,
+  .validate = TRUE
+)
 }
 \arguments{
 \item{beta}{Beta prior specification. Use either a numeric scale (or vector of
@@ -12,6 +18,10 @@ scales) or a list with \code{scale}/\code{sd}.}
 
 \item{alpha}{Alpha prior specification. Use either a numeric scale or a list
 with \code{scale}/\code{sd}.}
+
+\item{iota}{Iota prior specification for fit-only affine-shift intercept and
+slope parameters in functional association transforms. Use either a numeric
+scale or a list with \code{scale}/\code{sd}.}
 
 \item{lkj}{LKJ concentration parameter.}
 
@@ -30,6 +40,7 @@ Exposed components are:
 \itemize{
 \item \code{beta}: longitudinal/survival regression prior scale(s)
 \item \code{alpha}: association prior scale
+\item \code{iota}: fit-only affine-shift prior scale for functional association transforms
 \item \code{lkj}: LKJ concentration parameter
 }
 }
@@ -37,6 +48,7 @@ Exposed components are:
 pri <- joinme_priors(
   beta = list(scale = 2.5),
   alpha = list(scale = 1.0),
+  iota = list(scale = 1.0),
   lkj = 2
 )
 print(pri)

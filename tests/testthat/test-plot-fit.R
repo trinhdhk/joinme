@@ -1442,3 +1442,44 @@ test_that("plot.JoinMeFit uses cached association plotting payload when availabl
   expect_equal(range(p$data$x), c(-3, 3), tolerance = 1e-8)
   expect_equal(p$data[[median_col]], 2 * (1 / (1 + exp(-p$data$x))), tolerance = 1e-8)
 })
+
+test_that("plot.JoinMeFit applies iota affine shifts to functional association transforms", {
+  fit <- joinme::JoinMeFit$new(
+    fit = NULL,
+    stan_data = list(marker_levels = c("m1"), marker_weights = 1),
+    formulaLong = y ~ 1 + time,
+    formulaEvent = survival::Surv(time, event) ~ 1,
+    formulaVCov = NULL,
+    config = list(
+      transforms = list(),
+      transforms_spec = list(
+        cv_total = list(type = "functional", expr = ~ expit(x), estimate_iota_intercept = TRUE, estimate_iota_slope = TRUE)
+      ),
+      association_plot_data = list(
+        coeff_draws = list(cv_total = matrix(rep(1, 6), ncol = 1)),
+        marker_weight_draws = matrix(rep(1, 6), ncol = 1),
+        transform_coeff_draws = list(),
+        transform_iota_draws = list(cv_total = list(intercept = rep(0.5, 6), slope = rep(2, 6))),
+        transform_specs = list(cv_total = list(type = "functional", expr = ~ expit(x), estimate_iota_intercept = TRUE, estimate_iota_slope = TRUE)),
+        support = data.frame(
+          term = "cv_total",
+          marker = "m1",
+          lower = -1,
+          upper = 1,
+          source = "model_implied",
+          stringsAsFactors = FALSE
+        ),
+        term_map = data.frame(term = "cv_total", variable = "alpha_cv_total", stringsAsFactors = FALSE)
+      )
+    ),
+    call = quote(joinme::joinme(formulaLong = y ~ 1 + time)),
+    tmax = 1,
+    dataLong = data.frame(id = c(1, 1), time = c(0, 1), marker = "m1", y = c(1, 2)),
+    dataEvent = data.frame(id = 1, time = 1.2, event = 0L)
+  )
+
+  p <- plot(fit, type = "association", association_options = list(association_term = "cv_total", association_metric = "transform"))
+  median_col <- joinme:::.quantile_name_from_prob(0.5)
+
+  expect_equal(p$data[[median_col]], stats::plogis(0.5 + 2 * p$data$x), tolerance = 1e-8)
+})

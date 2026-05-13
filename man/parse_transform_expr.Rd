@@ -4,7 +4,7 @@
 \alias{parse_transform_expr}
 \title{Functional Transform Builder for Joint Models}
 \usage{
-parse_transform_expr(expr)
+parse_transform_expr(expr, iota_nodes = NULL)
 }
 \arguments{
 \item{expr}{A formula (e.g. \code{~ x + 2}), quosure, quoted expression, or character string to parse.}
@@ -20,6 +20,7 @@ Supported operations:
 \item Power: ^
 \item Functions: log, exp, sqrt, sin, cos, tan, abs, sinh, cosh, tanh, asinh, acosh, atanh
 \item Sigmoid/Link: inv_logit, logit, sigmoid, expit
+\item Sigmoid aliases: softmax, SoftMax
 \item Softplus: softplus, log1p_exp
 \item Other: cbrt, power
 \item Reciprocal: 1/x or rec(x)

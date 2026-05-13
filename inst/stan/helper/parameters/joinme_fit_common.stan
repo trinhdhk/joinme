@@ -69,7 +69,7 @@
   vector[M_vcov] alpha_vcov;          // vcov association coefficient latents (scaled by s_vcov below)
 
   /* marker-weight perturbations (global across ids) */
-  vector[D * estimate_marker_weights * use_marker_weight_assoc] z_marker_weights; // latent signed perturbations (active only when needed)
+  vector[D * estimate_marker_weights * use_marker_weight_assoc * n_marker_weight_sets] z_marker_weights; // latent signed perturbations for shared or term-specific weight structures
 
   /* Stan-estimated monotone spline increments for association transforms */
   vector[n_free_spline_cv] z_spline_cv;               // free increments for total CV spline
@@ -80,6 +80,24 @@
   vector[n_free_spline_cv_marker] z_spline_cv_marker; // free increments for marker CV spline
   vector[n_free_spline_cs_mean] z_spline_cs_mean;     // free increments for mean CS spline
   vector[n_free_spline_cs_marker] z_spline_cs_marker; // free increments for marker CS spline
+
+  /* fit-only affine-shift parameters for functional transforms */
+  vector[estimate_iota_intercept_cv] z_iota_intercept_cv;
+  vector[estimate_iota_slope_cv] z_iota_slope_cv;
+  vector[estimate_iota_intercept_cs] z_iota_intercept_cs;
+  vector[estimate_iota_slope_cs] z_iota_slope_cs;
+  vector[M_corr * estimate_iota_intercept_corr] z_iota_intercept_corr;
+  vector[M_corr * estimate_iota_slope_corr] z_iota_slope_corr;
+  vector[M_vcov * estimate_iota_intercept_vcov] z_iota_intercept_vcov;
+  vector[M_vcov * estimate_iota_slope_vcov] z_iota_slope_vcov;
+  vector[estimate_iota_intercept_cv_mean] z_iota_intercept_cv_mean;
+  vector[estimate_iota_slope_cv_mean] z_iota_slope_cv_mean;
+  vector[estimate_iota_intercept_cv_marker] z_iota_intercept_cv_marker;
+  vector[estimate_iota_slope_cv_marker] z_iota_slope_cv_marker;
+  vector[estimate_iota_intercept_cs_mean] z_iota_intercept_cs_mean;
+  vector[estimate_iota_slope_cs_mean] z_iota_slope_cs_mean;
+  vector[estimate_iota_intercept_cs_marker] z_iota_intercept_cs_marker;
+  vector[estimate_iota_slope_cs_marker] z_iota_slope_cs_marker;
 
   /* association scales */
   real<lower=0> sd_alpha_cv_total;     // scale for total CV association

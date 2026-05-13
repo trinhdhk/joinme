@@ -22,6 +22,8 @@ List of standata entries for transformation parameters:
 \itemize{
 \item tf_mode_*
 \item functional_ops_* and const_data_* (if mode 1)
+\item estimate_iota_intercept_* and estimate_iota_slope_* (fit-only functional affine-shift counts)
+\item functional_iota_intercept_idx_* and functional_iota_slope_idx_* (per-op affine-shift indices)
 \item knots_* and coeff_* and spline_degree_* (if mode 2, 3, or 4)
 }
 }

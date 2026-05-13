@@ -4,7 +4,12 @@
 \alias{.build_priors}
 \title{Build prior specification for joinme model}
 \usage{
-.build_priors(beta_prior = NULL, alpha_prior = NULL, lkj_prior = NULL)
+.build_priors(
+  beta_prior = NULL,
+  alpha_prior = NULL,
+  iota_prior = NULL,
+  lkj_prior = NULL
+)
 }
 \arguments{
 \item{beta_prior}{Named list or vector. If vector: uniform scale for all beta.
@@ -12,6 +17,9 @@ If list with 'scale' or 'sd': uses normal(0, sd) for all.
 Example: list(scale = 2) or list(scale = c(2, 1, 1))}
 
 \item{alpha_prior}{Scale for baseline hazard coefficients. Default: normal(0, 2)}
+
+\item{iota_prior}{Scale for fit-only affine-shift intercept and slope
+parameters in functional association transforms. Default: normal(0, 1)}
 
 \item{lkj_prior}{Concentration parameter for LKJ correlation prior. Default: 1 (uniform)}
 }

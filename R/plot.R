@@ -2484,7 +2484,7 @@ plot.JoinMeFit <- function(x,
         return(matrix(1, nrow = n_draws, ncol = 1L))
     }
 
-    weight_draws <- .marker_weight_draws(x, n_draws = n_draws, seed = seed, data = data)
+    weight_draws <- .marker_weight_draws(x, term_key = term_key, n_draws = n_draws, seed = seed, data = data)
     if (is.null(weight_draws) || ncol(weight_draws) < marker_idx) {
         return(matrix(1 / length(marker_levels), nrow = n_draws, ncol = 1L))
     }
@@ -2494,7 +2494,7 @@ plot.JoinMeFit <- function(x,
     matrix(weight_draws[, marker_idx, drop = TRUE] / length(marker_levels), ncol = 1L)
 }
 
-.marker_weight_draws <- function(x, n_draws, seed = 1, data = NULL) {
+.marker_weight_draws <- function(x, term_key, n_draws, seed = 1, data = NULL) {
     # Start from the canonical marker ordering used in standata so cached draws,
     # posterior draws, and default weights all align to the same columns.
     sd <- x$stan_data
@@ -2507,33 +2507,53 @@ plot.JoinMeFit <- function(x,
     # Prefer cached data draws because they may already be subset to the
     # relevant variables and draws for the current plotting request.
     if (!is.null(data$marker_weight_draws)) {
-        return(as.matrix(data$marker_weight_draws[, seq_len(min(n_markers, ncol(data$marker_weight_draws))), drop = FALSE]))
+        if (is.matrix(data$marker_weight_draws)) {
+            return(as.matrix(data$marker_weight_draws[, seq_len(min(n_markers, ncol(data$marker_weight_draws))), drop = FALSE]))
+        }
+        cached <- data$marker_weight_draws[[term_key]]
+        if (!is.null(cached)) {
+            return(as.matrix(cached[, seq_len(min(n_markers, ncol(cached))), drop = FALSE]))
+        }
     }
 
     # Otherwise try the effective-weight parameter names first.
-    eff_names <- paste0("marker_weights_eff[", seq_len(n_markers), "]")
+    eff_names <- paste0(.marker_weight_var_prefix(term_key, effective = TRUE), "[", seq_len(n_markers), "]")
     dmat <- tryCatch(
         .get_draws_matrix(x$fit, variables = eff_names, draws = n_draws, seed = seed),
         error = function(e) NULL
     )
+    if ((is.null(dmat) || !all(eff_names %in% colnames(dmat))) && isTRUE(as.integer(sd$shared_marker_weights %||% 1L) == 1L)) {
+        eff_names <- paste0("marker_weights_eff[", seq_len(n_markers), "]")
+        dmat <- tryCatch(
+            .get_draws_matrix(x$fit, variables = eff_names, draws = n_draws, seed = seed),
+            error = function(e) NULL
+        )
+    }
     if (!is.null(dmat) && all(eff_names %in% colnames(dmat))) {
         return(as.matrix(dmat[, eff_names, drop = FALSE]))
     }
 
     # Fall back to the pre-effective base-weight parameterization if that is all
     # that is available in the stored fit object.
-    base_names <- paste0("marker_weights[", seq_len(n_markers), "]")
+    base_names <- paste0(.marker_weight_var_prefix(term_key, effective = FALSE), "[", seq_len(n_markers), "]")
     dmat <- tryCatch(
         .get_draws_matrix(x$fit, variables = base_names, draws = n_draws, seed = seed),
         error = function(e) NULL
     )
+    if ((is.null(dmat) || !all(base_names %in% colnames(dmat))) && isTRUE(as.integer(sd$shared_marker_weights %||% 1L) == 1L)) {
+        base_names <- paste0("marker_weights[", seq_len(n_markers), "]")
+        dmat <- tryCatch(
+            .get_draws_matrix(x$fit, variables = base_names, draws = n_draws, seed = seed),
+            error = function(e) NULL
+        )
+    }
     if (!is.null(dmat) && all(base_names %in% colnames(dmat))) {
         return(as.matrix(dmat[, base_names, drop = FALSE]))
     }
 
     # If no posterior draws are available, degrade gracefully to the standata
     # base weights so plotting still works in lightweight or partial objects.
-    base_weights <- as.numeric(sd$marker_weights %||% rep(1, n_markers))
+    base_weights <- as.numeric((sd$marker_weights_by_term %||% list())[[term_key]] %||% sd$marker_weights %||% rep(1, n_markers))
     if (length(base_weights) < n_markers) {
         base_weights <- c(base_weights, rep(1, n_markers - length(base_weights)))
     }
@@ -2550,56 +2570,88 @@ plot.JoinMeFit <- function(x,
             base_coeff = "coeff_cv",
             n_coeff = "n_coeff_cv",
             knots = "knots_cv",
-            degree = "spline_degree_cv"
+            degree = "spline_degree_cv",
+            iota_intercept = "iota_intercept_cv_eff",
+            iota_slope = "iota_slope_cv_eff",
+            n_iota_intercept = "estimate_iota_intercept_cv",
+            n_iota_slope = "estimate_iota_slope_cv"
         ),
         cs_total = list(
             eff_prefix = "coeff_cs_eff",
             base_coeff = "coeff_cs",
             n_coeff = "n_coeff_cs",
             knots = "knots_cs",
-            degree = "spline_degree_cs"
+            degree = "spline_degree_cs",
+            iota_intercept = "iota_intercept_cs_eff",
+            iota_slope = "iota_slope_cs_eff",
+            n_iota_intercept = "estimate_iota_intercept_cs",
+            n_iota_slope = "estimate_iota_slope_cs"
         ),
         corr = list(
             eff_prefix = "coeff_corr_eff",
             base_coeff = "coeff_corr",
             n_coeff = "n_coeff_corr",
             knots = "knots_corr",
-            degree = "spline_degree_corr"
+            degree = "spline_degree_corr",
+            iota_intercept = "iota_intercept_corr_eff",
+            iota_slope = "iota_slope_corr_eff",
+            n_iota_intercept = "estimate_iota_intercept_corr",
+            n_iota_slope = "estimate_iota_slope_corr"
         ),
         vcov = list(
             eff_prefix = "coeff_vcov_eff",
             base_coeff = "coeff_vcov",
             n_coeff = "n_coeff_vcov",
             knots = "knots_vcov",
-            degree = "spline_degree_vcov"
+            degree = "spline_degree_vcov",
+            iota_intercept = "iota_intercept_vcov_eff",
+            iota_slope = "iota_slope_vcov_eff",
+            n_iota_intercept = "estimate_iota_intercept_vcov",
+            n_iota_slope = "estimate_iota_slope_vcov"
         ),
         cv_mean = list(
             eff_prefix = "coeff_cv_mean_eff",
             base_coeff = "coeff_cv_mean",
             n_coeff = "n_coeff_cv_mean",
             knots = "knots_cv_mean",
-            degree = "spline_degree_cv_mean"
+            degree = "spline_degree_cv_mean",
+            iota_intercept = "iota_intercept_cv_mean_eff",
+            iota_slope = "iota_slope_cv_mean_eff",
+            n_iota_intercept = "estimate_iota_intercept_cv_mean",
+            n_iota_slope = "estimate_iota_slope_cv_mean"
         ),
         cv_marker = list(
             eff_prefix = "coeff_cv_marker_eff",
             base_coeff = "coeff_cv_marker",
             n_coeff = "n_coeff_cv_marker",
             knots = "knots_cv_marker",
-            degree = "spline_degree_cv_marker"
+            degree = "spline_degree_cv_marker",
+            iota_intercept = "iota_intercept_cv_marker_eff",
+            iota_slope = "iota_slope_cv_marker_eff",
+            n_iota_intercept = "estimate_iota_intercept_cv_marker",
+            n_iota_slope = "estimate_iota_slope_cv_marker"
         ),
         cs_mean = list(
             eff_prefix = "coeff_cs_mean_eff",
             base_coeff = "coeff_cs_mean",
             n_coeff = "n_coeff_cs_mean",
             knots = "knots_cs_mean",
-            degree = "spline_degree_cs_mean"
+            degree = "spline_degree_cs_mean",
+            iota_intercept = "iota_intercept_cs_mean_eff",
+            iota_slope = "iota_slope_cs_mean_eff",
+            n_iota_intercept = "estimate_iota_intercept_cs_mean",
+            n_iota_slope = "estimate_iota_slope_cs_mean"
         ),
         cs_marker = list(
             eff_prefix = "coeff_cs_marker_eff",
             base_coeff = "coeff_cs_marker",
             n_coeff = "n_coeff_cs_marker",
             knots = "knots_cs_marker",
-            degree = "spline_degree_cs_marker"
+            degree = "spline_degree_cs_marker",
+            iota_intercept = "iota_intercept_cs_marker_eff",
+            iota_slope = "iota_slope_cs_marker_eff",
+            n_iota_intercept = "estimate_iota_intercept_cs_marker",
+            n_iota_slope = "estimate_iota_slope_cs_marker"
         ),
         NULL
     )
@@ -2621,8 +2673,30 @@ plot.JoinMeFit <- function(x,
     # they do not depend on draw-specific spline coefficients.
     if (identical(tf_type, "functional")) {
         tf_fun <- .joinme_make_assoc_transform(tf_spec, term_key)
-        vals <- as.numeric(tf_fun(x_grid))
-        return(matrix(rep(vals, each = n_draws), nrow = n_draws))
+        iota_draws <- .transform_iota_draws(
+            x = x,
+            term_key = term_key,
+            term = term,
+            n_draws = n_draws,
+            seed = seed,
+            data = data
+        )
+        intercept_draws <- as.matrix(iota_draws$intercept %||% matrix(0, nrow = n_draws, ncol = 0L))
+        slope_draws <- as.matrix(iota_draws$slope %||% matrix(1, nrow = n_draws, ncol = 0L))
+        if (nrow(intercept_draws) != n_draws) {
+            intercept_draws <- matrix(rep(intercept_draws[1, , drop = TRUE], each = n_draws), nrow = n_draws)
+        }
+        if (nrow(slope_draws) != n_draws) {
+            slope_draws <- matrix(rep(slope_draws[1, , drop = TRUE], each = n_draws), nrow = n_draws)
+        }
+        shifted <- vapply(seq_len(n_draws), function(i) {
+            as.numeric(tf_fun(
+                x_grid,
+                iota_intercept = intercept_draws[i, , drop = TRUE],
+                iota_slope = slope_draws[i, , drop = TRUE]
+            ))
+        }, numeric(length(x_grid)))
+        return(t(shifted))
     }
 
     if (identical(tf_type, "pwlin")) {
@@ -2754,6 +2828,64 @@ plot.JoinMeFit <- function(x,
     matrix(rep(base_coeff[seq_len(n_coeff)], times = n_draws), nrow = n_draws, byrow = TRUE)
 }
 
+.transform_iota_draws <- function(x, term_key, term = term_key, n_draws, seed = 1, data = NULL) {
+    data_key <- term %||% term_key
+    if (!is.null(data_key) && !is.null(data$transform_iota_draws[[data_key]])) {
+        cached <- data$transform_iota_draws[[data_key]]
+        return(list(
+            intercept = as.matrix(cached$intercept %||% matrix(0, nrow = n_draws, ncol = 0L)),
+            slope = as.matrix(cached$slope %||% matrix(1, nrow = n_draws, ncol = 0L))
+        ))
+    }
+
+    tf_spec <- .transform_spec_for_term(x, term_key, term = term)
+    if (!identical(.canonicalise_transform_type(tf_spec$type %||% "identity"), "functional")) {
+        return(list(
+            intercept = matrix(0, nrow = n_draws, ncol = 0L),
+            slope = matrix(1, nrow = n_draws, ncol = 0L)
+        ))
+    }
+
+    map <- .assoc_channel_map(term_key)
+    component_index <- if (term_key %in% c("corr", "vcov")) .assoc_component_index(term) else NULL
+    n_iota_intercept <- as.integer(tf_spec$n_iota_intercept %||% x$stan_data[[map$n_iota_intercept]] %||% 0L)
+    n_iota_slope <- as.integer(tf_spec$n_iota_slope %||% x$stan_data[[map$n_iota_slope]] %||% 0L)
+
+    get_iota_component <- function(prefix, default, n_iota) {
+        if (is.null(prefix) || n_iota < 1L) {
+            return(matrix(default, nrow = n_draws, ncol = max(0L, n_iota)))
+        }
+        if (!is.null(component_index) && !is.na(component_index)) {
+            offsets <- (component_index - 1L) * n_iota + seq_len(n_iota)
+            eff_names <- paste0(prefix, "[", offsets, "]")
+        } else {
+            eff_names <- paste0(prefix, "[", seq_len(n_iota), "]")
+        }
+        dmat <- tryCatch(
+            .get_draws_matrix(x$fit, variables = eff_names, draws = n_draws, seed = seed),
+            error = function(e) NULL
+        )
+        if (!is.null(dmat) && all(eff_names %in% colnames(dmat))) {
+            return(as.matrix(dmat[, eff_names, drop = FALSE]))
+        }
+        if (n_iota == 1L && is.null(component_index) && prefix %in% posterior::variables(.get_draws_obj(x$fit))) {
+            dmat_single <- tryCatch(
+                .get_draws_matrix(x$fit, variables = prefix, draws = n_draws, seed = seed),
+                error = function(e) NULL
+            )
+            if (!is.null(dmat_single) && prefix %in% colnames(dmat_single)) {
+                return(matrix(as.numeric(dmat_single[, prefix, drop = TRUE]), ncol = 1L))
+            }
+        }
+        matrix(default, nrow = n_draws, ncol = n_iota)
+    }
+
+    list(
+        intercept = get_iota_component(map$iota_intercept, default = 0, n_iota = n_iota_intercept),
+        slope = get_iota_component(map$iota_slope, default = 1, n_iota = n_iota_slope)
+    )
+}
+
 .assoc_coeff_draws <- function(x, term, data = NULL, seed = 1) {
     term_key <- if (grepl("^corr", term)) {
         "corr"
@@ -2847,8 +2979,9 @@ plot.JoinMeFit <- function(x,
 
     data <- list(
         coeff_draws = list(),
-        marker_weight_draws = NULL,
+        marker_weight_draws = list(),
         transform_coeff_draws = list(),
+        transform_iota_draws = list(),
         transform_specs = config$transforms_spec %||% list(),
         support = data.frame(term = character(0), marker = character(0), lower = numeric(0), upper = numeric(0), source = character(0), stringsAsFactors = FALSE),
         term_map = data.frame(term = character(0), variable = character(0), stringsAsFactors = FALSE)
@@ -2916,15 +3049,74 @@ plot.JoinMeFit <- function(x,
                 }
             }
         }
+
+        if (identical(tf_type, "functional") && (isTRUE(tf_spec$estimate_iota_intercept) || isTRUE(tf_spec$estimate_iota_slope))) {
+            map <- .assoc_channel_map(term_key)
+            n_iota_intercept <- as.integer(tf_spec$n_iota_intercept %||% stan_data[[map$n_iota_intercept]] %||% 0L)
+            n_iota_slope <- as.integer(tf_spec$n_iota_slope %||% stan_data[[map$n_iota_slope]] %||% 0L)
+
+            get_cached_iota_draws <- function(prefix, n_iota, component_index = NULL) {
+                if (is.null(prefix) || n_iota < 1L) {
+                    return(NULL)
+                }
+                eff_names <- if (!is.null(component_index) && !is.na(component_index)) {
+                    offsets <- (component_index - 1L) * n_iota + seq_len(n_iota)
+                    paste0(prefix, "[", offsets, "]")
+                } else {
+                    paste0(prefix, "[", seq_len(n_iota), "]")
+                }
+                dmat <- tryCatch(.get_draws_matrix(fit, variables = eff_names, seed = seed), error = function(e) NULL)
+                if (!is.null(dmat) && all(eff_names %in% colnames(dmat))) {
+                    return(as.matrix(dmat[, eff_names, drop = FALSE]))
+                }
+                if (n_iota == 1L && is.null(component_index)) {
+                    dmat_single <- tryCatch(.get_draws_matrix(fit, variables = prefix, seed = seed), error = function(e) NULL)
+                    if (!is.null(dmat_single) && prefix %in% colnames(dmat_single)) {
+                        return(matrix(as.numeric(dmat_single[, prefix, drop = TRUE]), ncol = 1L))
+                    }
+                }
+                NULL
+            }
+
+            if (term_key %in% c("corr", "vcov")) {
+                n_components <- .assoc_transform_component_count(
+                    term_key,
+                    stan_data$Q_idm,
+                    diagonal_only = identical(term_key, "vcov") && as.integer(stan_data$indep_idmarker_cov %||% 0L) == 1L
+                )
+                component_terms <- .assoc_transform_component_labels(term_key, n_components)
+                for (m in seq_len(n_components)) {
+                    data$transform_iota_draws[[component_terms[[m]]]] <- list(
+                        intercept = get_cached_iota_draws(map$iota_intercept, n_iota_intercept, component_index = m),
+                        slope = get_cached_iota_draws(map$iota_slope, n_iota_slope, component_index = m)
+                    )
+                }
+            } else {
+                data$transform_iota_draws[[term_key]] <- list(
+                    intercept = get_cached_iota_draws(map$iota_intercept, n_iota_intercept),
+                    slope = get_cached_iota_draws(map$iota_slope, n_iota_slope)
+                )
+            }
+        }
     }
 
     if (any(active_terms %in% c("cv_total", "cs_total", "cv_marker", "cs_marker"))) {
         n_markers <- as.integer(stan_data$D %||% length(stan_data$marker_levels %||% numeric(0)))
         if (n_markers > 0L) {
-            eff_names <- paste0("marker_weights_eff[", seq_len(n_markers), "]")
-            dmat <- tryCatch(.get_draws_matrix(fit, variables = eff_names, seed = seed), error = function(e) NULL)
-            if (!is.null(dmat) && all(eff_names %in% colnames(dmat))) {
-                data$marker_weight_draws <- as.matrix(dmat[, eff_names, drop = FALSE])
+            weight_terms <- intersect(active_terms, .weighted_assoc_term_keys())
+            if (isTRUE(as.integer(stan_data$shared_marker_weights %||% 1L) == 1L) && length(weight_terms) > 1L) {
+                weight_terms <- weight_terms[1L]
+            }
+            for (term_key in weight_terms) {
+                eff_names <- paste0(.marker_weight_var_prefix(term_key, effective = TRUE), "[", seq_len(n_markers), "]")
+                dmat <- tryCatch(.get_draws_matrix(fit, variables = eff_names, seed = seed), error = function(e) NULL)
+                if ((is.null(dmat) || !all(eff_names %in% colnames(dmat))) && isTRUE(as.integer(stan_data$shared_marker_weights %||% 1L) == 1L)) {
+                    eff_names <- paste0("marker_weights_eff[", seq_len(n_markers), "]")
+                    dmat <- tryCatch(.get_draws_matrix(fit, variables = eff_names, seed = seed), error = function(e) NULL)
+                }
+                if (!is.null(dmat) && all(eff_names %in% colnames(dmat))) {
+                    data$marker_weight_draws[[term_key]] <- as.matrix(dmat[, eff_names, drop = FALSE])
+                }
             }
         }
     }
@@ -3104,7 +3296,7 @@ plot.JoinMeFit <- function(x,
         idx_time_idm <- as.integer(stan_data$idx_time_idm %||% integer(0))
         idx_time_idm <- idx_time_idm[is.finite(idx_time_idm) & idx_time_idm >= 1L & idx_time_idm <= length(marker_id_row_scale)]
         if (length(idx_time_idm) > 0L) {
-            marker_id_row_scale[idx_time_idm] <- as.numeric(stan_data$tmax %||% 1)
+            marker_id_row_scale[idx_time_idm] <- as.numeric(stan_data$tmax_internal %||% 1)
         }
         li_terms <- lapply(seq_len(n_id), function(i) {
             if (nrow(vcov_map) == 0L) {
@@ -3156,12 +3348,16 @@ plot.JoinMeFit <- function(x,
     tf_type <- .canonicalise_transform_type(spec$type)
 
     if (identical(tf_type, "functional")) {
-        bc <- parse_transform_expr(spec$expr)
-        return(function(x) {
+        bc <- parse_transform_expr(spec$expr, iota_nodes = .transform_iota_nodes(spec))
+        return(function(x, iota_intercept = numeric(0), iota_slope = numeric(0)) {
             eval_bytecode_vector(
                 x = x,
                 bytecode = bc$bytecode %||% bc$opcodes,
-                const_data = bc$const_data %||% numeric(0)
+                const_data = bc$const_data %||% numeric(0),
+                iota_intercepts = iota_intercept,
+                iota_slopes = iota_slope,
+                op_iota_intercept_idx = bc$op_iota_intercept_idx %||% integer(length(bc$bytecode %||% bc$opcodes %||% integer(0))),
+                op_iota_slope_idx = bc$op_iota_slope_idx %||% integer(length(bc$bytecode %||% bc$opcodes %||% integer(0)))
             )
         })
     }

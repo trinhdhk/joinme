@@ -108,7 +108,10 @@ for (k in 1 : n_draws) {
   // -------------------------------------------------------------
   // 2. Prepare for Association (Averages)
   // -------------------------------------------------------------
-  vector[n_marker_types] marker_weights_k = to_vector(marker_weights_draws[k, ]); // draw-specific weights
+  vector[n_marker_types] marker_weights_cv_total_k = to_vector(marker_weights_draws_cv_total[k, ]);
+  vector[n_marker_types] marker_weights_cs_total_k = to_vector(marker_weights_draws_cs_total[k, ]);
+  vector[n_marker_types] marker_weights_cv_marker_k = to_vector(marker_weights_draws_cv_marker[k, ]);
+  vector[n_marker_types] marker_weights_cs_marker_k = to_vector(marker_weights_draws_cs_marker[k, ]);
   // Aggregation is by marker count D to match fit-time construction.
   // Marker weights are applied in transformed marker aggregation, not here.
   vector[n_random_marker] vbar; // unweighted mean marker REs
@@ -344,10 +347,14 @@ for (k in 1 : n_draws) {
       cvm,
       tf_mode_cv_mean,
       functional_ops_cv_mean,
+      functional_iota_intercept_idx_cv_mean,
+      functional_iota_slope_idx_cv_mean,
       const_data_cv_mean,
       knots_cv_mean,
         coeff_cv_mean[k],
-      spline_degree_cv_mean
+      spline_degree_cv_mean,
+      iota_intercept_cv_mean[k],
+      iota_slope_cv_mean[k]
     );
     vector[n_gk] cv_marker_tf;
     vector[n_gk] cs_tot_tf;
@@ -369,27 +376,31 @@ for (k in 1 : n_draws) {
         real cvk_f_d = mk_part_f_d + dot_product(mat_marker_id_gk_cond_fwd[j], w_draw[d]);
         real cv_tot_d = cvm[j] + cvk_d;
 
-        acc_cv_tot_tf += marker_weights_k[d]
+        acc_cv_tot_tf += marker_weights_cv_total_k[d]
           * apply_transform_scalar(cv_tot_d, tf_mode_cv_tot,
-                                   functional_ops_cv, const_data_cv,
-                                   knots_cv, coeff_cv[k], spline_degree_cv);
-        acc_cv_marker_tf += marker_weights_k[d]
+                                   functional_ops_cv, functional_iota_intercept_idx_cv, functional_iota_slope_idx_cv, const_data_cv,
+                                   knots_cv, coeff_cv[k], spline_degree_cv,
+                                   iota_intercept_cv[k], iota_slope_cv[k]);
+        acc_cv_marker_tf += marker_weights_cv_marker_k[d]
           * apply_transform_scalar(cvk_d, tf_mode_cv_marker,
-                                   functional_ops_cv_marker, const_data_cv_marker,
-                                   knots_cv_marker, coeff_cv_marker[k], spline_degree_cv_marker);
+                                   functional_ops_cv_marker, functional_iota_intercept_idx_cv_marker, functional_iota_slope_idx_cv_marker, const_data_cv_marker,
+                                   knots_cv_marker, coeff_cv_marker[k], spline_degree_cv_marker,
+                                   iota_intercept_cv_marker[k], iota_slope_cv_marker[k]);
         {
           real csk_raw_d = (cvk_f_d - cvk_d) / eps_finite_diff;
           real cs_tot_raw_d = csm_raw[j] + csk_raw_d;
 
-          acc_csk_raw += marker_weights_k[d] * csk_raw_d;
-          acc_cs_tot_tf += marker_weights_k[d]
+          acc_csk_raw += marker_weights_cs_marker_k[d] * csk_raw_d;
+          acc_cs_tot_tf += marker_weights_cs_total_k[d]
             * apply_transform_scalar(cs_tot_raw_d, tf_mode_cs_tot,
-                                     functional_ops_cs, const_data_cs,
-                                     knots_cs, coeff_cs[k], spline_degree_cs);
-          acc_cs_marker_tf += marker_weights_k[d]
+                                     functional_ops_cs, functional_iota_intercept_idx_cs, functional_iota_slope_idx_cs, const_data_cs,
+                                     knots_cs, coeff_cs[k], spline_degree_cs,
+                                     iota_intercept_cs[k], iota_slope_cs[k]);
+          acc_cs_marker_tf += marker_weights_cs_marker_k[d]
             * apply_transform_scalar(csk_raw_d, tf_mode_cs_marker,
-                                     functional_ops_cs_marker, const_data_cs_marker,
-                                     knots_cs_marker, coeff_cs_marker[k], spline_degree_cs_marker);
+                                     functional_ops_cs_marker, functional_iota_intercept_idx_cs_marker, functional_iota_slope_idx_cs_marker, const_data_cs_marker,
+                                     knots_cs_marker, coeff_cs_marker[k], spline_degree_cs_marker,
+                                     iota_intercept_cs_marker[k], iota_slope_cs_marker[k]);
         }
       }
       cv_tot_tf[j] = acc_cv_tot_tf / n_marker_types;
@@ -403,28 +414,40 @@ for (k in 1 : n_draws) {
       csm_raw,
       tf_mode_cs_mean,
       functional_ops_cs_mean,
+      functional_iota_intercept_idx_cs_mean,
+      functional_iota_slope_idx_cs_mean,
       const_data_cs_mean,
       knots_cs_mean,
         coeff_cs_mean[k],
-      spline_degree_cs_mean
+      spline_degree_cs_mean,
+      iota_intercept_cs_mean[k],
+      iota_slope_cs_mean[k]
     );
     vector[M_corr_local] corr_terms_tf = apply_transform_vector_by_component(
       corr_terms_raw,
       tf_mode_corr,
       functional_ops_corr,
+      functional_iota_intercept_idx_corr,
+      functional_iota_slope_idx_corr,
       const_data_corr,
       knots_corr,
         coeff_corr[k],
-      spline_degree_corr
+      spline_degree_corr,
+      iota_intercept_corr[k],
+      iota_slope_corr[k]
     );
       vector[M_corr_local] corr_terms_ref = apply_transform_vector_by_component(
         rep_vector(0, M_corr_local),
         tf_mode_corr,
         functional_ops_corr,
+        functional_iota_intercept_idx_corr,
+        functional_iota_slope_idx_corr,
         const_data_corr,
         knots_corr,
         coeff_corr[k],
-        spline_degree_corr
+        spline_degree_corr,
+        iota_intercept_corr[k],
+        iota_slope_corr[k]
       );
       corr_terms_tf = corr_terms_tf - corr_terms_ref;
     real corr_assoc_scalar = dot_product(a_corr, corr_terms_tf);
@@ -433,19 +456,27 @@ for (k in 1 : n_draws) {
       vcov_terms_raw,
       tf_mode_vcov,
       functional_ops_vcov,
+      functional_iota_intercept_idx_vcov,
+      functional_iota_slope_idx_vcov,
       const_data_vcov,
       knots_vcov,
         coeff_vcov[k],
-      spline_degree_vcov
+      spline_degree_vcov,
+      iota_intercept_vcov[k],
+      iota_slope_vcov[k]
     );
     vector[M_vcov_local] vcov_terms_ref = apply_transform_vector_by_component(
       rep_vector(0, M_vcov_local),
       tf_mode_vcov,
       functional_ops_vcov,
+      functional_iota_intercept_idx_vcov,
+      functional_iota_slope_idx_vcov,
       const_data_vcov,
       knots_vcov,
       coeff_vcov[k],
-      spline_degree_vcov
+      spline_degree_vcov,
+      iota_intercept_vcov[k],
+      iota_slope_vcov[k]
     );
     vcov_terms_tf = vcov_terms_tf - vcov_terms_ref;
     real vcov_assoc_scalar = dot_product(a_vcov, vcov_terms_tf);
@@ -514,10 +545,14 @@ for (k in 1 : n_draws) {
       cvm,
       tf_mode_cv_mean,
       functional_ops_cv_mean,
+      functional_iota_intercept_idx_cv_mean,
+      functional_iota_slope_idx_cv_mean,
       const_data_cv_mean,
       knots_cv_mean,
         coeff_cv_mean[k],
-      spline_degree_cv_mean
+      spline_degree_cv_mean,
+      iota_intercept_cv_mean[k],
+      iota_slope_cv_mean[k]
     );
     vector[n_gk] cv_marker_tf;
     vector[n_gk] cs_tot_tf;
@@ -539,27 +574,31 @@ for (k in 1 : n_draws) {
         real cvk_f_d = mk_part_f_d + dot_product(mat_marker_id_gk_surv_fwd[s][j], w_draw[d]);
         real cv_tot_d = cvm[j] + cvk_d;
 
-        acc_cv_tot_tf += marker_weights_k[d]
+        acc_cv_tot_tf += marker_weights_cv_total_k[d]
           * apply_transform_scalar(cv_tot_d, tf_mode_cv_tot,
-                                   functional_ops_cv, const_data_cv,
-                                   knots_cv, coeff_cv[k], spline_degree_cv);
-        acc_cv_marker_tf += marker_weights_k[d]
+                                   functional_ops_cv, functional_iota_intercept_idx_cv, functional_iota_slope_idx_cv, const_data_cv,
+                                   knots_cv, coeff_cv[k], spline_degree_cv,
+                                   iota_intercept_cv[k], iota_slope_cv[k]);
+        acc_cv_marker_tf += marker_weights_cv_marker_k[d]
           * apply_transform_scalar(cvk_d, tf_mode_cv_marker,
-                                   functional_ops_cv_marker, const_data_cv_marker,
-                                   knots_cv_marker, coeff_cv_marker[k], spline_degree_cv_marker);
+                                   functional_ops_cv_marker, functional_iota_intercept_idx_cv_marker, functional_iota_slope_idx_cv_marker, const_data_cv_marker,
+                                   knots_cv_marker, coeff_cv_marker[k], spline_degree_cv_marker,
+                                   iota_intercept_cv_marker[k], iota_slope_cv_marker[k]);
         {
           real csk_raw_d = (cvk_f_d - cvk_d) / eps_finite_diff;
           real cs_tot_raw_d = csm_raw[j] + csk_raw_d;
 
-          acc_csk_raw += marker_weights_k[d] * csk_raw_d;
-          acc_cs_tot_tf += marker_weights_k[d]
+          acc_csk_raw += marker_weights_cs_marker_k[d] * csk_raw_d;
+          acc_cs_tot_tf += marker_weights_cs_total_k[d]
             * apply_transform_scalar(cs_tot_raw_d, tf_mode_cs_tot,
-                                     functional_ops_cs, const_data_cs,
-                                     knots_cs, coeff_cs[k], spline_degree_cs);
-          acc_cs_marker_tf += marker_weights_k[d]
+                                     functional_ops_cs, functional_iota_intercept_idx_cs, functional_iota_slope_idx_cs, const_data_cs,
+                                     knots_cs, coeff_cs[k], spline_degree_cs,
+                                     iota_intercept_cs[k], iota_slope_cs[k]);
+          acc_cs_marker_tf += marker_weights_cs_marker_k[d]
             * apply_transform_scalar(csk_raw_d, tf_mode_cs_marker,
-                                     functional_ops_cs_marker, const_data_cs_marker,
-                                     knots_cs_marker, coeff_cs_marker[k], spline_degree_cs_marker);
+                                     functional_ops_cs_marker, functional_iota_intercept_idx_cs_marker, functional_iota_slope_idx_cs_marker, const_data_cs_marker,
+                                     knots_cs_marker, coeff_cs_marker[k], spline_degree_cs_marker,
+                                     iota_intercept_cs_marker[k], iota_slope_cs_marker[k]);
         }
       }
       cv_tot_tf[j] = acc_cv_tot_tf / n_marker_types;
@@ -573,28 +612,40 @@ for (k in 1 : n_draws) {
       csm_raw,
       tf_mode_cs_mean,
       functional_ops_cs_mean,
+      functional_iota_intercept_idx_cs_mean,
+      functional_iota_slope_idx_cs_mean,
       const_data_cs_mean,
       knots_cs_mean,
         coeff_cs_mean[k],
-      spline_degree_cs_mean
+      spline_degree_cs_mean,
+      iota_intercept_cs_mean[k],
+      iota_slope_cs_mean[k]
     );
     vector[M_corr_local2] corr_terms_tf = apply_transform_vector_by_component(
       corr_terms_raw,
       tf_mode_corr,
       functional_ops_corr,
+      functional_iota_intercept_idx_corr,
+      functional_iota_slope_idx_corr,
       const_data_corr,
       knots_corr,
         coeff_corr[k],
-      spline_degree_corr
+      spline_degree_corr,
+      iota_intercept_corr[k],
+      iota_slope_corr[k]
     );
       vector[M_corr_local2] corr_terms_ref = apply_transform_vector_by_component(
         rep_vector(0, M_corr_local2),
         tf_mode_corr,
         functional_ops_corr,
+        functional_iota_intercept_idx_corr,
+        functional_iota_slope_idx_corr,
         const_data_corr,
         knots_corr,
         coeff_corr[k],
-        spline_degree_corr
+        spline_degree_corr,
+        iota_intercept_corr[k],
+        iota_slope_corr[k]
       );
       corr_terms_tf = corr_terms_tf - corr_terms_ref;
     real corr_assoc_scalar = dot_product(a_corr, corr_terms_tf);
@@ -603,19 +654,27 @@ for (k in 1 : n_draws) {
       vcov_terms_raw,
       tf_mode_vcov,
       functional_ops_vcov,
+      functional_iota_intercept_idx_vcov,
+      functional_iota_slope_idx_vcov,
       const_data_vcov,
       knots_vcov,
         coeff_vcov[k],
-      spline_degree_vcov
+      spline_degree_vcov,
+      iota_intercept_vcov[k],
+      iota_slope_vcov[k]
     );
     vector[M_vcov_local2] vcov_terms_ref = apply_transform_vector_by_component(
       rep_vector(0, M_vcov_local2),
       tf_mode_vcov,
       functional_ops_vcov,
+      functional_iota_intercept_idx_vcov,
+      functional_iota_slope_idx_vcov,
       const_data_vcov,
       knots_vcov,
       coeff_vcov[k],
-      spline_degree_vcov
+      spline_degree_vcov,
+      iota_intercept_vcov[k],
+      iota_slope_vcov[k]
     );
     vcov_terms_tf = vcov_terms_tf - vcov_terms_ref;
     real vcov_assoc_scalar = dot_product(a_vcov, vcov_terms_tf);

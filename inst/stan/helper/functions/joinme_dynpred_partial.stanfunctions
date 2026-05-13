@@ -55,7 +55,10 @@
  * @param n_obs_long Number of longitudinal observations for the new subject.
  * @param idx_marker_obs Array of marker indices for each observation (1-based).
  * @param n_marker_types Total number of marker types (D).
- * @param marker_weights_draws Matrix of marker weights for each draw.
+ * @param marker_weights_draws_cv_total Matrix of cv_total marker weights for each draw.
+ * @param marker_weights_draws_cs_total Matrix of cs_total marker weights for each draw.
+ * @param marker_weights_draws_cv_marker Matrix of cv_marker marker weights for each draw.
+ * @param marker_weights_draws_cs_marker Matrix of cs_marker marker weights for each draw.
  * @param y_real Vector of continuous response values.
  * @param y_int Array of integer response values (for ordinal/count outcomes).
  * @param trials_obs Array of trial counts for binomial outcomes.
@@ -233,7 +236,10 @@ real partial_draw(
     int n_obs_long,
     array[] int idx_marker_obs,
     int n_marker_types,
-    matrix marker_weights_draws,
+    matrix marker_weights_draws_cv_total,
+    matrix marker_weights_draws_cs_total,
+    matrix marker_weights_draws_cv_marker,
+    matrix marker_weights_draws_cs_marker,
     vector y_real,
     array[] int y_int,
     array[] int trials_obs,
@@ -334,6 +340,22 @@ real partial_draw(
     array[] real coeff_assoc_cs_marker,
     array[] vector coeff_assoc_corr,
     array[] vector coeff_assoc_vcov,
+    array[] vector iota_intercept_cv,
+    array[] vector iota_slope_cv,
+    array[] vector iota_intercept_cs,
+    array[] vector iota_slope_cs,
+    array[] vector iota_intercept_corr,
+    array[] vector iota_slope_corr,
+    array[] vector iota_intercept_vcov,
+    array[] vector iota_slope_vcov,
+    array[] vector iota_intercept_cv_mean,
+    array[] vector iota_slope_cv_mean,
+    array[] vector iota_intercept_cv_marker,
+    array[] vector iota_slope_cv_marker,
+    array[] vector iota_intercept_cs_mean,
+    array[] vector iota_slope_cs_mean,
+    array[] vector iota_intercept_cs_marker,
+    array[] vector iota_slope_cs_marker,
     int K_ord,
     array[] vector cutpoints_ord,
     int flag_assoc_cv_total,
@@ -353,41 +375,57 @@ real partial_draw(
     int tf_mode_cs_mean,
     int tf_mode_cs_marker,
     array[] int functional_ops_cv,
+    array[] int functional_iota_intercept_idx_cv,
+    array[] int functional_iota_slope_idx_cv,
     vector const_data_cv,
     vector knots_cv,
     array[] vector coeff_cv,
     int spline_degree_cv,
     array[] int functional_ops_cs,
+    array[] int functional_iota_intercept_idx_cs,
+    array[] int functional_iota_slope_idx_cs,
     vector const_data_cs,
     vector knots_cs,
     array[] vector coeff_cs,
     int spline_degree_cs,
     array[] int functional_ops_corr,
+    array[] int functional_iota_intercept_idx_corr,
+    array[] int functional_iota_slope_idx_corr,
     vector const_data_corr,
     vector knots_corr,
     array[] matrix coeff_corr,
     int spline_degree_corr,
     array[] int functional_ops_vcov,
+    array[] int functional_iota_intercept_idx_vcov,
+    array[] int functional_iota_slope_idx_vcov,
     vector const_data_vcov,
     vector knots_vcov,
     array[] matrix coeff_vcov,
     int spline_degree_vcov,
     array[] int functional_ops_cv_mean,
+    array[] int functional_iota_intercept_idx_cv_mean,
+    array[] int functional_iota_slope_idx_cv_mean,
     vector const_data_cv_mean,
     vector knots_cv_mean,
     array[] vector coeff_cv_mean,
     int spline_degree_cv_mean,
     array[] int functional_ops_cv_marker,
+    array[] int functional_iota_intercept_idx_cv_marker,
+    array[] int functional_iota_slope_idx_cv_marker,
     vector const_data_cv_marker,
     vector knots_cv_marker,
     array[] vector coeff_cv_marker,
     int spline_degree_cv_marker,
     array[] int functional_ops_cs_mean,
+    array[] int functional_iota_intercept_idx_cs_mean,
+    array[] int functional_iota_slope_idx_cs_mean,
     vector const_data_cs_mean,
     vector knots_cs_mean,
     array[] vector coeff_cs_mean,
     int spline_degree_cs_mean,
     array[] int functional_ops_cs_marker,
+    array[] int functional_iota_intercept_idx_cs_marker,
+    array[] int functional_iota_slope_idx_cs_marker,
     vector const_data_cs_marker,
     vector knots_cs_marker,
     array[] vector coeff_cs_marker,
@@ -647,7 +685,10 @@ real partial_draw(
     vector[n_gk] cvk_f; // marker CV forward
 
     // Marker weights for draw k (used only for transformed marker aggregation).
-    vector[n_marker_types] marker_weights_k = to_vector(marker_weights_draws[k, ]); // draw-specific signed weights
+    vector[n_marker_types] marker_weights_cv_total_k = to_vector(marker_weights_draws_cv_total[k, ]);
+    vector[n_marker_types] marker_weights_cs_total_k = to_vector(marker_weights_draws_cs_total[k, ]);
+    vector[n_marker_types] marker_weights_cv_marker_k = to_vector(marker_weights_draws_cv_marker[k, ]);
+    vector[n_marker_types] marker_weights_cs_marker_k = to_vector(marker_weights_draws_cs_marker[k, ]);
     // Unweighted average of marker-level random effects for baseline CV/CS paths.
     vector[n_random_marker] vbar; // unweighted mean of marker REs
     if (n_random_marker > 0) {
@@ -714,7 +755,8 @@ real partial_draw(
       w_draw[d] = Li_eff * z_w[d];
 
     vector[n_gk] cv_tot_tf;
-    vector[n_gk] cv_mean_tf = apply_transform_vector(cvm, tf_mode_cv_mean, functional_ops_cv_mean, const_data_cv_mean, knots_cv_mean, coeff_cv_mean[k], spline_degree_cv_mean);
+    vector[n_gk] cv_mean_tf = apply_transform_vector(cvm, tf_mode_cv_mean, functional_ops_cv_mean, functional_iota_intercept_idx_cv_mean, functional_iota_slope_idx_cv_mean, const_data_cv_mean, knots_cv_mean, coeff_cv_mean[k], spline_degree_cv_mean,
+                             iota_intercept_cv_mean[k], iota_slope_cv_mean[k]);
     vector[n_gk] cv_marker_tf;
     vector[n_gk] cs_tot_tf;
     vector[n_gk] cs_marker_tf;
@@ -736,14 +778,16 @@ real partial_draw(
         real cvk_f_d = mk_part_f_d + dot_product(mat_marker_id_gk_cond_fwd[j], w_draw[d]);
         real cv_tot_d = cvm[j] + cvk_d;
 
-        acc_cv_tot_tf += marker_weights_k[d]
+        acc_cv_tot_tf += marker_weights_cv_total_k[d]
           * apply_transform_scalar(cv_tot_d, tf_mode_cv_tot,
-                                   functional_ops_cv, const_data_cv,
-                                   knots_cv, coeff_cv[k], spline_degree_cv);
-        acc_cv_marker_tf += marker_weights_k[d]
+                                   functional_ops_cv, functional_iota_intercept_idx_cv, functional_iota_slope_idx_cv, const_data_cv,
+                                   knots_cv, coeff_cv[k], spline_degree_cv,
+                                   iota_intercept_cv[k], iota_slope_cv[k]);
+        acc_cv_marker_tf += marker_weights_cv_marker_k[d]
           * apply_transform_scalar(cvk_d, tf_mode_cv_marker,
-                                   functional_ops_cv_marker, const_data_cv_marker,
-                                   knots_cv_marker, coeff_cv_marker[k], spline_degree_cv_marker);
+                                   functional_ops_cv_marker, functional_iota_intercept_idx_cv_marker, functional_iota_slope_idx_cv_marker, const_data_cv_marker,
+                                   knots_cv_marker, coeff_cv_marker[k], spline_degree_cv_marker,
+                                   iota_intercept_cv_marker[k], iota_slope_cv_marker[k]);
         {
           // Marker-resolved slope channels at GK node j:
           //   csk_raw_d for cs_marker
@@ -751,14 +795,16 @@ real partial_draw(
           // Both channels are transformed first, then weighted and averaged.
           real csk_raw_d = (cvk_f_d - cvk_d) / eps_finite_diff;
           real cs_tot_raw_d = csm_raw[j] + csk_raw_d;
-          acc_cs_tot_tf += marker_weights_k[d]
+          acc_cs_tot_tf += marker_weights_cs_total_k[d]
             * apply_transform_scalar(cs_tot_raw_d, tf_mode_cs_tot,
-                                     functional_ops_cs, const_data_cs,
-                                     knots_cs, coeff_cs[k], spline_degree_cs);
-          acc_cs_marker_tf += marker_weights_k[d]
+                                     functional_ops_cs, functional_iota_intercept_idx_cs, functional_iota_slope_idx_cs, const_data_cs,
+                                     knots_cs, coeff_cs[k], spline_degree_cs,
+                                     iota_intercept_cs[k], iota_slope_cs[k]);
+          acc_cs_marker_tf += marker_weights_cs_marker_k[d]
             * apply_transform_scalar(csk_raw_d, tf_mode_cs_marker,
-                                     functional_ops_cs_marker, const_data_cs_marker,
-                                     knots_cs_marker, coeff_cs_marker[k], spline_degree_cs_marker);
+                                     functional_ops_cs_marker, functional_iota_intercept_idx_cs_marker, functional_iota_slope_idx_cs_marker, const_data_cs_marker,
+                                     knots_cs_marker, coeff_cs_marker[k], spline_degree_cs_marker,
+                                     iota_intercept_cs_marker[k], iota_slope_cs_marker[k]);
         }
       }
       // Final marker-aggregated channels at GK node j.
@@ -768,14 +814,19 @@ real partial_draw(
       cs_marker_tf[j] = acc_cs_marker_tf / n_marker_types;
     }
 
-    vector[n_gk] cs_mean_tf = apply_transform_vector(csm_raw, tf_mode_cs_mean, functional_ops_cs_mean, const_data_cs_mean, knots_cs_mean, coeff_cs_mean[k], spline_degree_cs_mean);
-    vector[M_corr_local] corr_terms_tf = apply_transform_vector_by_component(corr_terms_raw, tf_mode_corr, functional_ops_corr, const_data_corr, knots_corr, coeff_corr[k], spline_degree_corr);
-    vector[M_corr_local] corr_terms_ref = apply_transform_vector_by_component(rep_vector(0, M_corr_local), tf_mode_corr, functional_ops_corr, const_data_corr, knots_corr, coeff_corr[k], spline_degree_corr);
+    vector[n_gk] cs_mean_tf = apply_transform_vector(csm_raw, tf_mode_cs_mean, functional_ops_cs_mean, functional_iota_intercept_idx_cs_mean, functional_iota_slope_idx_cs_mean, const_data_cs_mean, knots_cs_mean, coeff_cs_mean[k], spline_degree_cs_mean,
+                             iota_intercept_cs_mean[k], iota_slope_cs_mean[k]);
+    vector[M_corr_local] corr_terms_tf = apply_transform_vector_by_component(corr_terms_raw, tf_mode_corr, functional_ops_corr, functional_iota_intercept_idx_corr, functional_iota_slope_idx_corr, const_data_corr, knots_corr, coeff_corr[k], spline_degree_corr,
+                                         iota_intercept_corr[k], iota_slope_corr[k]);
+    vector[M_corr_local] corr_terms_ref = apply_transform_vector_by_component(rep_vector(0, M_corr_local), tf_mode_corr, functional_ops_corr, functional_iota_intercept_idx_corr, functional_iota_slope_idx_corr, const_data_corr, knots_corr, coeff_corr[k], spline_degree_corr,
+                                          iota_intercept_corr[k], iota_slope_corr[k]);
     corr_terms_tf = corr_terms_tf - corr_terms_ref;
     real corr_assoc_scalar = dot_product(flag_assoc_corr * coeff_assoc_corr[k], corr_terms_tf);
     vector[n_gk] corr_assoc = rep_vector(corr_assoc_scalar, n_gk);
-    vector[M_vcov_local] vcov_terms_tf = apply_transform_vector_by_component(vcov_terms_raw, tf_mode_vcov, functional_ops_vcov, const_data_vcov, knots_vcov, coeff_vcov[k], spline_degree_vcov);
-    vector[M_vcov_local] vcov_terms_ref = apply_transform_vector_by_component(rep_vector(0, M_vcov_local), tf_mode_vcov, functional_ops_vcov, const_data_vcov, knots_vcov, coeff_vcov[k], spline_degree_vcov);
+    vector[M_vcov_local] vcov_terms_tf = apply_transform_vector_by_component(vcov_terms_raw, tf_mode_vcov, functional_ops_vcov, functional_iota_intercept_idx_vcov, functional_iota_slope_idx_vcov, const_data_vcov, knots_vcov, coeff_vcov[k], spline_degree_vcov,
+                                         iota_intercept_vcov[k], iota_slope_vcov[k]);
+    vector[M_vcov_local] vcov_terms_ref = apply_transform_vector_by_component(rep_vector(0, M_vcov_local), tf_mode_vcov, functional_ops_vcov, functional_iota_intercept_idx_vcov, functional_iota_slope_idx_vcov, const_data_vcov, knots_vcov, coeff_vcov[k], spline_degree_vcov,
+                                          iota_intercept_vcov[k], iota_slope_vcov[k]);
     vcov_terms_tf = vcov_terms_tf - vcov_terms_ref;
     real vcov_assoc_scalar = dot_product(flag_assoc_vcov * coeff_assoc_vcov[k], vcov_terms_tf);
     vector[n_gk] vcov_assoc = rep_vector(vcov_assoc_scalar, n_gk);

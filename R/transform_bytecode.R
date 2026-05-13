@@ -13,6 +13,7 @@
 ##' - Power: ^
 ##' - Functions: log, exp, sqrt, sin, cos, tan, abs, sinh, cosh, tanh, asinh, acosh, atanh
 ##' - Sigmoid/Link: inv_logit, logit, sigmoid, expit
+##' - Sigmoid aliases: softmax, SoftMax
 ##' - Softplus: softplus, log1p_exp
 ##' - Other: cbrt, power
 ##' - Reciprocal: 1/x or rec(x)
@@ -70,14 +71,25 @@
 # - Parse R expressions into portable bytecode programs.
 # - Validate bytecode stack behaviour before handing programs to Stan.
 # - Evaluate bytecode in R (shared by inverse-link and association transforms).
-parse_transform_expr <- function(expr) {
+parse_transform_expr <- function(expr, iota_nodes = NULL) {
   # Step 1: normalise any supported expression input into a language object.
   expr_call <- .coerce_transform_expr(expr)
+  iota_node_map <- .iota_node_map(iota_nodes)
 
   # Step 2: emit bytecode instructions and constant vector.
   bytecode <- integer()
   const_data <- numeric()
-  result <- .emit_bytecode_expr(expr_call, bytecode, const_data)
+  op_iota_intercept_idx <- integer()
+  op_iota_slope_idx <- integer()
+  result <- .emit_bytecode_expr(
+    expr_call,
+    bytecode,
+    const_data,
+    op_iota_intercept_idx,
+    op_iota_slope_idx,
+    iota_node_map = iota_node_map,
+    path = "root"
+  )
 
   # Step 3: validate stack consistency so runtime evaluation is deterministic.
   verify_opcodes(result$bytecode, result$const_data)
@@ -87,9 +99,40 @@ parse_transform_expr <- function(expr) {
     opcodes = result$bytecode,
     bytecode = result$bytecode,
     const_data = result$const_data,
+    op_iota_intercept_idx = result$op_iota_intercept_idx,
+    op_iota_slope_idx = result$op_iota_slope_idx,
     n_ops = length(result$bytecode),
     n_bytecode = length(result$bytecode),
-    n_const = length(result$const_data)
+    n_const = length(result$const_data),
+    n_iota_intercept = max(c(0L, result$op_iota_intercept_idx)),
+    n_iota_slope = max(c(0L, result$op_iota_slope_idx))
+  )
+}
+
+#' @keywords internal
+.iota_node_map <- function(iota_nodes = NULL) {
+  if (is.null(iota_nodes) || !length(iota_nodes)) {
+    return(list())
+  }
+  stats::setNames(iota_nodes, vapply(iota_nodes, function(node) node$path %||% "", character(1)))
+}
+
+#' @keywords internal
+.bytecode_iota_indices <- function(iota_node_map, path, function_name) {
+  node <- iota_node_map[[path]]
+  if (is.null(node)) {
+    return(list(intercept = 0L, slope = 0L))
+  }
+  node_fun <- tolower(as.character(node$function_name %||% ""))
+  if (!identical(node_fun, tolower(function_name))) {
+    cli::cli_abort(c(
+      x = "Transform affine-shift metadata is inconsistent with the functional expression.",
+      i = "Rebuild the transform specification before parsing bytecode."
+    ))
+  }
+  list(
+    intercept = as.integer(node$intercept_index %||% 0L),
+    slope = as.integer(node$slope_index %||% 0L)
   )
 }
 
@@ -130,12 +173,27 @@ parse_transform_expr <- function(expr) {
 
 ##' @keywords internal
 ##' Emit bytecode from an R language object (calls, names, constants).
-.emit_bytecode_expr <- function(node, bytecode, const_data) {
+.emit_bytecode_expr <- function(
+  node,
+  bytecode,
+  const_data,
+  op_iota_intercept_idx,
+  op_iota_slope_idx,
+  iota_node_map = list(),
+  path = "root"
+) {
   # Recursive descent over AST nodes to emit bytecode
   if (is.numeric(node)) {
     bytecode <- c(bytecode, 1L)
     const_data <- c(const_data, as.numeric(node))
-    return(list(bytecode = bytecode, const_data = const_data))
+    op_iota_intercept_idx <- c(op_iota_intercept_idx, 0L)
+    op_iota_slope_idx <- c(op_iota_slope_idx, 0L)
+    return(list(
+      bytecode = bytecode,
+      const_data = const_data,
+      op_iota_intercept_idx = op_iota_intercept_idx,
+      op_iota_slope_idx = op_iota_slope_idx
+    ))
   }
   if (is.name(node)) {
     if (as.character(node) != "x") {
@@ -145,7 +203,14 @@ parse_transform_expr <- function(expr) {
       ))
     }
     bytecode <- c(bytecode, 0L)
-    return(list(bytecode = bytecode, const_data = const_data))
+    op_iota_intercept_idx <- c(op_iota_intercept_idx, 0L)
+    op_iota_slope_idx <- c(op_iota_slope_idx, 0L)
+    return(list(
+      bytecode = bytecode,
+      const_data = const_data,
+      op_iota_intercept_idx = op_iota_intercept_idx,
+      op_iota_slope_idx = op_iota_slope_idx
+    ))
   }
   if (!is.call(node)) {
     cli::cli_abort(c(
@@ -164,19 +229,35 @@ parse_transform_expr <- function(expr) {
         i = "Remove stray commas or extra arguments inside parentheses."
       ))
     }
-    return(.emit_bytecode_expr(args[[1]], bytecode, const_data))
+    return(.emit_bytecode_expr(
+      args[[1]], bytecode, const_data,
+      op_iota_intercept_idx, op_iota_slope_idx,
+      iota_node_map = iota_node_map,
+      path = paste0(path, "/1")
+    ))
   }
   
   if (op %in% c("+", "-", "*", "/", "^")) {
     if (length(args) == 1 && op == "-") {
-      res <- .emit_bytecode_expr(0, bytecode, const_data)
+      res <- .emit_bytecode_expr(0, bytecode, const_data, op_iota_intercept_idx, op_iota_slope_idx, iota_node_map = iota_node_map, path = paste0(path, "/1"))
       bytecode <- res$bytecode
       const_data <- res$const_data
-      res <- .emit_bytecode_expr(args[[1]], bytecode, const_data)
+      op_iota_intercept_idx <- res$op_iota_intercept_idx
+      op_iota_slope_idx <- res$op_iota_slope_idx
+      res <- .emit_bytecode_expr(args[[1]], bytecode, const_data, op_iota_intercept_idx, op_iota_slope_idx, iota_node_map = iota_node_map, path = paste0(path, "/1"))
       bytecode <- res$bytecode
       const_data <- res$const_data
+      op_iota_intercept_idx <- res$op_iota_intercept_idx
+      op_iota_slope_idx <- res$op_iota_slope_idx
       bytecode <- c(bytecode, 3L)
-      return(list(bytecode = bytecode, const_data = const_data))
+      op_iota_intercept_idx <- c(op_iota_intercept_idx, 0L)
+      op_iota_slope_idx <- c(op_iota_slope_idx, 0L)
+      return(list(
+        bytecode = bytecode,
+        const_data = const_data,
+        op_iota_intercept_idx = op_iota_intercept_idx,
+        op_iota_slope_idx = op_iota_slope_idx
+      ))
     }
     if (length(args) != 2) {
       cli::cli_abort(c(
@@ -184,15 +265,26 @@ parse_transform_expr <- function(expr) {
         i = "Check the transform expression for missing operands."
       ))
     }
-    res <- .emit_bytecode_expr(args[[1]], bytecode, const_data)
+    res <- .emit_bytecode_expr(args[[1]], bytecode, const_data, op_iota_intercept_idx, op_iota_slope_idx, iota_node_map = iota_node_map, path = paste0(path, "/1"))
     bytecode <- res$bytecode
     const_data <- res$const_data
-    res <- .emit_bytecode_expr(args[[2]], bytecode, const_data)
+    op_iota_intercept_idx <- res$op_iota_intercept_idx
+    op_iota_slope_idx <- res$op_iota_slope_idx
+    res <- .emit_bytecode_expr(args[[2]], bytecode, const_data, op_iota_intercept_idx, op_iota_slope_idx, iota_node_map = iota_node_map, path = paste0(path, "/2"))
     bytecode <- res$bytecode
     const_data <- res$const_data
+    op_iota_intercept_idx <- res$op_iota_intercept_idx
+    op_iota_slope_idx <- res$op_iota_slope_idx
     op_id <- switch(op, "+" = 2L, "-" = 3L, "*" = 4L, "/" = 5L, "^" = 12L)
     bytecode <- c(bytecode, op_id)
-    return(list(bytecode = bytecode, const_data = const_data))
+    op_iota_intercept_idx <- c(op_iota_intercept_idx, 0L)
+    op_iota_slope_idx <- c(op_iota_slope_idx, 0L)
+    return(list(
+      bytecode = bytecode,
+      const_data = const_data,
+      op_iota_intercept_idx = op_iota_intercept_idx,
+      op_iota_slope_idx = op_iota_slope_idx
+    ))
   }
 
   if (op == "power") {
@@ -202,16 +294,30 @@ parse_transform_expr <- function(expr) {
         i = "Check the transform expression for missing arguments."
       ))
     }
-    res <- .emit_bytecode_expr(args[[1]], bytecode, const_data)
+    res <- .emit_bytecode_expr(args[[1]], bytecode, const_data, op_iota_intercept_idx, op_iota_slope_idx, iota_node_map = iota_node_map, path = paste0(path, "/1"))
     bytecode <- res$bytecode
     const_data <- res$const_data
-    res <- .emit_bytecode_expr(args[[2]], bytecode, const_data)
+    op_iota_intercept_idx <- res$op_iota_intercept_idx
+    op_iota_slope_idx <- res$op_iota_slope_idx
+    res <- .emit_bytecode_expr(args[[2]], bytecode, const_data, op_iota_intercept_idx, op_iota_slope_idx, iota_node_map = iota_node_map, path = paste0(path, "/2"))
     bytecode <- res$bytecode
     const_data <- res$const_data
+    op_iota_intercept_idx <- res$op_iota_intercept_idx
+    op_iota_slope_idx <- res$op_iota_slope_idx
     bytecode <- c(bytecode, 12L)
-    return(list(bytecode = bytecode, const_data = const_data))
+    op_iota <- .bytecode_iota_indices(iota_node_map, path, "power")
+    op_iota_intercept_idx <- c(op_iota_intercept_idx, op_iota$intercept)
+    op_iota_slope_idx <- c(op_iota_slope_idx, op_iota$slope)
+    return(list(
+      bytecode = bytecode,
+      const_data = const_data,
+      op_iota_intercept_idx = op_iota_intercept_idx,
+      op_iota_slope_idx = op_iota_slope_idx
+    ))
   }
   
+  op <- tolower(op)
+
   func_op_id <- switch(op,
     log = 6L,
     exp = 7L,
@@ -219,6 +325,7 @@ parse_transform_expr <- function(expr) {
     inv_logit = 9L,
     sigmoid = 9L,
     expit = 9L,
+    softmax = 9L,
     logit = 10L,
     rec = 11L,
     sin = 13L,
@@ -244,14 +351,24 @@ parse_transform_expr <- function(expr) {
         i = "Check the transform expression for missing arguments."
       ))
     }
-    res <- .emit_bytecode_expr(args[[1]], bytecode, const_data)
+    res <- .emit_bytecode_expr(args[[1]], bytecode, const_data, op_iota_intercept_idx, op_iota_slope_idx, iota_node_map = iota_node_map, path = paste0(path, "/1"))
     bytecode <- res$bytecode
     const_data <- res$const_data
+    op_iota_intercept_idx <- res$op_iota_intercept_idx
+    op_iota_slope_idx <- res$op_iota_slope_idx
     bytecode <- c(bytecode, func_op_id)
-    return(list(bytecode = bytecode, const_data = const_data))
+    op_iota <- .bytecode_iota_indices(iota_node_map, path, op)
+    op_iota_intercept_idx <- c(op_iota_intercept_idx, op_iota$intercept)
+    op_iota_slope_idx <- c(op_iota_slope_idx, op_iota$slope)
+    return(list(
+      bytecode = bytecode,
+      const_data = const_data,
+      op_iota_intercept_idx = op_iota_intercept_idx,
+      op_iota_slope_idx = op_iota_slope_idx
+    ))
   }
   
-  if (op == "ISpline") {
+  if (op == "ispline") {
     cli::cli_abort(c(
       x = "ISpline() is not supported in functional bytecode mode.",
       i = "Use the ispline transform mode and supply knots/coefficients instead."
@@ -260,7 +377,7 @@ parse_transform_expr <- function(expr) {
   
   cli::cli_abort(c(
     x = "Unsupported function in transform expression: {op}.",
-    i = "Supported functions: log, exp, sqrt, inv_logit, logit, probit, sigmoid, expit, softplus, log1p_exp, cbrt, power, rec, sin, cos, tan, abs, sinh, cosh, tanh, asinh, acosh, atanh."
+    i = "Supported functions: log, exp, sqrt, inv_logit, logit, probit, sigmoid, expit, softmax, softplus, log1p_exp, cbrt, power, rec, sin, cos, tan, abs, sinh, cosh, tanh, asinh, acosh, atanh."
   ))
 }
 
@@ -319,11 +436,28 @@ verify_opcodes <- function(opcodes, const_data) {
 #'
 #' @return Numeric scalar result.
 #' @keywords internal
-eval_bytecode_scalar <- function(x, bytecode = NULL, const_data = numeric(), opcodes = NULL) {
+eval_bytecode_scalar <- function(
+  x,
+  bytecode = NULL,
+  const_data = numeric(),
+  opcodes = NULL,
+  iota_intercepts = numeric(0),
+  iota_slopes = numeric(0),
+  op_iota_intercept_idx = NULL,
+  op_iota_slope_idx = NULL
+) {
   # Step 1: normalise inputs and resolve legacy naming aliases.
-  program <- .normalize_bytecode_program(bytecode = bytecode, opcodes = opcodes, const_data = const_data)
+  program <- .normalize_bytecode_program(
+    bytecode = bytecode,
+    opcodes = opcodes,
+    const_data = const_data,
+    op_iota_intercept_idx = op_iota_intercept_idx,
+    op_iota_slope_idx = op_iota_slope_idx
+  )
   code <- program$bytecode
   constants <- program$const_data
+  intercept_idx <- program$op_iota_intercept_idx
+  slope_idx <- program$op_iota_slope_idx
 
   # Identity behaviour for empty programs keeps backward compatibility.
   if (length(code) == 0L) {
@@ -336,7 +470,15 @@ eval_bytecode_scalar <- function(x, bytecode = NULL, const_data = numeric(), opc
   # Step 3: execute the bytecode stack machine instruction by instruction.
   stack <- numeric(0)
   const_idx <- 1L
-  for (op in code) {
+  resolve_iota_shift <- function(value, intercept_ref, slope_ref) {
+    intercept_val <- if (isTRUE(intercept_ref > 0L) && length(iota_intercepts) >= intercept_ref) iota_intercepts[[intercept_ref]] else 0
+    slope_val <- if (isTRUE(slope_ref > 0L) && length(iota_slopes) >= slope_ref) iota_slopes[[slope_ref]] else 1
+    as.numeric(intercept_val + slope_val * value)
+  }
+  for (op_pos in seq_along(code)) {
+    op <- code[[op_pos]]
+    op_intercept_idx <- intercept_idx[[op_pos]]
+    op_slope_idx <- slope_idx[[op_pos]]
     if (op == 0L) {
       stack <- c(stack, as.numeric(x))
     } else if (op == 1L) {
@@ -355,49 +497,50 @@ eval_bytecode_scalar <- function(x, bytecode = NULL, const_data = numeric(), opc
       b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
       stack <- c(stack[-c(length(stack) - 1L, length(stack))], a / b)
     } else if (op == 6L) {
-      stack[length(stack)] <- log(stack[length(stack)])
+      stack[length(stack)] <- log(resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx))
     } else if (op == 7L) {
-      stack[length(stack)] <- exp(stack[length(stack)])
+      stack[length(stack)] <- exp(resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx))
     } else if (op == 8L) {
-      stack[length(stack)] <- sqrt(stack[length(stack)])
+      stack[length(stack)] <- sqrt(resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx))
     } else if (op == 9L) {
-      stack[length(stack)] <- stats::plogis(stack[length(stack)])
+      stack[length(stack)] <- stats::plogis(resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx))
     } else if (op == 10L) {
-      stack[length(stack)] <- stats::qlogis(stack[length(stack)])
+      stack[length(stack)] <- stats::qlogis(resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx))
     } else if (op == 11L) {
-      stack[length(stack)] <- 1 / stack[length(stack)]
+      stack[length(stack)] <- 1 / resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx)
     } else if (op == 12L) {
       b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
+      a <- resolve_iota_shift(a, op_intercept_idx, op_slope_idx)
       stack <- c(stack[-c(length(stack) - 1L, length(stack))], a^b)
     } else if (op == 13L) {
-      stack[length(stack)] <- sin(stack[length(stack)])
+      stack[length(stack)] <- sin(resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx))
     } else if (op == 14L) {
-      stack[length(stack)] <- cos(stack[length(stack)])
+      stack[length(stack)] <- cos(resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx))
     } else if (op == 15L) {
-      stack[length(stack)] <- tan(stack[length(stack)])
+      stack[length(stack)] <- tan(resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx))
     } else if (op == 16L) {
-      stack[length(stack)] <- abs(stack[length(stack)])
+      stack[length(stack)] <- abs(resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx))
     } else if (op == 17L) {
-      stack[length(stack)] <- stack[length(stack)]^2
+      stack[length(stack)] <- resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx)^2
     } else if (op == 18L) {
-      stack[length(stack)] <- sinh(stack[length(stack)])
+      stack[length(stack)] <- sinh(resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx))
     } else if (op == 19L) {
-      stack[length(stack)] <- cosh(stack[length(stack)])
+      stack[length(stack)] <- cosh(resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx))
     } else if (op == 20L) {
-      stack[length(stack)] <- tanh(stack[length(stack)])
+      stack[length(stack)] <- tanh(resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx))
     } else if (op == 21L) {
-      stack[length(stack)] <- asinh(stack[length(stack)])
+      stack[length(stack)] <- asinh(resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx))
     } else if (op == 22L) {
-      stack[length(stack)] <- acosh(stack[length(stack)])
+      stack[length(stack)] <- acosh(resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx))
     } else if (op == 23L) {
-      stack[length(stack)] <- atanh(stack[length(stack)])
+      stack[length(stack)] <- atanh(resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx))
     } else if (op == 24L) {
-      stack[length(stack)] <- .softplus(stack[length(stack)])
+      stack[length(stack)] <- .softplus(resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx))
     } else if (op == 25L) {
-      a <- stack[length(stack)]
+      a <- resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx)
       stack[length(stack)] <- sign(a) * abs(a)^(1 / 3)
     } else if (op == 26L) {
-      stack[length(stack)] <- stats::pnorm(stack[length(stack)])
+      stack[length(stack)] <- stats::pnorm(resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx))
     } else {
       cli::cli_abort("Unknown transform bytecode instruction: {op}.")
     }
@@ -418,9 +561,34 @@ eval_bytecode_scalar <- function(x, bytecode = NULL, const_data = numeric(), opc
 #'
 #' @return Numeric vector result.
 #' @keywords internal
-eval_bytecode_vector <- function(x, bytecode = NULL, const_data = numeric(), opcodes = NULL) {
-  program <- .normalize_bytecode_program(bytecode = bytecode, opcodes = opcodes, const_data = const_data)
-  vapply(as.numeric(x), eval_bytecode_scalar, numeric(1), bytecode = program$bytecode, const_data = program$const_data)
+eval_bytecode_vector <- function(
+  x,
+  bytecode = NULL,
+  const_data = numeric(),
+  opcodes = NULL,
+  iota_intercepts = numeric(0),
+  iota_slopes = numeric(0),
+  op_iota_intercept_idx = NULL,
+  op_iota_slope_idx = NULL
+) {
+  program <- .normalize_bytecode_program(
+    bytecode = bytecode,
+    opcodes = opcodes,
+    const_data = const_data,
+    op_iota_intercept_idx = op_iota_intercept_idx,
+    op_iota_slope_idx = op_iota_slope_idx
+  )
+  vapply(
+    as.numeric(x),
+    eval_bytecode_scalar,
+    numeric(1),
+    bytecode = program$bytecode,
+    const_data = program$const_data,
+    iota_intercepts = iota_intercepts,
+    iota_slopes = iota_slopes,
+    op_iota_intercept_idx = program$op_iota_intercept_idx,
+    op_iota_slope_idx = program$op_iota_slope_idx
+  )
 }
 
 #' Normalise bytecode program inputs
@@ -430,7 +598,13 @@ eval_bytecode_vector <- function(x, bytecode = NULL, const_data = numeric(), opc
 #' @param const_data Numeric constant vector.
 #' @return List with normalised `bytecode` and `const_data`.
 #' @keywords internal
-.normalize_bytecode_program <- function(bytecode = NULL, opcodes = NULL, const_data = numeric()) {
+.normalize_bytecode_program <- function(
+  bytecode = NULL,
+  opcodes = NULL,
+  const_data = numeric(),
+  op_iota_intercept_idx = NULL,
+  op_iota_slope_idx = NULL
+) {
   code <- bytecode
   if (is.null(code) && !is.null(opcodes)) {
     code <- opcodes
@@ -441,17 +615,30 @@ eval_bytecode_vector <- function(x, bytecode = NULL, const_data = numeric(), opc
 
   code <- as.integer(code)
   constants <- as.numeric(const_data %||% numeric(0))
+  iota_intercepts <- as.integer(op_iota_intercept_idx %||% rep(0L, length(code)))
+  iota_slopes <- as.integer(op_iota_slope_idx %||% rep(0L, length(code)))
 
   # Backward compatibility: some legacy saved transforms encoded unary maps like
   # softplus(x) as [SOFTPLUS] rather than [PUSH_X, SOFTPLUS]. Prepend PUSH_X so
   # replay in R and Stan stays stable for old fitted objects used in prediction.
   if (length(code) > 0L && code[[1]] %in% .bytecode_unary_ops()) {
     code <- c(0L, code)
+    iota_intercepts <- c(0L, iota_intercepts)
+    iota_slopes <- c(0L, iota_slopes)
+  }
+
+  if (length(iota_intercepts) != length(code) || length(iota_slopes) != length(code)) {
+    cli::cli_abort(c(
+      x = "Functional transform bytecode metadata is malformed.",
+      i = "The iota index arrays must align with the bytecode length."
+    ))
   }
 
   list(
     bytecode = code,
-    const_data = constants
+    const_data = constants,
+    op_iota_intercept_idx = iota_intercepts,
+    op_iota_slope_idx = iota_slopes
   )
 }
 

@@ -298,6 +298,8 @@
 #' @return List of standata entries for transformation parameters:
 #'   - tf_mode_*
 #'   - functional_ops_* and const_data_* (if mode 1)
+#'   - estimate_iota_intercept_* and estimate_iota_slope_* (fit-only functional affine-shift counts)
+#'   - functional_iota_intercept_idx_* and functional_iota_slope_idx_* (per-op affine-shift indices)
 #'   - knots_* and coeff_* and spline_degree_* (if mode 2, 3, or 4)
 #'
 #' @section Usage:
@@ -340,6 +342,8 @@ build_standata_transforms <- function(
     standata[[paste0("functional_ops_", short_suffix)]] <- integer()
     standata[[paste0("n_const_", short_suffix)]] <- 0
     standata[[paste0("const_data_", short_suffix)]] <- numeric()
+    standata[[paste0("functional_iota_intercept_idx_", short_suffix)]] <- integer()
+    standata[[paste0("functional_iota_slope_idx_", short_suffix)]] <- integer()
     standata[[paste0("n_knots_", short_suffix)]] <- 0
     standata[[paste0("knots_", short_suffix)]] <- numeric()
     standata[[paste0("n_coeff_", short_suffix)]] <- 0
@@ -352,6 +356,8 @@ build_standata_transforms <- function(
     standata[[paste0("estimate_spline_", short_suffix)]] <- 0L
     standata[[paste0("lambda_spline_", short_suffix)]] <- 0.0
     standata[[paste0("n_free_spline_", short_suffix)]] <- 0L
+    standata[[paste0("estimate_iota_intercept_", short_suffix)]] <- 0L
+    standata[[paste0("estimate_iota_slope_", short_suffix)]] <- 0L
   }
   
   # Override with user specifications
@@ -374,13 +380,17 @@ build_standata_transforms <- function(
       if (is.null(spec) || spec$type == "identity") {
         standata[[paste0("tf_mode_", mode_suffix)]] <- 0
       } else if (spec$type == "functional") {
-        bc <- parse_transform_expr(spec$expr)
+        bc <- parse_transform_expr(spec$expr, iota_nodes = .transform_iota_nodes(spec))
         ops <- bc$bytecode %||% bc$opcodes
         standata[[paste0("tf_mode_", mode_suffix)]] <- 1
         standata[[paste0("n_functional_ops_", short_suffix)]] <- length(ops)
         standata[[paste0("functional_ops_", short_suffix)]] <- ops
         standata[[paste0("n_const_", short_suffix)]] <- bc$n_const
         standata[[paste0("const_data_", short_suffix)]] <- bc$const_data
+        standata[[paste0("functional_iota_intercept_idx_", short_suffix)]] <- as.integer(bc$op_iota_intercept_idx %||% rep(0L, length(ops)))
+        standata[[paste0("functional_iota_slope_idx_", short_suffix)]] <- as.integer(bc$op_iota_slope_idx %||% rep(0L, length(ops)))
+        standata[[paste0("estimate_iota_intercept_", short_suffix)]] <- as.integer(spec$n_iota_intercept %||% bc$n_iota_intercept %||% 0L)
+        standata[[paste0("estimate_iota_slope_", short_suffix)]] <- as.integer(spec$n_iota_slope %||% bc$n_iota_slope %||% 0L)
       } else if (.is_ispline_transform_type(spec$type)) {
         if (spec$type %in% c("ispline_penalised", "pmonospline", "pmono", "ispline_expit_penalised")) {
           # Two supported semantics:

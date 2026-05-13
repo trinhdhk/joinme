@@ -4,7 +4,7 @@
 \alias{ranef.JoinMeFit}
 \title{Extract random effects}
 \usage{
-\method{ranef}{JoinMeFit}(object, draws = NULL, seed = 1, digits = 3, ...)
+\method{ranef}{JoinMeFit}(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...)
 }
 \arguments{
 \item{object}{A joinme fit object.}
@@ -14,6 +14,9 @@
 \item{seed}{Random seed for subsetting draws.}
 
 \item{digits}{Number of digits to round summary values.}
+
+\item{summary}{Logical. If \code{TRUE}, return posterior summaries. If \code{FALSE},
+return the posterior extraction on the coefficient scale.}
 
 \item{...}{Unused.}
 }

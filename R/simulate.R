@@ -434,12 +434,15 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'
 #'   In other words, simulation currently uses the legacy plug-in spline mode;
 #'   it does not estimate spline coefficients jointly inside Stan.
-#' @param marker_weights Optional base marker weights used as prior offsets for
-#'   association aggregation. Effective weights are computed as
-#'   `w_raw` and used for marker-averaged CV/CS terms.
-#'   If `NULL`, equal weights are used and aggregated
-#'   as weighted means divided by marker count. Inputs are treated as direct
-#'   signed weights used in association aggregation.
+#' @param marker_weights Optional base marker weights used for association
+#'   aggregation. If `shared_marker_weights = TRUE`, supply one numeric vector to
+#'   be shared across all active weighted marker-based association terms. If
+#'   `shared_marker_weights = FALSE`, you may instead supply a named list with
+#'   entries `cv_total`, `cs_total`, `cv_marker`, and `cs_marker`.
+#' @param shared_marker_weights Logical. If `TRUE`, all active weighted
+#'   marker-based association terms share one marker-weight structure. If
+#'   `FALSE`, each active weighted marker-based association term uses its own
+#'   marker-weight structure.
 #' @param n_id Number of subjects.
 #' @param families Marker-specific family names.
 #'   Use `jm_family()` entries to supply custom `link`/`inv_link` expressions.
@@ -620,6 +623,7 @@ simulate_joinme <- function(
     x2 ~ rnorm(n_id)
   ),
   marker_weights = NULL,
+  shared_marker_weights = TRUE,
   assoc = c("cv_total"),
   assoc_coefs = c(cv_total = 0.6),
   beta_long = NULL,
@@ -1169,6 +1173,26 @@ simulate_joinme <- function(
     unclass(.normalise_joinme_tf_input(transform_list, validate = FALSE))
   }
 
+  .sim_validate_fixed_transform_shifts <- function(transforms) {
+    if (is.null(transforms) || !length(transforms)) {
+      return(transforms)
+    }
+    has_fit_only_iota <- vapply(transforms, function(spec) {
+      isTRUE((spec$n_iota_intercept %||% 0L) > 0L) ||
+        isTRUE((spec$n_iota_slope %||% 0L) > 0L) ||
+        isTRUE(spec$estimate_iota_intercept) ||
+        isTRUE(spec$estimate_iota_slope)
+    }, logical(1))
+    if (any(has_fit_only_iota)) {
+      bad_terms <- names(transforms)[has_fit_only_iota]
+      cli::cli_abort(c(
+        x = "Fit-only functional transform affine shifts are not available in {.fn simulate_joinme}.",
+        i = "Remove {.arg intercept}/{.arg slope} from {.fn joinme_tf} for simulation, or encode fixed shifts directly in the transform expression for: {.val {paste(bad_terms, collapse = ', ')}}."
+      ))
+    }
+    transforms
+  }
+
   .sim_canonicalise_transform_type <- function(type) {
     type <- as.character(type %||% "identity")[1]
     if (identical(type, "ispline_penalized")) {
@@ -1647,24 +1671,6 @@ simulate_joinme <- function(
   inv_link_specs <- family_spec$inv_link_specs
   family_names <- vapply(family_codes, .family_code_to_name, character(1))
 
-  marker_weights_raw <- marker_weights %||% rep(1, D)
-  marker_weights_raw <- as.numeric(unlist(marker_weights_raw, use.names = FALSE))
-  if (length(marker_weights_raw) == 1L) marker_weights_raw <- rep(marker_weights_raw, D)
-  if (length(marker_weights_raw) != D) {
-    if (length(marker_weights_raw) > D) {
-      marker_weights_raw <- marker_weights_raw[seq_len(D)]
-    } else {
-      marker_weights_raw <- rep(marker_weights_raw, length.out = D)
-    }
-  }
-  if (any(!is.finite(marker_weights_raw))) {
-    cli::cli_abort(c(
-      x = "{.arg marker_weights} must be finite numeric with length equal to number of markers ({D}).",
-      i = "Provide one weight per marker or a scalar recycled across markers."
-    ))
-  }
-  marker_weights_eff <- marker_weights_raw
-
   # ---- Parse longitudinal formula structure
   f_exp <- reformulas::expandDoubleVerts(formulaLong)
   bars <- reformulas::findbars(f_exp)
@@ -1762,6 +1768,22 @@ simulate_joinme <- function(
   assoc_effective <- if (!is.null(assoc_from_formula)) assoc_from_formula else assoc
   assoc_effective <- unique(assoc_effective)
   if (length(assoc_effective) == 0) assoc_effective <- "cv_total"
+
+  marker_weight_spec <- .resolve_marker_weight_structure(
+    marker_weights = marker_weights,
+    marker_levels = marker_levels,
+    active_terms = .active_weighted_assoc_terms(assoc_effective),
+    shared_marker_weights = shared_marker_weights,
+    estimate_marker_weights = FALSE,
+    context = "simulate_joinme()"
+  )
+  marker_weights_by_term <- marker_weight_spec$base_by_term
+  marker_weights_raw <- if (isTRUE(marker_weight_spec$shared_marker_weights)) {
+    as.numeric(marker_weight_spec$base_matrix[1, ])
+  } else {
+    marker_weights_by_term
+  }
+  marker_weights_eff <- marker_weights_by_term
 
   W_event <- .mm_event(formulaEvent, dataEvent)
 
@@ -2090,6 +2112,88 @@ simulate_joinme <- function(
     }
   }
 
+  rescale_re_matrix_to_public <- function(mat, idx, scale_factor) {
+    if (!is.matrix(mat) || ncol(mat) == 0L) return(mat)
+    idx <- as.integer(idx %||% integer(0))
+    idx <- idx[is.finite(idx) & idx >= 1L & idx <= ncol(mat)]
+    if (!length(idx) || !is.finite(scale_factor) || scale_factor <= 0 || abs(scale_factor - 1) < 1e-12) {
+      return(mat)
+    }
+    mat[, idx] <- mat[, idx, drop = FALSE] / scale_factor
+    mat
+  }
+
+  rescale_re_array_to_public <- function(arr, idx, scale_factor) {
+    if (is.null(arr) || length(dim(arr)) != 3L || dim(arr)[3] == 0L) return(arr)
+    idx <- as.integer(idx %||% integer(0))
+    idx <- idx[is.finite(idx) & idx >= 1L & idx <= dim(arr)[3]]
+    if (!length(idx) || !is.finite(scale_factor) || scale_factor <= 0 || abs(scale_factor - 1) < 1e-12) {
+      return(arr)
+    }
+    arr[, , idx] <- arr[, , idx, drop = FALSE] / scale_factor
+    arr
+  }
+
+  label_re_matrix <- function(mat, row_labels, col_labels) {
+    if (!is.matrix(mat)) {
+      return(mat)
+    }
+    row_labels <- as.character(row_labels %||% character(0))
+    col_labels <- as.character(col_labels %||% character(0))
+    if (nrow(mat) == length(row_labels)) {
+      rownames(mat) <- row_labels
+    }
+    if (ncol(mat) == length(col_labels)) {
+      colnames(mat) <- col_labels
+    }
+    mat
+  }
+
+  label_re_array <- function(arr, id_labels, marker_labels, term_labels) {
+    if (is.null(arr) || length(dim(arr)) != 3L) {
+      return(arr)
+    }
+
+    dim_names <- dimnames(arr)
+    if (is.null(dim_names)) {
+      dim_names <- vector("list", 3L)
+    }
+
+    id_labels <- as.character(id_labels %||% character(0))
+    marker_labels <- as.character(marker_labels %||% character(0))
+    term_labels <- as.character(term_labels %||% character(0))
+
+    if (dim(arr)[1] == length(id_labels)) {
+      dim_names[[1]] <- id_labels
+    }
+    if (dim(arr)[2] == length(marker_labels)) {
+      dim_names[[2]] <- marker_labels
+    }
+    if (dim(arr)[3] == length(term_labels)) {
+      dim_names[[3]] <- term_labels
+    }
+
+    dimnames(arr) <- dim_names
+    arr
+  }
+
+  re_id_public <- rescale_re_matrix_to_public(re_id, idx_time_uid, time_scale_internal)
+  re_marker_public <- rescale_re_matrix_to_public(re_marker, idx_time_vmk, time_scale_internal)
+  re_idm_public <- rescale_re_array_to_public(re_idm_scaled, idx_time_idm, time_scale_internal)
+
+  id_labels_public <- as.character(dataEvent[[id_var]] %||% seq_len(n_id))
+  id_term_labels <- colnames(Z_id_proto) %||% paste0("id_re_", seq_len(ncol(re_id_public)))
+  marker_term_labels <- colnames(Z_mk_proto) %||% paste0("marker_re_", seq_len(ncol(re_marker_public)))
+  idm_term_labels <- colnames(Z_idm_proto) %||% paste0("id_marker_re_", seq_len(dim(re_idm_public)[3]))
+
+  re_id <- label_re_matrix(re_id, id_labels_public, id_term_labels)
+  re_id_public <- label_re_matrix(re_id_public, id_labels_public, id_term_labels)
+  re_marker <- label_re_matrix(re_marker, marker_levels, marker_term_labels)
+  re_marker_public <- label_re_matrix(re_marker_public, marker_levels, marker_term_labels)
+  re_idm <- label_re_array(re_idm, id_labels_public, marker_levels, idm_term_labels)
+  re_idm_scaled <- label_re_array(re_idm_scaled, id_labels_public, marker_levels, idm_term_labels)
+  re_idm_public <- label_re_array(re_idm_public, id_labels_public, marker_levels, idm_term_labels)
+
   # ---- Association terms driving survival (syntax aligned with fit)
   if (!is.null(assoc_from_formula)) assoc <- assoc_from_formula
   assoc <- unique(assoc)
@@ -2240,7 +2344,7 @@ simulate_joinme <- function(
     assoc_coef_vec <- c(assoc_coef_vec, stats::setNames(assoc_coef_vcov, vc_names))
   }
 
-  transforms <- .sim_normalize_transform_list(transforms)
+  transforms <- .sim_validate_fixed_transform_shifts(.sim_normalize_transform_list(transforms))
   .sim_make_component_transform_set <- function(spec, term_name, n_components) {
     # Expand a single user-facing covariance-style transform spec into a list of
     # per-component evaluators. Each component currently shares the same runtime
@@ -2331,16 +2435,19 @@ simulate_joinme <- function(
     now <- eta_components_all_markers(i, t)
     eps <- eta_components_all_markers(i, t + eps_cs)
 
-    w_mean <- function(x) sum(marker_weights_eff * x) / D
+    w_mean <- function(term_key, x) {
+      weights_term <- as.numeric(marker_weights_eff[[term_key]] %||% rep(1, D))
+      sum(weights_term * x) / D
+    }
 
     # Step B: aggregate raw CV summaries (mean, marker, total).
     cv_mean_raw <- mean(now$mu_mean)
-    cv_marker_raw <- w_mean(now$mu_marker)
-    cv_total_raw <- w_mean(now$mu_total)
+    cv_marker_raw <- w_mean("cv_marker", now$mu_marker)
+    cv_total_raw <- w_mean("cv_total", now$mu_total)
 
     cv_mean <- tf_funs$cv_mean(cv_mean_raw)
-    cv_marker <- if (has_tf_cv_marker) w_mean(tf_funs$cv_marker(now$mu_marker)) else cv_marker_raw
-    cv_total <- if (has_tf_cv_total) w_mean(tf_funs$cv_total(now$mu_total)) else cv_total_raw
+    cv_marker <- if (has_tf_cv_marker) w_mean("cv_marker", tf_funs$cv_marker(now$mu_marker)) else cv_marker_raw
+    cv_total <- if (has_tf_cv_total) w_mean("cv_total", tf_funs$cv_total(now$mu_total)) else cv_total_raw
 
     # Step C: compute mean slope via finite difference.
     cs_mean_raw <- (mean(eps$mu_mean) - cv_mean_raw) / eps_cs
@@ -2353,12 +2460,12 @@ simulate_joinme <- function(
 
     # Step E: CS aggregation semantics (aligned with CV aggregation semantics):
     # transform first at marker level, then weighted-average across markers.
-    cs_marker <- w_mean(tf_funs$cs_marker(cs_marker_raw_by_marker))
-    cs_total <- w_mean(tf_funs$cs_total(cs_total_raw_by_marker))
+    cs_marker <- w_mean("cs_marker", tf_funs$cs_marker(cs_marker_raw_by_marker))
+    cs_total <- w_mean("cs_total", tf_funs$cs_total(cs_total_raw_by_marker))
 
     # Step F: keep weighted raw summaries for debugging/inspection helpers.
-    cs_marker_raw <- w_mean(cs_marker_raw_by_marker)
-    cs_total_raw <- w_mean(cs_total_raw_by_marker)
+    cs_marker_raw <- w_mean("cs_marker", cs_marker_raw_by_marker)
+    cs_total_raw <- w_mean("cs_total", cs_total_raw_by_marker)
 
     corr_vals <- corr_by_id[[i]]
     # CORR semantics are transform-first, then weight:
@@ -2952,9 +3059,11 @@ simulate_joinme <- function(
     alpha_cv_total = if ("cv_total" %in% names(assoc_coef_vec)) assoc_coef_vec[["cv_total"]] else NA_real_,
     assoc = assoc,
     assoc_coefs = assoc_coef_vec,
-    marker_weights = marker_weights_eff,
+    marker_weights = marker_weights_raw,
     marker_weights_raw = marker_weights_raw,
     marker_weights_eff = marker_weights_eff,
+    marker_weights_by_term = marker_weights_by_term,
+    shared_marker_weights = isTRUE(marker_weight_spec$shared_marker_weights),
     link_names = link_names,
     quadrature_nodes = as.integer(gk_spec$n_gk),
     gk_nodes = gk_spec$nodes,
@@ -2986,10 +3095,16 @@ simulate_joinme <- function(
       )
     ),
     re_draws = list(
-      id = re_id,
-      marker = re_marker,
+      id = re_id_public,
+      marker = re_marker_public,
+      id_marker_cov = re_idm_public,
       id_marker_cov_latent = re_idm,
       id_marker_cov_scaled = re_idm_scaled
+    ),
+    re_draws_likelihood = list(
+      id = re_id,
+      marker = re_marker,
+      id_marker_cov = re_idm_scaled
     ),
     L_i = L_i,
     id_marker_cov_effective = list(

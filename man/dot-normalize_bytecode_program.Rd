@@ -7,7 +7,9 @@
 .normalize_bytecode_program(
   bytecode = NULL,
   opcodes = NULL,
-  const_data = numeric()
+  const_data = numeric(),
+  op_iota_intercept_idx = NULL,
+  op_iota_slope_idx = NULL
 )
 }
 \arguments{

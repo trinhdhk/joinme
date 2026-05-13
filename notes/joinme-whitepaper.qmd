@@ -84,9 +84,13 @@ fitted and predicted objects:
 
 - `diagnosis(fit)` and `diagnosis(pred)` return the same diagnostics schema
   (`metric`, `value`) to simplify downstream monitoring.
+- `fixef(fit)`, `ranef(fit)`, and `coef(fit)` all support `summary = TRUE`
+  for posterior summaries and `summary = FALSE` for posterior draw extraction.
 - `ranef(fit)` and `vcov(fit)` return nested outputs grouped by
   `formulaLong` and `formulaDist`, with family-scoped blocks for
   distributional random effects.
+- `coef(fit)` returns the coefficient on the design-matrix scale after adding
+  the population-level effect and the matching group-level deviation.
 - `ranef(pred)` and `vcov(pred)` expose marker-by-id predicted random effects
   and covariance only when marker covariance is subject-dependent.
 

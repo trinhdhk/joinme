@@ -4,7 +4,7 @@
 \alias{fixef.JoinMeFit}
 \title{Extract fixed effects}
 \usage{
-\method{fixef}{JoinMeFit}(object, draws = NULL, seed = 1, digits = 3, ...)
+\method{fixef}{JoinMeFit}(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...)
 }
 \arguments{
 \item{object}{A joinme fit object.}
@@ -15,10 +15,15 @@
 
 \item{digits}{Number of digits to round summary values.}
 
+\item{summary}{Logical. If \code{TRUE}, return posterior summaries with the same
+inferential columns used throughout the package. If \code{FALSE}, return the
+posterior draw matrix.}
+
 \item{...}{Unused.}
 }
 \value{
-A data.frame of fixed effects summaries.
+When \code{summary = TRUE}, a data.frame of posterior summaries. When
+\code{summary = FALSE}, a draws-by-term matrix.
 }
 \description{
 Extract fixed effects

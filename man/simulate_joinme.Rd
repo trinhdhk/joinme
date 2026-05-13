@@ -21,6 +21,7 @@ simulate_joinme(
   seed = 42,
   covariate_formulas = list(x1 ~ rnorm(n_id), x2 ~ rnorm(n_id)),
   marker_weights = NULL,
+  shared_marker_weights = TRUE,
   assoc = c("cv_total"),
   assoc_coefs = c(cv_total = 0.6),
   beta_long = NULL,
@@ -166,12 +167,16 @@ the longitudinal schedule may continue after the event time up to
 \item{covariate_formulas}{Named or LHS formulas used to generate event-level covariates,
 e.g. \code{list(x1 ~ rnorm(n_id), x2 ~ rt(n_id, df = 5))}.}
 
-\item{marker_weights}{Optional base marker weights used as prior offsets for
-association aggregation. Effective weights are computed as
-\code{w_raw} and used for marker-averaged CV/CS terms.
-If \code{NULL}, equal weights are used and aggregated
-as weighted means divided by marker count. Inputs are treated as direct
-signed weights used in association aggregation.}
+\item{marker_weights}{Optional base marker weights used for association
+aggregation. If \code{shared_marker_weights = TRUE}, supply one numeric vector to
+be shared across all active weighted marker-based association terms. If
+\code{shared_marker_weights = FALSE}, you may instead supply a named list with
+entries \code{cv_total}, \code{cs_total}, \code{cv_marker}, and \code{cs_marker}.}
+
+\item{shared_marker_weights}{Logical. If \code{TRUE}, all active weighted
+marker-based association terms share one marker-weight structure. If
+\code{FALSE}, each active weighted marker-based association term uses its own
+marker-weight structure.}
 
 \item{assoc}{Association components (same names as fit): \code{cv_total}, \code{cv_mean},
 \code{cv_marker}, \code{cs_total}, \code{cs_mean}, \code{cs_marker}, \code{corr}, \code{vcov}.

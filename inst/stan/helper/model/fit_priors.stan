@@ -177,6 +177,22 @@
   if (n_free_spline_cv_marker > 0) z_spline_cv_marker ~ double_exponential(0, 1);
   if (n_free_spline_cs_mean > 0) z_spline_cs_mean ~ double_exponential(0, 1);
   if (n_free_spline_cs_marker > 0) z_spline_cs_marker ~ double_exponential(0, 1);
+    if (estimate_iota_intercept_cv > 0) z_iota_intercept_cv ~ std_normal();
+    if (estimate_iota_slope_cv > 0) z_iota_slope_cv ~ std_normal();
+    if (estimate_iota_intercept_cs > 0) z_iota_intercept_cs ~ std_normal();
+    if (estimate_iota_slope_cs > 0) z_iota_slope_cs ~ std_normal();
+    if (estimate_iota_intercept_corr > 0) z_iota_intercept_corr ~ std_normal();
+    if (estimate_iota_slope_corr > 0) z_iota_slope_corr ~ std_normal();
+    if (estimate_iota_intercept_vcov > 0) z_iota_intercept_vcov ~ std_normal();
+    if (estimate_iota_slope_vcov > 0) z_iota_slope_vcov ~ std_normal();
+    if (estimate_iota_intercept_cv_mean > 0) z_iota_intercept_cv_mean ~ std_normal();
+    if (estimate_iota_slope_cv_mean > 0) z_iota_slope_cv_mean ~ std_normal();
+    if (estimate_iota_intercept_cv_marker > 0) z_iota_intercept_cv_marker ~ std_normal();
+    if (estimate_iota_slope_cv_marker > 0) z_iota_slope_cv_marker ~ std_normal();
+    if (estimate_iota_intercept_cs_mean > 0) z_iota_intercept_cs_mean ~ std_normal();
+    if (estimate_iota_slope_cs_mean > 0) z_iota_slope_cs_mean ~ std_normal();
+    if (estimate_iota_intercept_cs_marker > 0) z_iota_intercept_cs_marker ~ std_normal();
+    if (estimate_iota_slope_cs_marker > 0) z_iota_slope_cs_marker ~ std_normal();
   } else if (shrinkage == 2) {
     alpha_corr ~ std_normal();
     alpha_vcov ~ std_normal();
@@ -203,6 +219,22 @@
     if (n_free_spline_cv_marker > 0) z_spline_cv_marker ~ std_normal();
     if (n_free_spline_cs_mean > 0) z_spline_cs_mean ~ std_normal();
     if (n_free_spline_cs_marker > 0) z_spline_cs_marker ~ std_normal();
+    if (estimate_iota_intercept_cv > 0) z_iota_intercept_cv ~ std_normal();
+    if (estimate_iota_slope_cv > 0) z_iota_slope_cv ~ std_normal();
+    if (estimate_iota_intercept_cs > 0) z_iota_intercept_cs ~ std_normal();
+    if (estimate_iota_slope_cs > 0) z_iota_slope_cs ~ std_normal();
+    if (estimate_iota_intercept_corr > 0) z_iota_intercept_corr ~ std_normal();
+    if (estimate_iota_slope_corr > 0) z_iota_slope_corr ~ std_normal();
+    if (estimate_iota_intercept_vcov > 0) z_iota_intercept_vcov ~ std_normal();
+    if (estimate_iota_slope_vcov > 0) z_iota_slope_vcov ~ std_normal();
+    if (estimate_iota_intercept_cv_mean > 0) z_iota_intercept_cv_mean ~ std_normal();
+    if (estimate_iota_slope_cv_mean > 0) z_iota_slope_cv_mean ~ std_normal();
+    if (estimate_iota_intercept_cv_marker > 0) z_iota_intercept_cv_marker ~ std_normal();
+    if (estimate_iota_slope_cv_marker > 0) z_iota_slope_cv_marker ~ std_normal();
+    if (estimate_iota_intercept_cs_mean > 0) z_iota_intercept_cs_mean ~ std_normal();
+    if (estimate_iota_slope_cs_mean > 0) z_iota_slope_cs_mean ~ std_normal();
+    if (estimate_iota_intercept_cs_marker > 0) z_iota_intercept_cs_marker ~ std_normal();
+    if (estimate_iota_slope_cs_marker > 0) z_iota_slope_cs_marker ~ std_normal();
   }
 
   

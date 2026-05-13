@@ -16,27 +16,149 @@ NULL
 #' Diagnostic summary for joinme objects
 #'
 #' @description
-#' Returns a compact diagnostics table for fitted (`JoinMeFit`) and dynamic
+#' Returns diagnostic summaries for fitted (`JoinMeFit`) and dynamic
 #' prediction (`JoinMeDynPred`) objects.
 #'
-#' For `JoinMeFit`, diagnostics summarise the Stan sampler run. For
-#' `JoinMeDynPred`, diagnostics summarise posterior-draw quality for predicted
-#' quantities and are aligned to the same metric schema used for `JoinMeFit`.
+#' For `JoinMeFit`, diagnostics include both an overall summary table and a
+#' parameter-level diagnostics table built from the same cached posterior
+#' summaries used by [summary.JoinMeFit()]. This avoids the slower backend-wide
+#' diagnostic pass and keeps the reported metrics aligned with the summary
+#' sections users already inspect.
+#'
+#' For `JoinMeDynPred`, diagnostics summarise posterior-draw quality for
+#' predicted quantities and are aligned to the same metric schema used for
+#' `JoinMeFit`.
 #'
 #' @param object A joinme object.
 #' @param ... Additional arguments passed to class-specific methods.
 #'
-#' @return A data frame with `metric` and `value` columns.
+#' @return
+#' For `JoinMeFit`, a `joinme_diagnosis` object with components `summary` and
+#' `by_parameter`. For `JoinMeDynPred`, a data frame with `metric` and `value`
+#' columns.
 #' @export
 diagnosis <- function(object, ...) {
 	UseMethod("diagnosis")
 }
 
+#' @keywords internal
+.diagnosis_parameter_label <- function(df) {
+	label <- rep("", nrow(df))
+	if ("term" %in% names(df)) {
+		label <- as.character(df$term)
+	}
+	if ("parameter" %in% names(df)) {
+		param_label <- as.character(df$parameter)
+		empty_idx <- !nzchar(trimws(label))
+		label[empty_idx] <- param_label[empty_idx]
+		label[!empty_idx] <- paste0(param_label[!empty_idx], ": ", label[!empty_idx])
+	}
+	if ("channel" %in% names(df)) {
+		label <- ifelse(nzchar(trimws(label)), paste0(df$channel, ": ", label), as.character(df$channel))
+	}
+	if ("block" %in% names(df)) {
+		label <- ifelse(nzchar(trimws(label)), paste0(df$block, ": ", label), as.character(df$block))
+	}
+	if (all(c("row", "col") %in% names(df))) {
+		rc_label <- ifelse(
+			is.finite(df$row) & is.finite(df$col),
+			paste0("[", df$row, ",", df$col, "]"),
+			""
+		)
+		label <- ifelse(
+			nzchar(rc_label),
+			ifelse(nzchar(trimws(label)), paste0(label, " ", rc_label), rc_label),
+			label
+		)
+	}
+	label[!nzchar(trimws(label))] <- paste0("parameter_", seq_len(sum(!nzchar(trimws(label)))))
+	trimws(label)
+}
+
+#' @keywords internal
+.diagnosis_parameter_table_from_tables <- function(tables) {
+	metric_cols <- c("Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail")
+	drop_cols <- c(metric_cols, "Hazard.Ratio", "HR.Q2.5", "HR.Q97.5")
+
+	collect_tables <- function(x, path = character()) {
+		if (is.null(x)) {
+			return(list())
+		}
+		if (is.data.frame(x)) {
+			if (!any(c("Rhat", "ess_bulk", "ess_tail") %in% names(x))) {
+				return(list())
+			}
+			id_cols <- setdiff(names(x), drop_cols)
+			out <- x[, c(id_cols, intersect(metric_cols, names(x))), drop = FALSE]
+			out$section <- if (length(path) >= 1L) path[[1L]] else NA_character_
+			out$subsection <- if (length(path) > 1L) paste(path[-1L], collapse = " / ") else NA_character_
+			out$parameter_label <- .diagnosis_parameter_label(out)
+			keep_id_cols <- setdiff(id_cols, c("section", "subsection", "parameter_label"))
+			out <- out[, c(
+				"section", "subsection", "parameter_label",
+				keep_id_cols,
+				intersect(metric_cols, names(out))
+			), drop = FALSE]
+			return(list(out))
+		}
+		if (is.list(x)) {
+			nm <- names(x)
+			if (is.null(nm)) {
+				nm <- paste0("item", seq_along(x))
+			}
+			out <- list()
+			for (idx in seq_along(x)) {
+				child_name <- nm[[idx]]
+				if (is.null(child_name) || !nzchar(child_name)) {
+					child_name <- paste0("item", idx)
+				}
+				out <- c(out, collect_tables(x[[idx]], c(path, child_name)))
+			}
+			return(out)
+		}
+		list()
+	}
+
+	tables <- tables[setdiff(names(tables), "diagnostics")]
+	out <- collect_tables(tables)
+	if (length(out) == 0L) {
+		return(data.frame())
+	}
+	all_cols <- unique(unlist(lapply(out, names), use.names = FALSE))
+	out <- lapply(out, function(df) {
+		missing_cols <- setdiff(all_cols, names(df))
+		if (length(missing_cols) > 0L) {
+			for (col_name in missing_cols) {
+				df[[col_name]] <- NA
+			}
+		}
+		df[, all_cols, drop = FALSE]
+	})
+	out <- do.call(rbind, out)
+	rownames(out) <- NULL
+	out
+}
+
 #' @export
-diagnosis.JoinMeFit <- function(object, ...) {
+diagnosis.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, include_corr = TRUE, ...) {
 	assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
-	diag <- .joinme_sampler_diagnostics(object$fit)
-	.diagnostics_table_from_sampler(diag)
+	cache_key <- paste0("diagnosis_", draws %||% "default", "_", digits, "_", include_corr)
+	cached <- object$cache_get(cache_key)
+	if (!is.null(cached)) {
+		return(cached)
+	}
+	sum_obj <- summary(object, draws = draws, seed = seed, digits = digits, include_corr = include_corr, ...)
+	result <- structure(
+		list(
+			summary = sum_obj$tables$diagnostics %||% .diagnostics_table_from_sampler(sum_obj$diagnostics %||% list()),
+			by_parameter = .diagnosis_parameter_table_from_tables(sum_obj$tables),
+			sampler = sum_obj$diagnostics %||% list(),
+			metadata = c(sum_obj$metadata %||% list(), list(include_corr = include_corr, digits = digits))
+		),
+		class = "joinme_diagnosis"
+	)
+	object$cache_set(cache_key, result)
+	result
 }
 
 #' @export
@@ -44,6 +166,23 @@ diagnosis.JoinMeDynPred <- function(object, ...) {
 	assertthat::assert_that(inherits(object, "JoinMeDynPred"), msg = "Object must be a JoinMeDynPred instance.")
 	sum_obj <- summary(object)
 	sum_obj$tables$diagnostics %||% .build_common_diagnostics_table()
+}
+
+#' @export
+print.joinme_diagnosis <- function(x, max_rows = 20, ...) {
+	assertthat::assert_that(inherits(x, "joinme_diagnosis"), msg = "x must be a joinme_diagnosis object.")
+	.cli_print_table_section("Diagnostics Summary", x$summary, level = 1L, formatter = .format_common_diagnostics_for_print)
+	if (is.data.frame(x$by_parameter) && nrow(x$by_parameter) > 0L) {
+		.tbl <- x$by_parameter
+		if (nrow(.tbl) > max_rows) {
+			.tbl <- utils::head(.tbl, max_rows)
+		}
+		.cli_print_table_section("Per-Parameter Diagnostics", .tbl, level = 2L)
+		if (nrow(x$by_parameter) > max_rows) {
+			cat("... truncated to ", max_rows, " rows; inspect $by_parameter for the full table.\n", sep = "")
+		}
+	}
+	invisible(x)
 }
 
 # ---- log-likelihood extraction -------------------------------------------

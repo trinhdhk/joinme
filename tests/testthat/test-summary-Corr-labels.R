@@ -143,6 +143,16 @@ test_that("transform formula summaries expand corr and vcov by component", {
   expect_true(all(out$formula[out$term %in% c("vcov[1]", "vcov[2]", "vcov[3]")] == out$formula[out$term == "vcov[1]"]))
 })
 
+test_that("transform formula summaries expose fit-only affine shift placeholders", {
+  tf <- joinme_tf(cv_total = ~ SoftMax(x, intercept = TRUE, slope = TRUE))
+
+  out <- joinme:::.transform_formulas_from_specs(tf, sd = list(Q_idm = 0L, indep_idmarker_cov = 0L))
+
+  expect_identical(out$term, "cv_total")
+  expect_match(out$formula, "iota_1", fixed = TRUE)
+  expect_match(out$formula, "iota_2", fixed = TRUE)
+})
+
 test_that("transform parameter summaries omit fixed monotone spline endpoints", {
   tbl <- data.frame(
     channel = rep("vcov[1]", 7),

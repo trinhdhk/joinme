@@ -90,12 +90,16 @@ print.joinme_tf <- function(x, ...) {
 #' Exposed components are:
 #' - `beta`: longitudinal/survival regression prior scale(s)
 #' - `alpha`: association prior scale
+#' - `iota`: fit-only affine-shift prior scale for functional association transforms
 #' - `lkj`: LKJ concentration parameter
 #'
 #' @param beta Beta prior specification. Use either a numeric scale (or vector of
 #'   scales) or a list with `scale`/`sd`.
 #' @param alpha Alpha prior specification. Use either a numeric scale or a list
 #'   with `scale`/`sd`.
+#' @param iota Iota prior specification for fit-only affine-shift intercept and
+#'   slope parameters in functional association transforms. Use either a numeric
+#'   scale or a list with `scale`/`sd`.
 #' @param lkj LKJ concentration parameter.
 #' @param .validate Logical; if `TRUE` (default), validate the resulting prior
 #'   declarations immediately.
@@ -107,12 +111,13 @@ print.joinme_tf <- function(x, ...) {
 #' pri <- joinme_priors(
 #'   beta = list(scale = 2.5),
 #'   alpha = list(scale = 1.0),
+#'   iota = list(scale = 1.0),
 #'   lkj = 2
 #' )
 #' print(pri)
-joinme_priors <- function(beta = NULL, alpha = NULL, lkj = NULL, .validate = TRUE) {
+joinme_priors <- function(beta = NULL, alpha = NULL, iota = NULL, lkj = NULL, .validate = TRUE) {
   .normalise_joinme_priors_input(
-    list(beta = beta, alpha = alpha, lkj = lkj),
+    list(beta = beta, alpha = alpha, iota = iota, lkj = lkj),
     validate = .validate
   )
 }
@@ -128,11 +133,15 @@ print.joinme_priors <- function(x, ...) {
     alpha_scale <- if (is.list(priors$alpha)) priors$alpha$scale %||% priors$alpha$sd else priors$alpha
     paste(alpha_scale, collapse = ", ")
   }
+  iota_txt <- if (is.null(priors$iota)) "default" else {
+    iota_scale <- if (is.list(priors$iota)) priors$iota$scale %||% priors$iota$sd else priors$iota
+    paste(iota_scale, collapse = ", ")
+  }
   lkj_txt <- if (is.null(priors$lkj)) "default" else paste(priors$lkj, collapse = ", ")
 
   tbl <- data.frame(
-    component = c("beta", "alpha", "lkj"),
-    value = c(beta_txt, alpha_txt, lkj_txt),
+    component = c("beta", "alpha", "iota", "lkj"),
+    value = c(beta_txt, alpha_txt, iota_txt, lkj_txt),
     stringsAsFactors = FALSE
   )
   cat("Prior specification for Joint Mixed Effects model\n")
@@ -157,6 +166,177 @@ print.joinme_priors <- function(x, ...) {
 #' @importFrom brms make_conditions
 make_conditions <- function(x, ...) {
   brms::make_conditions(x = x, ...)
+}
+
+.fit_affine_shift_supported_functions <- function() {
+  c(
+    "log", "exp", "sqrt", "inv_logit", "sigmoid", "expit", "softmax",
+    "logit", "rec", "sin", "cos", "tan", "abs", "sinh", "cosh", "tanh",
+    "asinh", "acosh", "atanh", "softplus", "log1p_exp", "cbrt", "probit", "power"
+  )
+}
+
+#' @keywords internal
+.parse_fit_affine_shift_flag <- function(value, arg_name, term_name) {
+  if (!is.logical(value) || length(value) != 1L || is.na(value)) {
+    cli::cli_abort(c(
+      x = "Functional transform option {.arg {arg_name}} for {.val {term_name}} must be TRUE or FALSE.",
+      i = "Use syntax such as {.code joinme_tf(cv_total = ~ expit(x, intercept = TRUE, slope = TRUE))}."
+    ))
+  }
+  isTRUE(value)
+}
+
+#' @keywords internal
+.extract_fit_affine_shift_node <- function(
+  node,
+  term_name = "transform",
+  path = "root",
+  intercept_count = 0L,
+  slope_count = 0L
+) {
+  if (!is.call(node)) {
+    return(list(
+      node = node,
+      iota_nodes = list(),
+      n_iota_intercept = as.integer(intercept_count),
+      n_iota_slope = as.integer(slope_count)
+    ))
+  }
+
+  op <- as.character(node[[1]])
+  op_lower <- if (grepl("^[[:alpha:].][[:alnum:]_.]*$", op)) tolower(op) else op
+  args <- as.list(node[-1])
+  arg_names <- names(args) %||% rep("", length(args))
+  intercept_idx <- which(arg_names == "intercept")
+  slope_idx <- which(arg_names == "slope")
+
+  if (length(intercept_idx) > 1L || length(slope_idx) > 1L) {
+    cli::cli_abort(c(
+      x = "Functional transform {.val {term_name}} may declare {.arg intercept} and {.arg slope} at most once.",
+      i = "Use each fit-only affine-shift option no more than once."
+    ))
+  }
+
+  has_affine_shift <- length(intercept_idx) > 0L || length(slope_idx) > 0L
+  shift_intercept <- FALSE
+  shift_slope <- FALSE
+  if (has_affine_shift) {
+    if (!(op_lower %in% .fit_affine_shift_supported_functions())) {
+      cli::cli_abort(c(
+        x = "Functional transform {.val {term_name}} uses fit-only affine-shift options with unsupported function {.val {op}}.",
+        i = "Use fit-only {.arg intercept}/{.arg slope} with supported nonlinear functional transforms such as expit, softplus, sinh, cosh, tanh, or power."
+      ))
+    }
+    if (length(intercept_idx) > 0L) {
+      shift_intercept <- .parse_fit_affine_shift_flag(args[[intercept_idx]], "intercept", term_name)
+    }
+    if (length(slope_idx) > 0L) {
+      shift_slope <- .parse_fit_affine_shift_flag(args[[slope_idx]], "slope", term_name)
+    }
+  }
+
+  keep_idx <- setdiff(seq_along(args), c(intercept_idx, slope_idx))
+  args_clean <- args[keep_idx]
+  arg_names_clean <- arg_names[keep_idx]
+  iota_nodes <- list()
+
+  if (length(args_clean) > 0L) {
+    cleaned_args <- vector("list", length(args_clean))
+    for (idx in seq_along(args_clean)) {
+      child <- .extract_fit_affine_shift_node(
+        args_clean[[idx]],
+        term_name = term_name,
+        path = paste0(path, "/", idx),
+        intercept_count = intercept_count,
+        slope_count = slope_count
+      )
+      cleaned_args[[idx]] <- child$node
+      intercept_count <- as.integer(child$n_iota_intercept)
+      slope_count <- as.integer(child$n_iota_slope)
+      iota_nodes <- c(iota_nodes, child$iota_nodes)
+    }
+  } else {
+    cleaned_args <- list()
+  }
+
+  intercept_index <- 0L
+  slope_index <- 0L
+  if (isTRUE(shift_intercept)) {
+    intercept_count <- intercept_count + 1L
+    intercept_index <- intercept_count
+  }
+  if (isTRUE(shift_slope)) {
+    slope_count <- slope_count + 1L
+    slope_index <- slope_count
+  }
+  if (isTRUE(shift_intercept) || isTRUE(shift_slope)) {
+    iota_nodes <- c(iota_nodes, list(list(
+      path = path,
+      function_name = op_lower,
+      intercept_index = intercept_index,
+      slope_index = slope_index,
+      estimate_iota_intercept = shift_intercept,
+      estimate_iota_slope = shift_slope
+    )))
+  }
+
+  parts <- c(list(as.name(op_lower)), cleaned_args)
+  names(parts) <- c("", arg_names_clean)
+
+  list(
+    node = as.call(parts),
+    iota_nodes = iota_nodes,
+    n_iota_intercept = as.integer(intercept_count),
+    n_iota_slope = as.integer(slope_count)
+  )
+}
+
+#' @keywords internal
+.extract_fit_affine_shift_spec <- function(expr, term_name = "transform") {
+  expr_call <- .coerce_transform_expr(expr)
+  extracted <- .extract_fit_affine_shift_node(expr_call, term_name = term_name)
+  expr_call <- extracted$node
+
+  list(
+    expr = stats::as.formula(paste0("~ ", paste(deparse(expr_call, width.cutoff = 500L), collapse = ""))),
+    estimate_iota_intercept = isTRUE(extracted$n_iota_intercept > 0L),
+    estimate_iota_slope = isTRUE(extracted$n_iota_slope > 0L),
+    n_iota_intercept = as.integer(extracted$n_iota_intercept),
+    n_iota_slope = as.integer(extracted$n_iota_slope),
+    iota_nodes = extracted$iota_nodes
+  )
+}
+
+#' @keywords internal
+.transform_iota_nodes <- function(spec) {
+  nodes <- spec$iota_nodes %||% list()
+  if (length(nodes) > 0L) {
+    return(nodes)
+  }
+  if (is.null(spec) || !identical(spec$type %||% NULL, "functional")) {
+    return(list())
+  }
+
+  n_iota_intercept <- as.integer(spec$n_iota_intercept %||% if (isTRUE(spec$estimate_iota_intercept)) 1L else 0L)
+  n_iota_slope <- as.integer(spec$n_iota_slope %||% if (isTRUE(spec$estimate_iota_slope)) 1L else 0L)
+  if (n_iota_intercept < 1L && n_iota_slope < 1L) {
+    return(list())
+  }
+
+  expr_call <- tryCatch(.coerce_transform_expr(spec$expr), error = function(e) NULL)
+  if (!is.call(expr_call)) {
+    return(list())
+  }
+
+  list(list(
+    path = "root",
+    function_name = tolower(as.character(expr_call[[1]])),
+    intercept_index = if (n_iota_intercept > 0L) 1L else 0L,
+    slope_index = if (n_iota_slope > 0L) 1L else 0L,
+    estimate_iota_intercept = n_iota_intercept > 0L,
+    estimate_iota_slope = n_iota_slope > 0L
+  ))
 }
 
 #' @keywords internal
@@ -221,10 +401,18 @@ make_conditions <- function(x, ...) {
   )
 
   if (is.null(spec)) {
-    return(list(type = "identity"))
+    return(list(
+      type = "identity",
+      estimate_iota_intercept = FALSE,
+      estimate_iota_slope = FALSE,
+      n_iota_intercept = 0L,
+      n_iota_slope = 0L,
+      iota_nodes = list()
+    ))
   }
   if (inherits(spec, "formula")) {
-    return(list(type = "functional", expr = spec))
+    parsed <- .extract_fit_affine_shift_spec(spec, term_name = term_name)
+    return(c(list(type = "functional"), parsed))
   }
   if (is.character(spec) && length(spec) == 1L) {
     if (!(spec %in% allowed_types)) {
@@ -233,7 +421,14 @@ make_conditions <- function(x, ...) {
         i = "Use one of: {paste(allowed_types, collapse = ', ')} or a formula such as ~ log1p(x)."
       ))
     }
-    return(list(type = .canonicalise_transform_type(spec)))
+    return(list(
+      type = .canonicalise_transform_type(spec),
+      estimate_iota_intercept = FALSE,
+      estimate_iota_slope = FALSE,
+      n_iota_intercept = 0L,
+      n_iota_slope = 0L,
+      iota_nodes = list()
+    ))
   }
   if (!is.list(spec)) {
     cli::cli_abort(c(
@@ -256,13 +451,35 @@ make_conditions <- function(x, ...) {
     }
   }
   spec$type <- .canonicalise_transform_type(spec$type)
+  if (identical(spec$type, "functional")) {
+    parsed <- .extract_fit_affine_shift_spec(spec$expr, term_name = term_name)
+    spec$expr <- parsed$expr
+    spec$estimate_iota_intercept <- parsed$estimate_iota_intercept
+    spec$estimate_iota_slope <- parsed$estimate_iota_slope
+    spec$n_iota_intercept <- parsed$n_iota_intercept
+    spec$n_iota_slope <- parsed$n_iota_slope
+    spec$iota_nodes <- parsed$iota_nodes
+  } else {
+    if (isTRUE(spec$estimate_iota_intercept) || isTRUE(spec$estimate_iota_slope) ||
+        !is.null(spec$intercept) || !is.null(spec$slope)) {
+      cli::cli_abort(c(
+        x = "Fit-only affine-shift options are supported only for functional association transforms.",
+        i = "Use {.arg intercept}/{.arg slope} only inside formulas such as {.code ~ expit(x, intercept = TRUE, slope = TRUE)}."
+      ))
+    }
+    spec$estimate_iota_intercept <- FALSE
+    spec$estimate_iota_slope <- FALSE
+    spec$n_iota_intercept <- 0L
+    spec$n_iota_slope <- 0L
+    spec$iota_nodes <- list()
+  }
   spec
 }
 
 #' @keywords internal
 .normalise_joinme_priors_input <- function(priors = NULL, validate = TRUE) {
   if (is.null(priors)) {
-    priors <- list(beta = NULL, alpha = NULL, lkj = NULL)
+    priors <- list(beta = NULL, alpha = NULL, iota = NULL, lkj = NULL)
   }
   priors <- if (inherits(priors, "joinme_priors")) unclass(priors) else priors
 
@@ -279,7 +496,7 @@ make_conditions <- function(x, ...) {
     ))
   }
 
-  allowed <- c("beta", "alpha", "lkj")
+  allowed <- c("beta", "alpha", "iota", "lkj")
   bad <- setdiff(names(priors), allowed)
   if (length(bad) > 0) {
     cli::cli_abort(c(
@@ -291,11 +508,13 @@ make_conditions <- function(x, ...) {
   out <- list(
     beta = priors$beta %||% NULL,
     alpha = priors$alpha %||% NULL,
+    iota = priors$iota %||% NULL,
     lkj = priors$lkj %||% NULL
   )
 
   .validate_joinme_prior_component(out$beta, "beta")
   .validate_joinme_prior_component(out$alpha, "alpha")
+  .validate_joinme_prior_component(out$iota, "iota")
   if (!is.null(out$lkj)) {
     if (!is.numeric(out$lkj) || length(out$lkj) != 1L || !is.finite(out$lkj) || out$lkj <= 0) {
       cli::cli_abort(c(
@@ -307,7 +526,7 @@ make_conditions <- function(x, ...) {
   }
 
   if (isTRUE(validate)) {
-    .build_priors(beta_prior = out$beta, alpha_prior = out$alpha, lkj_prior = out$lkj)
+    .build_priors(beta_prior = out$beta, alpha_prior = out$alpha, iota_prior = out$iota, lkj_prior = out$lkj)
   }
 
   structure(out, class = c("joinme_priors", "list"))

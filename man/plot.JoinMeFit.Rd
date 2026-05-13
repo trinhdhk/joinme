@@ -17,11 +17,14 @@
   subject = NULL,
   marker = NA,
   scale = NULL,
+  longitudinal_style = c("curves", "heatmap"),
+  condition = NULL,
   conditioning = c("auto", "last", "origin"),
   time_start = NULL,
   times = NULL,
   time_horizon = NULL,
   pred_control = list(n_samples = 100),
+  threshold = 0.05,
   smooth_trajectory = TRUE,
   smooth_method = c("loess", "spline"),
   smooth_span = 0.3,
@@ -48,7 +51,9 @@
 \item{type}{Plot type. Diagnostic types are \code{"rhat"}, \code{"ess_bulk"},
 \code{"ess_tail"}, \code{"mcse_mean"}, \code{"mcse_sd"}, \code{"running_mean"}, and
 \code{"running_quantile"}. Fitted-data types are \code{"longitudinal"},
-\code{"survival"}, \code{"cumhaz"}, and \code{"association"}.}
+\code{"survival"}, \code{"cumhaz"}, and \code{"association"}. The compatibility alias
+\code{"longitudinal_heatmap"} is treated as
+\verb{type = "longitudinal", longitudinal_style = "heatmap"}.}
 
 \item{pars}{Optional character vector of parameter names to include for
 diagnostic plots.}
@@ -74,6 +79,23 @@ markers.}
 \item{scale}{Longitudinal scale for fitted-data plots. One of \code{"epred"},
 \code{"linpred"}, or \code{"predict"}.}
 
+\item{longitudinal_style}{Display style for fitted longitudinal plots.
+\code{"curves"} shows the existing separated trajectory curves with credible
+bands. \code{"heatmap"} shows marker-level mean change over time using draw-level
+aggregation across the selected subjects. The heatmap is therefore an
+alternative display for the longitudinal process rather than a separate
+modelling target.}
+
+\item{condition}{Optional conditioning specification for fitted-data plots.
+Supply either a named list for one condition or a data frame with one row
+per condition, such as the output of \code{\link[=make_conditions]{make_conditions()}}. Each condition
+row may contain baseline covariates from the longitudinal data, the event
+data, or both. For ordinary fitted trajectories, multiple rows return a
+named list of condition-specific plots unless a single plot type is
+requested with \code{combined = TRUE}, in which case the condition-specific
+panels are combined. For \code{longitudinal_style = "heatmap"}, multiple
+condition rows are shown as separate facets.}
+
 \item{conditioning}{Conditioning-time convention when \code{time_start} is not
 supplied. \code{"last"} uses each subject's last observed longitudinal time,
 \code{"origin"} uses the first observed time, and \code{"auto"} chooses \code{"last"}
@@ -89,6 +111,12 @@ column name.}
 
 \item{pred_control}{Named list passed to \code{predict.JoinMeFit()} for fitted-data
 plotting. By default this uses a modest draw count for plotting.}
+
+\item{threshold}{Posterior sign-certainty threshold for
+\code{longitudinal_style = "heatmap"}. A tile is shown as significant when the
+posterior probability of either a positive or a negative change, relative
+to the earliest plotted time for that marker, is at least \code{1 - threshold}.
+Tiles that do not meet that criterion are drawn transparently.}
 
 \item{smooth_trajectory, smooth_method, smooth_span, ci_levels, ci_type, }{observed_first,facet_by,facet_scales,combined,show_data,
 show_observed_line,observed_style,prediction_style,theme_fn,

@@ -152,12 +152,16 @@ fit <- joinme(
 # Summaries
 summary(fit)
 diagnosis(fit)
+fixef(fit)
+coef(fit)
 
-# Random effects / covariance (nested by formula block)
+# Random effects / covariance / combined coefficients (nested by formula block)
 re_fit <- ranef(fit)
+cf_fit <- coef(fit)
 vc_fit <- vcov(fit)
 # Example accessors:
 # re_fit$formulaLong$id
+# cf_fit$formulaLong$id
 # re_fit$formulaDist$sigma$allFamilies
 # vc_fit$formulaDist$nu$allFamilies
 
@@ -210,7 +214,15 @@ plot(
 
 # Posterior summary/extraction helpers
 posterior_summary(fit)
+posterior_fixef(fit)
+posterior_ranef(fit)
+posterior_coef(fit)
 posterior_assoc(fit, summary = TRUE)
+
+# All coefficient extractors support summary = TRUE/FALSE
+fixef(fit, summary = TRUE)
+ranef(fit, summary = FALSE)
+coef(fit, summary = FALSE)
 
 # For multiple subjects with combined=TRUE: returns one combined plot per subject
 # (named list). If combiner packages are unavailable, falls back to the

@@ -33,22 +33,28 @@
   * @param spline_knots Knot vector (for modes 2-3)
   * @param spline_coeff Spline or piecewise coefficients (for modes 2-3)
   * @param spline_degree Spline degree (for mode 2)
+    * @param iota_intercept Fit-only affine-shift intercept. Ignored unless mode 1.
+    * @param iota_slope Fit-only affine-shift slope. Ignored unless mode 1.
   * @return Transformed scalar
   */
   real apply_transform_scalar(
       real x,
       int mode,
       array[] int opcodes,
+      array[] int op_iota_intercept_idx,
+      array[] int op_iota_slope_idx,
       vector const_data,
       vector spline_knots,
       vector spline_coeff,
-      int spline_degree
+      int spline_degree,
+      vector iota_intercept,
+      vector iota_slope
   ) {
     if (mode == 0) {
       return x;
     } else if (mode == 1) {
       // Functional bytecode evaluation
-      return eval_bytecode_scalar(x, opcodes, const_data);
+      return eval_bytecode_scalar(x, opcodes, const_data, iota_intercept, iota_slope, op_iota_intercept_idx, op_iota_slope_idx, 0, 0);
     } else if (mode == 2) {
       // I-spline basis evaluation (monotone)
       return ispline_eval(x, spline_knots, spline_degree, spline_coeff);
@@ -80,22 +86,28 @@
   * @param spline_knots Knot vector (for modes 2-3)
   * @param spline_coeff Spline or piecewise coefficients (for modes 2-3)
    * @param spline_degree Spline degree (for mode 2)
+     * @param iota_intercept Fit-only affine-shift intercept. Ignored unless mode 1.
+     * @param iota_slope Fit-only affine-shift slope. Ignored unless mode 1.
    * @return Vector of transformed values
    */
   vector apply_transform_vector(
       vector x,
       int mode,
       array[] int opcodes,
+      array[] int op_iota_intercept_idx,
+      array[] int op_iota_slope_idx,
       vector const_data,
       vector spline_knots,
       vector spline_coeff,
-      int spline_degree
+      int spline_degree,
+      vector iota_intercept,
+      vector iota_slope
   ) {
     if (mode == 0) {
       return x;
     } else if (mode == 1) {
       // Functional bytecode evaluation (element-wise)
-      return eval_bytecode_vector(x, opcodes, const_data);
+      return eval_bytecode_vector(x, opcodes, const_data, iota_intercept, iota_slope, op_iota_intercept_idx, op_iota_slope_idx, 0, 0);
     } else if (mode == 2) {
       // I-spline basis evaluation (element-wise)
       return ispline_eval_vec(x, spline_knots, spline_degree, spline_coeff);
@@ -127,8 +139,141 @@
    * @param spline_knots Knot vector (for spline / pwlin modes)
    * @param spline_coeff Matrix of component-specific coefficients, one row per component.
    * @param spline_degree Spline degree (for spline modes)
+  * @param iota_intercept Component-specific fit-only affine-shift intercepts.
+  * @param iota_slope Component-specific fit-only affine-shift slopes.
    * @return Vector of transformed values with component-specific spline / pwlin coefficients.
    */
+  vector apply_transform_vector_by_component(
+      vector x,
+      int mode,
+      array[] int opcodes,
+      array[] int op_iota_intercept_idx,
+      array[] int op_iota_slope_idx,
+      vector const_data,
+      vector spline_knots,
+      matrix spline_coeff,
+    int spline_degree,
+    int n_iota_intercept,
+    vector iota_intercept,
+    int n_iota_slope,
+    vector iota_slope
+  ) {
+    int n_comp = num_elements(x);
+    vector[n_comp] out;
+    if (mode == 0) {
+      return x;
+    } else if (mode == 1) {
+      for (m in 1:n_comp) {
+        out[m] = eval_bytecode_scalar(x[m], opcodes, const_data, iota_intercept, iota_slope, op_iota_intercept_idx, op_iota_slope_idx, (m - 1) * n_iota_intercept, (m - 1) * n_iota_slope);
+      }
+      return out;
+    } else if (mode == 2 || mode == 3 || mode == 4 || mode == 5 || mode == 6) {
+      for (m in 1:n_comp) {
+        out[m] = apply_transform_scalar(
+          x[m],
+          mode,
+          opcodes,
+          op_iota_intercept_idx,
+          op_iota_slope_idx,
+          const_data,
+          spline_knots,
+          to_vector(row(spline_coeff, m)),
+          spline_degree,
+          rep_vector(0, 0),
+          rep_vector(1, 0)
+        );
+      }
+      return out;
+    } else {
+      reject("Unknown transformation mode: ", mode);
+    }
+  }
+
+  real apply_transform_scalar(
+      real x,
+      int mode,
+      array[] int opcodes,
+      vector const_data,
+      vector spline_knots,
+      vector spline_coeff,
+      int spline_degree,
+      vector iota_intercept,
+      vector iota_slope
+  ) {
+    return apply_transform_scalar(
+      x,
+      mode,
+      opcodes,
+      rep_array(0, size(opcodes)),
+      rep_array(0, size(opcodes)),
+      const_data,
+      spline_knots,
+      spline_coeff,
+      spline_degree,
+      iota_intercept,
+      iota_slope
+    );
+  }
+
+  vector apply_transform_vector(
+      vector x,
+      int mode,
+      array[] int opcodes,
+      vector const_data,
+      vector spline_knots,
+      vector spline_coeff,
+      int spline_degree,
+      vector iota_intercept,
+      vector iota_slope
+  ) {
+    return apply_transform_vector(
+      x,
+      mode,
+      opcodes,
+      rep_array(0, size(opcodes)),
+      rep_array(0, size(opcodes)),
+      const_data,
+      spline_knots,
+      spline_coeff,
+      spline_degree,
+      iota_intercept,
+      iota_slope
+    );
+  }
+
+  vector apply_transform_vector_by_component(
+      vector x,
+      int mode,
+      array[] int opcodes,
+      array[] int op_iota_intercept_idx,
+      array[] int op_iota_slope_idx,
+      vector const_data,
+      vector spline_knots,
+      matrix spline_coeff,
+      int spline_degree,
+      vector iota_intercept,
+      vector iota_slope
+  ) {
+    int n_comp = num_elements(x);
+    int n_iota_intercept = (n_comp > 0) ? (num_elements(iota_intercept) %/% n_comp) : 0;
+    int n_iota_slope = (n_comp > 0) ? (num_elements(iota_slope) %/% n_comp) : 0;
+    return apply_transform_vector_by_component(
+      x,
+      mode,
+      opcodes,
+      op_iota_intercept_idx,
+      op_iota_slope_idx,
+      const_data,
+      spline_knots,
+      spline_coeff,
+      spline_degree,
+      n_iota_intercept,
+      iota_intercept,
+      n_iota_slope,
+      iota_slope
+    );
+  }
+
   vector apply_transform_vector_by_component(
       vector x,
       int mode,
@@ -136,28 +281,26 @@
       vector const_data,
       vector spline_knots,
       matrix spline_coeff,
-      int spline_degree
+      int spline_degree,
+      vector iota_intercept,
+      vector iota_slope
   ) {
     int n_comp = num_elements(x);
-    vector[n_comp] out;
-    if (mode == 0) {
-      return x;
-    } else if (mode == 1) {
-      return eval_bytecode_vector(x, opcodes, const_data);
-    } else if (mode == 2 || mode == 3 || mode == 4 || mode == 5 || mode == 6) {
-      for (m in 1:n_comp) {
-        out[m] = apply_transform_scalar(
-          x[m],
-          mode,
-          opcodes,
-          const_data,
-          spline_knots,
-          to_vector(row(spline_coeff, m)),
-          spline_degree
-        );
-      }
-      return out;
-    } else {
-      reject("Unknown transformation mode: ", mode);
-    }
+    int n_iota_intercept = (n_comp > 0) ? (num_elements(iota_intercept) %/% n_comp) : 0;
+    int n_iota_slope = (n_comp > 0) ? (num_elements(iota_slope) %/% n_comp) : 0;
+    return apply_transform_vector_by_component(
+      x,
+      mode,
+      opcodes,
+      rep_array(0, size(opcodes)),
+      rep_array(0, size(opcodes)),
+      const_data,
+      spline_knots,
+      spline_coeff,
+      spline_degree,
+      n_iota_intercept,
+      iota_intercept,
+      n_iota_slope,
+      iota_slope
+    );
   }
