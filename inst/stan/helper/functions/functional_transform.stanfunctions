@@ -49,13 +49,13 @@
 
   /**
   * @brief Functional bytecode evaluator for scalar inputs.
-   *
-   * @param x Input value
+  *
+  * @param x Input value
   * @param bytecode Array of bytecode instructions. Accepted opcodes are 0-26 as
   *   enumerated in the file-level description.
-   * @param const_data Vector of constant values for PUSH_CONST operations
-   * @return Scalar result of bytecode evaluation
-   */
+  * @param const_data Vector of constant values for PUSH_CONST operations
+  * @return Scalar result of bytecode evaluation
+  */
   real apply_iota_shift_scalar(
     real value,
     vector iota_intercepts,
