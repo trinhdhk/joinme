@@ -2,16 +2,21 @@
 % Please edit documentation in R/extract.R
 \name{extract}
 \alias{extract}
-\title{Extract posterior draws from joinme objects}
+\title{Extract posterior draws from JoiNMe objects}
 \usage{
 extract(object, ...)
 }
 \arguments{
-\item{object}{A supported joinme object.}
+\item{object}{A supported JoiNMe object.}
 
 \item{...}{Additional method-specific arguments.}
 }
 \description{
-S3 generic to extract draw-level matrices from \code{JoinMeFit} and \code{JoinMeDynPred}
-objects using names aligned to summary tables where feasible.
+S3 generic to extract component-specific posterior payloads from
+\code{JoiNMeFit} and \code{JoiNMeDynPred} objects.
+
+Compared with \code{draws()}, \code{extract()} is the lower-level, more
+structured interface. It keeps the request scoped to a semantic model component
+and returns the metadata needed to relate user-facing terms back to the stored
+Stan variables or prediction draw blocks.
 }

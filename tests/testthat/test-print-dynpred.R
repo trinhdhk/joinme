@@ -1,5 +1,5 @@
-testthat::test_that("print.JoinMeDynPred shows key metadata", {
-  pred <- joinme::JoinMeDynPred$new(
+testthat::test_that("print.JoiNMeDynPred shows key metadata", {
+  pred <- JoiNMe::JoiNMeDynPred$new(
     predictions = list(longitudinal = NULL, survival = NULL, cumhaz = NULL),
     quantiles = list(),
     draws = list(),
@@ -12,7 +12,7 @@ testthat::test_that("print.JoinMeDynPred shows key metadata", {
 
   out <- paste(capture.output(print(pred)), collapse = "\n")
 
-  testthat::expect_match(out, "JoinMe dynamic prediction", fixed = TRUE)
+  testthat::expect_match(out, "JoiNMe dynamic prediction", fixed = TRUE)
   testthat::expect_match(out, "Prediction type: per_marker_id", fixed = TRUE)
   testthat::expect_match(out, "Scale: epred", fixed = TRUE)
   testthat::expect_match(out, "Subjects: 2", fixed = TRUE)

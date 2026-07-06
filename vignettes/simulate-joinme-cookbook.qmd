@@ -26,7 +26,12 @@ knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>"
 )
-library(joinme)
+repo_root <- normalizePath(if (dir.exists("R")) "." else "..", mustWork = FALSE)
+if (requireNamespace("devtools", quietly = TRUE) && file.exists(file.path(repo_root, "DESCRIPTION"))) {
+  devtools::load_all(repo_root, quiet = TRUE)
+} else {
+  try(base::attachNamespace("JoiNMe"), silent = TRUE)
+}
 library(survival)
 ```
 
@@ -43,6 +48,12 @@ It is organised by common simulation goals:
 - checking outputs and truth objects.
 
 The examples intentionally mirror the `joinme()` fitting syntax so your simulation and fitting pipelines stay aligned.
+
+That alignment now extends to the posterior layer as well: the recommended
+follow-up after fitting a simulated dataset is to use `summary()`, `draws()`,
+and `mcmc_plot()` rather than inspecting raw Stan variables directly.
+
+The fit class referenced throughout the examples below is `JoiNMeFit`.
 
 # Quick mental model
 
@@ -83,6 +94,135 @@ str(sim$dataLong)
 str(sim$dataEvent)
 names(sim$truth)
 ```
+
+# From simulation to reporting-scale posterior summaries
+
+The main idea of a simulation study is not only to fit the model, but also to
+recover known parameters using the same public summaries you would use in a real
+analysis. The minimal reporting workflow looks like this:
+
+```{r eval=FALSE}
+fit <- joinme(
+  formulaLong = y ~ 1 + time + x1 + (1 + time || id) + (0 + x1 + (1 + time || id) || marker),
+  dataLong = sim$dataLong,
+  formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
+  dataEvent = sim$dataEvent,
+  assoc = c("cv_total"),
+  transforms = joinme_tf(cv_total = "identity"),
+  control = list(chains = 1, parallel_chains = 1, iter_warmup = 200, iter_sampling = 200)
+)
+
+summary(fit)
+draws(fit, variables = c("time", "alpha_cv_total"), format = "draws_df")
+mcmc_plot(fit, variable = c("time", "alpha_cv_total"), type = "intervals")
+```
+
+This workflow keeps simulation recovery tables, posterior graphics, and fitted
+plots on the same user-facing parameter names.
+
+# `draws()` versus `extract()`
+
+These two functions both expose posterior information, but they are intended
+for different jobs.
+
+## Mental model
+
+- `draws()` is the convenient, analysis-facing interface.
+- `extract()` is the structured, component-facing interface.
+
+In practice:
+
+- use `draws()` when you want one posterior object you can pass straight to
+  `posterior::summarise_draws()`, `posterior::subset_draws()`, or
+  `mcmc_plot()`,
+- use `extract()` when you want one semantic block of the model together with
+  the metadata describing how that block was assembled.
+
+## What `draws()` returns
+
+`draws()` always returns a standard posterior object in one of three formats:
+
+- `"draws_array"`
+- `"draws_matrix"`
+- `"draws_df"`
+
+For fitted models, the variables are renamed onto the same user-facing scale as
+`summary(fit)`. For example, raw Stan variables such as `beta[2]` or
+`gamma_w[1,2]` are relabelled to readable terms such as `time` or
+`event1: x1` when that mapping is available.
+
+For prediction objects, `draws()` flattens stored prediction blocks into a
+single posterior object with explicit labels containing id, scale, marker, and
+time information.
+
+```{r eval=FALSE}
+# one posterior object, ready for posterior/bayesplot workflows
+d_fit <- draws(fit, format = "draws_df")
+d_assoc <- draws(fit, variables = "^alpha_", regex = TRUE, format = "draws_matrix")
+
+posterior::summarise_draws(d_assoc)
+mcmc_plot(fit, variable = "alpha_cv_total", type = "trace")
+```
+
+## What `extract()` returns
+
+`extract()` returns a list, not a single posterior object. The exact structure
+depends on the object and the requested component, but the core idea is the
+same: keep the extraction tied to a model block.
+
+For fitted models, `extract()` lets you request one component at a time:
+
+- `what = "fixef"`
+- `what = "gamma_w"`
+- `what = "assoc"`
+- `what = "distributional"`
+- `what = "distributional_regression"`
+- `what = "likelihood_scale"`
+- `what = "raw"`
+- `what = "association_plot"`
+
+The returned list includes `draws` and `term_map`, and in the
+`association_plot` case it also includes support ranges and transform payloads
+used by fitted association plotting.
+
+For prediction objects, `extract()` keeps the original stored block structure,
+so you can request `longitudinal`, `survival`, `cumhaz`, or random-effect draw
+blocks before flattening.
+
+```{r eval=FALSE}
+# component-aware extraction with explicit mapping metadata
+ext_fixef <- extract(fit, what = "fixef")
+ext_assoc <- extract(fit, what = "assoc", term = c("cv_total", "cs_total"))
+
+str(ext_fixef$draws)
+ext_fixef$term_map
+
+# prediction blocks remain separated
+ext_surv <- extract(pred, what = "survival", id = 1)
+str(ext_surv$draws)
+```
+
+## Rule of thumb
+
+Use `draws()` if your next step is one of these:
+
+- posterior summarisation,
+- MCMC diagnostics or plotting,
+- regex-based variable selection,
+- exporting a single posterior object for downstream tooling.
+
+Use `extract()` if your next step is one of these:
+
+- inspecting one model component in isolation,
+- checking how summary labels map to underlying Stan variables,
+- using the special `association_plot` payload,
+- working with dynamic-prediction draw blocks before flattening.
+
+The two functions are therefore complementary rather than redundant:
+
+- `extract()` is the component-aware extraction layer,
+- `draws()` is the standardised posterior-consumption layer built on top of the
+  same naming logic.
 
 # Association cookbook (`assoc`, `formulaAssoc`, `assoc_coefs`)
 

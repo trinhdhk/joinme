@@ -10,7 +10,7 @@ test_that("penalised expit vcov recovers a one-component association", {
   if (!has_cmdstan) skip("CmdStan is not installed.")
 
   expit_grid <- stats::plogis(seq(-4, 4, length.out = 25))
-  sim_tf <- joinme::joinme_tf(
+  sim_tf <- JoiNMe::joinme_tf(
     vcov = list(
       type = "ispline_expit_penalised",
       x = expit_grid,
@@ -20,7 +20,7 @@ test_that("penalised expit vcov recovers a one-component association", {
       lambda = 1
     )
   )
-  fit_tf <- joinme::joinme_tf(
+  fit_tf <- JoiNMe::joinme_tf(
     vcov = list(
       type = "ispline_expit_penalised",
       x = expit_grid,
@@ -30,7 +30,7 @@ test_that("penalised expit vcov recovers a one-component association", {
     )
   )
 
-  sim <- joinme::simulate_joinme(
+  sim <- JoiNMe::simulate_joinme(
     formulaLong = y ~ 1 + time + (1 + time || id) + (0 + (1 | id) | marker),
     formulaEvent = survival::Surv(time, event) ~ 1,
     families = c("gaussian", "gaussian"),
@@ -46,7 +46,7 @@ test_that("penalised expit vcov recovers a one-component association", {
     n_workers = 8
   )
 
-  fit <- joinme::joinme(
+  fit <- JoiNMe::joinme(
     formulaLong = y ~ 1 + time + (1 + time || id) + (0 + (1 | id) | marker),
     formulaEvent = survival::Surv(time, event) ~ 1,
     dataLong = sim$dataLong,

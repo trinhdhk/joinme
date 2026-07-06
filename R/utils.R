@@ -1,5 +1,5 @@
-#' @name joinme_utils
-#' @title joinme Utility Functions
+#' @name JoiNMe_utils
+#' @title JoiNMe Utility Functions
 #'
 #' @importFrom stats terms
 #'
@@ -32,7 +32,7 @@ suppressPackageStartupMessages({
 #'
 #' @return Character scalar naming the resolved response column.
 #' @keywords internal
-.resolve_response_var <- function(formulaLong, dataLong, context = "joinme") {
+.resolve_response_var <- function(formulaLong, dataLong, context = "JoiNMe") {
   if (!inherits(formulaLong, "formula") || length(formulaLong) < 3) {
     cli::cli_abort(c(
       x = "{context}: {.arg formulaLong} must be a two-sided formula with a response on the left-hand side.",
@@ -67,7 +67,7 @@ suppressPackageStartupMessages({
 #'
 #' @return Named list with extracted `event_time`, `event_status`, and `surv_type`.
 #' @keywords internal
-.resolve_event_model_vars <- function(formulaEvent, dataEvent, context = "joinme") {
+.resolve_event_model_vars <- function(formulaEvent, dataEvent, context = "JoiNMe") {
   if (!inherits(formulaEvent, "formula") || length(formulaEvent) < 3) {
     cli::cli_abort(c(
       x = "{context}: {.arg formulaEvent} must be a two-sided survival formula.",
@@ -125,7 +125,7 @@ suppressPackageStartupMessages({
 #' @keywords internal
 .resolve_vcov_formula <- function(formulaVCov = NULL,
                                   default = ~ 1,
-                                  context = "joinme") {
+                                  context = "JoiNMe") {
   chosen <- formulaVCov %||% default
   if (!inherits(chosen, "formula")) {
     cli::cli_abort(c(
@@ -148,7 +148,7 @@ suppressPackageStartupMessages({
 .build_vcov_design <- function(formulaVCov,
                                dataEvent,
                                time_var,
-                               context = "joinme") {
+                               context = "JoiNMe") {
   if (length(reformulas::findbars(formulaVCov)) > 0) {
     cli::cli_abort(c(
       x = "{context}: {.arg formulaVCov} does not support random-effects terms.",
@@ -192,7 +192,7 @@ suppressPackageStartupMessages({
 #'
 #' @return Named list with `d_event`, `event_type`, and `K_event`.
 #' @keywords internal
-.derive_event_outcomes <- function(status_raw, context = "joinme") {
+.derive_event_outcomes <- function(status_raw, context = "JoiNMe") {
   n <- length(status_raw)
 
   if (is.numeric(status_raw) || is.integer(status_raw) || is.logical(status_raw)) {
@@ -622,7 +622,7 @@ gk_quadrature <- function(nodes = 15L) {
 #' Detect stored model-matrix blueprint objects
 #' @keywords internal
 .is_model_matrix_blueprint <- function(x) {
-  is.list(x) && inherits(x, "joinme_mm_blueprint") && !is.null(x$terms)
+  is.list(x) && inherits(x, "JoiNMe_mm_blueprint") && !is.null(x$terms)
 }
 
 #' Build a reusable model-matrix blueprint
@@ -654,7 +654,7 @@ gk_quadrature <- function(nodes = 15L) {
       assign = attr(X, "assign") %||% integer(0),
       columns = colnames(X) %||% character(0)
     ),
-    class = "joinme_mm_blueprint"
+    class = "JoiNMe_mm_blueprint"
   )
 }
 
@@ -760,7 +760,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' @keywords internal
 .new_dist_scope <- function() {
-  structure(list(default = NULL, by_family = list()), class = "joinme_dist_scope")
+  structure(list(default = NULL, by_family = list()), class = "JoiNMe_dist_scope")
 }
 
 #' @keywords internal
@@ -1051,11 +1051,11 @@ gk_quadrature <- function(nodes = 15L) {
 
     fam_specs <- formula$by_family %||% list()
     if (length(fam_specs) > 0) {
-      family_by_row <- attr(data, "joinme_family_by_row", exact = TRUE)
+      family_by_row <- attr(data, "JoiNMe_family_by_row", exact = TRUE)
       if (is.null(family_by_row) || length(family_by_row) != nrow(data)) {
         cli::cli_abort(c(
           x = "Family-scoped distributional random effects require row-level family labels.",
-          i = "Attach {.code attr(data, 'joinme_family_by_row')} before parsing random effects."
+          i = "Attach {.code attr(data, 'JoiNMe_family_by_row')} before parsing random effects."
         ))
       }
       family_by_row <- as.character(family_by_row)
@@ -2056,6 +2056,20 @@ gk_quadrature <- function(nodes = 15L) {
 
 # ---- Stan engine helpers ---------------------------------------------------
 
+#' Detect whether a Stan backend is currently usable
+#' @keywords internal
+.stan_backend_available <- function(engine) {
+  engine <- match.arg(engine, c("cmdstanr", "rstan"))
+  if (identical(engine, "cmdstanr")) {
+    if (!requireNamespace("cmdstanr", quietly = TRUE)) {
+      return(FALSE)
+    }
+    ver <- tryCatch(cmdstanr::cmdstan_version(error_on_NA = FALSE), error = function(e) NA)
+    return(!is.na(ver))
+  }
+  requireNamespace("rstan", quietly = TRUE)
+}
+
 #' Resolve preferred Stan engine
 #' @keywords internal
 .resolve_stan_engine <- function(engine = NULL) {
@@ -2066,6 +2080,19 @@ gk_quadrature <- function(nodes = 15L) {
       x = "Unknown Stan engine: {resolved}.",
       i = "Use 'cmdstanr' or 'rstan' via options(stan_preferred_engine=...)."
     ))
+  }
+  if (.stan_backend_available(resolved)) {
+    return(resolved)
+  }
+
+  fallback <- setdiff(c("cmdstanr", "rstan"), resolved)
+  fallback <- fallback[vapply(fallback, .stan_backend_available, logical(1))]
+  if (length(fallback) > 0L) {
+    cli::cli_warn(c(
+      x = "Preferred Stan engine {.val {resolved}} is not available in this session.",
+      i = "Falling back to {.val {fallback[[1L]]}}."
+    ))
+    return(fallback[[1L]])
   }
   resolved
 }

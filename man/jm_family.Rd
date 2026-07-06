@@ -15,7 +15,7 @@ jm_family(name, link = NULL, inv_link = NULL)
 (e.g. \code{~ exp(x)}, \code{~ inv_logit(x)}, \code{~ probit(x)}).}
 }
 \value{
-Object of class \code{"joinme_family_spec"}.
+Object of class \code{"JoiNMe_family_spec"}.
 }
 \description{
 Creates a family specification object for \code{joinme(..., families = ...)} with an

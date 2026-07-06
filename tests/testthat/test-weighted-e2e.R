@@ -77,8 +77,8 @@ test_that("weighted grouping works end-to-end (simulate fit predict plot)", {
     )
   )
 
-  expect_s3_class(fit, "JoinMeFit")
-  expect_s3_class(pred, "JoinMeDynPred")
+  expect_s3_class(fit, "JoiNMeFit")
+  expect_s3_class(pred, "JoiNMeDynPred")
   expect_true(all(is.finite(fit$stan_data$subject_weights)))
   expect_true(all(fit$stan_data$subject_weights > 0))
 

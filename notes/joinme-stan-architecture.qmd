@@ -1,5 +1,5 @@
 ---
-title: "JoinME Stan Model Architecture"
+title: "JoiNMe Stan Model Architecture"
 subtitle: "Comprehensive Technical Documentation"
 format:
   html:
@@ -13,7 +13,7 @@ format:
 
 # Overview
 
-The **JoinME** package implements a joint model for multivariate longitudinal and time-to-event data using Stan. This document describes the model structure, data flow, and main computations.
+The **JoiNMe** package implements a joint model for multivariate longitudinal and time-to-event data using Stan. This document describes the model structure, data flow, and main computations.
 
 Association splines now have a dedicated bounded-domain path: `ispline_expit`
 and `ispline_expit_penalised` evaluate the raw association feature on
@@ -68,18 +68,52 @@ The user-facing diagnostics and extraction tools are intentionally aligned acros
 fit and prediction objects:
 
 - `diagnosis()` returns a common diagnostics table schema for both
-  `JoinMeFit` and `JoinMeDynPred`.
-- `ranef()` and `vcov()` on `JoinMeFit` return nested structures organised by
+  `JoiNMeFit` and `JoiNMeDynPred`.
+- `draws()` and `as.array()` expose posterior draws with user-facing parameter
+  names for both fit and prediction objects, so downstream code no longer needs
+  to translate raw Stan variable names by hand.
+- `ranef()` and `vcov()` on `JoiNMeFit` return nested structures organised by
   `formulaLong` and `formulaDist` (including family-scoped distributional
   random-effect blocks).
-- `ranef()` and `vcov()` on `JoinMeDynPred` are enabled only when marker
+- `ranef()` and `vcov()` on `JoiNMeDynPred` are enabled only when marker
   covariance depends on id; they return per-id marker-by-id random effects and
   per-id predicted covariance summaries.
+
+For plotting, `plot()` remains the umbrella entry point, but the runtime now
+also exposes explicit wrappers `longitudinal_plot()`, `survival_plot()`,
+`cumhaz_plot()`, `association_plot()`, `diagnostic_plot()`, and `mcmc_plot()`.
+These wrappers route through the same internal plotting logic while making the
+intended display explicit in scripts and reports.
+
+The public fit and prediction objects also expose compatibility aliases:
+
+- `JoiNMeFit` in addition to `JoiNMeFit`,
+- `PredJoiNMeFit` in addition to `JoiNMeDynPred`.
+
+Instances retain both class labels so legacy S3 methods still dispatch through
+the established `JoiNMeFit` and `JoiNMeDynPred` methods.
+
+## Runtime backend behaviour
+
+Runtime Stan selection now uses the threaded Stan programs exclusively:
+
+- `JoiNMe_fit_threading.stan` for model fitting,
+- `JoiNMe_dynpred_threading.stan` for dynamic prediction.
+
+When `threads_per_chain = 1`, the same kernels run serially. When
+`threads_per_chain > 1`, Stan's TBB-backed `reduce_sum` parallelism is enabled.
+This removes the previous split between threaded and non-threaded source files
+from the runtime control path and keeps the data schema identical across serial
+and parallel execution.
+
+Backend choice is resolved dynamically at runtime. `JoiNMe` prefers CmdStanR
+when CmdStan is installed, and falls back to RStan when the preferred backend is
+unavailable in the current session.
 
 ## Family-Scoped Distributional Formulas
 
 `formulaDist` supports bracket scopes such as
-`sigma[family=student_t] ~ 1 + time`. Internally, JoinME builds gated
+`sigma[family=student_t] ~ 1 + time`. Internally, JoiNMe builds gated
 distributional design matrices where each scoped block contributes only on rows
 whose marker family matches the scope. Unscoped formulas (for example,
 `sigma ~ 1 + time`) remain global and apply to all rows where that parameter is
@@ -102,8 +136,8 @@ flowchart TD
     
     subgraph Model["Model Layer"]
         direction TB
-        FitModel["joinme_fit.stan<br/><b>Model Fitting</b>"]
-        DynPred["joinme_dynpred.stan<br/><b>Dynamic Prediction</b>"]
+        FitModel["JoiNMe_fit_threading.stan<br/><b>Model Fitting</b>"]
+        DynPred["JoiNMe_dynpred_threading.stan<br/><b>Dynamic Prediction</b>"]
     end
     
     subgraph Parameters["Parameter Space"]
@@ -155,7 +189,20 @@ flowchart TD
     style PartialDynPred fill:#f5e1ff
 ```
 
-# Model Fitting: `joinme_fit.stan`
+## Install-time compilation strategy
+
+The installation-time precompile script now mirrors the runtime design:
+
+- CmdStanR precompile targets the threaded Stan programs only.
+- RStan precompile is best-effort and only attempted when
+  `JoiNMe_COMPILE_RSTAN=1` is set during installation.
+- Windows-specific `big-obj` configuration remains in `src/Makevars.win`
+  instead of being appended dynamically during `configure.win`.
+
+This keeps installation behaviour deterministic and consistent with the runtime
+model-selection logic.
+
+# Model Fitting: `JoiNMe_fit_threading.stan`
 
 ## Data Flow
 
@@ -183,7 +230,7 @@ graph LR
     
     subgraph Likelihood["Model Block"]
         ReduceSum["reduce_sum()<br/>Parallelizes over subjects"]
-        PartialJoinME["partial_joinme(id_seq, start, end, ...)<br/>Likelihood slice"]
+        PartialJoiNMe["partial_joinme(id_seq, start, end, ...)<br/>Likelihood slice"]
     end
     
     subgraph SubjectLik["Subject i Likelihood"]
@@ -196,13 +243,13 @@ graph LR
     Params --> Likelihood
     
     Likelihood --> ReduceSum
-    ReduceSum -.->|Slice| PartialJoinME
-    PartialJoinME --> SubjectLik
+    ReduceSum -.->|Slice| PartialJoiNMe
+    PartialJoiNMe --> SubjectLik
     SubjectLik --> LongLoop
     SubjectLik --> SurvCalc
     
     style ReduceSum fill:#ffe6e6
-    style PartialJoinME fill:#fff0e6
+    style PartialJoiNMe fill:#fff0e6
 ```
 
 ## Algorithm Pseudocode
@@ -457,7 +504,7 @@ $$ \eta_{assoc} += \alpha \cdot f(CV) $$
 where $f()$ is learned via splines.
 
 
-# Dynamic Prediction: `joinme_dynpred.stan`
+# Dynamic Prediction: `JoiNMe_dynpred_threading.stan`
 
 ## Conceptual Overview
 
@@ -620,7 +667,7 @@ FUNCTION partial_draw(draw_ids_slice, start, end, ... [data & posterior draws]):
         + mat_marker_obs[n]' * v_marker[d]
         + mat_marker_id_obs[n]' * w_idm[d]
       
-      // Likelihood based on family (same logic as joinme_fit)
+      // Likelihood based on family (same logic as JoiNMe_fit)
       SWITCH family_long[d]:
         CASE Gaussian:
           Ïƒ = ... (from Î²_sigma^(k) or Ïƒ_marker^(k))
@@ -632,7 +679,7 @@ FUNCTION partial_draw(draw_ids_slice, start, end, ... [data & posterior draws]):
     // -------------------
     // 5. COMPUTE ASSOCIATION FEATURES AT GK NODES (conditional on T_cond)
     // -------------------
-    // Same logic as joinme_fit, but at conditioning time T_cond
+    // Same logic as JoiNMe_fit, but at conditioning time T_cond
     
     // Marker-specific association features with draw-specific weights
     marker_weights_k = marker_weights_draws[k, :]
@@ -824,7 +871,7 @@ For example `PUSH_X, PUSH_1, ADD, LOG` computes $\log(x+1)$.
 
 ## Threading and Parallelisation
 
-### `reduce_sum()` in `joinme_fit.stan`
+### `reduce_sum()` in `JoiNMe_fit_threading.stan`
 
 ```plaintext
 target += reduce_sum(partial_joinme, id_seq, grainsize, ...)
@@ -844,7 +891,7 @@ Threading model:
 - **Large grainsize**: Less parallelism, lower overhead
 - **Optimal**: Depends on n_id, model complexity, hardware
 
-### Threading in `joinme_dynpred.stan`
+### Threading in `JoiNMe_dynpred_threading.stan`
 
 ```plaintext
 target += reduce_sum(partial_draw, draw_ids, grainsize, ...)
@@ -903,7 +950,7 @@ All times scaled to $[0, 1]$ via division by $t_{max}$:
 
 **Symptom**: Stan warnings about divergent transitions after warmup.
 
-**Causes** in JoinME context:
+**Causes** in JoiNMe context:
 1. **Stiff survival likelihood**: Hazard changes rapidly, creating challenging geometry
 2. **Weakly identified random effects**: Some REs not well-constrained by data
 3. **Prior-data conflict**: Priors incompatible with likelihood
@@ -1091,7 +1138,7 @@ plot(pred, type = "longitudinal", marker = "CD4")
 
 # Priors and Regularisation Strategy
 
-This section provides the definitive technical specification and rationale for the prior ecosystem within `joinme`. The prior choices strike a balance between **weakly informative defaults** (allowing data to drive inference) and **principled regularisation** (preventing pathological behaviour in complex joint likelihood surfaces).
+This section provides the definitive technical specification and rationale for the prior ecosystem within `JoiNMe`. The prior choices strike a balance between **weakly informative defaults** (allowing data to drive inference) and **principled regularisation** (preventing pathological behaviour in complex joint likelihood surfaces).
 
 ## Longitudinal Submodel
 
@@ -1121,7 +1168,7 @@ Family-specific auxiliary parameters require constraints matching their support:
 
 ### Baseline Hazard ($h_0(t)$)
 - **Coefficients ($\gamma_{bs}$)**: Normal($0, \sigma_{bs}$).
-- **Smoothness Penalty**: When B-splines are used, `joinme` imposes a **random-walk prior** (second-order difference penalty) on the spline coefficients.
+- **Smoothness Penalty**: When B-splines are used, `JoiNMe` imposes a **random-walk prior** (second-order difference penalty) on the spline coefficients.
   $$ \gamma_k - 2\gamma_{k-1} + \gamma_{k-2} \sim \mathcal{N}(0, \tau_{smooth}) $$
 - **Intercept handling**: The baseline level is represented by the spline intercept basis column in `bs_gamma_c`; there is no separate `log_h0_intercept` parameter.
 - **Rationale**: This effectively smooths the baseline hazard, preventing overfitting to small clusters of events (spikes) while allowing flexibility in the hazard shape over time. The smoothness penalty is applied to non-intercept spline contrasts, preserving a stable baseline level for robust dynamic prediction.
@@ -1180,5 +1227,5 @@ that same expit scale.
 
 **Document Version**: 1.0  
 **Last Updated**: {{< meta date >}}  
-**Package**: JoinME  
+**Package**: JoiNMe  
 **Stan Version**: â‰¥ 2.32

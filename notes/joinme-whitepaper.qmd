@@ -1,7 +1,7 @@
 ---
-title: "The JoinME Framework: High-Dimensional Joint Modelling of Longitudinal and Time-to-Event Data"
+title: "The JoiNMe Framework: High-Dimensional Joint Modelling of Longitudinal and Time-to-Event Data"
 subtitle: "Methodological Foundations and Implementation Strategy"
-author: "JoinME Development Team"
+author: "JoiNMe Development Team"
 date: last-modified
 format:
   html:
@@ -18,11 +18,11 @@ format:
 
 # Executive Summary
 
-The **JoinME** (Joint Modelling Estimation) package represents a new generation of Bayesian joint models designed for the era of high-dimensional biomarkers. While traditional joint models typically handle one or two longitudinal markers, modern clinical datasets often feature dozens of biomarkers, competing risks, and complex nonlinear associations. Bridging this gap requires not just a statistical extension, but a fundamental re-architecting of the computational approach.
+The **JoiNMe** (Joint Nested Mixed-effects model) package represents a new generation of Bayesian joint models designed for the era of high-dimensional biomarkers. While traditional joint models typically handle one or two longitudinal markers, modern clinical datasets often feature dozens of biomarkers, competing risks, and complex nonlinear associations. Bridging this gap requires not just a statistical extension, but a fundamental re-architecting of the computational approach.
 
-This white paper details the mathematical and algorithmic foundations of `joinme`. We describe a modular architecture that separates the longitudinal observation process from the survival mechanism, linked via a flexible association structure. Key innovations include:
+This white paper details the mathematical and algorithmic foundations of `JoiNMe`. We describe a modular architecture that separates the longitudinal observation process from the survival mechanism, linked via a flexible association structure. Key innovations include:
 
-**High-Dimensional Random Effects**: A factor-analytic approach to covariance modelling (`joinme` covariance regression) that scales to many markers.
+**High-Dimensional Random Effects**: A factor-analytic approach to covariance modelling (`JoiNMe` covariance regression) that scales to many markers.
 **Regularised Association**: Hierarchical shrinkage priors (Ridge/Lasso type) that automatically select relevant markers from a large candidate set.
 **Computational Efficiency**: A massive parallelisation strategy using `reduce_sum` for subject-level likelihood evaluations and efficient Gauss-Kronrod quadrature for survival integrals.
 **Flexible Semantics**: A domain-specific language for non-linear transformations (splines, functional compositions) defined at runtime without recompiling the Stan model.
@@ -36,7 +36,13 @@ However, scaling these models challenges standard implementations:
 *   **Complex Dependencies**: Traditional models assume linear associations (current value predicts risk), failing to capture threshold effects or nonlinear biomarker dynamics.
 *   **Computational Cost**: The survival integral, requiring numerical quadrature at every MCMC step, becomes a bottleneck.
 
-`JoinME` addresses these challenges through a fully Bayesian framework implemented in **Stan**, leveraging Hamiltonian Monte Carlo (HMC) for efficient exploration of high-dimensional posteriors (Carpenter et al. 2017).
+`JoiNMe` addresses these challenges through a fully Bayesian framework implemented in **Stan**, leveraging Hamiltonian Monte Carlo (HMC) for efficient exploration of high-dimensional posteriors (Carpenter et al. 2017).
+
+On the software side, the package now exposes a reporting-oriented posterior
+layer in addition to the modelling core. Posterior draws, diagnostics,
+summaries, and helper plots are all surfaced on user-facing parameter names so
+the labels seen in tables match those shown in MCMC graphics and fitted-effect
+plots.
 
 # Methodological Framework
 
@@ -72,7 +78,7 @@ Formula-scoped weighting can be declared directly on grouping terms using
 random-effects priors; when used on subject-level groupings they also scale
 subject contributions in the longitudinal and survival likelihood.
 
-For user-facing model specification, `JoinME` exposes `joinme_tf(...)` and
+For user-facing model specification, `JoiNMe` exposes `joinme_tf(...)` and
 `joinme_priors(...)` as validated wrappers around transformation and prior
 declarations. These wrappers improve transparency while still compiling to the
 same Stan-ready inputs used internally.
@@ -84,6 +90,9 @@ fitted and predicted objects:
 
 - `diagnosis(fit)` and `diagnosis(pred)` return the same diagnostics schema
   (`metric`, `value`) to simplify downstream monitoring.
+- `draws(fit, ...)` and `draws(pred, ...)` return renamed posterior draws in
+  `posterior`-compatible formats, which removes the need to work directly with
+  raw Stan parameter names in scientific reporting.
 - `fixef(fit)`, `ranef(fit)`, and `coef(fit)` all support `summary = TRUE`
   for posterior summaries and `summary = FALSE` for posterior draw extraction.
 - `ranef(fit)` and `vcov(fit)` return nested outputs grouped by
@@ -93,6 +102,23 @@ fitted and predicted objects:
   the population-level effect and the matching group-level deviation.
 - `ranef(pred)` and `vcov(pred)` expose marker-by-id predicted random effects
   and covariance only when marker covariance is subject-dependent.
+
+The fitted and predicted objects now use `JoiNMeFit` and `JoiNMeDynPred` as
+their primary class labels, while preserving `JoiNMeFit` and `PredJoiNMeFit`
+as compatibility aliases for S3 dispatch stability.
+
+For plotting, the package now provides both umbrella `plot()` methods and
+explicit helper entry points:
+
+- `longitudinal_plot()`
+- `survival_plot()`
+- `cumhaz_plot()`
+- `association_plot()`
+- `diagnostic_plot()`
+- `mcmc_plot()`
+
+The last of these uses `bayesplot` on the renamed `draws()` output, ensuring
+that posterior graphics and summary tables remain on the same parameter scale.
 
 ## Family-Scoped Distributional Regression
 
@@ -127,7 +153,7 @@ Under competing risks, the event time $T_i$ and cause $\delta_i$ contribute to t
 
 # Association Structures
 
-The power of `joinme` lies in how $\mathcal{A}_{iq}(t)$ is constructed. We move beyond simple "current value" associations.
+The power of `JoiNMe` lies in how $\mathcal{A}_{iq}(t)$ is constructed. We move beyond simple "current value" associations.
 
 ## Association Primitives
 
@@ -141,14 +167,14 @@ We compute three fundamental features from the reconstructed trajectories:
 
 ## Transformations
 
-Raw biomarkers often affect survival nonlinearly (e.g., only extremely high values increase risk). `JoinME` implements a runtime transformation engine:
+Raw biomarkers often affect survival nonlinearly (e.g., only extremely high values increase risk). `JoiNMe` implements a runtime transformation engine:
 
 *   **Functional Opcodes**: A stack-based evaluator allows users to specify compositions like $\log(1 + \exp(x))$ or $\sqrt{\max(0, x)}$ which are evaluated inside the Stan leapfrog integrator.
 *   **Monotone I-Splines**: For data-driven shapes, we use Integrated Splines (I-splines) with non-negative coefficients, ensuring the association is monotonic but nonlinear.
 *   **Expit-Domain I-Splines**: For wide or poorly scaled association features, we also support I-splines evaluated on $\operatorname{expit}(x)$, which moves the spline basis to the bounded interval $(0,1)$ while preserving the raw association feature outside the spline map.
 
 For marker-aggregated association terms (`cv_total`, `cv_marker`, `cs_total`,
-`cs_marker`), `joinme` uses transform-before-averaging semantics. Let
+`cs_marker`), `JoiNMe` uses transform-before-averaging semantics. Let
 $m_{id}(t)$ be a marker-level feature and $f(\cdot)$ the configured transform:
 
 $$
@@ -160,7 +186,7 @@ transforming an already-averaged marker value only when $f$ is linear.
 
 # Bayesian Implementation and Regularisation
 
-Valid inference in high dimensions requires principled priors. `JoinME` employs a hierarchy of regularisation:
+Valid inference in high dimensions requires principled priors. `JoiNMe` employs a hierarchy of regularisation:
 
 ## Sparse Association Priors
 When $D$ is large, we use shrinkage priors on non-centred association latents
@@ -178,7 +204,7 @@ signed.
 
 ### Marker Weights
 
-When marker-weighted summaries are used, `joinme` estimates latent signed
+When marker-weighted summaries are used, `JoiNMe` estimates latent signed
 weights via additive perturbations around base weights. Let
 $\omega^{(0)}$ be the base latent weights and $z_d$ be shrinkage perturbations.
 Define
@@ -213,7 +239,7 @@ inside $\gamma_{bs}$; there is no separate baseline-intercept parameter.
 
 # Advanced Architecture: Covariance Regression
 
-A unique feature of `joinme` is the model for the covariance matrix itself. The Cholesky factor $L_i$ of the marker-by-id random effect covariance $\Sigma_{idm}$ is not static but modelled directly as a function of covariates and an iid standard-normal latent effect $z_{L,i}$:
+A unique feature of `JoiNMe` is the model for the covariance matrix itself. The Cholesky factor $L_i$ of the marker-by-id random effect covariance $\Sigma_{idm}$ is not static but modelled directly as a function of covariates and an iid standard-normal latent effect $z_{L,i}$:
 
 $$ L_{i}[r,c] = \begin{cases} \text{softplus}(\mu_{r,c} + \beta_{r,c}^\top X_i + \lambda_{r,c} z_{L,i}) & \text{if } r=c \\ \mu_{r,c} + \beta_{r,c}^\top X_i + \lambda_{r,c} z_{L,i} & \text{if } r \neq c \end{cases} $$
 
@@ -250,6 +276,18 @@ Solving the integral $\Lambda(t) = \int_0^t \lambda(s) ds$ inside an MCMC loop i
     $$ \mathcal{L}_{total} = \sum_{k=1}^{K} \text{partial\_likelihood}(\text{slice}_k) $$
     This provides nearly linear scaling with CPU cores.
 
+From the package-engineering perspective, the runtime now always selects the
+thread-capable Stan programs and varies only `threads_per_chain` plus
+`grainsize`:
+
+- `threads_per_chain = 1` reuses the threaded kernels in serial mode,
+- `threads_per_chain > 1` activates true multi-thread execution,
+- default `grainsize` expands to the full work size in the serial case and is
+  load-balanced across threads otherwise.
+
+This change eliminates a separate non-threaded runtime path while preserving a
+single Stan data schema across serial and parallel execution.
+
 # Dynamic Prediction
 
 The fitted model supports dynamic prediction for a new subject $j$ with history $\mathcal{Y}_j(t \le T_{cond})$.
@@ -266,11 +304,16 @@ $$ \pi_j(u | T_{cond}) = P(T_j \ge u | T_j > T_{cond}, \mathcal{Y}_j, \mathcal{D
   `predict`) and hazard $\lambda_j(t)$ for $t > T_{cond}$.
 5.  Integrate hazard to get survival $S(t)$ and average over prediction draws.
 
+The resulting prediction object exposes the same renamed posterior interface as
+the fitted object. In practice, this means dynamic prediction outputs can be
+sent directly to `draws()`, `summary()`, `diagnosis()`, and the explicit helper
+plot functions without first reconstructing raw Stan variable names.
+
 Under competing risks, this procedure yields the **overall event-free survival** probability.
 
 # Conclusion
 
-`JoinME` transforms joint modelling from a specialised technique for single-marker analysis into a robust, scalable engine for high-dimensional biomedical data. By combining factor-analytic random effects, shrinkage priors, and modern parallel computing, it enables researchers to discover complex associations in dense longitudinal datasets that were previously computationally inaccessible.
+`JoiNMe` transforms joint modelling from a specialised technique for single-marker analysis into a robust, scalable engine for high-dimensional biomedical data. By combining factor-analytic random effects, shrinkage priors, and modern parallel computing, it enables researchers to discover complex associations in dense longitudinal datasets that were previously computationally inaccessible.
 
 ***
 

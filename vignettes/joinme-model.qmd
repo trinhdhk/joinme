@@ -25,15 +25,15 @@ knitr::opts_chunk$set(
   fig.height = 4
 )
 options(width = 80)
-if (requireNamespace("joinme", quietly = TRUE)) {
-  library(joinme)
+if (requireNamespace("JoiNMe", quietly = TRUE)) {
+  library(JoiNMe)
 }
 library(dplyr)
 ```
 
 # Overview
 
-This document provides the formal technical specification for the `joinme` package model structure. It details the precise matrix formulations, transformation logic, and the exact algorithms used by the underlying Stan engine. Ideally, this document serves as a reference for advanced methodologists or developers seeking to understand or extend the package internals.
+This document provides the formal technical specification for the `JoiNMe` package model structure. It details the precise matrix formulations, transformation logic, and the exact algorithms used by the underlying Stan engine. Ideally, this document serves as a reference for advanced methodologists or developers seeking to understand or extend the package internals.
 
 # Mathematical formulation
 
@@ -56,7 +56,7 @@ $$
 y_{ijk} \sim \mathcal{D}(\eta_{id}(t_{ijk}), \sigma_y, \nu)
 $$
 
-The linear predictor $\eta_{id}(t)$ is decomposed into fixed effects and random effects components. A key feature of `joinme` is the flexible random effects structure:
+The linear predictor $\eta_{id}(t)$ is decomposed into fixed effects and random effects components. A key feature of `JoiNMe` is the flexible random effects structure:
 
 $$
 \eta_{id}(t) = \mathbf{x}_{id}(t)^\top \boldsymbol{\beta} + \mathbf{z}_{id, id}(t)^\top \mathbf{b}_i + \mathbf{z}_{id, mk}(t)^\top \mathbf{u}_d + \mathbf{z}_{id, idm}(t)^\top \mathbf{w}_{id}
@@ -89,7 +89,7 @@ where:
 -   $\mathcal{M}_i(t) = \{ \eta_{i1}(t), \dots, \eta_{iD}(t), \eta'_{i1}(t), \dots \}$: The collection of longitudinal trajectories and their derivatives (slopes) at time $t$.
 -   $g_k(\cdot)$: A functional transformation linking the longitudinal history to the hazard (the "association structure").
 
-Common forms for $g_k(\cdot)$ in `joinme` are constructed from the following
+Common forms for $g_k(\cdot)$ in `JoiNMe` are constructed from the following
 association summaries, each optionally transformed:
 
 - **Current value (CV)**: the value of the longitudinal linear predictor at time $t$.
@@ -104,7 +104,7 @@ In implementation, CV and CS are evaluated at a default set of 15 Gauss-Kronrod
 nodes on the scaled time interval (configurable via `quadrature_nodes`), and CS
 is approximated by a forward finite difference with step size $\varepsilon$.
 
-When multiple markers are present, `joinme` forms marker-average CV and CS components
+When multiple markers are present, `JoiNMe` forms marker-average CV and CS components
 using weights $\omega_d$ (one per marker). These weights apply to marker summaries
 after transformation and before association scaling.
 When marker-weight estimation is enabled, latent perturbations are added to base
@@ -141,7 +141,7 @@ Coefficients reported to the user are automatically rescaled to the original tim
 
 The survival likelihood requires evaluating the cumulative hazard $H_i(T_i) = \int_0^{T_i} h_i(s) ds$. Since the hazard contains time-varying random effects $\eta_{id}(s)$, this integral has no closed form.
 
-`joinme` employs **Gauss-Kronrod quadrature** (default 15-point, configurable)
+`JoiNMe` employs **Gauss-Kronrod quadrature** (default 15-point, configurable)
 to approximate this integral numerically within the Stan `log_prob` block.
 The Stan program uses hardcoded nodes and weights for the supported node counts,
 so only the node count is passed in the data.
@@ -154,7 +154,7 @@ This method provides high accuracy with relatively few function evaluations comp
 
 ## Arbitrary Transformation
 
-`joinme` supports user-specified association transforms in four modes:
+`JoiNMe` supports user-specified association transforms in four modes:
 
 - **Identity**: no transformation.
 - **Functional bytecode**: a data-defined Reverse Polish Notation (RPN) program.

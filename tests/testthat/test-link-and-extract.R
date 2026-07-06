@@ -75,9 +75,9 @@ test_that("jm_family invertibility warning only triggers for likely non-injectiv
   )
 })
 
-test_that("extract.JoinMeDynPred returns flattened draw payloads", {
+test_that("extract.JoiNMeDynPred returns flattened draw payloads", {
   toy_draw <- matrix(rnorm(12), nrow = 3, ncol = 4)
-  pred_obj <- JoinMeDynPred$new(
+  pred_obj <- JoiNMeDynPred$new(
     predictions = list(),
     quantiles = list(),
     draws = list(
@@ -108,7 +108,7 @@ test_that("extract.JoinMeDynPred returns flattened draw payloads", {
   expect_equal(nrow(ext_surv$draws[["1"]]), 3)
 })
 
-test_that("extract.JoinMeFit returns draw matrices by friendly names", {
+test_that("extract.JoiNMeFit returns draw matrices by friendly names", {
   skip_on_cran()
   skip_if_not_installed("cmdstanr")
 
@@ -157,7 +157,7 @@ test_that("extract.JoinMeFit returns draw matrices by friendly names", {
   expect_true(any(grepl("^id_marker_row_scale_eff: time$", colnames(ex_eff$draws))))
 })
 
-test_that("extract.JoinMeFit assoc prefers effective vcov coefficients", {
+test_that("extract.JoiNMeFit assoc prefers effective vcov coefficients", {
   draws_obj <- posterior::as_draws_matrix(stats::setNames(
     data.frame(
       raw = c(0.1, 0.1, 0.1),
@@ -173,7 +173,7 @@ test_that("extract.JoinMeFit assoc prefers effective vcov coefficients", {
                      assoc_cv_marker = 0L, assoc_cs_total = 0L, assoc_cs_mean = 0L, assoc_cs_marker = 0L,
                      D = 0L),
     config = list()
-  ), class = "JoinMeFit")
+  ), class = "JoiNMeFit")
 
   testthat::local_mocked_bindings(
     .get_draws_obj = function(fit, variables = NULL, draws = NULL, seed = 1, keep_chains = FALSE) {

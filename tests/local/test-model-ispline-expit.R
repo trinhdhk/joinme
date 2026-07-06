@@ -1,15 +1,15 @@
 library(testthat)
 
-test_that("joinme supports expit-based penalised spline transforms end to end", {
+test_that("JoiNMe supports expit-based penalised spline transforms end to end", {
   skip_on_cran()
   skip_if_not_installed("splines2")
-  if (!requireNamespace("joinme", quietly = TRUE)) skip("joinme not installed")
+  if (!requireNamespace("JoiNMe", quietly = TRUE)) skip("JoiNMe not installed")
   has_cmd <- requireNamespace("cmdstanr", quietly = TRUE)
   has_rstan <- requireNamespace("rstan", quietly = TRUE)
   if (!has_cmd && !has_rstan) skip("No Stan backend available")
 
   expit_grid <- stats::plogis(seq(-4, 4, length.out = 32))
-  sim_tf <- joinme::joinme_tf(
+  sim_tf <- JoiNMe::joinme_tf(
     vcov = list(
       type = "ispline_expit_penalised",
       x = expit_grid,
@@ -19,7 +19,7 @@ test_that("joinme supports expit-based penalised spline transforms end to end", 
       lambda = 1
     )
   )
-  fit_tf <- joinme::joinme_tf(
+  fit_tf <- JoiNMe::joinme_tf(
     vcov = list(
       type = "ispline_expit_penalised",
       x = seq(0,1, length.out = 8),
@@ -30,7 +30,7 @@ test_that("joinme supports expit-based penalised spline transforms end to end", 
   )
 
   set.seed(2401)
-  sim <- joinme::simulate_joinme(
+  sim <- JoiNMe::simulate_joinme(
     formulaLong = y ~ 1 + time + (1 + time | id) + (0 + (1 + time | id) | marker),
     formulaEvent = survival::Surv(time, event) ~ 1,
     families = c("gaussian", "gaussian", "gaussian"),
@@ -64,7 +64,7 @@ test_that("joinme supports expit-based penalised spline transforms end to end", 
  
   fit2 <- tryCatch(
     suppressWarnings(
-      joinme::joinme(
+      JoiNMe::joinme(
         formulaLong = y ~ 1 + time + (1 + time | id) + (0 + (1 + time | id) | marker),
         formulaEvent = survival::Surv(time, event) ~ 1,
         dataLong = sim$dataLong,
@@ -80,7 +80,7 @@ test_that("joinme supports expit-based penalised spline transforms end to end", 
     error = function(e) skip(paste("fit failed:", conditionMessage(e)))
   )
 
-  expect_s3_class(fit, "JoinMeFit")
+  expect_s3_class(fit, "JoiNMeFit")
 
   s <- suppressWarnings(tryCatch(summary(fit), error = function(e) NULL))
   expect_true(!is.null(s))
@@ -125,7 +125,7 @@ test_that("joinme supports expit-based penalised spline transforms end to end", 
     error = function(e) skip(paste("prediction failed:", conditionMessage(e)))
   )
 
-  expect_s3_class(pred, "JoinMeDynPred")
+  expect_s3_class(pred, "JoiNMeDynPred")
   p_pred <- tryCatch(
     plot(pred, type = c("longitudinal", "survival"), combined = TRUE),
     error = function(e) NULL

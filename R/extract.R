@@ -1,10 +1,20 @@
-#' Extract posterior draws from joinme objects
+#' Extract posterior draws from JoiNMe objects
 #'
 #' @description
-#' S3 generic to extract draw-level matrices from `JoinMeFit` and `JoinMeDynPred`
-#' objects using names aligned to summary tables where feasible.
+#' S3 generic to extract component-specific posterior payloads from
+#' `JoiNMeFit` and `JoiNMeDynPred` objects.
 #'
-#' @param object A supported joinme object.
+#' Compared with [draws()], `extract()` is the lower-level, more structured
+#' interface. It works component by component and returns the metadata needed to
+#' understand how a requested summary term maps back to the stored Stan
+#' variables or prediction draw blocks.
+#'
+#' Use `extract()` when you need a specific model component, the corresponding
+#' `term_map`, or a specialised payload such as `what = "association_plot"`.
+#' Use [draws()] when you want a single posterior object ready for `posterior`
+#' or `bayesplot` workflows.
+#'
+#' @param object A supported JoiNMe object.
 #' @param ... Additional method-specific arguments.
 #' @export
 extract <- function(object, ...) {
@@ -12,81 +22,30 @@ extract <- function(object, ...) {
 }
 
 # File overview:
-# - Extract draw matrices from JoinMeFit by summary-like components.
-# - Extract draw matrices from JoinMeDynPred from stored draw components.
+# - Extract draw matrices from JoiNMeFit by summary-like components.
+# - Extract draw matrices from JoiNMeDynPred from stored draw components.
 
-#' Extract posterior draws from a fitted joinme model
+#' Build a user-facing term map for extracted JoiNMeFit draws
 #'
-#' @param object A `JoinMeFit` object.
-#' @param what Character component selector. One of
-#'   `"fixef"`, `"gamma_w"`, `"assoc"`, `"association_plot"`,
-#'   `"distributional"`, `"distributional_regression"`, `"likelihood_scale"`,
-#'   or `"raw"`.
-#' @param term Optional character vector of friendly term names (summary-style)
-#'   to subset extracted columns.
-#' @param variable Optional character vector of raw Stan variable names. This is
-#'   used directly when `what = "raw"` and can also further filter mapped outputs.
-#' @param draws Optional number of posterior draws to keep per chain.
-#' @param seed Integer seed used when subsetting draws.
-#' @param keep_chains Logical; if TRUE, return draws with chains in a separate
-#'   dimension (iteration x chain x term). If FALSE, return a flattened
-#'   draws-by-term matrix.
+#' @param object A `JoiNMeFit` object.
+#' @param what Character component selector used by [extract.JoiNMeFit()].
+#' @param all_vars Optional character vector of available posterior variable
+#'   names. When omitted, they are read from the fitted object.
 #'
-#' @return A list with fields:
-#'   - `draws`: numeric array when `keep_chains = TRUE` (iteration x chain x term),
-#'     otherwise a numeric matrix (rows = draws, cols = requested terms). For
-#'     `what = "association_plot"`, this is a named list of compact draw
-#'     matrices keyed by association term.
-#'   - `term_map`: data.frame mapping `term` to Stan `variable`
-#'   - `support`: for `what = "association_plot"`, cached model-implied raw
-#'     support ranges used by association plotting.
-#' @export
-extract.JoinMeFit <- function(object,
-                              what = c("fixef", "gamma_w", "assoc", "association_plot", "distributional", "distributional_regression", "likelihood_scale", "raw"),
-                              term = NULL,
-                              variable = NULL,
-                              draws = NULL,
-                              seed = 1,
-                              keep_chains = TRUE,
-                              ...) {
+#' @return A data frame with columns `term` and `variable`.
+#' @keywords internal
+.JoiNMefit_component_term_map <- function(object,
+                                          what = c("fixef", "gamma_w", "assoc", "distributional", "distributional_regression", "likelihood_scale", "raw"),
+                                          all_vars = NULL) {
   what <- match.arg(what)
+
   fit <- object$fit
   sd <- object$stan_data
   cfg <- object$config
-
-  if (what == "association_plot") {
-    data <- .get_association_plot_data(object, seed = seed)
-    if (is.null(data)) {
-      cli::cli_abort(c(
-        x = "No association plotting data is available.",
-        i = "Fit a model with association terms or refit with posterior draws available."
-      ))
-    }
-
-    keep_terms <- term %||% names(data$coeff_draws %||% list())
-    keep_terms <- intersect(keep_terms, names(data$coeff_draws %||% list()))
-    term_map <- data$term_map %||% data.frame(term = character(0), variable = character(0), stringsAsFactors = FALSE)
-    if (!is.null(term)) {
-      term_map <- term_map[term_map$term %in% keep_terms, , drop = FALSE]
-    }
-    support <- data$support %||% data.frame()
-    if (!is.null(term) && nrow(support) > 0) {
-      support <- support[support$term %in% keep_terms, , drop = FALSE]
-    }
-
-    return(list(
-      draws = data$coeff_draws[keep_terms],
-      term_map = term_map,
-      support = support,
-      marker_weight_draws = data$marker_weight_draws,
-      transform_coeff_draws = data$transform_coeff_draws,
-      transform_specs = data$transform_specs
-    ))
+  if (is.null(all_vars)) {
+    all_vars <- tryCatch(posterior::variables(.get_draws_obj(fit)), error = function(e) character(0))
   }
 
-  all_vars <- tryCatch(posterior::variables(.get_draws_obj(fit)), error = function(e) character(0))
-
-  # Build a friendly term -> variable map following summary naming conventions.
   map <- data.frame(term = character(0), variable = character(0), stringsAsFactors = FALSE)
 
   if (what == "fixef") {
@@ -98,9 +57,32 @@ extract.JoinMeFit <- function(object,
   } else if (what == "gamma_w") {
     g_vars <- paste0("gamma_w[", seq_len(sd$p_w %||% 0L), "]")
     g_vars <- g_vars[g_vars %in% all_vars]
-    g_terms <- sd$w_cols %||% g_vars
-    if (length(g_terms) != length(g_vars)) g_terms <- g_vars
-    map <- data.frame(term = as.character(g_terms), variable = as.character(g_vars), stringsAsFactors = FALSE)
+    if (length(g_vars) == 0L) {
+      k_event <- sd$K_event %||% 1L
+      g_vars <- as.vector(outer(
+        seq_len(k_event),
+        seq_len(sd$p_w %||% 0L),
+        function(k, j) paste0("gamma_w[", k, ",", j, "]")
+      ))
+      g_vars <- g_vars[g_vars %in% all_vars]
+    }
+    if (length(g_vars) > 0L) {
+      var_idx <- regmatches(g_vars, regexec("^gamma_w\\[(\\d+)(?:,(\\d+))?\\]$", g_vars))
+      k_idx <- vapply(var_idx, function(x) if (length(x) >= 2L) as.integer(x[2]) else NA_integer_, integer(1))
+      j_idx <- vapply(var_idx, function(x) if (length(x) >= 3L && nzchar(x[3])) as.integer(x[3]) else as.integer(x[2]), integer(1))
+      k_event <- sd$K_event %||% 1L
+      g_terms <- sd$w_cols %||% g_vars
+      if (length(g_terms) < max(j_idx %||% 0L, 0L)) {
+        g_terms <- c(g_terms, paste0("w_", seq.int(length(g_terms) + 1L, max(j_idx))))
+      }
+      if (length(g_terms) > 0L && any(!is.na(j_idx))) {
+        g_terms <- g_terms[j_idx]
+      }
+      if (k_event > 1L && any(!is.na(k_idx))) {
+        g_terms <- paste0("event", k_idx, ": ", g_terms)
+      }
+      map <- data.frame(term = as.character(g_terms), variable = as.character(g_vars), stringsAsFactors = FALSE)
+    }
   } else if (what == "assoc") {
     corr_assoc_vars <- grep("^alpha_corr_eff\\[", all_vars, value = TRUE)
     if (length(corr_assoc_vars) == 0L) {
@@ -136,7 +118,6 @@ extract.JoinMeFit <- function(object,
 
     map <- data.frame(term = as.character(assoc_terms), variable = as.character(assoc_vars), stringsAsFactors = FALSE)
 
-    # Marker-weight terms mirror summary naming when present.
     marker_terms <- sd$marker_levels %||% paste0("marker_", seq_len(sd$D %||% 0L))
     shared_weights <- isTRUE(as.integer(sd$shared_marker_weights %||% 1L) == 1L)
     weight_term_keys <- .active_weighted_assoc_terms(sd)
@@ -252,10 +233,99 @@ extract.JoinMeFit <- function(object,
 
     if (length(map_rows) > 0) map <- do.call(rbind, map_rows)
   } else if (what == "raw") {
-    vars <- variable %||% all_vars
-    vars <- vars[vars %in% all_vars]
-    map <- data.frame(term = vars, variable = vars, stringsAsFactors = FALSE)
+    map <- data.frame(term = all_vars, variable = all_vars, stringsAsFactors = FALSE)
   }
+
+  map
+}
+
+#' Extract posterior draws from a fitted JoiNMe model
+#'
+#' @description
+#' Extracts one fitted-model component at a time and returns both the draw-level
+#' values and the mapping that produced them.
+#'
+#' This differs from [draws()] in two important ways:
+#' - `extract()` keeps the request scoped to one semantic component such as
+#'   fixed effects, survival coefficients, association terms, distributional
+#'   terms, or likelihood-scale parameters.
+#' - `extract()` returns a structured list with `draws` plus `term_map`
+#'   (and for `what = "association_plot"`, additional plotting support data)
+#'   instead of a single `posterior` draws object.
+#'
+#' In short, use `extract()` when you need component-aware extraction and use
+#' [draws()] when you need one renamed posterior object for general downstream
+#' analysis.
+#'
+#' @param object A `JoiNMeFit` object.
+#' @param what Character component selector. One of
+#'   `"fixef"`, `"gamma_w"`, `"assoc"`, `"association_plot"`,
+#'   `"distributional"`, `"distributional_regression"`, `"likelihood_scale"`,
+#'   or `"raw"`.
+#' @param term Optional character vector of friendly term names (summary-style)
+#'   to subset extracted columns.
+#' @param variable Optional character vector of raw Stan variable names. This is
+#'   used directly when `what = "raw"` and can also further filter mapped outputs.
+#' @param draws Optional number of posterior draws to keep per chain.
+#' @param seed Integer seed used when subsetting draws.
+#' @param keep_chains Logical; if TRUE, return draws with chains in a separate
+#'   dimension (iteration x chain x term). If FALSE, return a flattened
+#'   draws-by-term matrix.
+#'
+#' @return A list with fields:
+#'   - `draws`: numeric array when `keep_chains = TRUE` (iteration x chain x term),
+#'     otherwise a numeric matrix (rows = draws, cols = requested terms). For
+#'     `what = "association_plot"`, this is a named list of compact draw
+#'     matrices keyed by association term.
+#'   - `term_map`: data.frame mapping `term` to Stan `variable`
+#'   - `support`: for `what = "association_plot"`, cached model-implied raw
+#'     support ranges used by association plotting.
+#' @export
+extract.JoiNMeFit <- function(object,
+                              what = c("fixef", "gamma_w", "assoc", "association_plot", "distributional", "distributional_regression", "likelihood_scale", "raw"),
+                              term = NULL,
+                              variable = NULL,
+                              draws = NULL,
+                              seed = 1,
+                              keep_chains = TRUE,
+                              ...) {
+  what <- match.arg(what)
+  fit <- object$fit
+  sd <- object$stan_data
+  cfg <- object$config
+
+  if (what == "association_plot") {
+    data <- .get_association_plot_data(object, seed = seed)
+    if (is.null(data)) {
+      cli::cli_abort(c(
+        x = "No association plotting data is available.",
+        i = "Fit a model with association terms or refit with posterior draws available."
+      ))
+    }
+
+    keep_terms <- term %||% names(data$coeff_draws %||% list())
+    keep_terms <- intersect(keep_terms, names(data$coeff_draws %||% list()))
+    term_map <- data$term_map %||% data.frame(term = character(0), variable = character(0), stringsAsFactors = FALSE)
+    if (!is.null(term)) {
+      term_map <- term_map[term_map$term %in% keep_terms, , drop = FALSE]
+    }
+    support <- data$support %||% data.frame()
+    if (!is.null(term) && nrow(support) > 0) {
+      support <- support[support$term %in% keep_terms, , drop = FALSE]
+    }
+
+    return(list(
+      draws = data$coeff_draws[keep_terms],
+      term_map = term_map,
+      support = support,
+      marker_weight_draws = data$marker_weight_draws,
+      transform_coeff_draws = data$transform_coeff_draws,
+      transform_specs = data$transform_specs
+    ))
+  }
+
+  all_vars <- tryCatch(posterior::variables(.get_draws_obj(fit)), error = function(e) character(0))
+  map <- .JoiNMefit_component_term_map(object, what = what, all_vars = all_vars)
 
   if (!is.null(variable)) {
     map <- map[map$variable %in% variable, , drop = FALSE]
@@ -308,7 +378,16 @@ extract.JoinMeFit <- function(object,
 
 #' Extract stored posterior draw components from dynamic prediction objects
 #'
-#' @param object A `JoinMeDynPred` object.
+#' @description
+#' Extracts stored prediction draw blocks without flattening them first.
+#'
+#' This is the structured companion to [draws.JoiNMeDynPred()]. Use
+#' `extract()` when you want to keep the original prediction block semantics
+#' (`longitudinal`, `survival`, `cumhaz`, random effects, and scale/id filters).
+#' Use [draws()] when you want those blocks flattened into one
+#' `posterior`-compatible draw object with composite variable labels.
+#'
+#' @param object A `JoiNMeDynPred` object.
 #' @param what Draw block selector: `"longitudinal"`, `"longitudinal_fitted"`,
 #'   `"survival"`, `"cumhaz"`, `"random_effects_id"`, `"random_effects_marker_id"`.
 #' @param id Optional character/integer id filter.
@@ -318,7 +397,7 @@ extract.JoinMeFit <- function(object,
 #'   - `draws`: numeric matrix or list of matrices
 #'   - `meta`: extraction metadata
 #' @export
-extract.JoinMeDynPred <- function(object,
+extract.JoiNMeDynPred <- function(object,
                                   what = c("longitudinal", "longitudinal_fitted", "survival", "cumhaz", "random_effects_id", "random_effects_marker_id"),
                                   id = NULL,
                                   scale = NULL,

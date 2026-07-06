@@ -1,4 +1,4 @@
-if (requireNamespace("pkgload", quietly = TRUE) && !"joinme" %in% loadedNamespaces()) {
+if (requireNamespace("pkgload", quietly = TRUE) && !"JoiNMe" %in% loadedNamespaces()) {
   # Use source tree during ad-hoc test runs (non-CRAN).
   repo_root <- normalizePath(file.path("..", ".."), mustWork = FALSE)
   if (!file.exists(file.path(repo_root, "DESCRIPTION"))) {

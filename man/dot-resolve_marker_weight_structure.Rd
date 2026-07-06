@@ -10,7 +10,7 @@
   active_terms,
   shared_marker_weights = TRUE,
   estimate_marker_weights = FALSE,
-  context = "joinme"
+  context = "JoiNMe"
 )
 }
 \arguments{

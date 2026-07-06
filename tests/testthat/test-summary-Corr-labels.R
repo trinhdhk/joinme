@@ -1,5 +1,5 @@
-test_that("print.summary_JoinMeFit uses bespoke covariance labels", {
-  s <- SummaryJoinMeFit$new(
+test_that("print.summary_JoiNMeFit uses bespoke covariance labels", {
+  s <- SummaryJoiNMeFit$new(
     tables = list(
       fixef = NULL,
       gamma_w = NULL,
@@ -50,7 +50,7 @@ test_that("print.summary_JoinMeFit uses bespoke covariance labels", {
   expect_false(grepl("Sigma_u|Sigma_v|Sigma_w", txt))
 })
 
-test_that("summary.JoinMeFit retains covariance regression tables when top-level id REs are independent", {
+test_that("summary.JoiNMeFit retains covariance regression tables when top-level id REs are independent", {
   skip_on_cran()
   skip_if_not_installed("cmdstanr")
 
@@ -106,8 +106,8 @@ test_that("summary.JoinMeFit retains covariance regression tables when top-level
   expect_equal(offdiag$Estimate, rep(0, nrow(offdiag)), tolerance = 1e-12)
 })
 
-test_that("print.summary_JoinMeFit formats count diagnostics as integers", {
-  s <- SummaryJoinMeFit$new(
+test_that("print.summary_JoiNMeFit formats count diagnostics as integers", {
+  s <- SummaryJoiNMeFit$new(
     tables = list(
       diagnostics = data.frame(
         metric = c("draws", "divergences", "treedepth_hits", "n_terms_total", "rhat_max"),
@@ -134,7 +134,7 @@ test_that("transform formula summaries expand corr and vcov by component", {
     vcov = list(type = "ispline", knots = c(-1, 0, 1), coeff = c(0, 0.5, 1, 1.2), degree = 2)
   )
 
-  out <- joinme:::.transform_formulas_from_specs(
+  out <- JoiNMe:::.transform_formulas_from_specs(
     tf,
     sd = list(Q_idm = 2L, indep_idmarker_cov = 0L)
   )
@@ -146,7 +146,7 @@ test_that("transform formula summaries expand corr and vcov by component", {
 test_that("transform formula summaries expose fit-only affine shift placeholders", {
   tf <- joinme_tf(cv_total = ~ SoftMax(x, intercept = TRUE, slope = TRUE))
 
-  out <- joinme:::.transform_formulas_from_specs(tf, sd = list(Q_idm = 0L, indep_idmarker_cov = 0L))
+  out <- JoiNMe:::.transform_formulas_from_specs(tf, sd = list(Q_idm = 0L, indep_idmarker_cov = 0L))
 
   expect_identical(out$term, "cv_total")
   expect_match(out$formula, "iota_1", fixed = TRUE)
@@ -167,7 +167,7 @@ test_that("transform parameter summaries omit fixed monotone spline endpoints", 
     stringsAsFactors = FALSE
   )
 
-  out <- joinme:::.omit_fixed_transform_endpoint_rows(
+  out <- JoiNMe:::.omit_fixed_transform_endpoint_rows(
     tbl,
     channel = "vcov",
     spec = list(n = 7L),
@@ -177,7 +177,7 @@ test_that("transform parameter summaries omit fixed monotone spline endpoints", 
   expect_false(any(out$term %in% c("coeff_1", "coeff_7")))
   expect_identical(out$term, paste0("coeff_", 2:6))
 
-  kept <- joinme:::.omit_fixed_transform_endpoint_rows(
+  kept <- JoiNMe:::.omit_fixed_transform_endpoint_rows(
     tbl,
     channel = "vcov",
     spec = list(n = 7L),
@@ -187,8 +187,8 @@ test_that("transform parameter summaries omit fixed monotone spline endpoints", 
   expect_identical(kept$term, tbl$term)
 })
 
-test_that("print.summary_JoinMeFit prints survival process report only when available", {
-  s_with <- SummaryJoinMeFit$new(
+test_that("print.summary_JoiNMeFit prints survival process report only when available", {
+  s_with <- SummaryJoiNMeFit$new(
     tables = list(
       fixef = NULL,
       gamma_w = NULL,
@@ -219,7 +219,7 @@ test_that("print.summary_JoinMeFit prints survival process report only when avai
   expect_true(grepl("Joint mixed effects model summary", txt_with, fixed = TRUE))
   expect_true(grepl("Survival process (non-association covariates)", txt_with, fixed = TRUE))
 
-  s_without <- SummaryJoinMeFit$new(
+  s_without <- SummaryJoiNMeFit$new(
     tables = list(
       fixef = NULL,
       gamma_w = NULL,

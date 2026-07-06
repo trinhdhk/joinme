@@ -1,5 +1,5 @@
 /**
- * @file joinme_fit_partial.stanfunctions
+ * @file JoiNMe_fit_partial.stanfunctions
  * @brief Subject-specific joint log-likelihood for reduce_sum parallelisation.
  *
  * @details This function computes the combined longitudinal and survival log-likelihood

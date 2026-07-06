@@ -10,7 +10,7 @@ test_that("fixed vcov expit I-spline recovers a one-component association", {
   if (!has_cmdstan) skip("CmdStan is not installed.")
 
   expit_knots <- stats::plogis(c(-4, -2.5, -1, 0.5, 2, 4))
-  tf <- joinme::joinme_tf(
+  tf <- JoiNMe::joinme_tf(
     vcov = list(
       type = "ispline_expit",
       knots = expit_knots,
@@ -19,7 +19,7 @@ test_that("fixed vcov expit I-spline recovers a one-component association", {
     )
   )
 
-  sim <- joinme::simulate_joinme(
+  sim <- JoiNMe::simulate_joinme(
     formulaLong = y ~ 1 + time + (1 + time || id) + (0 + (1 | id) | marker),
     formulaEvent = survival::Surv(time, event) ~ 1,
     families = c("gaussian", "gaussian"),
@@ -35,7 +35,7 @@ test_that("fixed vcov expit I-spline recovers a one-component association", {
     n_workers = 2
   )
 
-  fit <- joinme::joinme(
+  fit <- JoiNMe::joinme(
     formulaLong = y ~ 1 + time + (1 + time || id) + (0 + (1 | id) | marker),
     formulaEvent = survival::Surv(time, event) ~ 1,
     dataLong = sim$dataLong,

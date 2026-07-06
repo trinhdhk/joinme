@@ -14,7 +14,7 @@ test_that(".extract_matrix_from_stan pairs draw indices with posterior rows", {
     dimnames = list(NULL, cn)
   )
 
-  out <- joinme:::.extract_matrix_from_stan(
+  out <- JoiNMe:::.extract_matrix_from_stan(
     draws_mat = draws_mat,
     var_name = "y_pred_epred",
     N_cols = 2,
@@ -42,7 +42,7 @@ test_that(".extract_matrix_from_stan supports swapped index order", {
     dimnames = list(NULL, cn)
   )
 
-  out <- joinme:::.extract_matrix_from_stan(
+  out <- JoiNMe:::.extract_matrix_from_stan(
     draws_mat = draws_mat,
     var_name = "surv_prob",
     N_cols = 2,

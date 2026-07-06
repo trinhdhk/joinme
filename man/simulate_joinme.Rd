@@ -352,7 +352,7 @@ Numeric vector on response scale.
 List with family codes, link names, and inverse-link bytecode per marker.
 }
 \description{
-Generalised simulator for \code{joinme} that mirrors the fitting syntax as closely as
+Generalised simulator for \code{JoiNMe} that mirrors the fitting syntax as closely as
 possible. The simulator supports:
 \itemize{
 \item multivariate outcomes via marker-level families,

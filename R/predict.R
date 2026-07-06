@@ -4,22 +4,22 @@
 #' @importFrom utils head modifyList
 #' @importFrom stats setNames
 #' @keywords internal
-#' @name predict.JoinMeFit
+#' @name predict.JoiNMeFit
 NULL
 
 # File overview:
 # - Build subject-specific Stan data for dynamic prediction.
 # - Run the dynpred model and summarise longitudinal/survival draws.
 
-#' Dynamic prediction for a fitted `JoinMeFit` model
+#' Dynamic prediction for a fitted `JoiNMeFit` model
 #'
-#' @rdname predict.JoinMeFit
+#' @rdname predict.JoiNMeFit
 #' @description
-#' Performs dynamic prediction for a new subject using a fitted `JoinMeFit` joint model.
+#' Performs dynamic prediction for a new subject using a fitted `JoiNMeFit` joint model.
 #' It calculates the posterior predictive distribution of longitudinal trajectories
 #' and survival probabilities conditional on the subject's observed history up to a specific time point.
 #'
-#' @param object A fitted object of class `JoinMeFit`.
+#' @param object A fitted object of class `JoiNMeFit`.
 #' @param newdataLong Data frame containing longitudinal histories for one or more subjects.
 #' Must contain columns for id, time, marker, and response variables as specified in the original model formula.
 #' @param newdataEvent Data frame containing one row per subject with event time, event status,
@@ -68,10 +68,14 @@ NULL
 #'     object. This is independent of `n_samples` (posterior parameter draw
 #'     extraction count). If omitted, defaults to the extracted posterior draw
 #'     count.
-#'   - threads_per_chain: integer; if > 1 uses `joinme_dynpred_threading.stan`.
-#'     For engine = "rstan", threading uses options(stan.thread = threads_per_chain).
-#'   - grainsize: integer; reduce_sum grainsize for threaded prediction
-#'     (default max(1, ceiling(n_id/(4*threads_per_chain)))).
+#'   - threads_per_chain: integer; the threaded dynpred Stan program is always
+#'     used. `threads_per_chain = 1` keeps execution serial while preserving the
+#'     thread-capable kernel. For engine = "rstan", threading uses
+#'     options(stan.thread = threads_per_chain).
+#'   - grainsize: integer; reduce_sum grainsize for threaded prediction.
+#'     Defaults to the full prediction draw count when `threads_per_chain = 1`,
+#'     and to `max(1, ceiling(n_pred_draws/(4*threads_per_chain*chains)))`
+#'     otherwise.
 #'   - quadrature_nodes: optional positive integer target for total quadrature
 #'     points during dynamic prediction. Allowed values are exactly `7`, `15`,
 #'     `31`, `41`, `51`, and `61`. Only the node count is passed to Stan; GK
@@ -102,7 +106,7 @@ NULL
 #' 5.  Pool draws to form marginal predictive summaries and intervals.
 #'
 #' @export
-predict.JoinMeFit <- function(object,
+predict.JoiNMeFit <- function(object,
                            newdataLong,
                            newdataEvent,
                            process = c("longitudinal", "event"),
@@ -116,9 +120,9 @@ predict.JoinMeFit <- function(object,
                            control = list(),
                            seed = 123,
                            ...) {
-    if (!inherits(object, "JoinMeFit")) {
+    if (!inherits(object, "JoiNMeFit")) {
         cli::cli_abort(c(
-            x = "Object must be a {.cls JoinMeFit} fit.",
+            x = "Object must be a {.cls JoiNMeFit} fit.",
             i = "Fit the model with joinme() before predicting."
         ))
     }
@@ -305,8 +309,8 @@ predict.JoinMeFit <- function(object,
     }
 
     stan_file <- .get_stan_file(
-        program = "joinme_dynpred",
-        threaded = threads_per_chain > 1
+        program = "JoiNMe_dynpred",
+        threaded = TRUE
     )
 
     engine_default <- getOption("stan_preferred_engine", object$config$engine %||% "cmdstanr")
@@ -323,8 +327,8 @@ predict.JoinMeFit <- function(object,
         on.exit(options(stan.thread = old_stan_thread), add = TRUE)
     }
 
-    cpp_opts <- if (threads_per_chain > 1) list(stan_threads = TRUE) else NULL
-    force_recompile <- isTRUE(control$force_recompile %||% getOption("joinme.force_recompile", FALSE))
+    cpp_opts <- list(stan_threads = TRUE)
+    force_recompile <- isTRUE(control$force_recompile %||% getOption("JoiNMe.force_recompile", FALSE))
     if (engine == "cmdstanr") {
         mod <- .get_cmdstan_model(
             stan_file,
@@ -337,9 +341,9 @@ predict.JoinMeFit <- function(object,
         )
     }
 
-    if (engine == "cmdstanr" && threads_per_chain > 1 && !.cmdstan_threads_enabled(mod)) {
+    if (engine == "cmdstanr" && !.cmdstan_threads_enabled(mod)) {
         cli::cli_warn(c(
-            x = "threads_per_chain > 1 requested but the CmdStan model is not compiled with stan_threads.",
+            x = "The CmdStan prediction model is not compiled with stan_threads.",
             i = "Recompiling the prediction model with stan_threads enabled."
         ))
         mod <- .get_cmdstan_model(
@@ -348,17 +352,10 @@ predict.JoinMeFit <- function(object,
             force_recompile = TRUE
         )
         if (!.cmdstan_threads_enabled(mod)) {
-            cli::cli_warn(c(
-                x = "Thread-enabled compilation failed; falling back to single-thread prediction.",
-                i = "Proceeding with threads_per_chain = 1."
+            cli::cli_abort(c(
+                x = "Thread-enabled compilation failed for the dynpred Stan program.",
+                i = "Retry with {.code control = list(force_recompile = TRUE)} or precompile the threaded model ahead of time."
             ))
-            threads_per_chain <- 1L
-            stan_file <- .get_stan_file(program = "joinme_dynpred", threaded = FALSE)
-            mod <- .get_cmdstan_model(
-                stan_file,
-                cpp_options = NULL,
-                force_recompile = force_recompile
-            )
         }
     }
 
@@ -376,15 +373,19 @@ predict.JoinMeFit <- function(object,
     # reduce_sum grainsize for prediction (draw-level parallelism)
     grainsize <- control$grainsize
     if (is.null(grainsize)) {
-        # reduce_sum in dynpred parallelizes over posterior draws, not subjects.
-        # Tune default grainsize using number of draws to avoid overly tiny slices
-        # and to keep work balanced across threads/chains.
         n_pred_draws_local <- n_pred_draws
-        n_chains <- control$chains %||% 1L
-        denom <- 4L * as.integer(threads_per_chain) * as.integer(n_chains)
-        denom <- max(1L, denom)
-        grainsize <- max(1L, as.integer(ceiling(n_pred_draws_local / denom)))
-        grainsize <- min(as.integer(n_cores), grainsize)
+        if (threads_per_chain <= 1L) {
+            grainsize <- as.integer(n_pred_draws_local)
+        } else {
+            # reduce_sum in dynpred parallelizes over posterior draws, not subjects.
+            # Tune default grainsize using number of draws to avoid overly tiny slices
+            # and to keep work balanced across threads/chains.
+            n_chains <- control$chains %||% 1L
+            denom <- 4L * as.integer(threads_per_chain) * as.integer(n_chains)
+            denom <- max(1L, denom)
+            grainsize <- max(1L, as.integer(ceiling(n_pred_draws_local / denom)))
+            grainsize <- min(as.integer(n_cores), grainsize)
+        }
     }
     if (!is.numeric(grainsize) || length(grainsize) != 1) {
         cli::cli_abort(c(
@@ -509,7 +510,7 @@ predict.JoinMeFit <- function(object,
 
             # SD Prep
             # - assemble subject-specific data list for Stan
-            grainsize_data <- if (threads_per_chain > 1) grainsize else NULL
+            grainsize_data <- grainsize
             sd_pred <- .prepare_subject_standata(
                 dE, dL, object, tmax_val, knots, col_means,
                 t_cond, t_grid, t_surv_grid,
@@ -561,14 +562,14 @@ predict.JoinMeFit <- function(object,
                 adapt_delta = 0.8
             )
             sample_args <- utils::modifyList(sample_args, sample_control)
-            if (threads_per_chain > 1) sample_args$threads_per_chain <- threads_per_chain
+            sample_args$threads_per_chain <- threads_per_chain
             sample_args$data <- sd_pred
             sample_args <- sample_args[!vapply(sample_args, is.null, logical(1))]
             if (engine == "cmdstanr") {
                 allowed <- names(formals(mod$sample))
                 sample_args <- sample_args[names(sample_args) %in% allowed]
                 fit_pred <- do.call(mod$sample, sample_args)
-                pred_diag <- .joinme_sampler_diagnostics(fit_pred)
+                pred_diag <- .JoiNMe_sampler_diagnostics(fit_pred)
                 if (is.na(pred_diag$draws) || pred_diag$draws < 1) {
                     retry_args <- sample_args
                     retry_args$init <- 0.1
@@ -577,7 +578,7 @@ predict.JoinMeFit <- function(object,
                         i = "Retrying with narrower random init range ({.code init = 0.1})."
                     ))
                     fit_pred <- do.call(mod$sample, retry_args)
-                    pred_diag <- .joinme_sampler_diagnostics(fit_pred)
+                    pred_diag <- .JoiNMe_sampler_diagnostics(fit_pred)
                 }
             } else {
                 control_list <- list()
@@ -601,7 +602,7 @@ predict.JoinMeFit <- function(object,
                 }
                 if (length(control_list) > 0) rstan_args$control <- control_list
                 fit_pred <- do.call(rstan::sampling, rstan_args)
-                pred_diag <- .joinme_sampler_diagnostics(fit_pred)
+                pred_diag <- .JoiNMe_sampler_diagnostics(fit_pred)
             }
             pred_sampler_diag_list[[as.character(id)]] <- pred_diag
 
@@ -897,7 +898,7 @@ predict.JoinMeFit <- function(object,
         marker_var = eval(object$call$marker_var) %||% "marker"
     )
 
-    JoinMeDynPred$new(
+    JoiNMeDynPred$new(
         predictions = list(
             longitudinal = if (!is.null(results_long_aggregated)) results_long_aggregated else if (length(results_long) > 0) do.call(rbind, results_long) else NULL,
             longitudinal_fitted = if (length(results_long_fit) > 0) do.call(rbind, results_long_fit) else NULL,
@@ -1045,20 +1046,19 @@ predict.JoinMeFit <- function(object,
 
 #' Posterior Linear Predictor
 #'
-#' @rdname predict.JoinMeFit
+#' @rdname predict.JoiNMeFit
 #' @description
 #' Convenience wrapper around the [predict] method returning the posterior
 #' linear predictor (linpred scale).
 #'
-#' @param object A fitted object of class `JoinMeFit`.
+#' @param object A fitted object of class `JoiNMeFit`.
 #' @param ... Additional arguments passed to [predict].
 #' 
-#' @importFrom rstantools posterior_linpred
-#' @return A `JoinMeDynPred` object with `metadata$scale = "linpred"` and
+#' @return A `JoiNMeDynPred` object with `metadata$scale = "linpred"` and
 #'   `metadata$scales = "linpred"`.
 #'
 #' @export
-posterior_linpred.JoinMeFit <- function(object, ...) {
+posterior_linpred.JoiNMeFit <- function(object, ...) {
     call_ <- match.call()
     call_[[1]] <- quote(predict)
     call_$scale <- "linpred"
@@ -1067,19 +1067,18 @@ posterior_linpred.JoinMeFit <- function(object, ...) {
 
 #' Posterior Expected Predictor
 #'
-#' @rdname predict.JoinMeFit
+#' @rdname predict.JoiNMeFit
 #' @description
 #' Convenience wrapper around the [predict] method returning the posterior
 #' expected predictor (epred scale).
 #'
-#' @param object A fitted object of class `JoinMeFit`.
+#' @param object A fitted object of class `JoiNMeFit`.
 #' @param ... Additional arguments passed to [predict].
 #'
-#' @importFrom rstantools posterior_epred
-#' @return A `JoinMeDynPred` object with `metadata$scale = "epred"` and
+#' @return A `JoiNMeDynPred` object with `metadata$scale = "epred"` and
 #'   `metadata$scales = "epred"`.
 #' @export
-posterior_epred.JoinMeFit <- function(object, ...) {
+posterior_epred.JoiNMeFit <- function(object, ...) {
     call_ <- match.call()
     call_[[1]] <- quote(predict)
     call_$scale <- "epred"
@@ -1088,19 +1087,18 @@ posterior_epred.JoinMeFit <- function(object, ...) {
 
 #' Posterior Predictive Draws
 #' 
-#' @rdname predict.JoinMeFit
+#' @rdname predict.JoiNMeFit
 #' @description
 #' Convenience wrapper around the [predict] method returning posterior
 #' predictive draws (includes observation noise).
 #'
-#' @param object A fitted object of class `JoinMeFit`.
+#' @param object A fitted object of class `JoiNMeFit`.
 #' @param ... Additional arguments passed to [predict].
 #'
-#' @importFrom rstantools posterior_predict
-#' @return A `JoinMeDynPred` object with `metadata$scale = "predict"` and
+#' @return A `JoiNMeDynPred` object with `metadata$scale = "predict"` and
 #'   `metadata$scales = "predict"`.
 #' @export
-posterior_predict.JoinMeFit <- function(object, ...) {
+posterior_predict.JoiNMeFit <- function(object, ...) {
     call_ <- match.call()
     call_[[1]] <- quote(predict)
     call_$scale <- "predict"
@@ -1713,7 +1711,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
         formulaVCov = forms$formulaVCov,
         dataEvent = dE,
         time_var = eval(object$call$time_var) %||% "time",
-        context = "predict.JoinMeFit()"
+        context = "predict.JoiNMeFit()"
     )
     vec_cov_vcov <- vcov_design$Xcov
 
@@ -2513,7 +2511,7 @@ posterior_predict.JoinMeFit <- function(object, ...) {
 #' Summarise dynamic prediction outputs
 #'
 #' @description
-#' Summarises a `JoinMeDynPred` object with detailed subject-level prediction
+#' Summarises a `JoiNMeDynPred` object with detailed subject-level prediction
 #' summaries and diagnostics.
 #'
 #' The summary includes:
@@ -2526,17 +2524,17 @@ posterior_predict.JoinMeFit <- function(object, ...) {
 #'   marker covariance depends on id,
 #' - a compact diagnostics table counting potential convergence/ESS issues.
 #'
-#' @param object A `JoinMeDynPred` object produced by [predict].
+#' @param object A `JoiNMeDynPred` object produced by [predict].
 #' @param ... Unused.
 #'
-#' @return A `summary_JoinMeDynPred` object containing tabular summaries.
-#' @method summary JoinMeDynPred
+#' @return A `summary_JoiNMeDynPred` object containing tabular summaries.
+#' @method summary JoiNMeDynPred
 #' @export
-summary.JoinMeDynPred <- function(object, ...) {
-    if (!inherits(object, "JoinMeDynPred")) {
+summary.JoiNMeDynPred <- function(object, ...) {
+    if (!inherits(object, "JoiNMeDynPred")) {
         cli::cli_abort(c(
-            x = "Object must be a {.cls JoinMeDynPred} prediction.",
-            i = "Call predict() on a JoinMeFit object first."
+            x = "Object must be a {.cls JoiNMeDynPred} prediction.",
+            i = "Call predict() on a JoiNMeFit object first."
         ))
     }
     cached <- object$cache_get("summary")
@@ -2742,7 +2740,7 @@ summary.JoinMeDynPred <- function(object, ...) {
         corr_marker_id = corr_marker_id_table
     )
 
-    summary_obj <- SummaryJoinMeDynPred$new(tables = tables, metadata = object$metadata)
+    summary_obj <- SummaryJoiNMeDynPred$new(tables = tables, metadata = object$metadata)
     object$cache_set("summary", summary_obj)
     summary_obj
 }
@@ -2750,18 +2748,18 @@ summary.JoinMeDynPred <- function(object, ...) {
 #' Extract predicted random effects from dynamic predictions
 #'
 #' @description
-#' Returns predicted random effects from a `JoinMeDynPred` object. Marker-by-id
+#' Returns predicted random effects from a `JoiNMeDynPred` object. Marker-by-id
 #' random effects are available only when marker covariance is configured to be
 #' subject-dependent.
 #'
-#' @param object A `JoinMeDynPred` object.
+#' @param object A `JoiNMeDynPred` object.
 #' @param ... Unused.
 #'
 #' @return A named list containing random-effects summary tables.
 #' @importFrom lme4 ranef
 #' @export
-ranef.JoinMeDynPred <- function(object, ...) {
-    assertthat::assert_that(inherits(object, "JoinMeDynPred"), msg = "Object must be a JoinMeDynPred instance.")
+ranef.JoiNMeDynPred <- function(object, ...) {
+    assertthat::assert_that(inherits(object, "JoiNMeDynPred"), msg = "Object must be a JoiNMeDynPred instance.")
 
     if (!isTRUE(object$metadata$marker_corr_depends_on_id)) {
         cli::cli_abort(c(
@@ -2782,17 +2780,17 @@ ranef.JoinMeDynPred <- function(object, ...) {
 #'
 #' @description
 #' Returns per-subject covariance summaries for marker-by-id random effects from
-#' a `JoinMeDynPred` object. This method is available only when marker covariance
+#' a `JoiNMeDynPred` object. This method is available only when marker covariance
 #' depends on id.
 #'
-#' @param object A `JoinMeDynPred` object.
+#' @param object A `JoiNMeDynPred` object.
 #' @param ... Unused.
 #'
 #' @return A named list containing covariance summary tables.
-#' @method vcov JoinMeDynPred
+#' @method vcov JoiNMeDynPred
 #' @export
-vcov.JoinMeDynPred <- function(object, ...) {
-    assertthat::assert_that(inherits(object, "JoinMeDynPred"), msg = "Object must be a JoinMeDynPred instance.")
+vcov.JoiNMeDynPred <- function(object, ...) {
+    assertthat::assert_that(inherits(object, "JoiNMeDynPred"), msg = "Object must be a JoiNMeDynPred instance.")
 
     if (!isTRUE(object$metadata$marker_corr_depends_on_id)) {
         cli::cli_abort(c(
@@ -2816,10 +2814,10 @@ vcov.JoinMeDynPred <- function(object, ...) {
 #'
 #' @return Invisibly returns the object.
 #' @export
-print.JoinMeDynPred <- function(x, ...) {
-    assertthat::assert_that(inherits(x, "JoinMeDynPred"), msg = "Object must be a JoinMeDynPred instance.")
+print.JoiNMeDynPred <- function(x, ...) {
+    assertthat::assert_that(inherits(x, "JoiNMeDynPred"), msg = "Object must be a JoiNMeDynPred instance.")
 
-    cat("JoinMe dynamic prediction\n")
+    cat("JoiNMe dynamic prediction\n")
     cat("=======================\n")
     if (!is.null(x$call)) {
         cat("Call:\n")
@@ -2851,7 +2849,7 @@ print.JoinMeDynPred <- function(x, ...) {
 }
 
 #' @export
-print.summary_JoinMeDynPred <- function(x, ...) {
+print.summary_JoiNMeDynPred <- function(x, ...) {
     .cli_summary_heading("Prediction summary", level = 1L)
     meta_lines <- character(0)
     if (!is.null(x$metadata$pred_type)) {

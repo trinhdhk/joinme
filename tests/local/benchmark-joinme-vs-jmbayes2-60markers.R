@@ -12,8 +12,8 @@ benchmark_config <- function(
   seed = 20260329L,
   n_id = 50L,
   n_markers = 60L,
-  iter_warmup_joinme = 800L,
-  iter_sampling_joinme = 1000L,
+  iter_warmup_JoiNMe = 800L,
+  iter_sampling_JoiNMe = 1000L,
   n_iter_jm = 6000L,
   n_burnin_jm = 2000L,
   n_chains_jm = 2L,
@@ -23,8 +23,8 @@ benchmark_config <- function(
     seed = as.integer(seed),
     n_id = as.integer(n_id),
     n_markers = as.integer(n_markers),
-    iter_warmup_joinme = as.integer(iter_warmup_joinme),
-    iter_sampling_joinme = as.integer(iter_sampling_joinme),
+    iter_warmup_JoiNMe = as.integer(iter_warmup_JoiNMe),
+    iter_sampling_JoiNMe = as.integer(iter_sampling_JoiNMe),
     n_iter_jm = as.integer(n_iter_jm),
     n_burnin_jm = as.integer(n_burnin_jm),
     n_chains_jm = as.integer(n_chains_jm),
@@ -36,8 +36,8 @@ cfg <- benchmark_config(
   seed = 20260329L,
   n_id = 50L,
   n_markers = 60L,
-  iter_warmup_joinme = 500L,
-  iter_sampling_joinme = 1000L,
+  iter_warmup_JoiNMe = 500L,
+  iter_sampling_JoiNMe = 1000L,
   n_iter_jm = 4000L,
   n_burnin_jm = 1000L,
   n_chains_jm = 2L,
@@ -47,7 +47,7 @@ cfg <- benchmark_config(
 if (!dir.exists(cfg$output_dir)) dir.create(cfg$output_dir, recursive = TRUE, showWarnings = FALSE)
 
 benchmark_stamp <- format(Sys.time(), "%Y%m%d-%H%M%S")
-output_rds <- file.path(cfg$output_dir, paste0("joinme-vs-jmbayes2-", cfg$n_markers, "markers-", benchmark_stamp, ".rds"))
+output_rds <- file.path(cfg$output_dir, paste0("JoiNMe-vs-jmbayes2-", cfg$n_markers, "markers-", benchmark_stamp, ".rds"))
 
 safe_cor <- function(x, y) {
   keep <- is.finite(x) & is.finite(y)
@@ -158,7 +158,7 @@ infer_survival_terms <- function(sim) {
   }
 
   formula_event <- sim$true_params$formulaEvent %||% sim$truth$formulaEvent
-  event_cols <- colnames(joinme:::.mm_event(formula_event, sim$dataEvent))
+  event_cols <- colnames(JoiNMe:::.mm_event(formula_event, sim$dataEvent))
   as.character(event_cols %||% character(0))
 }
 
@@ -190,8 +190,8 @@ build_truth_survival <- function(sim) {
   )
 }
 
-build_joinme_assoc_draws <- function(fit_joinme, marker_levels) {
-  assoc_draws <- posterior_assoc(fit_joinme, summary = FALSE)
+build_JoiNMe_assoc_draws <- function(fit_JoiNMe, marker_levels) {
+  assoc_draws <- posterior_assoc(fit_JoiNMe, summary = FALSE)
   n_markers <- length(marker_levels)
 
   cv_mean_draws <- assoc_draws[["cv_mean"]]
@@ -256,9 +256,9 @@ marker_levels <- as.character(sim$marker_info$names)
 truth_survival <- build_truth_survival(sim)
 truth_assoc <- build_truth_assoc(sim, marker_levels)
 
-cat("[2/6] Fitting joinme...\n")
-joinme_elapsed <- system.time({
-  fit_joinme <- joinme(
+cat("[2/6] Fitting JoiNMe...\n")
+JoiNMe_elapsed <- system.time({
+  fit_JoiNMe <- joinme(
     formulaLong = y ~ 1 + time + (1 | id) + (1 + time + (1 | id) | marker),
     dataLong = sim$dataLong,
     formulaEvent = survival::Surv(time, event) ~ x1 + x2,
@@ -273,8 +273,8 @@ joinme_elapsed <- system.time({
       chains = 2,
       parallel_chains = 2,
       threads_per_chain = 6,
-      iter_warmup = cfg$iter_warmup_joinme,
-      iter_sampling = cfg$iter_sampling_joinme,
+      iter_warmup = cfg$iter_warmup_JoiNMe,
+      iter_sampling = cfg$iter_sampling_JoiNMe,
       refresh = 0,
       init = 1,
       seed = cfg$seed,
@@ -284,8 +284,8 @@ joinme_elapsed <- system.time({
   )
 })
 
-joinme_coef <- coef(fit_joinme, summary = TRUE)
-marker_terms <- unique(as.character(joinme_coef$formulaLong$marker$term))
+JoiNMe_coef <- coef(fit_JoiNMe, summary = TRUE)
+marker_terms <- unique(as.character(JoiNMe_coef$formulaLong$marker$term))
 marker_draws <- normalize_marker_draws(
   marker_draws = sim$true_params$re_draws$marker,
   marker_levels = marker_levels,
@@ -301,24 +301,24 @@ truth_long <- do.call(rbind, lapply(marker_levels, function(marker_label) {
     stringsAsFactors = FALSE
   )
 }))
-joinme_long_est <- joinme_coef$formulaLong$marker[, c("marker", "term", "Estimate")]
-names(joinme_long_est)[names(joinme_long_est) == "Estimate"] <- "estimate"
-joinme_long_cmp <- merge(truth_long, joinme_long_est, by = c("marker", "term"), all.x = TRUE)
-joinme_long_cmp$error <- joinme_long_cmp$estimate - joinme_long_cmp$truth
+JoiNMe_long_est <- JoiNMe_coef$formulaLong$marker[, c("marker", "term", "Estimate")]
+names(JoiNMe_long_est)[names(JoiNMe_long_est) == "Estimate"] <- "estimate"
+JoiNMe_long_cmp <- merge(truth_long, JoiNMe_long_est, by = c("marker", "term"), all.x = TRUE)
+JoiNMe_long_cmp$error <- JoiNMe_long_cmp$estimate - JoiNMe_long_cmp$truth
 
-joinme_surv_est <- joinme_coef$formulaEvent[, c("term", "Estimate")]
-names(joinme_surv_est)[names(joinme_surv_est) == "Estimate"] <- "estimate"
-joinme_surv_cmp <- merge(truth_survival, joinme_surv_est, by = "term", all.x = TRUE)
-joinme_surv_cmp$error <- joinme_surv_cmp$estimate - joinme_surv_cmp$truth
+JoiNMe_surv_est <- JoiNMe_coef$formulaEvent[, c("term", "Estimate")]
+names(JoiNMe_surv_est)[names(JoiNMe_surv_est) == "Estimate"] <- "estimate"
+JoiNMe_surv_cmp <- merge(truth_survival, JoiNMe_surv_est, by = "term", all.x = TRUE)
+JoiNMe_surv_cmp$error <- JoiNMe_surv_cmp$estimate - JoiNMe_surv_cmp$truth
 
-joinme_assoc_draws <- build_joinme_assoc_draws(fit_joinme, marker_levels)
-joinme_assoc_est <- data.frame(
-  marker = colnames(joinme_assoc_draws),
-  estimate = colMeans(joinme_assoc_draws),
+JoiNMe_assoc_draws <- build_JoiNMe_assoc_draws(fit_JoiNMe, marker_levels)
+JoiNMe_assoc_est <- data.frame(
+  marker = colnames(JoiNMe_assoc_draws),
+  estimate = colMeans(JoiNMe_assoc_draws),
   stringsAsFactors = FALSE
 )
-joinme_assoc_cmp <- merge(truth_assoc, joinme_assoc_est, by = "marker", all.x = TRUE)
-joinme_assoc_cmp$error <- joinme_assoc_cmp$estimate - joinme_assoc_cmp$truth
+JoiNMe_assoc_cmp <- merge(truth_assoc, JoiNMe_assoc_est, by = "marker", all.x = TRUE)
+JoiNMe_assoc_cmp$error <- JoiNMe_assoc_cmp$estimate - JoiNMe_assoc_cmp$truth
 
 cat("[3/6] Reshaping data for JMbayes2...\n")
 wide_long <- reshape(
@@ -410,9 +410,9 @@ if (is.null(jm_fit)) {
 }
 
 runtime <- data.frame(
-  engine = c("joinme", "JMbayes2_lme", "JMbayes2_survival", "JMbayes2_joint", "JMbayes2_total"),
+  engine = c("JoiNMe", "JMbayes2_lme", "JMbayes2_survival", "JMbayes2_joint", "JMbayes2_total"),
   elapsed_seconds = c(
-    unname(joinme_elapsed[["elapsed"]]),
+    unname(JoiNMe_elapsed[["elapsed"]]),
     unname(jm_lme_elapsed[["elapsed"]]),
     unname(jm_surv_elapsed[["elapsed"]]),
     unname(jm_elapsed[["elapsed"]]),
@@ -423,15 +423,15 @@ runtime <- data.frame(
 
 recovery <- list(
   longitudinal = do.call(rbind, Filter(Negate(is.null), list(
-    transform(summarise_recovery(joinme_long_cmp, c("term")), engine = "joinme"),
+    transform(summarise_recovery(JoiNMe_long_cmp, c("term")), engine = "JoiNMe"),
     if (nrow(jm_long_cmp)) transform(summarise_recovery(jm_long_cmp, c("term")), engine = "JMbayes2") else NULL
   ))),
   survival = do.call(rbind, Filter(Negate(is.null), list(
-    transform(summarise_recovery(joinme_surv_cmp, c("term")), engine = "joinme"),
+    transform(summarise_recovery(JoiNMe_surv_cmp, c("term")), engine = "JoiNMe"),
     if (nrow(jm_surv_cmp)) transform(summarise_recovery(jm_surv_cmp, c("term")), engine = "JMbayes2") else NULL
   ))),
   association = do.call(rbind, Filter(Negate(is.null), list(
-    transform(summarise_recovery(joinme_assoc_cmp, character(0)), engine = "joinme"),
+    transform(summarise_recovery(JoiNMe_assoc_cmp, character(0)), engine = "JoiNMe"),
     if (nrow(jm_assoc_cmp)) transform(summarise_recovery(jm_assoc_cmp, character(0)), engine = "JMbayes2") else NULL
   )))
 )
@@ -442,7 +442,7 @@ results <- list(
   recovery = recovery,
   truth = list(longitudinal = truth_long, survival = truth_survival, association = truth_assoc),
   estimates = list(
-    joinme = list(longitudinal = joinme_long_cmp, survival = joinme_surv_cmp, association = joinme_assoc_cmp),
+    JoiNMe = list(longitudinal = JoiNMe_long_cmp, survival = JoiNMe_surv_cmp, association = JoiNMe_assoc_cmp),
     JMbayes2 = list(longitudinal = jm_long_cmp, survival = jm_surv_cmp, association = jm_assoc_cmp)
   ),
   jm_fit_error = jm_fit_error

@@ -1,73 +1,72 @@
-##' Functional Transform Builder for Joint Models
-##'
-##' Provides R utilities to parse user-friendly transformation expressions
-##' and generate functional bytecode for Stan's arbitrary transformation evaluator.
-##'
-##' @description
-##' The `parse_transform_expr` function takes a formula, quosure, quoted expression,
-##' or character string and converts it to a functional bytecode representation compatible with the
-##' Stan-side opcode evaluator.
-##'
-##' Supported operations:
-##' - Arithmetic: +, -, *, /
-##' - Power: ^
-##' - Functions: log, exp, sqrt, sin, cos, tan, abs, sinh, cosh, tanh, asinh, acosh, atanh
-##' - Sigmoid/Link: inv_logit, logit, sigmoid, expit
-##' - Sigmoid aliases: softmax, SoftMax
-##' - Softplus: softplus, log1p_exp
-##' - Other: cbrt, power
-##' - Reciprocal: 1/x or rec(x)
-##'
-##' @param expr A formula (e.g. `~ x + 2`), quosure, quoted expression, or character string to parse.
-##'
-##' @note
-##' Functional bytecode is a vector of operation codes (0-25) paired with a vector of
-##' constant values. Constants are embedded using PUSH_CONST operations.
-##'
-##' @section Functional Bytecode Reference:
-##' \describe{
-##'   \item{0}{PUSH_X: Push input x onto stack}
-##'   \item{1}{PUSH_CONST: Push next constant value}
-##'   \item{2}{ADD: Pop b,a; push a+b}
-##'   \item{3}{SUB: Pop b,a; push a-b}
-##'   \item{4}{MUL: Pop b,a; push a*b}
-##'   \item{5}{DIV: Pop b,a; push a/b}
-##'   \item{6}{LOG: Pop a; push log(a)}
-##'   \item{7}{EXP: Pop a; push exp(a)}
-##'   \item{8}{SQRT: Pop a; push sqrt(a)}
-##'   \item{9}{INV_LOGIT: Pop a; push inv_logit(a)}
-##'   \item{10}{LOGIT: Pop a; push logit(a)}
-##'   \item{11}{RECIPROCAL: Pop a; push 1/a}
-##'   \item{12}{POW: Pop b,a; push a^b}
-##'   \item{13}{SIN: Pop a; push sin(a)}
-##'   \item{14}{COS: Pop a; push cos(a)}
-##'   \item{15}{TAN: Pop a; push tan(a)}
-##'   \item{16}{ABS: Pop a; push abs(a)}
-##'   \item{17}{SQUARE: Pop a; push a^2}
-##'   \item{18}{SINH: Pop a; push sinh(a)}
-##'   \item{19}{COSH: Pop a; push cosh(a)}
-##'   \item{20}{TANH: Pop a; push tanh(a)}
-##'   \item{21}{ASINH: Pop a; push asinh(a)}
-##'   \item{22}{ACOSH: Pop a; push acosh(a)}
-##'   \item{23}{ATANH: Pop a; push atanh(a)}
-##'   \item{24}{SOFTPLUS: Pop a; push log1p_exp(a)}
-##'   \item{25}{CBRT: Pop a; push cbrt(a)}
-##'   \item{26}{PROBIT: Pop a; push Phi(a)}
-##' }
-##'
-##' @examples
-##' # Simple: f(x) = x + 2
-##' bc <- parse_transform_expr(~ x + 2)
-##'
-##' # Use a plain formula (recommended)
-##' bc <- parse_transform_expr(~ log(x + 1))
-##' # Returns: bytecode = c(0, 1, 2), const_data = c(2)
-##'
-##' # Complex: f(x) = (log(sqrt(x + 1/inv_logit(3*x - 3))))^2
-##' bc <- parse_transform_expr(~ (log(sqrt(x + 1/inv_logit(3*x - 3))))^2)
-##'
-##' @export
-# File overview:
+#' Functional Transform Builder for Joint Models
+#'
+#' Provides R utilities to parse user-friendly transformation expressions
+#' and generate functional bytecode for Stan's arbitrary transformation evaluator.
+#'
+#' @description
+#' The `parse_transform_expr` function takes a formula, quosure, quoted expression,
+#' or character string and converts it to a functional bytecode representation compatible with the
+#' Stan-side opcode evaluator.
+#'
+#' Supported operations:
+#' - Arithmetic: +, -, *, /
+#' - Power: ^, power
+#' - Root: sqrt, cbrt
+#' - Exponential transformations: log, exp, 
+#' - Trigonometric functions: sin, cos, tan, abs, sinh, cosh, tanh, asinh, acosh, atanh
+#' - Common links: inv_logit (softmax, SoftMax), logit, sigmoid, expit, softplus (log1p_exp)
+#' - Reciprocal: 1/x or rec(x)
+#'
+#' @param expr A formula (e.g. `~ x + 2`), quosure, quoted expression, or character string to parse.
+#'
+#' @note
+#' Functional bytecode is a vector of operation codes (0-25) paired with a vector of
+#' constant values. Constants are embedded using PUSH_CONST operations.
+#'
+#' @section Functional Bytecode Reference:
+#' \describe{
+#'   \item{0}{PUSH_X: Push input x onto stack}
+#'   \item{1}{PUSH_CONST: Push next constant value}
+#'   \item{2}{ADD: Pop b,a; push a+b}
+#'   \item{3}{SUB: Pop b,a; push a-b}
+#'   \item{4}{MUL: Pop b,a; push a*b}
+#'   \item{5}{DIV: Pop b,a; push a/b}
+#'   \item{6}{LOG: Pop a; push log(a)}
+#'   \item{7}{EXP: Pop a; push exp(a)}
+#'   \item{8}{SQRT: Pop a; push sqrt(a)}
+#'   \item{9}{INV_LOGIT: Pop a; push inv_logit(a)}
+#'   \item{10}{LOGIT: Pop a; push logit(a)}
+#'   \item{11}{RECIPROCAL: Pop a; push 1/a}
+#'   \item{12}{POW: Pop b,a; push a^b}
+#'   \item{13}{SIN: Pop a; push sin(a)}
+#'   \item{14}{COS: Pop a; push cos(a)}
+#'   \item{15}{TAN: Pop a; push tan(a)}
+#'   \item{16}{ABS: Pop a; push abs(a)}
+#'   \item{17}{SQUARE: Pop a; push a^2}
+#'   \item{18}{SINH: Pop a; push sinh(a)}
+#'   \item{19}{COSH: Pop a; push cosh(a)}
+#'   \item{20}{TANH: Pop a; push tanh(a)}
+#'   \item{21}{ASINH: Pop a; push asinh(a)}
+#'   \item{22}{ACOSH: Pop a; push acosh(a)}
+#'   \item{23}{ATANH: Pop a; push atanh(a)}
+#'   \item{24}{SOFTPLUS: Pop a; push log1p_exp(a)}
+#'   \item{25}{CBRT: Pop a; push cbrt(a)}
+#'   \item{26}{PROBIT: Pop a; push Phi(a)}
+#' }
+#'
+#' @examples
+#' # Simple: f(x) = x + 2
+#' bc <- parse_transform_expr(~ x + 2)
+#'
+#' # Use a plain formula (recommended)
+#' bc <- parse_transform_expr(~ log(x + 1))
+#' # Returns: bytecode = c(0, 1, 2), const_data = c(2)
+#'
+#' # Complex: f(x) = (log(sqrt(x + 1/inv_logit(3*x - 3))))^2
+#' bc <- parse_transform_expr(~ (log(sqrt(x + 1/inv_logit(3*x - 3))))^2)
+#'
+#' @export
+# 
 # - Parse R expressions into portable bytecode programs.
 # - Validate bytecode stack behaviour before handing programs to Stan.
 # - Evaluate bytecode in R (shared by inverse-link and association transforms).
@@ -92,7 +91,7 @@ parse_transform_expr <- function(expr, iota_nodes = NULL) {
   )
 
   # Step 3: validate stack consistency so runtime evaluation is deterministic.
-  verify_opcodes(result$bytecode, result$const_data)
+  verify_bytecode(result$bytecode, result$const_data)
 
   # Step 4: return both `bytecode` and legacy `opcodes` aliases for compatibility.
   list(
@@ -136,8 +135,9 @@ parse_transform_expr <- function(expr, iota_nodes = NULL) {
   )
 }
 
-##' @keywords internal
-##' Coerce input to a language object using base R parsing.
+#' @keywords internal
+#' Coerce input to a language object
+#
 .coerce_transform_expr <- function(expr) {
   # Normalise input to a single language object
   if (rlang::is_quosure(expr)) {
@@ -171,8 +171,8 @@ parse_transform_expr <- function(expr, iota_nodes = NULL) {
   ))
 }
 
-##' @keywords internal
-##' Emit bytecode from an R language object (calls, names, constants).
+#' @keywords internal
+#' Emit bytecode from an R language object (calls, names, constants).
 .emit_bytecode_expr <- function(
   node,
   bytecode,
@@ -381,12 +381,12 @@ parse_transform_expr <- function(expr, iota_nodes = NULL) {
   ))
 }
 
-##' @keywords internal
-##' Legacy tokenizer/parser removed in favor of R's formula parsing.
+#' @keywords internal
+#' Legacy tokenizer/parser removed in favor of R's formula parsing.
 
-##' @keywords internal
-##' Verify functional bytecode for basic sanity (stack under/overflow, etc.)
-verify_opcodes <- function(opcodes, const_data) {
+#' @keywords internal
+#' Verify functional bytecode for basic sanity (stack under/overflow, etc.)
+verify_bytecode <- function(opcodes, const_data) {
   # Accept both historical `opcodes` naming and modern `bytecode` naming.
   stack_height <- 0
   const_idx <- 0
@@ -465,7 +465,7 @@ eval_bytecode_scalar <- function(
   }
 
   # Step 2: validate stack behaviour before execution for reproducibility.
-  verify_opcodes(code, constants)
+  verify_bytecode(code, constants)
 
   # Step 3: execute the bytecode stack machine instruction by instruction.
   stack <- numeric(0)
@@ -641,6 +641,3 @@ eval_bytecode_vector <- function(
     op_iota_slope_idx = iota_slopes
   )
 }
-
-# Backward-compatible alias for older internal helper naming.
-.emit_opcode_expr <- .emit_bytecode_expr

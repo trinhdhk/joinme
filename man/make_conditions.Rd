@@ -17,7 +17,7 @@ A data frame with one row per requested condition.
 }
 \description{
 \code{make_conditions()} is a thin wrapper around \code{\link[brms:make_conditions]{brms::make_conditions()}} so the
-resulting condition tables can be passed directly to \code{plot.JoinMeFit()}
+resulting condition tables can be passed directly to \code{plot.JoiNMeFit()}
 through its \code{condition} argument. This keeps the conditioning workflow close
-to \code{brms::conditional_effects()} while staying within the joinme interface.
+to \code{brms::conditional_effects()} while staying within the JoiNMe interface.
 }

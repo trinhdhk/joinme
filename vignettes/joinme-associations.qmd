@@ -1,5 +1,5 @@
 ---
-title: "joinme: Association Construction"
+title: "JoiNMe: Association Construction"
 output-dir: ../docs/articles
 format:
   html:
@@ -30,6 +30,10 @@ options(width = 80)
 
 This vignette focuses on **association term construction**, including transformation selection, interpretability, and practical trade-offs.
 
+It also explains how those association terms propagate into the public summary,
+draw-extraction, and plotting APIs so the same labels are used consistently in
+tables, MCMC plots, and fitted association curves.
+
 Association transforms apply to all supported longitudinal families (including
 double_exponential, skew_double_exponential, beta, and cumulative_logit) and to
 competing-risk survival models.
@@ -39,7 +43,7 @@ competing-risk survival models.
 At the event time and at the default 15 Gauss-Kronrod nodes used for integration
 (configurable), the
 longitudinal linear predictor is decomposed into a mean component and a marker
-component. From these components, `joinme` constructs:
+component. From these components, `JoiNMe` constructs:
 
 - **CV_total**: total current value (mean + marker components).
 - **CV_mean**: current value of the mean component only.
@@ -64,7 +68,7 @@ covariance-style associations are not available.
 
 # Marker-weighted CV and CS
 
-When multiple biomarkers are modelled, `joinme` constructs marker-average association
+When multiple biomarkers are modelled, `JoiNMe` constructs marker-average association
 components using weights $\omega_d$ (one per marker). For marker-aggregated
 terms (`cv_total`, `cv_marker`, `cs_total`, `cs_marker`), transforms are applied
 at the marker level first and then averaged with weights. This matters whenever
@@ -74,7 +78,7 @@ For example, with marker-specific total current values $CV_{id}(t)$ and transfor
 $f_{cv}$:
 
 $$
-  ext{cv\_total}(t) = \frac{1}{D}\sum_{d=1}^{D} \omega_d\, f_{cv}\!\left(CV_{id}(t)\right),
+  	ext{cv\_total}(t) = \frac{1}{D}\sum_{d=1}^{D} \omega_d\, f_{cv}\!\left(CV_{id}(t)\right),
 $$
 
 which differs from $f_{cv}(\frac{1}{D}\sum_d \omega_d CV_{id}(t))$ unless $f_{cv}$
@@ -84,7 +88,7 @@ For slopes, let $CS_{id}(t)$ be a marker-specific slope feature and $f_{cs}$ the
 configured CS transform. Then
 
 $$
-  ext{cs\_total}(t) = \frac{1}{D}\sum_{d=1}^{D} \omega_d\, f_{cs}\!\left(CS_{id}(t)\right),
+  	ext{cs\_total}(t) = \frac{1}{D}\sum_{d=1}^{D} \omega_d\, f_{cs}\!\left(CS_{id}(t)\right),
 $$
 
 and analogously for `cs_marker`. This is intentionally not equal to
@@ -100,7 +104,7 @@ marker-aggregated association terms. The simulator reports them in
 ## Plotting fitted association curves
 
 `plot(fit, type = "association")` uses a compact association plotting bundle
-stored on the fitted `JoinMeFit` object. The bundle keeps only the posterior
+stored on the fitted `JoiNMeFit` object. The bundle keeps only the posterior
 quantities needed for plotting: active association coefficients, marker weights,
 transform coefficients, and cached model-implied raw support ranges.
 
@@ -111,6 +115,14 @@ This has two practical consequences:
 - default x-axis grids are taken from model-implied feature support when
   available, with spline plots falling back to knot support only when the fitted
   spline support is narrower than the model-implied raw range.
+
+The same fitted-object payload is also used by the exported
+`association_plot()` wrapper, which is useful when you want a script to make
+the plotting intent explicit instead of switching on `plot(fit, type = ...)`.
+
+```{r association-plot-helper, eval=FALSE}
+association_plot(fit)
+```
 
 ## Posterior association extraction and covariance-style labels
 
@@ -130,6 +142,28 @@ For covariance-style channels (`corr`, `vcov`):
 This means the public posterior summaries, plotting labels, and the fitted
 hazard contribution now use the same user-facing covariance component names.
 
+## Renamed posterior draws for association terms
+
+Association terms can now be extracted directly on the reporting scale with
+`draws()`. This avoids having to translate between raw Stan variables such as
+`alpha_corr_eff[...]` and the user-facing labels printed by `summary()`.
+
+```{r association-renamed-draws, eval=FALSE}
+# All association terms with reporting-friendly names
+assoc_draws <- draws(fit, variables = "^alpha_", regex = TRUE, format = "draws_df")
+head(assoc_draws)
+
+# Bayesplot visualisation with the same labels used by summary(fit)
+mcmc_plot(fit, variable = "alpha_cv_total", type = "dens_overlay")
+```
+
+For practical reporting, the recommended order is:
+
+1. `posterior_assoc(fit, summary = TRUE)` for concise tables,
+2. `draws(fit, variables = "^alpha_", regex = TRUE)` for downstream posterior work,
+3. `association_plot(fit)` for fitted transform-and-hazard displays,
+4. `mcmc_plot(fit, variable = ...)` when you need chain-level MCMC displays.
+
 # Association coefficients and naming
 
 Association coefficients are denoted with the $\alpha$ prefix (e.g., `alpha_cv_total`).
@@ -144,7 +178,7 @@ components to keep interpretation focused on the fitted association structure.
 
 # Transform modes
 
-`joinme` supports four transformation modes for association features:
+`JoiNMe` supports four transformation modes for association features:
 
 - **Identity** (`type = "identity"`): no transformation.
 - **Functional** (`type = "functional"`): a user-defined expression converted

@@ -1,12 +1,12 @@
 /**
- * @file joinme_dynpred_threading.stan
- * @brief Threaded dynamic prediction twin that reuses the same `partial_draw` helper as the non-threaded model.
+ * @file JoiNMe_dynpred_threading.stan
+ * @brief Thread-capable dynamic prediction program that reuses the same `partial_draw` helper for serial and parallel execution.
  *
  * ### Inputs
- * - Same as joinme_dynpred.stan plus `grainsize` to size draw slices for reduce_sum.
+ * - Includes `grainsize` to size draw slices for reduce_sum.
  *
  * ### Outputs
- * - The same conditional predictions as the non-threaded path; threading only changes how work is split, not what is computed.
+ * - The same conditional predictions regardless of thread count; threading only changes how work is split, not what is computed.
  *
  * ### Execution story
  * - reduce_sum splits posterior draws into slices; each slice calls `partial_draw` (pure function) so math stays identical.
@@ -23,11 +23,11 @@ functions {
   #include helper/functions/basis_functions.stanfunctions
   #include helper/functions/composite_transform.stanfunctions
 
-  #include helper/functions/joinme_dynpred_partial.stanfunctions
+  #include helper/functions/JoiNMe_dynpred_partial.stanfunctions
 }
 
 data {
-  #include helper/data/joinme_dynpred_common.stan
+  #include helper/data/JoiNMe_dynpred_common.stan
   int<lower=1> grainsize;
 
   int flag_indep_id_re;
@@ -45,7 +45,7 @@ transformed data {
 }
 
 parameters {
-  #include helper/parameters/joinme_dynpred_common.stan
+  #include helper/parameters/JoiNMe_dynpred_common.stan
 }
 
 model {

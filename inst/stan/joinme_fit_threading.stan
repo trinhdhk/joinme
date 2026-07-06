@@ -1,15 +1,16 @@
 /**
- * @file joinme_fit_threading.stan
+ * @file JoiNMe_fit_threading.stan
  * @brief Threaded implementation of the Joint Mixed-Effects Model using reduce_sum.
  *
  * @details
- * This model implements the same joint model as `joinme_fit.stan` but uses `reduce_sum`
- * to parallelize the likelihood computation over subjects.
+ * This is the thread-capable JoiNMe fitting program used for both serial and
+ * parallel execution. It uses `reduce_sum` to parallelize the likelihood
+ * computation over subjects when more than one thread is requested.
  *
- * It uses the shared likelihood function `partial_joinme` to ensure mathematical equivalence
- * with the serial version.
+ * It uses the shared likelihood function `partial_joinme` so the same kernel can
+ * run with one thread or many threads without changing the target density.
  *
- * @see joinme_fit.stan
+ * @see JoiNMe::JoiNMe
  */
 
 functions {
@@ -28,11 +29,11 @@ functions {
   
   #include helper/functions/composite_transform.stanfunctions
   
-  #include helper/functions/joinme_fit_partial.stanfunctions
+  #include helper/functions/JoiNMe_fit_partial.stanfunctions
 }
 
 data {
-  #include helper/data/joinme_fit_common.stan
+  #include helper/data/JoiNMe_fit_common.stan
   array[n_id] int<lower=1, upper=N> id_start;
   array[n_id] int<lower=1, upper=N> id_end;
   int<lower=1> grainsize;
@@ -48,7 +49,7 @@ transformed data {
 }
 
 parameters {
-  #include helper/parameters/joinme_fit_common.stan
+  #include helper/parameters/JoiNMe_fit_common.stan
 }
 
 transformed parameters {

@@ -1,4 +1,4 @@
-make_mock_joinme_fit <- function(draws_obj, stan_data, config = list()) {
+make_mock_JoiNMe_fit <- function(draws_obj, stan_data, config = list()) {
   cache_env <- new.env(parent = emptyenv())
   fit_obj <- structure(
     list(
@@ -19,7 +19,7 @@ make_mock_joinme_fit <- function(draws_obj, stan_data, config = list()) {
         invisible(value)
       }
     ),
-    class = "JoinMeFit"
+    class = "JoiNMeFit"
   )
 
   list(object = fit_obj, cache = cache_env)
@@ -34,7 +34,7 @@ mock_draws_array_subset <- function(draws_obj, variables = NULL) {
   as.array(arr)
 }
 
-test_that("posterior_summary is an alias of summary for JoinMeFit", {
+test_that("posterior_summary is an alias of summary for JoiNMeFit", {
   draws_obj <- posterior::as_draws_array(array(
     c(0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6),
     dim = c(2, 2, 2),
@@ -45,7 +45,7 @@ test_that("posterior_summary is an alias of summary for JoinMeFit", {
     )
   ))
 
-  fit_bundle <- make_mock_joinme_fit(
+  fit_bundle <- make_mock_JoiNMe_fit(
     draws_obj = draws_obj,
     stan_data = list(
       P = 1L,
@@ -74,15 +74,15 @@ test_that("posterior_summary is an alias of summary for JoinMeFit", {
       }
       posterior::subset_draws(draws_obj, variable = variables)
     },
-    .joinme_sampler_diagnostics = function(fit) list(),
+    .JoiNMe_sampler_diagnostics = function(fit) list(),
     .package = "joinme"
   )
 
   summary_obj <- summary(fit_bundle$object, include_corr = FALSE)
   posterior_summary_obj <- posterior_summary(fit_bundle$object, include_corr = FALSE)
 
-  expect_s3_class(summary_obj, "summary_JoinMeFit")
-  expect_s3_class(posterior_summary_obj, "summary_JoinMeFit")
+  expect_s3_class(summary_obj, "summary_JoiNMeFit")
+  expect_s3_class(posterior_summary_obj, "summary_JoiNMeFit")
   expect_equal(posterior_summary_obj$tables$assoc, summary_obj$tables$assoc)
   expect_equal(posterior_summary_obj$tables$fixef, summary_obj$tables$fixef)
 })
@@ -102,7 +102,7 @@ test_that("assoc propagates weighted association strength into marker-specific e
     )
   ))
 
-  fit_bundle <- make_mock_joinme_fit(
+  fit_bundle <- make_mock_JoiNMe_fit(
     draws_obj = draws_obj,
     stan_data = list(
       assoc_cv_total = 1L,
@@ -189,7 +189,7 @@ test_that("assoc uses different marker-weight structures for different weighted 
     )
   ))
 
-  fit_bundle <- make_mock_joinme_fit(
+  fit_bundle <- make_mock_JoiNMe_fit(
     draws_obj = draws_obj,
     stan_data = list(
       assoc_cv_total = 1L,
@@ -240,7 +240,7 @@ test_that("summary labels covariance rows and columns with model terms", {
     )
   ))
 
-  fit_bundle <- make_mock_joinme_fit(
+  fit_bundle <- make_mock_JoiNMe_fit(
     draws_obj = draws_obj,
     stan_data = list(
       P = 1L,
@@ -271,8 +271,8 @@ test_that("summary labels covariance rows and columns with model terms", {
       }
       posterior::subset_draws(draws_obj, variable = variables)
     },
-    .joinme_sampler_diagnostics = function(fit) list(),
-    vcov.JoinMeFit = function(object, what = NULL, draws = NULL, ...) {
+    .JoiNMe_sampler_diagnostics = function(fit) list(),
+    vcov.JoiNMeFit = function(object, what = NULL, draws = NULL, ...) {
       if (identical(what, "id")) {
         return(data.frame(
           block = "id",
@@ -329,7 +329,7 @@ test_that("assoc expands corr and vcov displays with explicit row and col labels
     )
   ))
 
-  fit_bundle <- make_mock_joinme_fit(
+  fit_bundle <- make_mock_JoiNMe_fit(
     draws_obj = draws_obj,
     stan_data = list(
       assoc_cv_total = 0L,

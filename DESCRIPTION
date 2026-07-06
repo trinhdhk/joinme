@@ -1,6 +1,6 @@
 Package: joinme
 Type: Package
-Title: Joint Mixed-Effects (JoinME) Model for Multivariate Longitudinal and Survival Data
+Title: Joint Mixed-Effects (JoiNMe) Model for Multivariate Longitudinal and Survival Data
 Version: 0.0.0.9000
 Author: Trinh Dong <trinh.dong@ncl.ac.uk>
 Maintainer: Trinh Dong <trinh.dong@ncl.ac.uk>
@@ -13,14 +13,13 @@ Encoding: UTF-8
 LazyData: true
 Depends:
     R (>= 4.2.0),
+    data.table,
     lme4
 Imports:
     R6,
     methods,
     Rcpp (>= 0.12.0),
     RcppParallel (>= 5.0.1),
-    rstan (>= 2.18.1),
-    rstantools (>= 2.6.0),
     assertthat,
     matrixStats,
     cli,
@@ -48,16 +47,17 @@ Suggests:
     mirai,
     patchwork,
     rmarkdown,
+    StanHeaders (>= 2.18.0),
     testthat,
     devtools,
+    rstan (>= 2.18.1),
+    rstantools (>= 2.6.0),
     pkgdown
 LinkingTo: 
     BH (>= 1.66.0),
     Rcpp (>= 0.12.0),
     RcppEigen (>= 0.3.3.3.0),
-    RcppParallel (>= 5.0.1),
-    rstan (>= 2.18.1),
-    StanHeaders (>= 2.18.0)
+    RcppParallel (>= 5.0.1)
 VignetteBuilder: quarto
 SystemRequirements: 
     Quarto (>= 1.2),

@@ -1,10 +1,10 @@
-#' @name joinme_simulation
-#' @title Simulation for joinme
+#' @name JoiNMe_simulation
+#' @title Simulation for JoiNMe
 #'
 #' @importFrom stats rnorm rexp runif plogis rbeta rbinom rnbinom rpois rt integrate uniroot
 #'
 #' @description
-#' Simulator for the joinme joint model aligned with the v11 Stan semantics.
+#' Simulator for the JoiNMe joint model aligned with the v11 Stan semantics.
 #'
 #' Key features:
 #' - Multivariate longitudinal outcomes in long format with irregular times.
@@ -346,7 +346,7 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #' Simulate joint model data with formula-driven multistructure support
 #'
 #' @description
-#' Generalised simulator for `joinme` that mirrors the fitting syntax as closely as
+#' Generalised simulator for `JoiNMe` that mirrors the fitting syntax as closely as
 #' possible. The simulator supports:
 #' - multivariate outcomes via marker-level families,
 #' - multi-structure random effects from `formulaLong` (id, marker, marker-by-id),
@@ -1481,7 +1481,7 @@ simulate_joinme <- function(
           cli::cli_abort(c(
             x = "Simulation currently requires both {.arg x} and {.arg y} for penalised spline transforms.",
             i = "Use legacy plug-in mode in {.fn simulate_joinme} by supplying x/y pairs, or provide an explicit {.val ispline} transform instead.",
-            i = "Stan-estimated penalised splines without y are supported in {.fn joinme}, not in simulation."
+            i = "Stan-estimated penalised splines without y are supported in {.fn JoiNMe}, not in simulation."
           ))
         }
         spec <- .sim_make_penalised_ispline_transform(spec)
@@ -2779,7 +2779,7 @@ simulate_joinme <- function(
 
   # ---- Distributional parameters (family defaults + formulaDist overrides)
   family_by_row <- family_names[marker_index]
-  attr(dataLong, "joinme_family_by_row") <- family_by_row
+  attr(dataLong, "JoiNMe_family_by_row") <- family_by_row
 
   sigma_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "sigma", 1.0), numeric(1))
   nu_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "nu", 4.0), numeric(1))

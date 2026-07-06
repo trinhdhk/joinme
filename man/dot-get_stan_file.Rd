@@ -4,12 +4,14 @@
 \alias{.get_stan_file}
 \title{Resolve packaged/local Stan source file}
 \usage{
-.get_stan_file(program = c("joinme_fit", "joinme_dynpred"), threaded = FALSE)
+.get_stan_file(program = c("JoiNMe_fit", "JoiNMe_dynpred"), threaded = TRUE)
 }
 \arguments{
-\item{program}{One of "joinme_fit" or "joinme_dynpred".}
+\item{program}{One of "JoiNMe_fit" or "JoiNMe_dynpred".}
 
-\item{threaded}{Logical; whether to use the threading Stan twin.}
+\item{threaded}{Logical retained for compatibility. JoiNMe now always resolves
+the threaded Stan program and runs it serially when
+\code{threads_per_chain = 1}.}
 }
 \value{
 Absolute or relative path to an existing Stan source file.

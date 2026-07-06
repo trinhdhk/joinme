@@ -1,5 +1,5 @@
 test_that("stan cache key tracks include dependency content", {
-  tmp <- tempfile("joinme-stan-key-")
+  tmp <- tempfile("JoiNMe-stan-key-")
   dir.create(tmp, recursive = TRUE, showWarnings = FALSE)
   on.exit(unlink(tmp, recursive = TRUE, force = TRUE), add = TRUE)
   root_file <- file.path(tmp, "model.stan")
@@ -22,7 +22,7 @@ test_that("stan cache key tracks include dependency content", {
     "}"
   ), helper_file)
 
-  key1 <- joinme:::.stan_cache_key(root_file, cpp_options = list(stan_threads = TRUE))
+  key1 <- JoiNMe:::.stan_cache_key(root_file, cpp_options = list(stan_threads = TRUE))
 
   writeLines(c(
     "real f1(real x) {",
@@ -30,7 +30,7 @@ test_that("stan cache key tracks include dependency content", {
     "}"
   ), helper_file)
 
-  key2 <- joinme:::.stan_cache_key(root_file, cpp_options = list(stan_threads = TRUE))
+  key2 <- JoiNMe:::.stan_cache_key(root_file, cpp_options = list(stan_threads = TRUE))
 
   expect_true(nzchar(key1))
   expect_true(nzchar(key2))
@@ -38,7 +38,7 @@ test_that("stan cache key tracks include dependency content", {
 })
 
 test_that("stan cache key reflects cpp options", {
-  tmp <- tempfile("joinme-stan-key-cpp-")
+  tmp <- tempfile("JoiNMe-stan-key-cpp-")
   dir.create(tmp, recursive = TRUE, showWarnings = FALSE)
   on.exit(unlink(tmp, recursive = TRUE, force = TRUE), add = TRUE)
   root_file <- file.path(tmp, "model_simple.stan")
@@ -49,15 +49,15 @@ test_that("stan cache key reflects cpp options", {
     "model { y ~ normal(0, 1); }"
   ), root_file)
 
-  key_no_threads <- joinme:::.stan_cache_key(root_file, cpp_options = list(stan_threads = FALSE))
-  key_threads <- joinme:::.stan_cache_key(root_file, cpp_options = list(stan_threads = TRUE))
+  key_no_threads <- JoiNMe:::.stan_cache_key(root_file, cpp_options = list(stan_threads = FALSE))
+  key_threads <- JoiNMe:::.stan_cache_key(root_file, cpp_options = list(stan_threads = TRUE))
 
   expect_false(identical(key_no_threads, key_threads))
 })
 
 test_that("stan cache key is stable across different absolute root paths", {
-  tmp1 <- tempfile("joinme-stan-key-path-a-")
-  tmp2 <- tempfile("joinme-stan-key-path-b-")
+  tmp1 <- tempfile("JoiNMe-stan-key-path-a-")
+  tmp2 <- tempfile("JoiNMe-stan-key-path-b-")
   dir.create(tmp1, recursive = TRUE, showWarnings = FALSE)
   dir.create(tmp2, recursive = TRUE, showWarnings = FALSE)
   on.exit(unlink(tmp1, recursive = TRUE, force = TRUE), add = TRUE)
@@ -90,8 +90,8 @@ test_that("stan cache key is stable across different absolute root paths", {
   root1 <- make_tree(tmp1)
   root2 <- make_tree(tmp2)
 
-  key1 <- joinme:::.stan_cache_key(root1, cpp_options = list(stan_threads = TRUE))
-  key2 <- joinme:::.stan_cache_key(root2, cpp_options = list(stan_threads = TRUE))
+  key1 <- JoiNMe:::.stan_cache_key(root1, cpp_options = list(stan_threads = TRUE))
+  key2 <- JoiNMe:::.stan_cache_key(root2, cpp_options = list(stan_threads = TRUE))
 
   expect_equal(key1, key2)
 })

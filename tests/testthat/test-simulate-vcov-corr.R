@@ -78,9 +78,9 @@ test_that("vcov helper returns lower-triangular Cholesky-factor entries", {
   ), nrow = 2, byrow = TRUE)
 
   sd2 <- sqrt(sum(Li[2, ]^2))
-  expect_equal(joinme:::.assoc_corr_features_from_chol(Li), c(Li[2, 1] / sd2), tolerance = 1e-8)
-  expect_equal(joinme:::.assoc_vcov_features_from_chol(Li), c(Li[2, 1] / sd2, 0.7, sd2), tolerance = 1e-8)
-  expect_equal(joinme:::.assoc_vcov_features_from_chol(Li, diagonal_only = TRUE), c(0.7, sd2), tolerance = 1e-8)
+  expect_equal(JoiNMe:::.assoc_corr_features_from_chol(Li), c(Li[2, 1] / sd2), tolerance = 1e-8)
+  expect_equal(JoiNMe:::.assoc_vcov_features_from_chol(Li), c(Li[2, 1] / sd2, 0.7, sd2), tolerance = 1e-8)
+  expect_equal(JoiNMe:::.assoc_vcov_features_from_chol(Li, diagonal_only = TRUE), c(0.7, sd2), tolerance = 1e-8)
 })
 
 test_that("simulate_joinme vcov uses correlation-factor and SD features", {
@@ -202,10 +202,10 @@ test_that("simulate_joinme vcov uses effective time-scaled SD features", {
   raw <- sim$helpers$assoc_components_raw(1, 1.2)
   row_scale <- sim$truth$stan_fit$marker_id_row_scale_eff
   li_eff <- sweep(sim$truth$L_i[1, , ], 1L, row_scale, `*`)
-  expected <- joinme:::.assoc_vcov_features_from_chol(li_eff)
+  expected <- JoiNMe:::.assoc_vcov_features_from_chol(li_eff)
 
   expect_equal(raw$vcov_vals, expected, tolerance = 1e-10)
-  expect_gt(raw$vcov_vals[3], joinme:::.assoc_vcov_features_from_chol(sim$truth$L_i[1, , ])[3])
+  expect_gt(raw$vcov_vals[3], JoiNMe:::.assoc_vcov_features_from_chol(sim$truth$L_i[1, , ])[3])
 })
 
 test_that("simulate_joinme vcov respects diagonal-only marker-by-id independence under mirai", {

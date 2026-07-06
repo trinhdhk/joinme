@@ -32,7 +32,7 @@ NULL
 #' @param inv_link Optional one-sided formula `~ ...` or expression string using `x`
 #'   (e.g. `~ exp(x)`, `~ inv_logit(x)`, `~ probit(x)`).
 #'
-#' @return Object of class `"joinme_family_spec"`.
+#' @return Object of class `"JoiNMe_family_spec"`.
 #' @export
 jm_family <- function(name, link = NULL, inv_link = NULL) {
   .jm_family_spec(name = name, link = link, inv_link = inv_link)
@@ -70,7 +70,7 @@ jm_family <- function(name, link = NULL, inv_link = NULL) {
       link = link_name,
       inv_link = inv_link_bc
     ),
-    class = "joinme_family_spec"
+    class = "JoiNMe_family_spec"
   )
 }
 
@@ -238,7 +238,7 @@ jm_family <- function(name, link = NULL, inv_link = NULL) {
 
 #' @keywords internal
 .extract_family_and_link <- function(x) {
-  if (inherits(x, "joinme_family_spec")) {
+  if (inherits(x, "JoiNMe_family_spec")) {
     fam_code <- .parse_family(x$family)
     inv_link_bc <- x$inv_link
     if (is.null(inv_link_bc)) {
@@ -663,7 +663,7 @@ jm_family <- function(name, link = NULL, inv_link = NULL) {
   }
 }
 
-#' Build prior specification for joinme model
+#' Build prior specification for JoiNMe model
 #'
 #' @description
 #' Create prior specifications for fixed effects (beta), baseline hazard coefficients (alpha),

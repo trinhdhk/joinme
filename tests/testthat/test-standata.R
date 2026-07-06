@@ -324,7 +324,7 @@ test_that("functional vcov constants remain vector-shaped for Stan data", {
   expect_equal(sd$n_const_vcov, 1L)
   expect_equal(as.numeric(sd$const_data_vcov), 1)
 
-  sd_stan <- joinme:::.coerce_rstan_vectors(sd, c("const_data_vcov"))
+  sd_stan <- JoiNMe:::.coerce_rstan_vectors(sd, c("const_data_vcov"))
   expect_true(is.array(sd_stan$const_data_vcov))
   expect_equal(dim(sd_stan$const_data_vcov), 1)
   expect_equal(as.numeric(sd_stan$const_data_vcov), 1)

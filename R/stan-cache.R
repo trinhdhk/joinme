@@ -1,4 +1,4 @@
-#' @name joinme_stan_cache
+#' @name JoiNMe_stan_cache
 #' @title Stan Model Caching Helpers
 #'
 #' @description
@@ -81,14 +81,18 @@ NULL
 #' Resolve packaged/local Stan source file
 #'
 #' @param program One of "joinme_fit" or "joinme_dynpred".
-#' @param threaded Logical; whether to use the threading Stan twin.
+#' @param threaded Logical retained for compatibility. joinme now always uses
+#'   the threaded Stan program and runs it serially when
+#'   `threads_per_chain = 1`.
 #'
 #' @return Absolute or relative path to an existing Stan source file.
 #' @keywords internal
-.get_stan_file <- function(program = c("joinme_fit", "joinme_dynpred"), threaded = FALSE) {
+.get_stan_file <- function(program = c("joinme_fit", "joinme_dynpred"), threaded = TRUE) {
   program <- match.arg(program)
-  suffix <- if (isTRUE(threaded)) "_threading" else ""
-  file_name <- paste0(program, suffix, ".stan")
+  if (!isTRUE(threaded)) {
+    cli::cli_warn("Non-threaded Stan paths are deprecated; using the threaded Stan program instead.")
+  }
+  file_name <- paste0(program, "_threading.stan")
 
   stan_candidates <- c(
     system.file(file.path("stan", file_name), package = "joinme"),
@@ -219,7 +223,7 @@ NULL
   }
 
   payload <- c(
-    "joinme-stan-cache-v2",
+    "JoiNMe-stan-cache-v2",
     paste(dep_ids, unname(dep_md5), sep = "="),
     paste0("cpp:", cpp_sig)
   )
@@ -395,13 +399,8 @@ precompile_cmdstanr_models <- function(force_recompile = TRUE, cleanup = TRUE) {
 
   # Prepare the Stan file list in a deterministic order.
   stan_files <- c(
-    joinme_fit = system.file("stan/joinme_fit.stan", package = "joinme"),
     joinme_fit_threading = system.file(
       "stan/joinme_fit_threading.stan",
-      package = "joinme"
-    ),
-    joinme_dynpred = system.file(
-      "stan/joinme_dynpred.stan",
       package = "joinme"
     ),
     joinme_dynpred_threading = system.file(
@@ -420,7 +419,7 @@ precompile_cmdstanr_models <- function(force_recompile = TRUE, cleanup = TRUE) {
   # Clean-up old cached executables that match the naming pattern to prevent stale models. We can be aggressive here since the cache key includes file hashes, so old executables won't be reused anyway. This ensures that if the source files change, we won't accidentally use an old cached executable that doesn't match the new source.
   cache_dir <- .stan_cache_dir()
   if (cleanup) {
-    old_exes <- list.files(cache_dir, pattern = "^joinme_.*\\.(exe)?$", full.names = TRUE)
+    old_exes <- list.files(cache_dir, pattern = "^JoiNMe_.*\\.(exe)?$", full.names = TRUE)
     if (length(old_exes) > 0) {
       unlink(old_exes, force = TRUE)
     }
@@ -429,7 +428,7 @@ precompile_cmdstanr_models <- function(force_recompile = TRUE, cleanup = TRUE) {
   # Compile all models, enabling threading if requested.
   models <- lapply(stan_files, function(sf) {
     cat(sf, '')
-    cpp_opts <- list(stan_threads = grepl('threading', sf, fixed = TRUE))
+    cpp_opts <- list(stan_threads = TRUE)
     .get_cmdstan_model(
       stan_file = sf,
       cpp_options = cpp_opts,

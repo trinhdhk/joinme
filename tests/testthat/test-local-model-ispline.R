@@ -1,14 +1,14 @@
 library(testthat)
 
-test_that("joinme fits with ispline assoc", {
+test_that("JoiNMe fits with ispline assoc", {
   skip_on_cran()
-  if (!requireNamespace("joinme", quietly = TRUE)) skip("joinme not installed")
+  if (!requireNamespace("JoiNMe", quietly = TRUE)) skip("JoiNMe not installed")
   has_cmd <- requireNamespace("cmdstanr", quietly = TRUE)
   has_rstan <- requireNamespace("rstan", quietly = TRUE)
   if (!has_cmd && !has_rstan) skip("No Stan backend available")
 
   set.seed(123)
-  sim <- joinme::simulate_joinme(
+  sim <- JoiNMe::simulate_joinme(
     n_id = 20,
     families = c("gaussian", "gaussian"),
     n_obs_per_marker_per_id = 4,
@@ -32,7 +32,7 @@ test_that("joinme fits with ispline assoc", {
   if (engine == "cmdstanr") control$init <- 0
 
   fit <- tryCatch(
-    joinme::joinme(
+    JoiNMe::joinme(
       dataLong = sim$dataLong,
       dataEvent = sim$dataEvent,
       formulaLong = y ~ time + (1 + time || id) + (1 || marker),
@@ -44,7 +44,7 @@ test_that("joinme fits with ispline assoc", {
     error = function(e) skip(paste("fit failed:", conditionMessage(e)))
   )
 
-  expect_s3_class(fit, "JoinMeFit")
+  expect_s3_class(fit, "JoiNMeFit")
 
   # basic sanity: summary runs
   s <- tryCatch(summary(fit), error = function(e) NULL)

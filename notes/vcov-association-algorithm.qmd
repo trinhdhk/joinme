@@ -19,7 +19,7 @@ This note documents the exact `vcov` association algorithm currently used in:
 
 - simulation in `R/simulate.R`
 - fitting in Stan via `inst/stan/helper/transformed_parameters/fit_scaling_and_effects.stan`
-- the joint likelihood in `inst/stan/helper/functions/joinme_fit_partial.stanfunctions`
+- the joint likelihood in `inst/stan/helper/functions/JoiNMe_fit_partial.stanfunctions`
 
 The goal is to make the `vcov` association path auditable with the same variable names that appear in the code.
 
@@ -73,7 +73,7 @@ From `inst/stan/helper/transformed_parameters/fit_scaling_and_effects.stan`:
 
 ## Stan likelihood variables
 
-From `inst/stan/helper/functions/joinme_fit_partial.stanfunctions`:
+From `inst/stan/helper/functions/JoiNMe_fit_partial.stanfunctions`:
 
 - `vcov_terms_raw = eta_vcov_weighted_const(L_i[i], ...)`
 - `vcov_terms_tf = apply_transform_vector_by_component(vcov_terms_raw, ...)`
@@ -215,7 +215,7 @@ where `vcov_assoc` is a constant vector built from the scalar `vcov_assoc_scalar
 
 # Alignment Check: Simulation vs Stan
 
-| Stage | Simulation (`R/simulate.R`) | Stan fit (`joinme_fit_partial.stanfunctions`) |
+| Stage | Simulation (`R/simulate.R`) | Stan fit (`JoiNMe_fit_partial.stanfunctions`) |
 |---|---|---|
 | Raw source | `.assoc_vcov_features_from_chol(L_i)` | `eta_vcov_weighted_const(L_i[i], ...)` |
 | Transform timing | after raw extraction | after raw extraction |
@@ -346,7 +346,7 @@ sequenceDiagram
   participant TF as tf_funs$vcov[[m]]
   participant Haz as hazard_i
   participant StanTP as fit_scaling_and_effects.stan
-  participant StanLL as joinme_fit_partial.stanfunctions
+  participant StanLL as JoiNMe_fit_partial.stanfunctions
 
   Sim->>Chol: build L_i from alpha_cov, beta_cov, lambda_cov, z_cov
   Sim->>Chol: .assoc_vcov_features_from_chol(L_i)

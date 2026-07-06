@@ -15,8 +15,3 @@ utils::globalVariables(c(
   # Additional variables used in internal functions
   ".data", ".by", ".SD", ".", ":="
 ))
-
-
-# .onLoad <- function(libname, pkgname){
-  
-# }

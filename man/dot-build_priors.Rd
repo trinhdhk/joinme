@@ -2,7 +2,7 @@
 % Please edit documentation in R/family-utils.R
 \name{.build_priors}
 \alias{.build_priors}
-\title{Build prior specification for joinme model}
+\title{Build prior specification for JoiNMe model}
 \usage{
 .build_priors(
   beta_prior = NULL,

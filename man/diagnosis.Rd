@@ -2,12 +2,12 @@
 % Please edit documentation in R/diagnosis.R
 \name{diagnosis}
 \alias{diagnosis}
-\title{Diagnostic summary for joinme objects}
+\title{Diagnostic summary for JoiNMe objects}
 \usage{
 diagnosis(object, ...)
 }
 \arguments{
-\item{object}{A joinme object.}
+\item{object}{A JoiNMe object.}
 
 \item{...}{Additional arguments passed to class-specific methods.}
 }
@@ -15,10 +15,10 @@ diagnosis(object, ...)
 A data frame with \code{metric} and \code{value} columns.
 }
 \description{
-Returns a compact diagnostics table for fitted (\code{JoinMeFit}) and dynamic
-prediction (\code{JoinMeDynPred}) objects.
+Returns a compact diagnostics table for fitted (\code{JoiNMeFit}) and dynamic
+prediction (\code{JoiNMeDynPred}) objects.
 
-For \code{JoinMeFit}, diagnostics summarise the Stan sampler run. For
-\code{JoinMeDynPred}, diagnostics summarise posterior-draw quality for predicted
-quantities and are aligned to the same metric schema used for \code{JoinMeFit}.
+For \code{JoiNMeFit}, diagnostics summarise the Stan sampler run. For
+\code{JoiNMeDynPred}, diagnostics summarise posterior-draw quality for predicted
+quantities and are aligned to the same metric schema used for \code{JoiNMeFit}.
 }

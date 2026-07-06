@@ -1,10 +1,10 @@
-#' Fit joinme model via cmdstanr or rstan
+#' Fit JoiNMe model via cmdstanr or rstan
 #'
 #' @importFrom stats setNames
 #' @importFrom utils modifyList
 #'
 #' @description
-#' Fits the joinme Stan model using cmdstanr (default) or rstan. The engine can be
+#' Fits the JoiNMe Stan model using cmdstanr (default) or rstan. The engine can be
 #' set globally via options(stan_preferred_engine = "cmdstanr"|"rstan") or via
 #' control$engine.
 #' following the notebook, and supports association transformations and time-internal
@@ -38,7 +38,7 @@
 #' without additional normalisation, to scale the corresponding association
 #' contribution.
 #'
-#' The returned `JoinMeFit` object stores a compact association plotting bundle
+#' The returned `JoiNMeFit` object stores a compact association plotting bundle
 #' containing only the posterior quantities needed to draw association curves
 #' (`alpha_*`, marker weights, spline coefficients, and cached model-implied raw
 #' support ranges). This keeps association plotting usable after serialization
@@ -108,7 +108,7 @@
 #'   `degree`); `x`/`y`/`lambda` are not used.
 #' - `type = "ispline_penalised"` (alias: `"ispline_penalized"`): provide
 #'   spline structure through `knots` (or `n_knots`) and smoothness penalty `lambda`.
-#'   - If `y` is supplied, `joinme` first fits the monotone spline to training
+#'   - If `y` is supplied, `JoiNMe` first fits the monotone spline to training
 #'     pairs `(x, y)` in R and passes fixed coefficients to Stan. These plug-in
 #'     coefficients use the same anchored convention as the Stan-estimated path:
 #'     increasing splines run from `0` to `1`, while decreasing splines run from
@@ -190,9 +190,14 @@
 #'   - cmdstanr::model$sample() arguments (e.g., chains, parallel_chains,
 #'     iter_warmup, iter_sampling, seed, refresh, adapt_delta, max_treedepth).
 #'   - engine: "cmdstanr" or "rstan". Defaults to options(stan_preferred_engine).
-#'   - threads_per_chain: integer; if > 1 uses `joinme_fit_threading.stan`.
-#'     For engine = "rstan", threading uses options(stan.thread = threads_per_chain).
-#'   - grainsize: integer; reduce_sum grainsize for threading (default max(1, min(n_cores, ceiling(n_id/(4*threads_per_chain*chains))))).
+#'   - threads_per_chain: integer; the threaded Stan program is always used.
+#'     `threads_per_chain = 1` keeps execution serial while preserving the
+#'     thread-capable kernel. For engine = "rstan", threading uses
+#'     options(stan.thread = threads_per_chain).
+#'   - grainsize: integer; reduce_sum grainsize for the threaded kernel.
+#'     Defaults to the full subject count when `threads_per_chain = 1`, and to
+#'     `max(1, min(n_cores, ceiling(n_id/(4*threads_per_chain*chains))))`
+#'     otherwise.
 #'   - force_recompile: logical; recompile the Stan model if needed.
 #'   - quadrature_nodes: optional positive integer total node target for survival
 #'     integration. Allowed values are exactly 7/15/31/41/51/61. Only the node
@@ -239,7 +244,7 @@
 # File overview:
 # - Validate inputs and build Stan data.
 # - Resolve threading/engine settings and select the Stan program.
-# - Fit with cmdstanr/rstan and wrap results in a JoinMeFit object.
+# - Fit with cmdstanr/rstan and wrap results in a JoiNMeFit object.
 joinme <- function(
   formulaLong,
   dataLong,
@@ -333,11 +338,15 @@ joinme <- function(
   grainsize <- control$grainsize
   if (is.null(grainsize)) {
     n_id <- sd$n_id %||% 1L
-    n_chains <- control$parallel_chains %||% control$chains %||% 4L
-    denom <- 4L * as.integer(threads_per_chain) * as.integer(n_chains)
-    denom <- max(1L, denom)
-    grainsize <- max(1L, as.integer(ceiling(n_id / denom)))
-    grainsize <- min(as.integer(n_cores), grainsize)
+    if (threads_per_chain <= 1L) {
+      grainsize <- as.integer(n_id)
+    } else {
+      n_chains <- control$parallel_chains %||% control$chains %||% 4L
+      denom <- 4L * as.integer(threads_per_chain) * as.integer(n_chains)
+      denom <- max(1L, denom)
+      grainsize <- max(1L, as.integer(ceiling(n_id / denom)))
+      grainsize <- min(as.integer(n_cores), grainsize)
+    }
   }
   if (!is.numeric(grainsize) || length(grainsize) != 1) {
     cli::cli_abort(c(
@@ -354,10 +363,9 @@ joinme <- function(
   }
 
   stan_file <- .get_stan_file(
-    program = "joinme_fit",
-    threaded = threads_per_chain > 1
+    program = "JoiNMe_fit",
+    threaded = TRUE
   )
-  use_threading <- threads_per_chain > 1
 
   engine <- .resolve_stan_engine(control$engine)
   if (engine == "rstan") {
@@ -366,7 +374,7 @@ joinme <- function(
     on.exit(options(stan.thread = old_stan_thread), add = TRUE)
   }
 
-  cpp_opts <- if (use_threading) list(stan_threads = TRUE) else NULL
+  cpp_opts <- list(stan_threads = TRUE)
   if (engine == "cmdstanr") {
     mod <- .get_cmdstan_model(
       stan_file,
@@ -377,6 +385,12 @@ joinme <- function(
     mod <- .get_rstan_model(
       stan_file
     )
+  }
+  if (engine == "cmdstanr" && !.cmdstan_threads_enabled(mod)) {
+    cli::cli_abort(c(
+      x = "The CmdStan model is not compiled with {.code stan_threads = TRUE}.",
+      i = "Retry with {.code control = list(force_recompile = TRUE)} or call {.fn precompile_cmdstanr_models}."
+    ))
   }
 
   # Remove non-Stan fields only
@@ -399,27 +413,25 @@ joinme <- function(
   sd_stan$dist_re_terms <- NULL
   sd_stan$dist_formulas <- NULL
 
-  if (use_threading) {
-    if (is.null(sd_stan$id) || is.null(sd_stan$n_id)) {
-      cli::cli_abort(c(
-        x = "Threading requires {.arg id} and {.arg n_id} in Stan data.",
-        i = "Check the standata builder output."
-      ))
-    }
-    id_vec <- sd_stan$id
-    idx <- split(seq_along(id_vec), id_vec)
-    id_start <- vapply(idx, min, integer(1))
-    id_end <- vapply(idx, max, integer(1))
-    if (length(id_start) != sd_stan$n_id) {
-      cli::cli_abort(c(
-        x = "Threading requires contiguous ids from 1..n_id.",
-        i = "Check the id mapping in standata."
-      ))
-    }
-    sd_stan$id_start <- as.integer(id_start)
-    sd_stan$id_end <- as.integer(id_end)
-    sd_stan$grainsize <- grainsize
+  if (is.null(sd_stan$id) || is.null(sd_stan$n_id)) {
+    cli::cli_abort(c(
+      x = "Threaded Stan execution requires {.arg id} and {.arg n_id} in Stan data.",
+      i = "Check the standata builder output."
+    ))
   }
+  id_vec <- sd_stan$id
+  idx <- split(seq_along(id_vec), id_vec)
+  id_start <- vapply(idx, min, integer(1))
+  id_end <- vapply(idx, max, integer(1))
+  if (length(id_start) != sd_stan$n_id) {
+    cli::cli_abort(c(
+      x = "Threaded Stan execution requires contiguous ids from 1..n_id.",
+      i = "Check the id mapping in standata."
+    ))
+  }
+  sd_stan$id_start <- as.integer(id_start)
+  sd_stan$id_end <- as.integer(id_end)
+  sd_stan$grainsize <- grainsize
 
   # Ensure time index arrays are preserved for cmdstanr JSON (avoid auto-unbox)
   sd_stan <- .coerce_rstan_time_indices(sd_stan)
@@ -495,7 +507,7 @@ joinme <- function(
   chains_val <- args$parallel_chains %||% args$chains %||% defaults$parallel_chains
   args$parallel_chains <- chains_val
   args$chains <- chains_val
-  if (use_threading) args$threads_per_chain <- threads_per_chain
+  args$threads_per_chain <- threads_per_chain
   args$data <- sd_stan
   args <- args[!vapply(args, is.null, logical(1))]
 
@@ -588,7 +600,7 @@ joinme <- function(
   )
   cfg$engine <- engine
 
-  fit_obj <- JoinMeFit$new(
+  fit_obj <- JoiNMeFit$new(
     fit = fit,
     stan_data = sd,
     formulaLong = formulaLong,
@@ -604,7 +616,7 @@ joinme <- function(
   # Store a compact, self-contained plotting bundle so association plots remain
   # usable even when cmdstanr CSV outputs are no longer available.
   fit_obj$config$association_plot_payload <- tryCatch(
-    .build_joinmefit_association_plot_payload(
+    .build_JoiNMefit_association_plot_payload(
       fit = fit,
       stan_data = sd,
       config = fit_obj$config,

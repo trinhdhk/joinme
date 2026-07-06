@@ -2,18 +2,18 @@
 % Please edit documentation in R/methods.R
 \name{posterior_summary}
 \alias{posterior_summary}
-\alias{posterior_summary.JoinMeFit}
-\alias{posterior_summary.JoinMeDynPred}
-\title{Posterior summary alias for joinme objects}
+\alias{posterior_summary.JoiNMeFit}
+\alias{posterior_summary.JoiNMeDynPred}
+\title{Posterior summary alias for JoiNMe objects}
 \usage{
 posterior_summary(object, ...)
 
-\method{posterior_summary}{JoinMeFit}(object, ...)
+\method{posterior_summary}{JoiNMeFit}(object, ...)
 
-\method{posterior_summary}{JoinMeDynPred}(object, ...)
+\method{posterior_summary}{JoiNMeDynPred}(object, ...)
 }
 \arguments{
-\item{object}{A joinme object.}
+\item{object}{A JoiNMe object.}
 
 \item{...}{Additional arguments forwarded to \code{\link[=summary]{summary()}}.}
 }

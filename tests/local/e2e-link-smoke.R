@@ -71,7 +71,7 @@ pred <- predict(
   seed = 2602
 )
 
-stopifnot(inherits(pred, "JoinMeDynPred"))
+stopifnot(inherits(pred, "JoiNMeDynPred"))
 stopifnot(all(c("epred", "linpred", "predict") %in% pred$metadata$scales))
 
 if (!dir.exists("tests/local")) dir.create("tests/local", recursive = TRUE)

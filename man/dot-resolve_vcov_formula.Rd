@@ -4,7 +4,7 @@
 \alias{.resolve_vcov_formula}
 \title{Resolve the covariance-regression formula}
 \usage{
-.resolve_vcov_formula(formulaVCov = NULL, default = ~1, context = "joinme")
+.resolve_vcov_formula(formulaVCov = NULL, default = ~1, context = "JoiNMe")
 }
 \arguments{
 \item{formulaVCov}{Covariance-regression formula.}

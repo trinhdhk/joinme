@@ -1,7 +1,7 @@
 # Transform Specification Helper
 #
 # Provides utilities to build and manage transformation specifications
-# for the joinme Stan model's association term.
+# for the JoiNMe Stan model's association term.
 # File overview:
 # - Map user transform specs into Stan-friendly bytecode/spline data.
 # - Validate functional bytecode and spline shapes before sampling.
@@ -127,7 +127,7 @@
   if (any(values < 0 | values > 1)) {
     cli::cli_abort(c(
       x = "{.arg {arg_name}} must lie on the expit scale for expit-based spline transforms.",
-      i = "Supply values in [0, 1]; {.fn joinme} applies {.fn plogis} only to the raw association feature being transformed."
+      i = "Supply values in [0, 1]; {.fn JoiNMe} applies {.fn plogis} only to the raw association feature being transformed."
     ))
   }
   values
@@ -215,7 +215,7 @@
 #' Transform Specification Helper
 #'
 #' Provides utilities to build and manage transformation specifications
-#' for the joinme Stan model's association term.
+#' for the JoiNMe Stan model's association term.
 #'
 #' @description
 #' Transform can be specified in four modes:
@@ -249,7 +249,7 @@
 #'     - functional: expr (quosure, formula, quoted expression, or string)
 #'     - ispline: knots (vector), coeff (vector), degree (int)
 #'     - ispline_penalised: knots or n_knots, degree, lambda, optional x, optional y, optional weights
-#'       * if y is supplied, joinme fits the monotone spline to the training pairs (x, y) in R
+#'       * if y is supplied, JoiNMe fits the monotone spline to the training pairs (x, y) in R
 #'         using the same anchored endpoint convention as the Stan-estimated path
 #'         (first coefficient = 0, last coefficient = 1)
 #'       * if y is omitted, Stan estimates the monotone spline coefficients directly and lambda controls smoothness
@@ -470,7 +470,7 @@ build_standata_transforms <- function(
   return(standata)
 }
 
-##' @keywords internal
+#' @keywords internal
 .resolve_transform_term <- function(term_name) {
   switch(term_name,
     cv_total = list(mode_suffix = "cv_tot", short_suffix = "cv"),
@@ -490,14 +490,14 @@ build_standata_transforms <- function(
   )
 }
 
-##' Validate Transformation Specifications
-##'
-##' Check functional bytecode integrity and spline coefficient shapes before sampling.
-##'
-##' @param standata Prepared standata list with transformation entries
-##' @return TRUE if valid; stops with error message if invalid
-##'
-##' @keywords internal
+#' Validate Transformation Specifications
+#'
+#' Check functional bytecode integrity and spline coefficient shapes before sampling.
+#'
+#' @param standata Prepared standata list with transformation entries
+#' @return TRUE if valid; stops with error message if invalid
+#'
+#' @keywords internal
 validate_transforms <- function(standata) {
   term_map <- list(
     cv = list(mode_suffix = "cv_tot", short_suffix = "cv"),
@@ -518,7 +518,7 @@ validate_transforms <- function(standata) {
       # Functional bytecode validation
       functional_ops <- standata[[paste0("functional_ops_", short_suffix)]]
       const_data <- standata[[paste0("const_data_", short_suffix)]]
-      verify_opcodes(functional_ops, const_data)
+      verify_bytecode(functional_ops, const_data)
     } else if (mode %in% c(2, 3, 4)) {
       # Spline validation
       knots <- standata[[paste0("knots_", short_suffix)]]
@@ -560,118 +560,118 @@ validate_transforms <- function(standata) {
   return(TRUE)
 }
 
-##' Example: Build Transform Specification from Formula String
-##'
-##' Helper function to construct user-friendly transform specifications
-##' for the association term.
-##'
-##' @export
-##'
-##' @examples
-##' # Example 1: Functional transformation (bytecode-backed)
-##' spec_cv <- list(
-##'   type = "functional",
-##'   expr = ~ (log(sqrt(x + 1/inv_logit(3*x - 3))))^2
-##' )
-##'
-##' # Example 2: Piecewise-linear
-##' spec_cs <- list(
-##'   type = "pwlin",
-##'   x = c(-2, -1, 0, 1, 2),
-##'   y = c(0.1, 0.3, 1.0, 0.3, 0.1)  # smooth bump
-##' )
-##'
-##' # Example 3: I-spline (monotonic)
-##' # - knots define basis locations (first/last are boundary knots)
-##' # - coeff defines the monotone shape directly
-##' spec_corr <- list(
-##'   type = "ispline",
-##'   knots = c(-1, 0, 1),
-##'   coeff = c(0, 0.5, 1, 1.2, 1.5),
-##'   degree = 3
-##' )
-##'
-##' # Example 4: Penalised monotone I-spline (fit in R)
-##' # - x is the input scale of the raw association feature
-##' # - y is the desired transformed output at each x
-##' # - lambda controls smoothness (higher = smoother)
-##' spec_corr_pen <- list(
-##'   type = "ispline_penalised",
-##'   x = seq(-2, 2, length.out = 50),
-##'   y = exp(seq(-2, 2, length.out = 50)),
-##'   n_knots = 6,
-##'   degree = 3,
-##'   lambda = 1.0,
-##'   direction = "increasing"
-##' )
-##'
-##' # Example 5: Penalised monotone I-spline (Stan-estimated coefficients)
-##' # - omit y so Stan learns the monotone shape directly
-##' # - if knots are omitted, n_knots = 6 and x quantiles define them
-##' spec_corr_pen_stan <- list(
-##'   type = "ispline_penalised",
-##'   x = seq(-2, 2, length.out = 50),
-##'   n_knots = 6,
-##'   degree = 3,
-##'   lambda = 1.0
-##' )
-##'
-##' # Example 6: Penalised monotone I-spline on expit(x)
-##' spec_corr_expit <- list(
-##'   type = "ispline_expit_penalised",
-##'   x = seq(0.02, 0.98, length.out = 50),
-##'   y = seq(0.02, 0.98, length.out = 50)^0.75,
-##'   n_knots = 6,
-##'   degree = 3,
-##'   lambda = 1.0,
-##'   direction = "increasing"
-##' )
-##'
-##' # Combine and build standata
-##' transforms <- joinme_tf(
-##'   cv_total = spec_cv,
-##'   cs_total = spec_cs,
-##'   corr = spec_corr
-##' )
-##' standata_tf <- build_standata_transforms(transforms)
+#' Example: Build Transform Specification from Formula String
+#'
+#' Helper function to construct user-friendly transform specifications
+#' for the association term.
+#'
+#' @export
+#'
+#' @examples
+#' # Example 1: Functional transformation (bytecode-backed)
+#' spec_cv <- list(
+#'   type = "functional",
+#'   expr = ~ (log(sqrt(x + 1/inv_logit(3*x - 3))))^2
+#' )
+#'
+#' # Example 2: Piecewise-linear
+#' spec_cs <- list(
+#'   type = "pwlin",
+#'   x = c(-2, -1, 0, 1, 2),
+#'   y = c(0.1, 0.3, 1.0, 0.3, 0.1)  # smooth bump
+#' )
+#'
+#' # Example 3: I-spline (monotonic)
+#' # - knots define basis locations (first/last are boundary knots)
+#' # - coeff defines the monotone shape directly
+#' spec_corr <- list(
+#'   type = "ispline",
+#'   knots = c(-1, 0, 1),
+#'   coeff = c(0, 0.5, 1, 1.2, 1.5),
+#'   degree = 3
+#' )
+#'
+#' # Example 4: Penalised monotone I-spline (fit in R)
+#' # - x is the input scale of the raw association feature
+#' # - y is the desired transformed output at each x
+#' # - lambda controls smoothness (higher = smoother)
+#' spec_corr_pen <- list(
+#'   type = "ispline_penalised",
+#'   x = seq(-2, 2, length.out = 50),
+#'   y = exp(seq(-2, 2, length.out = 50)),
+#'   n_knots = 6,
+#'   degree = 3,
+#'   lambda = 1.0,
+#'   direction = "increasing"
+#' )
+#'
+#' # Example 5: Penalised monotone I-spline (Stan-estimated coefficients)
+#' # - omit y so Stan learns the monotone shape directly
+#' # - if knots are omitted, n_knots = 6 and x quantiles define them
+#' spec_corr_pen_stan <- list(
+#'   type = "ispline_penalised",
+#'   x = seq(-2, 2, length.out = 50),
+#'   n_knots = 6,
+#'   degree = 3,
+#'   lambda = 1.0
+#' )
+#'
+#' # Example 6: Penalised monotone I-spline on expit(x)
+#' spec_corr_expit <- list(
+#'   type = "ispline_expit_penalised",
+#'   x = seq(0.02, 0.98, length.out = 50),
+#'   y = seq(0.02, 0.98, length.out = 50)^0.75,
+#'   n_knots = 6,
+#'   degree = 3,
+#'   lambda = 1.0,
+#'   direction = "increasing"
+#' )
+#'
+#' # Combine and build standata
+#' transforms <- joinme_tf(
+#'   cv_total = spec_cv,
+#'   cs_total = spec_cs,
+#'   corr = spec_corr
+#' )
+#' standata_tf <- build_standata_transforms(transforms)
 example_transform_spec <- function() {
   cat("See docstring for examples\n")
 }
 
-##' Penalised Monotone I-spline Transform Spec
-##'
-##' @description
-##' Fits a monotone I-spline transformation with a smoothness penalty and
-##' returns a transform specification compatible with `build_standata_transforms()`.
-##'
-##' This helper is the legacy plug-in constructor for `type = "ispline_penalised"`.
-##' Its defaults are `n_knots = 6`, `degree = 3`, `lambda = 1.0`,
-##' `weights = NULL` (equal weights), and `diff_order = 2`.
-##' Returned coefficients follow the same anchored convention as the Stan-
-##' estimated path: increasing splines run from `0` to `1`, decreasing splines
-##' run from `1` to `0`, and interior coefficients stay monotone in the chosen
-##' direction.
-##' Example:
-##' `penalised_ispline_transform(x = seq(-2, 2, length.out = 50), y = exp(seq(-2, 2, length.out = 50)))`
-##'
-##' @param x Numeric vector of input values on the raw feature scale to transform.
-##' @param y Numeric vector of target transformed values at `x` (same length as `x`).
-##' @param knots Optional numeric vector of knots (including boundary knots).
-##' @param n_knots Integer. If knots are not provided, number of knots to use
-##'   (including boundary knots). Default 6.
-##' @param degree Integer spline degree (default 3).
-##' @param lambda Non-negative smoothness penalty weight (default 1.0).
-##'   Larger values produce smoother fitted transforms; smaller values allow
-##'   more local curvature.
-##' @param direction Monotone direction. Accepted values are `"increasing"`
-##'   and `"decreasing"`. When omitted, the direction is inferred from the
-##'   supplied `(x, y)` pairs.
-##' @param weights Optional non-negative weights (same length as x).
-##' @param diff_order Integer difference order for penalty (default 2).
-##'
-##' @return A list suitable for `build_standata_transforms()`.
-##'
-##' @export
+#' Penalised Monotone I-spline Transform Spec
+#'
+#' @description
+#' Fits a monotone I-spline transformation with a smoothness penalty and
+#' returns a transform specification compatible with `build_standata_transforms()`.
+#'
+#' This helper is the legacy plug-in constructor for `type = "ispline_penalised"`.
+#' Its defaults are `n_knots = 6`, `degree = 3`, `lambda = 1.0`,
+#' `weights = NULL` (equal weights), and `diff_order = 2`.
+#' Returned coefficients follow the same anchored convention as the Stan-
+#' estimated path: increasing splines run from `0` to `1`, decreasing splines
+#' run from `1` to `0`, and interior coefficients stay monotone in the chosen
+#' direction.
+#' Example:
+#' `penalised_ispline_transform(x = seq(-2, 2, length.out = 50), y = exp(seq(-2, 2, length.out = 50)))`
+#'
+#' @param x Numeric vector of input values on the raw feature scale to transform.
+#' @param y Numeric vector of target transformed values at `x` (same length as `x`).
+#' @param knots Optional numeric vector of knots (including boundary knots).
+#' @param n_knots Integer. If knots are not provided, number of knots to use
+#'   (including boundary knots). Default 6.
+#' @param degree Integer spline degree (default 3).
+#' @param lambda Non-negative smoothness penalty weight (default 1.0).
+#'   Larger values produce smoother fitted transforms; smaller values allow
+#'   more local curvature.
+#' @param direction Monotone direction. Accepted values are `"increasing"`
+#'   and `"decreasing"`. When omitted, the direction is inferred from the
+#'   supplied `(x, y)` pairs.
+#' @param weights Optional non-negative weights (same length as x).
+#' @param diff_order Integer difference order for penalty (default 2).
+#'
+#' @return A list suitable for `build_standata_transforms()`.
+#'
+#' @export
 penalised_ispline_transform <- function(
   x,
   y,
@@ -698,31 +698,31 @@ penalised_ispline_transform <- function(
   .make_penalised_ispline_transform(spec)
 }
 
-##' @keywords internal
-##' @rdname penalised_ispline_transform
-##' @export
+#' @keywords internal
+#' @rdname penalised_ispline_transform
+#' @export
 # American alias for `penalised_ispline_transform()`.
 penalized_ispline_transform <- function(...) {
   penalised_ispline_transform(...)
 }
 
-##' Build Stan-estimated penalised I-spline specification
-##'
-##' @description
-##' Construct the standata payload for a penalised I-spline whose coefficients
-##' will be estimated inside Stan. This path keeps the knot sequence fixed while
-##' initializing a monotone coefficient vector and the associated penalty
-##' metadata.
-##'
-##' @param spec Named list describing the transform. Accepted fields include
-##'   `type`, `degree`, `lambda`, `direction`, `knots`, `n_knots`, `x`, and
-##'   `n_coeff`.
-##'   For expit-domain variants, any supplied `x` or `knots` values must already
-##'   lie in `[0, 1]`.
-##'
-##' @return A canonicalised transform spec list suitable for
-##'   `build_standata_transforms()`.
-##' @keywords internal
+#' Build Stan-estimated penalised I-spline specification
+#'
+#' @description
+#' Construct the standata payload for a penalised I-spline whose coefficients
+#' will be estimated inside Stan. This path keeps the knot sequence fixed while
+#' initializing a monotone coefficient vector and the associated penalty
+#' metadata.
+#'
+#' @param spec Named list describing the transform. Accepted fields include
+#'   `type`, `degree`, `lambda`, `direction`, `knots`, `n_knots`, `x`, and
+#'   `n_coeff`.
+#'   For expit-domain variants, any supplied `x` or `knots` values must already
+#'   lie in `[0, 1]`.
+#'
+#' @return A canonicalised transform spec list suitable for
+#'   `build_standata_transforms()`.
+#' @keywords internal
 .make_stan_penalised_ispline_transform <- function(spec) {
   degree <- as.integer(spec$degree %||% 3L)
   if (degree < 1L) {
@@ -801,21 +801,21 @@ penalized_ispline_transform <- function(...) {
   )
 }
 
-##' Fit penalised I-spline coefficients in R
-##'
-##' @description
-##' Fit a monotone penalised I-spline to training pairs `(x, y)` in R and return
-##' the fixed-knot, fixed-coefficient specification that Stan later evaluates at
-##' runtime. This is the plug-in path used when `y` is supplied.
-##'
-##' @param spec Named list describing the transform. Accepted fields include
-##'   `type`, `x`, `y`, `knots`, `n_knots`, `degree`, `lambda`, `direction`,
-##'   `weights`, and `diff_order`. For expit-domain variants, any supplied `x`
-##'   or `knots` values
-##'   must already lie in `[0, 1]`.
-##'
-##' @return A canonicalised fixed I-spline transform spec list.
-##' @keywords internal
+#' Fit penalised I-spline coefficients in R
+#'
+#' @description
+#' Fit a monotone penalised I-spline to training pairs `(x, y)` in R and return
+#' the fixed-knot, fixed-coefficient specification that Stan later evaluates at
+#' runtime. This is the plug-in path used when `y` is supplied.
+#'
+#' @param spec Named list describing the transform. Accepted fields include
+#'   `type`, `x`, `y`, `knots`, `n_knots`, `degree`, `lambda`, `direction`,
+#'   `weights`, and `diff_order`. For expit-domain variants, any supplied `x`
+#'   or `knots` values
+#'   must already lie in `[0, 1]`.
+#'
+#' @return A canonicalised fixed I-spline transform spec list.
+#' @keywords internal
 .make_penalised_ispline_transform <- function(spec) {
   # Validate and coerce input pairs for monotone spline fitting
   if (is.null(spec$x) || is.null(spec$y)) {
@@ -998,12 +998,12 @@ penalized_ispline_transform <- function(...) {
   )
 }
 
-##' Default Backward-Compatible Transforms
-##'
-##' If no transforms specified, create identity specs so existing models
-##' continue to work unchanged.
-##'
-##' @keywords internal
+#' Default Backward-Compatible Transforms
+#'
+#' If no transforms specified, create identity specs so existing models
+#' continue to work unchanged.
+#'
+#' @keywords internal
 default_identity_transforms <- function() {
   list(
     cv_tot = list(type = "identity"),

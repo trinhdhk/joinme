@@ -28,8 +28,8 @@ test_that("all", {
     control = list(
       # engine = "rstan",
       parallel_chains = 2,
-      iter_warmup = 100,
-      iter_sampling = 100,
+      iter_warmup = 1000,
+      iter_sampling = 1000,
       refresh = 0,
       adapt_delta = 0.78,
       max_treedepth = 12,
@@ -37,11 +37,11 @@ test_that("all", {
     )
   )
 
-  expect_s3_class(fit, "JoinMeFit")
+  expect_s3_class(fit, "JoiNMeFit")
   sum_obj <- summary(fit)
   expect_true(!is.null(sum_obj$tables))
 
-  pred <- rstantools::posterior_predict(
+  pred <- posterior_predict(
     fit,
     newdataLong = sim$dataLong,
     newdataEvent = sim$dataEvent,
@@ -50,13 +50,13 @@ test_that("all", {
     control = list(
       n_samples = 20,
       chains = 1,
-      iter_warmup = 10,
-      iter_sampling = 10,
+      iter_warmup = 500,
+      iter_sampling = 500,
       refresh = 0
     )
   )
 
-  expect_s3_class(pred, "JoinMeDynPred")
+  expect_s3_class(pred, "JoiNMeDynPred")
   p <- plot(pred, type = c("longitudinal", "survival"), combined = FALSE)
   expect_true(inherits(p, "ggplot") || is.list(p))
 })

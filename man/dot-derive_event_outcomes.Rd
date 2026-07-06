@@ -4,7 +4,7 @@
 \alias{.derive_event_outcomes}
 \title{Decode event status into event indicator and cause/type index}
 \usage{
-.derive_event_outcomes(status_raw, context = "joinme")
+.derive_event_outcomes(status_raw, context = "JoiNMe")
 }
 \arguments{
 \item{status_raw}{Raw event-status vector.}

@@ -10,7 +10,7 @@
 \item{term_key}{Association channel name. Supported values are \code{"corr"} and
 \code{"vcov"}.}
 
-\item{sd}{Stan-data list stored in a \code{JoinMeFit} object.}
+\item{sd}{Stan-data list stored in a \code{JoiNMeFit} object.}
 
 \item{n_components}{Optional expected number of components. When supplied,
 the output is truncated to this length.}

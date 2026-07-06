@@ -21,7 +21,7 @@ A data frame with columns \code{term}, \code{Estimate}, \code{Est.Error}, \code{
 \description{
 Derived association effects do not necessarily exist as named Stan variables.
 This helper converts an iteration x chain x term array into the same summary
-schema used elsewhere in joinme: posterior mean, posterior standard
+schema used elsewhere in JoiNMe: posterior mean, posterior standard
 deviation, central 95\% interval, split-chain R-hat, and bulk/tail effective
 sample sizes.
 }

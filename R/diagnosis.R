@@ -1,4 +1,4 @@
-#' @name joinme_diagnosis
+#' @name JoiNMe_diagnosis
 #' @title Model Diagnosis
 #'
 #' @description
@@ -13,28 +13,28 @@ NULL
 
 # ---- diagnosis generic ---------------------------------------------------
 
-#' Diagnostic summary for joinme objects
+#' Diagnostic summary for JoiNMe objects
 #'
 #' @description
-#' Returns diagnostic summaries for fitted (`JoinMeFit`) and dynamic
-#' prediction (`JoinMeDynPred`) objects.
+#' Returns diagnostic summaries for fitted (`JoiNMeFit`) and dynamic
+#' prediction (`JoiNMeDynPred`) objects.
 #'
-#' For `JoinMeFit`, diagnostics include both an overall summary table and a
+#' For `JoiNMeFit`, diagnostics include both an overall summary table and a
 #' parameter-level diagnostics table built from the same cached posterior
-#' summaries used by [summary.JoinMeFit()]. This avoids the slower backend-wide
+#' summaries used by [summary.JoiNMeFit()]. This avoids the slower backend-wide
 #' diagnostic pass and keeps the reported metrics aligned with the summary
 #' sections users already inspect.
 #'
-#' For `JoinMeDynPred`, diagnostics summarise posterior-draw quality for
+#' For `JoiNMeDynPred`, diagnostics summarise posterior-draw quality for
 #' predicted quantities and are aligned to the same metric schema used for
-#' `JoinMeFit`.
+#' `JoiNMeFit`.
 #'
-#' @param object A joinme object.
+#' @param object A JoiNMe object.
 #' @param ... Additional arguments passed to class-specific methods.
 #'
 #' @return
-#' For `JoinMeFit`, a `joinme_diagnosis` object with components `summary` and
-#' `by_parameter`. For `JoinMeDynPred`, a data frame with `metric` and `value`
+#' For `JoiNMeFit`, a `JoiNMe_diagnosis` object with components `summary` and
+#' `by_parameter`. For `JoiNMeDynPred`, a data frame with `metric` and `value`
 #' columns.
 #' @export
 diagnosis <- function(object, ...) {
@@ -140,8 +140,8 @@ diagnosis <- function(object, ...) {
 }
 
 #' @export
-diagnosis.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, include_corr = TRUE, ...) {
-	assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
+diagnosis.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, include_corr = TRUE, ...) {
+	assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
 	cache_key <- paste0("diagnosis_", draws %||% "default", "_", digits, "_", include_corr)
 	cached <- object$cache_get(cache_key)
 	if (!is.null(cached)) {
@@ -155,22 +155,22 @@ diagnosis.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, incl
 			sampler = sum_obj$diagnostics %||% list(),
 			metadata = c(sum_obj$metadata %||% list(), list(include_corr = include_corr, digits = digits))
 		),
-		class = "joinme_diagnosis"
+		class = "JoiNMe_diagnosis"
 	)
 	object$cache_set(cache_key, result)
 	result
 }
 
 #' @export
-diagnosis.JoinMeDynPred <- function(object, ...) {
-	assertthat::assert_that(inherits(object, "JoinMeDynPred"), msg = "Object must be a JoinMeDynPred instance.")
+diagnosis.JoiNMeDynPred <- function(object, ...) {
+	assertthat::assert_that(inherits(object, "JoiNMeDynPred"), msg = "Object must be a JoiNMeDynPred instance.")
 	sum_obj <- summary(object)
 	sum_obj$tables$diagnostics %||% .build_common_diagnostics_table()
 }
 
 #' @export
-print.joinme_diagnosis <- function(x, max_rows = 20, ...) {
-	assertthat::assert_that(inherits(x, "joinme_diagnosis"), msg = "x must be a joinme_diagnosis object.")
+print.JoiNMe_diagnosis <- function(x, max_rows = 20, ...) {
+	assertthat::assert_that(inherits(x, "JoiNMe_diagnosis"), msg = "x must be a JoiNMe_diagnosis object.")
 	.cli_print_table_section("Diagnostics Summary", x$summary, level = 1L, formatter = .format_common_diagnostics_for_print)
 	if (is.data.frame(x$by_parameter) && nrow(x$by_parameter) > 0L) {
 		.tbl <- x$by_parameter
@@ -189,19 +189,18 @@ print.joinme_diagnosis <- function(x, max_rows = 20, ...) {
 
 #' Log-likelihood summary
 #'
-#' @rdname log_lik.JoinMeFit
-#' @param object A fitted object of class `JoinMeFit`.
+#' @rdname log_lik.JoiNMeFit
+#' @param object A fitted object of class `JoiNMeFit`.
 #' @param what Character; which component to return: `"long"`, `"surv"`, or `"total"`.
 #' @param draws Optional number of posterior draws to subset.
 #' @param seed Random seed for draw subsetting.
 #' @param ... Unused.
 #'
-#' @importFrom rstantools log_lik
 #' @return A matrix
-#' @seealso [rstantools::log_lik()]
+#' @seealso [log_lik()]
 #' @export
-log_lik.JoinMeFit <- function(object, what = c("long", "surv", "total"), draws = NULL, seed = 1, ...) {
-	assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
+log_lik.JoiNMeFit <- function(object, what = c("long", "surv", "total"), draws = NULL, seed = 1, ...) {
+	assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
 	what <- match.arg(what)
 	sd <- object$stan_data
 
@@ -221,9 +220,9 @@ log_lik.JoinMeFit <- function(object, what = c("long", "surv", "total"), draws =
 #' Backup, unused
 #' @noRd
 #' @keywords internal
-unused_loo.JoinMeFit <- function(object, what = c("total", "long", "surv"), draws = NULL, seed = 1, ...) {
+unused_loo.JoiNMeFit <- function(object, what = c("total", "long", "surv"), draws = NULL, seed = 1, ...) {
 	what <- match.arg(what)
-	ll_mat <- log_lik.JoinMeFit(object, what = what, draws = draws, seed = seed)
+	ll_mat <- log_lik.JoiNMeFit(object, what = what, draws = draws, seed = seed)
 
 	log_mean_exp <- function(x) {
 		m <- max(x)
@@ -252,10 +251,10 @@ unused_loo.JoinMeFit <- function(object, what = c("total", "long", "surv"), draw
 
 # ---- LOO / WAIC / ELPD ---------------------------------------------------
 
-#' LOO-CV for JoinMe models
+#' LOO-CV for JoiNMe models
 #' 
-#' @rdname loo.JoinMeFit
-#' @param object A fitted object of class `JoinMeFit`.
+#' @rdname loo.JoiNMeFit
+#' @param object A fitted object of class `JoiNMeFit`.
 #' @param what Character; which component to return: `"long"`, `"surv"`, or `"total"`.
 #' @param draws Optional number of posterior draws to subset.
 #' @param seed Random seed for draw subsetting.
@@ -264,15 +263,15 @@ unused_loo.JoinMeFit <- function(object, what = c("total", "long", "surv"), draw
 #' @return A `loo` object.
 #' @importFrom loo loo
 #' @export
-loo.JoinMeFit <- function(object, what = c("total", "long", "surv"), draws = NULL, seed = 1, ...) {
+loo.JoiNMeFit <- function(object, what = c("total", "long", "surv"), draws = NULL, seed = 1, ...) {
 	what <- match.arg(what)
-	ll_mat <- log_lik.JoinMeFit(object, what = what, draws = draws, seed = seed)
+	ll_mat <- log_lik.JoiNMeFit(object, what = what, draws = draws, seed = seed)
 	loo::loo(ll_mat, ...)
 }
 
-#' WAIC for JoinMe models
-#' @rdname waic.JoinMeFit
-#' @param object A fitted object of class `JoinMeFit`.
+#' WAIC for JoiNMe models
+#' @rdname waic.JoiNMeFit
+#' @param object A fitted object of class `JoiNMeFit`.
 #' @param what Character; which component to return: `"long"`, `"surv"`, or `"total"`.
 #' @param draws Optional number of posterior draws to subset.
 #' @param seed Random seed for draw subsetting.
@@ -282,30 +281,30 @@ loo.JoinMeFit <- function(object, what = c("total", "long", "surv"), draws = NUL
 #' 
 #' @return A `waic` object.
 #' @export
-waic.JoinMeFit <- function(object, what = c("total", "long", "surv"), draws = NULL, seed = 1, ...) {
+waic.JoiNMeFit <- function(object, what = c("total", "long", "surv"), draws = NULL, seed = 1, ...) {
 	if (!requireNamespace("loo", quietly = TRUE)) {
 		cli::cli_abort("Package {.pkg loo} is required for waic(). Install it with install.packages('loo').")
 	}
 	what <- match.arg(what)
-	ll_mat <- log_lik.JoinMeFit(object, what = what, draws = draws, seed = seed)
+	ll_mat <- log_lik.JoiNMeFit(object, what = what, draws = draws, seed = seed)
 	loo::waic(ll_mat, ...)
 }
 
 
-#' ELPD summary for JoinMe models
+#' ELPD summary for JoiNMe models
 #' 
-#' @param object A fitted object of class `JoinMeFit`.
+#' @param object A fitted object of class `JoiNMeFit`.
 #' @param what Character; which component to return: `"long"`, `"surv"`, or `"total"`.
 #' @param draws Optional number of posterior draws to subset.
 #' @param seed Random seed for draw subsetting.
 #' @param ... Additional arguments passed to `loo::elpd()`.
 #' 
 #' @importFrom loo elpd
-#' @rdname elpd.JoinMeFit
+#' @rdname elpd.JoiNMeFit
 #' @return A data frame with ELPD and standard error.
 #' @export
-elpd.JoinMeFit <- function(object, what = c("total", "long", "surv"), draws = NULL, seed = 1, ...) {
-	loo_obj <- loo.JoinMeFit(object, what = what, draws = draws, seed = seed, ...)
+elpd.JoiNMeFit <- function(object, what = c("total", "long", "surv"), draws = NULL, seed = 1, ...) {
+	loo_obj <- loo.JoiNMeFit(object, what = what, draws = draws, seed = seed, ...)
 	structure(
 		data.frame(
 			elpd_loo = loo_obj$estimates["elpd_loo", "Estimate"],
@@ -318,17 +317,17 @@ elpd.JoinMeFit <- function(object, what = c("total", "long", "surv"), draws = NU
 
 # ---- Bayes factor (bridge sampling) --------------------------------------
 
-#' Bayes factor between two JoinMe fits
+#' Bayes factor between two JoiNMe fits
 #'
-#' @param fit1 First fitted `JoinMeFit` object.
-#' @param fit2 Second fitted `JoinMeFit` object.
+#' @param fit1 First fitted `JoiNMeFit` object.
+#' @param fit2 Second fitted `JoiNMeFit` object.
 #' @param ... Additional arguments passed to `bridgesampling::bridge_sampler()`.
 #'
 #' @return A list with bridge sampling results and Bayes factor.
 #' @export
 bayes_factor <- function(fit1, fit2, ...) {
-	assertthat::assert_that(inherits(fit1, "JoinMeFit"), msg = "fit1 must be a JoinMeFit instance.")
-	assertthat::assert_that(inherits(fit2, "JoinMeFit"), msg = "fit2 must be a JoinMeFit instance.")
+	assertthat::assert_that(inherits(fit1, "JoiNMeFit"), msg = "fit1 must be a JoiNMeFit instance.")
+	assertthat::assert_that(inherits(fit2, "JoiNMeFit"), msg = "fit2 must be a JoiNMeFit instance.")
 
 	if (!requireNamespace("bridgesampling", quietly = TRUE)) {
 		cli::cli_abort("Package {.pkg bridgesampling} is required for bayes_factor(). Install it with install.packages('bridgesampling').")
@@ -364,7 +363,7 @@ bayes_factor <- function(fit1, fit2, ...) {
 
 #' Posterior predictive check for longitudinal outcomes
 #'
-#' @param object A fitted object of class `JoinMeFit`.
+#' @param object A fitted object of class `JoiNMeFit`.
 #' @param newdataLong New longitudinal data frame for predictions.
 #' @param newdataEvent New event data frame for predictions.
 #' @param ci_level Numeric; credible interval level (default 0.95).
@@ -372,14 +371,14 @@ bayes_factor <- function(fit1, fit2, ...) {
 #' @param ... Additional arguments.
 #'
 #' @importFrom bayesplot pp_check
-#' @rdname pp_check.JoinMeFit
+#' @rdname pp_check.JoiNMeFit
 #' @details 
 #' This crap is still under development.
 #' @return A list with observation-level summaries and overall diagnostics.
 #' @export
-pp_check.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, ci_level = 0.95, n_samples = 200, seed = 123, plot = FALSE,...) {
+pp_check.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, ci_level = 0.95, n_samples = 200, seed = 123, plot = FALSE,...) {
 	# Workflow: run posterior_epred -> summarise coverage and RMSE
-	assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
+	assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
 	if (is.null(newdataLong) && is.null(newdataEvent)) {
 		if (!is.null(object$dataLong) && !is.null(object$dataEvent)) {
 			newdataLong <- object$dataLong
@@ -419,7 +418,7 @@ pp_check.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, 
 	y_var <- pred$metadata$response_var %||% .resolve_response_var(
 		formulaLong = object$formulaLong,
 		dataLong = newdataLong,
-		context = "joinme_diagnosis()"
+		context = "JoiNMe_diagnosis()"
 	)
 
 	out_list <- list()
@@ -486,8 +485,8 @@ pp_check.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, 
 
 #' Time-varying concordance for the survival component
 #'
-#' @rdname concordance.JoinMeFit
-#' @param object A fitted object of class `JoinMeFit`.
+#' @rdname concordance.JoiNMeFit
+#' @param object A fitted object of class `JoiNMeFit`.
 #' @param newdataLong Longitudinal data for evaluation (defaults to training data).
 #' @param newdataEvent Event data for evaluation (defaults to training data).
 #' @param time_start Numeric landmark time(s) or a column name in `newdataEvent`.
@@ -497,15 +496,15 @@ pp_check.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, 
 #' @param n_samples Number of posterior draws for prediction (default 200).
 #' @param seed Random seed for draw subsetting.
 #' @param type_weights Time-weighting for concordance; passed to `survival::concordance`.
-#' @param ... Additional arguments passed to `predict.JoinMeFit()`.
+#' @param ... Additional arguments passed to `predict.JoiNMeFit()`.
 #'
 #' @importFrom survival Surv concordance
 #' @return A data frame with time-varying concordance at each landmark time.
 #' @export
-concordance.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, time_start,
+concordance.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, time_start,
                                   time_horizon = NULL, Dt = NULL, cause = 1, n_samples = 200,
                                   seed = 123, type_weights = "none", ...) {
-	assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
+	assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
 	if (missing(time_start)) {
 		cli::cli_abort("{.arg time_start} is required for time-varying concordance.")
 	}
@@ -522,7 +521,7 @@ concordance.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NUL
 	event_vars <- .resolve_event_model_vars(
 		formulaEvent = object$formulaEvent,
 		dataEvent = newdataEvent,
-		context = "concordance.JoinMeFit()"
+		context = "concordance.JoiNMeFit()"
 	)
 	event_time <- as.numeric(event_vars$event_time)
 	event_status <- event_vars$event_status
@@ -586,7 +585,7 @@ concordance.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NUL
 			.time_varying_concordance_single(object, newdataLong, newdataEvent, time_start_grid[i], th, cause, n_samples, seed, type_weights, ...)
 		})
 		out <- do.call(rbind, results)
-		class(out) <- c("tvConcordance_JoinMeFit", "data.frame")
+		class(out) <- c("tvConcordance_JoiNMeFit", "data.frame")
 		return(out)
 	}
 
@@ -611,7 +610,7 @@ concordance.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NUL
 	}
 
 	out <- .time_varying_concordance_single(object, newdataLong, newdataEvent, time_start_map, time_horizon_map, cause, n_samples, seed, type_weights, ...)
-	class(out) <- c("tvConcordance_JoinMeFit", "data.frame")
+	class(out) <- c("tvConcordance_JoiNMeFit", "data.frame")
 	out
 }
 
@@ -622,7 +621,7 @@ concordance.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NUL
 	event_vars <- .resolve_event_model_vars(
 		formulaEvent = object$formulaEvent,
 		dataEvent = newdataEvent,
-		context = "concordance.JoinMeFit()"
+		context = "concordance.JoiNMeFit()"
 	)
 	event_time <- as.numeric(event_vars$event_time)
 	event_status <- event_vars$event_status
@@ -705,7 +704,7 @@ concordance.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NUL
 	)
 	event_df[[id_var]] <- newdataEvent[[id_var]]
 	event_df <- event_df[, c(id_var, "event_time", "event_status"), drop = FALSE]
-	event_decoded <- .derive_event_outcomes(event_df$event_status, context = "concordance.JoinMeFit()")
+	event_decoded <- .derive_event_outcomes(event_df$event_status, context = "concordance.JoiNMeFit()")
 	event_df$event_status <- event_decoded$d_event
 	event_df$event_type <- event_decoded$event_type
 	merge_df <- merge(merge_df, event_df, by = id_var, all.x = TRUE)
@@ -758,11 +757,11 @@ concordance.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NUL
 
 # ---- Stan diagnostics ----------------------------------------------------
 
-#' Stan diagnostics for JoinMe models
+#' Stan diagnostics for JoiNMe models
 #'
-#' @name stan_diagnostics.JoinMeFit
-#' @rdname stan_diagnostics.JoinMeFit
-#' @param object A fitted object of class `JoinMeFit`.
+#' @name stan_diagnostics.JoiNMeFit
+#' @rdname stan_diagnostics.JoiNMeFit
+#' @param object A fitted object of class `JoiNMeFit`.
 #' @param pars Optional character vector of parameter names to include.
 #' @param regex_pars Optional regular expression for parameter selection.
 #' @param draws Optional number of posterior draws to subset.
@@ -772,50 +771,50 @@ concordance.JoinMeFit <- function(object, newdataLong = NULL, newdataEvent = NUL
 #'
 #' @return A data frame of diagnostics by parameter.
 #' @export
-stan_rhat.JoinMeFit <- function(object, pars = NULL, regex_pars = NULL, draws = NULL, seed = 1, ...) {
-	assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
-	draws_obj <- .get_draws_obj(object$fit)
+stan_rhat.JoiNMeFit <- function(object, pars = NULL, regex_pars = NULL, draws = NULL, seed = 1, ...) {
+	assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
+	draws_obj <- draws(object, format = "draws_array")
 	vars <- posterior::variables(draws_obj)
 	vars <- .filter_diag_vars(vars, pars, regex_pars)
 	if (length(vars) == 0) {
 		return(data.frame(variable = character(0), rhat = numeric(0)))
 	}
-	draws_obj <- .get_draws_obj(object$fit, variables = vars, draws = draws, seed = seed)
+	draws_obj <- draws(object, variables = vars, draws = draws, seed = seed, format = "draws_array")
 	.diag_summary_df(draws_obj, metric = "rhat", vars = vars)
 }
 
-#' @rdname stan_diagnostics.JoinMeFit
+#' @rdname stan_diagnostics.JoiNMeFit
 #' @export
-stan_ess.JoinMeFit <- function(object, pars = NULL, regex_pars = NULL, draws = NULL, seed = 1,
+stan_ess.JoiNMeFit <- function(object, pars = NULL, regex_pars = NULL, draws = NULL, seed = 1,
                                type = c("bulk", "tail"), ...) {
-	assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
+	assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
 	type <- match.arg(type)
-	draws_obj <- .get_draws_obj(object$fit)
+	draws_obj <- draws(object, format = "draws_array")
 	vars <- posterior::variables(draws_obj)
 	vars <- .filter_diag_vars(vars, pars, regex_pars)
 	if (length(vars) == 0) {
 		return(data.frame(variable = character(0), ess = numeric(0)))
 	}
-	draws_obj <- .get_draws_obj(object$fit, variables = vars, draws = draws, seed = seed)
+	draws_obj <- draws(object, variables = vars, draws = draws, seed = seed, format = "draws_array")
 	metric_name <- if (type == "bulk") "ess_bulk" else "ess_tail"
 	metric_df <- .diag_summary_df(draws_obj, metric = metric_name, vars = vars)
 	names(metric_df)[2] <- "ess"
 	metric_df
 }
 
-#' @rdname stan_diagnostics.JoinMeFit
+#' @rdname stan_diagnostics.JoiNMeFit
 #' @export
-stan_mcse.JoinMeFit <- function(object, pars = NULL, regex_pars = NULL, draws = NULL, seed = 1,
+stan_mcse.JoiNMeFit <- function(object, pars = NULL, regex_pars = NULL, draws = NULL, seed = 1,
                                 type = c("mean", "sd", "median"), ...) {
-	assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
+	assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
 	type <- match.arg(type)
-	draws_obj <- .get_draws_obj(object$fit)
+	draws_obj <- draws(object, format = "draws_array")
 	vars <- posterior::variables(draws_obj)
 	vars <- .filter_diag_vars(vars, pars, regex_pars)
 	if (length(vars) == 0) {
 		return(data.frame(variable = character(0), mcse = numeric(0)))
 	}
-	draws_obj <- .get_draws_obj(object$fit, variables = vars, draws = draws, seed = seed)
+	draws_obj <- draws(object, variables = vars, draws = draws, seed = seed, format = "draws_array")
 	metric_name <- switch(type,
 		mean = "mcse_mean",
 		sd = "mcse_sd",

@@ -2,12 +2,12 @@
 % Please edit documentation in R/methods.R
 \name{posterior_fixef}
 \alias{posterior_fixef}
-\title{Posterior fixed-effect alias for fitted joinme models}
+\title{Posterior fixed-effect alias for fitted JoiNMe models}
 \usage{
 posterior_fixef(object, ...)
 }
 \arguments{
-\item{object}{A \code{JoinMeFit} object.}
+\item{object}{A \code{JoiNMeFit} object.}
 
 \item{...}{Additional arguments forwarded to \code{\link[nlme:fixed.effects]{nlme::fixef()}}.}
 }
@@ -15,5 +15,5 @@ posterior_fixef(object, ...)
 The same object returned by \code{fixef(object, summary = FALSE, ...)}.
 }
 \description{
-Posterior fixed-effect alias for fitted joinme models
+Posterior fixed-effect alias for fitted JoiNMe models
 }

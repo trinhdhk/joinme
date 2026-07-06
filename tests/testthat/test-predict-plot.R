@@ -51,7 +51,7 @@ test_that("predict accepts time_start column and plot returns ribbons", {
     seed = 2027
   )
 
-  expect_true(inherits(pred, "JoinMeDynPred"))
+  expect_true(inherits(pred, "JoiNMeDynPred"))
   expect_true(all(names(pred$metadata$conditioning_time_by_id) %in% as.character(ndE$id)))
   expect_error(
     plot(pred, type = "longitudinal", scale = "predict"),
@@ -72,7 +72,7 @@ test_that("predict accepts time_start column and plot returns ribbons", {
     q75 = c(1.1, 1.3, 1.1, 1.3),
     q97.5 = c(1.2, 1.4, 1.3, 1.5)
   )
-  pred_multi <- JoinMeDynPred$new(
+  pred_multi <- JoiNMeDynPred$new(
     predictions = list(longitudinal = toy_quant),
     quantiles = list(longitudinal = toy_quant, longitudinal_fitted = NULL),
     draws = list(longitudinal = list()),

@@ -49,7 +49,7 @@ deviations.
 }
 \details{
 Provides utilities to build and manage transformation specifications
-for the joinme Stan model's association term.
+for the JoiNMe Stan model's association term.
 
 Each element of transform_list should be a list with:
 \itemize{
@@ -63,7 +63,7 @@ Each element of transform_list should be a list with:
 \item ispline: knots (vector), coeff (vector), degree (int)
 \item ispline_penalised: knots or n_knots, degree, lambda, optional x, optional y, optional weights
 \itemize{
-\item if y is supplied, joinme fits the monotone spline to the training pairs (x, y) in R
+\item if y is supplied, JoiNMe fits the monotone spline to the training pairs (x, y) in R
 using the same anchored endpoint convention as the Stan-estimated path
 (first coefficient = 0, last coefficient = 1)
 \item if y is omitted, Stan estimates the monotone spline coefficients directly and lambda controls smoothness
@@ -121,4 +121,3 @@ normalises channel specifications before they are passed here.
 Use \code{build_standata_transforms()} to construct the data list entries,
 and \code{validate_transforms()} to verify consistency before sampling.
 }
-

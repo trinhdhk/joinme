@@ -80,7 +80,7 @@ stan_cache_key <- function(stan_file, cpp_options = NULL) {
     }
 
     payload <- c(
-        "joinme-stan-cache-v2",
+        "JoiNMe-stan-cache-v2",
         paste(dep_ids, unname(dep_md5), sep = "="),
         paste0("cpp:", cpp_sig)
     )
@@ -121,13 +121,13 @@ clean_cache_dir <- function(cache_dir) {
 stan_dir <- if (dir.exists("stan")) "stan" else file.path("inst", "stan")
 stan_files <- list.files(
     path = stan_dir,
-    pattern = "\\.stan$",
+    pattern = "_threading\\.stan$",
     full.names = TRUE,
     recursive = FALSE
 )
 
 # ---- CmdStanR precompile (if available) -----------------------------------   
-cache_dir <- tools::R_user_dir("joinme", "cache")
+cache_dir <- tools::R_user_dir("JoiNMe", "cache")
 compiled_in_cmdstanr <- FALSE
 if (!dir.exists(cache_dir)) {
     dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
@@ -143,8 +143,7 @@ if (quiet_require("cmdstanr")) {
 
         quack("- Precompiling Stan models with CmdStanR...")
         for (sf in stan_files) {
-            is_threaded_model <- grepl("_threading\\.stan$", basename(sf))
-            cpp_options <- if (is_threaded_model) list(stan_threads = TRUE) else NULL
+            cpp_options <- list(stan_threads = TRUE)
 
             key <- stan_cache_key(sf, cpp_options = cpp_options)
             model_base_name <- paste0(tools::file_path_sans_ext(basename(sf)), "-", key)
@@ -170,40 +169,25 @@ if (quiet_require("cmdstanr")) {
     quack(" -- CmdStanR not available; skipping CmdStanR precompile.")
 }
 
-# ---- RStan precompile -------------------------------------------
+# ---- Optional RStan precompile --------------------------------------------
 
-if (quiet_require("rstan") && (Sys.getenv('JOINME_SKIP_RSTAN') != 1 || !compiled_in_cmdstanr)) {
-    quack(
-        " - Precompiling Stan models with RStan... You shall expect chaotic output here."
-    )
-    cat('useDynLib(joinme, .registration = TRUE)\n', file = 'NAMESPACE', append = TRUE)
-    options(stan.threads = 2)
-    rstantools::rstan_config()
-    # system("echo \"PKG_CXXFLAGS += -Wa,-mbig-obj\" >> ./src/Makevars.win")
-    # system("echo \"PKG_CXXFLAGS += -Wa,-mbig-obj\" >> ./src/Makevars")
-    options(stan.threads = NULL)
-    #   rstan_cache <- file.path(system.file("stan", package = "joinme"), "pre-compiled")
-    #   if (!dir.exists(rstan_cache)) {
-    #     dir.create(rstan_cache, recursive = TRUE, showWarnings = FALSE)
-    #   }
-
-    #   for (sf in stan_files) {
-    #     rds_path <- file.path(rstan_cache, paste0(basename(sf), ".rds"))
-    #     if (file.exists(rds_path)) next
-
-    #     try_safely(quote({
-    #       old_wd <- getwd()
-    #       setwd(dirname(sf))
-    #       on.exit(setwd(old_wd), add = TRUE)
-    #       rstan::rstan_options(auto_write = TRUE)
-    #       mod <- rstan::stan_model(
-    #         file = basename(sf),
-    #         save_dso = TRUE,
-    #         verbose = FALSE
-    #       )
-    #       saveRDS(mod, rds_path)
-    #     }))
-    #   }
-} 
+compile_rstan <- identical(Sys.getenv("JOINME_COMPILE_RSTAN", unset = "0"), "1") || !compiled_in_cmdstanr
+if (compile_rstan && quiet_require("rstan") && quiet_require("rstantools")) {
+    quack("- Precompiling Stan models with Rstan...")
+    try_safely(quote({
+        old_stan_thread <- getOption("stan.thread")
+        options(stan.thread = 1L)
+        on.exit(options(stan.thread = old_stan_thread), add = TRUE)
+        rstantools::rstan_config()
+        orig <- readLines("NAMESPACE", warn = FALSE)
+        on.exit(writeLines(orig, con = "NAMESPACE"), add = TRUE)
+        cat('useDynLib(joinme, .registration = TRUE)\n', file = 'NAMESPACE', append = TRUE)
+        invisible(lapply(stan_files, function(sf) {
+            rstan::stan_model(file = sf, save_dso = FALSE, verbose = FALSE)
+        }))
+    }))
+} else if (!compile_rstan && quiet_require("rstan")) {
+    quack(" -- Skipping RStan precompile. If you want to force compiling in Rstan, set JoiNMe_COMPILE_RSTAN = 1; ")
+}
 
 quit(save = "no", status = 0)

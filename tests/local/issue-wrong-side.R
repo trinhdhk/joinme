@@ -112,13 +112,13 @@ draw_vars <- c(
   "s_vcov"
 )
 
-draws <- joinme:::.get_draws_matrix(
+draws <- JoiNMe:::.get_draws_matrix(
   fit$fit,
   variables = draw_vars,
   seed = seed
 )
 
-draws_df <- posterior::as_draws_df(joinme:::.get_draws_obj(fit$fit))
+draws_df <- posterior::as_draws_df(JoiNMe:::.get_draws_obj(fit$fit))
 tracked_vars <- c(
   paste0("alpha_L[", seq_len(sd_check$M_vcov_tf), "]"),
   paste0("lambda_L[", seq_len(sd_check$M_vcov_tf), "]"),

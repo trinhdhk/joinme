@@ -4,7 +4,7 @@
 \alias{.resolve_event_model_vars}
 \title{Resolve event outcomes from formulaEvent via Surv model response}
 \usage{
-.resolve_event_model_vars(formulaEvent, dataEvent, context = "joinme")
+.resolve_event_model_vars(formulaEvent, dataEvent, context = "JoiNMe")
 }
 \arguments{
 \item{formulaEvent}{Event formula with \code{Surv(...)} on the left-hand side.}

@@ -8,7 +8,7 @@
 #' a joint model with flexible customisation of longitudinal trajectories and
 #' conditional survival curves.
 #'
-#' @param x An object of class `JoinMeDynPred` returned by the [predict] method.
+#' @param x An object of class `JoiNMeDynPred` returned by the [predict] method.
 #' @param type Character vector indicating what to plot: "cumhaz" (default),
 #'   "longitudinal", or "survival". Multiple values are allowed.
 #' @param subject Integer/Character vector. Which subject(s) to plot. If NULL,
@@ -85,7 +85,7 @@
 # File overview:
 # - Build longitudinal and survival/cumhaz plots from prediction summaries.
 # - Support per-subject panels and combined outputs.
-plot.JoinMeDynPred <- function(
+plot.JoiNMeDynPred <- function(
     x,
     type = c("cumhaz", "longitudinal", "survival"),
     subject = NULL,
@@ -120,6 +120,8 @@ plot.JoinMeDynPred <- function(
     ...
 ) {
     dots <- list(...)
+    use_wrapper_dispatch <- dots$.use_wrapper_dispatch %||% TRUE
+    dots$.use_wrapper_dispatch <- NULL
     is_competing <- FALSE
     if (!is.null(x$data$event)) {
         ev_cols <- names(x$data$event)
@@ -139,6 +141,82 @@ plot.JoinMeDynPred <- function(
 
     ci_levels <- .validate_ci_levels_plot(ci_levels, x$metadata$ci_levels %||% NULL)
     marker <- .normalize_plot_marker_filter(marker, available_markers = .available_plot_markers(x))
+
+    if (isTRUE(use_wrapper_dispatch) && length(type) == 1L) {
+        requested_type <- type[[1L]]
+        if (identical(requested_type, "longitudinal")) {
+            return(longitudinal_plot(
+                x,
+                subject = subject,
+                marker = marker,
+                trajectory_type = trajectory_type,
+                scale = scale,
+                smooth_trajectory = smooth_trajectory,
+                smooth_method = smooth_method,
+                smooth_span = smooth_span,
+                ci_levels = ci_levels,
+                ci_type = ci_type,
+                observed_first = observed_first,
+                facet_by = facet_by,
+                facet_scales = facet_scales,
+                combined = combined,
+                show_data = show_data,
+                show_observed_line = show_observed_line,
+                observed_style = observed_style,
+                prediction_style = prediction_style,
+                theme_fn = theme_fn,
+                palette_marker = palette_marker
+            ))
+        }
+        if (identical(requested_type, "survival")) {
+            return(survival_plot(
+                x,
+                subject = subject,
+                marker = marker,
+                trajectory_type = trajectory_type,
+                scale = scale,
+                smooth_trajectory = smooth_trajectory,
+                smooth_method = smooth_method,
+                smooth_span = smooth_span,
+                ci_levels = ci_levels,
+                ci_type = ci_type,
+                observed_first = observed_first,
+                facet_by = facet_by,
+                facet_scales = facet_scales,
+                combined = combined,
+                show_data = show_data,
+                show_observed_line = show_observed_line,
+                observed_style = observed_style,
+                prediction_style = prediction_style,
+                theme_fn = theme_fn,
+                palette_marker = palette_marker
+            ))
+        }
+        if (identical(requested_type, "cumhaz")) {
+            return(cumhaz_plot(
+                x,
+                subject = subject,
+                marker = marker,
+                trajectory_type = trajectory_type,
+                scale = scale,
+                smooth_trajectory = smooth_trajectory,
+                smooth_method = smooth_method,
+                smooth_span = smooth_span,
+                ci_levels = ci_levels,
+                ci_type = ci_type,
+                observed_first = observed_first,
+                facet_by = facet_by,
+                facet_scales = facet_scales,
+                combined = combined,
+                show_data = show_data,
+                show_observed_line = show_observed_line,
+                observed_style = observed_style,
+                prediction_style = prediction_style,
+                theme_fn = theme_fn,
+                palette_marker = palette_marker
+            ))
+        }
+    }
 
     available_scales <- .available_longitudinal_scales(x)
     if (!is.null(scale)) {
@@ -1067,16 +1145,17 @@ plot.JoinMeDynPred <- function(
 }
 
 # ============================================================================
-# Diagnostic plots for JoinMeFit
+# Diagnostic plots for JoiNMeFit
 # ============================================================================
 
-#' Plot diagnostics, fitted trajectories, and association curves for JoinMe fits
+#' Plot diagnostics, fitted trajectories, and association curves for JoiNMe fits
 #'
-#' @param x A fitted object of class `JoinMeFit`.
+#' @param x A fitted object of class `JoiNMeFit`.
 #' @param type Plot type. Diagnostic types are `"rhat"`, `"ess_bulk"`,
 #'   `"ess_tail"`, `"mcse_mean"`, `"mcse_sd"`, `"running_mean"`, and
 #'   `"running_quantile"`. Fitted-data types are `"longitudinal"`,
-#'   `"survival"`, `"cumhaz"`, and `"association"`. The compatibility alias
+#'   `"survival"`, `"cumhaz"`, and `"association"`. `"mcmc"` delegates to
+#'   [mcmc_plot()] for bayesplot-backed posterior displays. The compatibility alias
 #'   `"longitudinal_heatmap"` is treated as
 #'   `type = "longitudinal", longitudinal_style = "heatmap"`.
 #' @param pars Optional character vector of parameter names to include for
@@ -1086,6 +1165,7 @@ plot.JoinMeDynPred <- function(
 #' @param draws Optional number of posterior draws to subset for diagnostics.
 #' @param seed Random seed for draw subsetting and fitted plotting.
 #' @param max_vars Maximum number of parameters for running diagnostics.
+#' @param mcmc_type Bayesplot geometry used when `type = "mcmc"`.
 #' @param quantile_probs Numeric vector of quantile probabilities for running
 #'   quantile plots.
 #' @param subject Optional vector of subject ids for fitted-data plots.
@@ -1118,7 +1198,7 @@ plot.JoinMeDynPred <- function(
 #'   column name.
 #' @param times Optional time grid for fitted-data prediction.
 #' @param time_horizon Optional prediction horizon for fitted-data prediction.
-#' @param pred_control Named list passed to `predict.JoinMeFit()` for fitted-data
+#' @param pred_control Named list passed to `predict.JoiNMeFit()` for fitted-data
 #'   plotting. By default this uses a modest draw count for plotting.
 #' @param threshold Posterior sign-certainty threshold for
 #'   `longitudinal_style = "heatmap"`. A tile is shown as significant when the
@@ -1128,12 +1208,12 @@ plot.JoinMeDynPred <- function(
 #' @param smooth_trajectory,smooth_method,smooth_span,ci_levels,ci_type,
 #'   observed_first,facet_by,facet_scales,combined,show_data,
 #'   show_observed_line,observed_style,prediction_style,theme_fn,
-#'   palette_marker Passed to `plot.JoinMeDynPred()` for fitted-data plots.
+#'   palette_marker Passed to `plot.JoiNMeDynPred()` for fitted-data plots.
 #' @param association_options Named list of options for
 #'   `type = "association"`. Supported entries are
 #'   `association_term`, `association_grid`, `association_range`,
 #'   `association_points`, and `association_metric`. When
-#'   `association_grid` is not supplied, `plot.JoinMeFit()` uses cached
+#'   `association_grid` is not supplied, `plot.JoiNMeFit()` uses cached
 #'   model-implied raw support from the fitted association channels and only
 #'   falls back to knot support or observed-data heuristics when that cache is
 #'   unavailable. `association_range`, when supplied, overrides those default
@@ -1148,9 +1228,10 @@ plot.JoinMeDynPred <- function(
 #'
 #' @return A `ggplot` object, a combined plot, or a named list of plots.
 #' @export
-plot.JoinMeFit <- function(x,
-                           type = c("rhat", "ess_bulk", "ess_tail", "mcse_mean", "mcse_sd", "running_mean", "running_quantile"),
+plot.JoiNMeFit <- function(x,
+                           type = c("rhat", "ess_bulk", "ess_tail", "mcse_mean", "mcse_sd", "running_mean", "running_quantile", "mcmc"),
                            pars = NULL, regex_pars = NULL, draws = NULL, seed = 1, max_vars = 4,
+                           mcmc_type = c("intervals", "areas", "dens", "dens_overlay", "hist", "trace", "violin", "acf", "rhat", "neff"),
                            quantile_probs = c(0.1, 0.5, 0.9),
                            subject = NULL,
                            marker = NA,
@@ -1191,11 +1272,13 @@ plot.JoinMeFit <- function(x,
                            association_options = list(),
                            ...) {
     dots <- list(...)
+    use_wrapper_dispatch <- dots$.use_wrapper_dispatch %||% TRUE
+    dots$.use_wrapper_dispatch <- NULL
     diagnostic_types <- c("rhat", "ess_bulk", "ess_tail", "mcse_mean", "mcse_sd", "running_mean", "running_quantile")
     fitted_types <- c("longitudinal", "survival", "cumhaz", "association", "longitudinal_heatmap")
 
-    if (!inherits(x, "JoinMeFit")) {
-        cli::cli_abort("{.arg x} must be a JoinMeFit object.")
+    if (!inherits(x, "JoiNMeFit")) {
+        cli::cli_abort("{.arg x} must be a JoiNMeFit object.")
     }
     if (!requireNamespace("ggplot2", quietly = TRUE)) {
         cli::cli_abort("Package {.pkg ggplot2} is required for plotting.")
@@ -1205,12 +1288,24 @@ plot.JoinMeFit <- function(x,
         type <- dots$which
     }
 
-    type <- tryCatch(match.arg(unique(as.character(type)), c(diagnostic_types, fitted_types), several.ok = TRUE), error = function(e) {
+    type <- tryCatch(match.arg(unique(as.character(type)), c(diagnostic_types, fitted_types, "mcmc"), several.ok = TRUE), error = function(e) {
         cli::cli_abort(c(
             x = "Unknown {.arg type}: {paste(type, collapse = ', ')}.",
-            i = "Use one or more of: {paste(c(diagnostic_types, fitted_types), collapse = ', ')}."
+            i = "Use one or more of: {paste(c(diagnostic_types, fitted_types, 'mcmc'), collapse = ', ')}."
         ))
     })
+
+    if (length(type) == 1L && identical(type[[1L]], "mcmc")) {
+        return(mcmc_plot(
+            x,
+            pars = pars %||% regex_pars,
+            type = match.arg(mcmc_type),
+            variable = if (!is.null(pars)) pars else regex_pars,
+            regex = is.null(pars) && !is.null(regex_pars),
+            draws = draws,
+            seed = seed
+        ))
+    }
 
     if (any(type %in% diagnostic_types) && any(type %in% fitted_types)) {
         cli::cli_abort(c(
@@ -1225,7 +1320,7 @@ plot.JoinMeFit <- function(x,
                 i = "Example: plot(fit, type = 'rhat')."
             ))
         }
-        return(.plot_joinmefit_diagnostic(
+        return(.plot_JoiNMefit_diagnostic(
             x = x,
             type = type,
             pars = pars,
@@ -1255,7 +1350,7 @@ plot.JoinMeFit <- function(x,
         ))
     }
 
-    marker_var <- .joinmefit_call_arg_chr(x$call, "marker_var", "marker")
+    marker_var <- .JoiNMefit_call_arg_chr(x$call, "marker_var", "marker")
     marker_levels <- if (!is.null(x$dataLong) && marker_var %in% names(x$dataLong)) {
         unique(as.character(stats::na.omit(x$dataLong[[marker_var]])))
     } else {
@@ -1263,12 +1358,145 @@ plot.JoinMeFit <- function(x,
     }
     marker <- .normalize_plot_marker_filter(marker, available_markers = marker_levels)
 
+    if (isTRUE(use_wrapper_dispatch) && length(type) == 1L) {
+        requested_type <- type[[1L]]
+        if (requested_type %in% diagnostic_types) {
+            return(diagnostic_plot(
+                x,
+                type = requested_type,
+                pars = pars,
+                regex_pars = regex_pars,
+                draws = draws,
+                seed = seed,
+                max_vars = max_vars,
+                quantile_probs = quantile_probs
+            ))
+        }
+        if (identical(requested_type, "association")) {
+            association_opts <- .normalize_JoiNMefit_association_options(
+                association_options = association_options,
+                dots = dots
+            )
+            return(association_plot(
+                x,
+                association_term = association_opts$association_term,
+                marker = marker,
+                association_grid = association_opts$association_grid,
+                association_range = association_opts$association_range,
+                association_points = association_opts$association_points,
+                ci_levels = ci_levels,
+                ci_type = ci_type,
+                association_metric = association_opts$association_metric,
+                prediction_style = prediction_style,
+                theme_fn = theme_fn,
+                combined = combined,
+                seed = seed
+            ))
+        }
+        if (identical(requested_type, "longitudinal")) {
+            return(longitudinal_plot(
+                x,
+                subject = subject,
+                marker = marker,
+                scale = scale,
+                longitudinal_style = longitudinal_style,
+                condition = condition,
+                conditioning = conditioning,
+                time_start = time_start,
+                times = times,
+                time_horizon = time_horizon,
+                pred_control = pred_control,
+                threshold = threshold,
+                seed = seed,
+                smooth_trajectory = smooth_trajectory,
+                smooth_method = smooth_method,
+                smooth_span = smooth_span,
+                ci_levels = ci_levels,
+                ci_type = ci_type,
+                observed_first = observed_first,
+                facet_by = facet_by,
+                facet_scales = facet_scales,
+                combined = combined,
+                show_data = show_data,
+                show_observed_line = show_observed_line,
+                observed_style = observed_style,
+                prediction_style = prediction_style,
+                theme_fn = theme_fn,
+                palette_marker = palette_marker
+            ))
+        }
+        if (identical(requested_type, "survival")) {
+            return(survival_plot(
+                x,
+                subject = subject,
+                marker = marker,
+                scale = scale,
+                longitudinal_style = longitudinal_style,
+                condition = condition,
+                conditioning = conditioning,
+                time_start = time_start,
+                times = times,
+                time_horizon = time_horizon,
+                pred_control = pred_control,
+                threshold = threshold,
+                seed = seed,
+                smooth_trajectory = smooth_trajectory,
+                smooth_method = smooth_method,
+                smooth_span = smooth_span,
+                ci_levels = ci_levels,
+                ci_type = ci_type,
+                observed_first = observed_first,
+                facet_by = facet_by,
+                facet_scales = facet_scales,
+                combined = combined,
+                show_data = show_data,
+                show_observed_line = show_observed_line,
+                observed_style = observed_style,
+                prediction_style = prediction_style,
+                theme_fn = theme_fn,
+                palette_marker = palette_marker
+            ))
+        }
+        if (identical(requested_type, "cumhaz")) {
+            return(cumhaz_plot(
+                x,
+                subject = subject,
+                marker = marker,
+                scale = scale,
+                longitudinal_style = longitudinal_style,
+                condition = condition,
+                conditioning = conditioning,
+                time_start = time_start,
+                times = times,
+                time_horizon = time_horizon,
+                pred_control = pred_control,
+                threshold = threshold,
+                seed = seed,
+                smooth_trajectory = smooth_trajectory,
+                smooth_method = smooth_method,
+                smooth_span = smooth_span,
+                ci_levels = ci_levels,
+                ci_type = ci_type,
+                observed_first = observed_first,
+                facet_by = facet_by,
+                facet_scales = facet_scales,
+                combined = combined,
+                show_data = show_data,
+                show_observed_line = show_observed_line,
+                observed_style = observed_style,
+                prediction_style = prediction_style,
+                theme_fn = theme_fn,
+                palette_marker = palette_marker
+            ))
+        }
+    }
+
     if (identical(type, "association") || (length(type) == 1L && type[[1]] == "association")) {
-        association_opts <- .normalize_joinmefit_association_options(
+        association_opts <- .normalize_JoiNMefit_association_options(
             association_options = association_options,
             dots = dots
         )
-        return(.plot_joinmefit_association(
+        return(.plot_JoiNMefit_association(
             x = x,
             association_term = association_opts$association_term,
             marker = marker,
@@ -1285,7 +1513,7 @@ plot.JoinMeFit <- function(x,
         ))
     }
 
-    .plot_joinmefit_fitted(
+    .plot_JoiNMefit_fitted(
         x = x,
         type = type,
         subject = subject,
@@ -1318,7 +1546,7 @@ plot.JoinMeFit <- function(x,
     )
 }
 
-.normalize_joinmefit_plot_conditions <- function(condition) {
+.normalize_JoiNMefit_plot_conditions <- function(condition) {
     if (is.null(condition)) {
         return(list(rows = list(NULL), labels = NULL))
     }
@@ -1356,7 +1584,7 @@ plot.JoinMeFit <- function(x,
     list(rows = rows, labels = labels)
 }
 
-.coerce_joinmefit_condition_value <- function(template, value, n) {
+.coerce_JoiNMefit_condition_value <- function(template, value, n) {
     value <- value[[1L]]
 
     if (is.factor(template)) {
@@ -1382,7 +1610,7 @@ plot.JoinMeFit <- function(x,
     rep(value, n)
 }
 
-.apply_joinmefit_plot_condition <- function(data_long, data_event, condition_row, protected_columns = character(0)) {
+.apply_JoiNMefit_plot_condition <- function(data_long, data_event, condition_row, protected_columns = character(0)) {
     if (is.null(condition_row) || !length(condition_row)) {
         return(list(longitudinal = data_long, event = data_event))
     }
@@ -1400,17 +1628,17 @@ plot.JoinMeFit <- function(x,
 
     for (nm in condition_names) {
         if (nm %in% allowed_long && nrow(data_long) > 0L) {
-            data_long[[nm]] <- .coerce_joinmefit_condition_value(data_long[[nm]], condition_row[[nm]], nrow(data_long))
+            data_long[[nm]] <- .coerce_JoiNMefit_condition_value(data_long[[nm]], condition_row[[nm]], nrow(data_long))
         }
         if (nm %in% allowed_event && nrow(data_event) > 0L) {
-            data_event[[nm]] <- .coerce_joinmefit_condition_value(data_event[[nm]], condition_row[[nm]], nrow(data_event))
+            data_event[[nm]] <- .coerce_JoiNMefit_condition_value(data_event[[nm]], condition_row[[nm]], nrow(data_event))
         }
     }
 
     list(longitudinal = data_long, event = data_event)
 }
 
-.joinmefit_longitudinal_draw_scale <- function(draw_obj, scale) {
+.JoiNMefit_longitudinal_draw_scale <- function(draw_obj, scale) {
     if (is.null(draw_obj)) {
         return(NULL)
     }
@@ -1420,7 +1648,7 @@ plot.JoinMeFit <- function(x,
     draw_obj[[scale]] %||% NULL
 }
 
-.joinmefit_longitudinal_heatmap_data <- function(pred, scale, threshold, marker = NULL) {
+.JoiNMefit_longitudinal_heatmap_data <- function(pred, scale, threshold, marker = NULL) {
     if (!is.numeric(threshold) || length(threshold) != 1L || !is.finite(threshold) || threshold <= 0 || threshold >= 1) {
         cli::cli_abort(c(
             x = "{.arg threshold} must be a single number strictly between 0 and 1.",
@@ -1432,7 +1660,7 @@ plot.JoinMeFit <- function(x,
     if (is.null(draws_long) || !length(draws_long)) {
         cli::cli_abort(c(
             x = "Longitudinal draw-level predictions are required for {.val longitudinal_heatmap}.",
-            i = "Call {.fn plot} on a fitted JoinMe model so the helper can build draw-level predictions automatically."
+            i = "Call {.fn plot} on a fitted JoiNMe model so the helper can build draw-level predictions automatically."
         ))
     }
 
@@ -1449,7 +1677,7 @@ plot.JoinMeFit <- function(x,
     n_subjects <- 0L
 
     for (id in names(draws_long)) {
-        draw_scale <- .joinmefit_longitudinal_draw_scale(draws_long[[id]], scale)
+        draw_scale <- .JoiNMefit_longitudinal_draw_scale(draws_long[[id]], scale)
         if (is.null(draw_scale) || is.null(draw_scale$matrix)) {
             next
         }
@@ -1528,14 +1756,14 @@ plot.JoinMeFit <- function(x,
     heatmap_df
 }
 
-.plot_joinmefit_longitudinal_heatmap <- function(x, subject, marker, scale, condition, conditioning,
+.plot_JoiNMefit_longitudinal_heatmap <- function(x, subject, marker, scale, condition, conditioning,
                                                  time_start, times, time_horizon, pred_control,
                                                  threshold, seed, ci_levels, theme_fn) {
     scale_use <- .normalize_prediction_scales(scale %||% "epred")[[1L]]
-    condition_spec <- .normalize_joinmefit_plot_conditions(condition)
+    condition_spec <- .normalize_JoiNMefit_plot_conditions(condition)
 
     plot_data <- do.call(rbind, lapply(seq_along(condition_spec$rows), function(i) {
-        pred <- .build_joinmefit_plot_prediction(
+        pred <- .build_JoiNMefit_plot_prediction(
             x = x,
             which = "longitudinal",
             subject = subject,
@@ -1551,7 +1779,7 @@ plot.JoinMeFit <- function(x,
             pred_type = "per_marker_id"
         )
 
-        data_i <- .joinmefit_longitudinal_heatmap_data(
+        data_i <- .JoiNMefit_longitudinal_heatmap_data(
             pred = pred,
             scale = scale_use,
             threshold = threshold,
@@ -1589,7 +1817,7 @@ plot.JoinMeFit <- function(x,
     p
 }
 
-.normalize_joinmefit_association_options <- function(association_options = NULL, dots = list()) {
+.normalize_JoiNMefit_association_options <- function(association_options = NULL, dots = list()) {
     if (is.null(association_options)) {
         association_options <- list()
     }
@@ -1671,14 +1899,14 @@ plot.JoinMeFit <- function(x,
     opts
 }
 
-.plot_joinmefit_diagnostic <- function(x, type, pars, regex_pars, draws, seed, max_vars, quantile_probs) {
+.plot_JoiNMefit_diagnostic <- function(x, type, pars, regex_pars, draws, seed, max_vars, quantile_probs) {
     if (type %in% c("rhat", "ess_bulk", "ess_tail", "mcse_mean", "mcse_sd")) {
         df <- switch(type,
-            rhat = stan_rhat.JoinMeFit(x, pars = pars, regex_pars = regex_pars, draws = draws, seed = seed),
-            ess_bulk = stan_ess.JoinMeFit(x, pars = pars, regex_pars = regex_pars, draws = draws, seed = seed, type = "bulk"),
-            ess_tail = stan_ess.JoinMeFit(x, pars = pars, regex_pars = regex_pars, draws = draws, seed = seed, type = "tail"),
-            mcse_mean = stan_mcse.JoinMeFit(x, pars = pars, regex_pars = regex_pars, draws = draws, seed = seed, type = "mean"),
-            mcse_sd = stan_mcse.JoinMeFit(x, pars = pars, regex_pars = regex_pars, draws = draws, seed = seed, type = "sd")
+            rhat = stan_rhat.JoiNMeFit(x, pars = pars, regex_pars = regex_pars, draws = draws, seed = seed),
+            ess_bulk = stan_ess.JoiNMeFit(x, pars = pars, regex_pars = regex_pars, draws = draws, seed = seed, type = "bulk"),
+            ess_tail = stan_ess.JoiNMeFit(x, pars = pars, regex_pars = regex_pars, draws = draws, seed = seed, type = "tail"),
+            mcse_mean = stan_mcse.JoiNMeFit(x, pars = pars, regex_pars = regex_pars, draws = draws, seed = seed, type = "mean"),
+            mcse_sd = stan_mcse.JoiNMeFit(x, pars = pars, regex_pars = regex_pars, draws = draws, seed = seed, type = "sd")
         )
         if (nrow(df) == 0) {
             cli::cli_abort("No parameters found for diagnostic plotting.")
@@ -1688,7 +1916,7 @@ plot.JoinMeFit <- function(x,
         p <- ggplot2::ggplot(df, ggplot2::aes(x = stats::reorder(.data$variable, .data$metric), y = .data$metric)) +
             ggplot2::geom_point(size = 1.6, alpha = 0.7, color = "steelblue") +
             ggplot2::coord_flip() +
-            ggplot2::labs(x = NULL, y = type, title = paste("JoinMe diagnostics:", type)) +
+            ggplot2::labs(x = NULL, y = type, title = paste("JoiNMe diagnostics:", type)) +
             ggplot2::theme_minimal()
         if (type == "rhat") {
             p <- p + ggplot2::geom_hline(yintercept = 1.01, linetype = "dashed", color = "firebrick")
@@ -1696,7 +1924,7 @@ plot.JoinMeFit <- function(x,
         return(p)
     }
 
-    vars <- posterior::variables(.get_draws_obj(x$fit))
+    vars <- posterior::variables(draws(x, format = "draws_array"))
     vars <- .filter_diag_vars(vars, pars, regex_pars)
     if (length(vars) == 0) {
         cli::cli_abort("No parameters found for running diagnostics.")
@@ -1706,8 +1934,7 @@ plot.JoinMeFit <- function(x,
         cli::cli_warn("Limiting running diagnostics to the first {max_vars} parameters.")
     }
 
-    draws_obj <- .get_draws_obj(x$fit, variables = vars, draws = draws, seed = seed)
-    arr <- posterior::as_draws_array(draws_obj)
+    arr <- draws(x, variables = vars, draws = draws, seed = seed, format = "draws_array")
     if (type == "running_mean") {
         df <- .running_mean_df(arr)
         p <- ggplot2::ggplot(df, ggplot2::aes(x = .data$iteration, y = .data$value, color = factor(.data$chain))) +
@@ -1726,13 +1953,13 @@ plot.JoinMeFit <- function(x,
         ggplot2::theme_minimal()
 }
 
-.plot_joinmefit_fitted <- function(x, type, subject, marker, scale, longitudinal_style, condition, conditioning, time_start, times, time_horizon,
+.plot_JoiNMefit_fitted <- function(x, type, subject, marker, scale, longitudinal_style, condition, conditioning, time_start, times, time_horizon,
                                    pred_control, threshold, seed, smooth_trajectory, smooth_method, smooth_span,
                                    ci_levels, ci_type, observed_first, facet_by, facet_scales, combined,
                                    show_data, show_observed_line, observed_style, prediction_style,
                                    theme_fn, palette_marker) {
     if (identical(longitudinal_style, "heatmap")) {
-        return(.plot_joinmefit_longitudinal_heatmap(
+        return(.plot_JoiNMefit_longitudinal_heatmap(
             x = x,
             subject = subject,
             marker = marker,
@@ -1750,12 +1977,12 @@ plot.JoinMeFit <- function(x,
         ))
     }
 
-    condition_spec <- .normalize_joinmefit_plot_conditions(condition)
+    condition_spec <- .normalize_JoiNMefit_plot_conditions(condition)
     plot_types <- intersect(type, c("longitudinal", "survival", "cumhaz"))
 
     if (length(condition_spec$rows) > 1L) {
         plots <- lapply(seq_along(condition_spec$rows), function(i) {
-            pred <- .build_joinmefit_plot_prediction(
+            pred <- .build_JoiNMefit_plot_prediction(
                 x = x,
                 which = type,
                 subject = subject,
@@ -1805,7 +2032,7 @@ plot.JoinMeFit <- function(x,
         return(plots)
     }
 
-    pred <- .build_joinmefit_plot_prediction(
+    pred <- .build_JoiNMefit_plot_prediction(
         x = x,
         which = type,
         subject = subject,
@@ -1843,11 +2070,11 @@ plot.JoinMeFit <- function(x,
          palette_marker = palette_marker)
 }
 
-.build_joinmefit_plot_prediction <- function(x, which, subject, scale, condition, conditioning, time_start, times,
+.build_JoiNMefit_plot_prediction <- function(x, which, subject, scale, condition, conditioning, time_start, times,
                                              time_horizon, pred_control, seed, ci_levels, pred_type = "per_marker_id") {
-    id_var <- .joinmefit_call_arg_chr(x$call, "id_var", "id")
-    time_var <- .joinmefit_call_arg_chr(x$call, "time_var", "time")
-    marker_var <- .joinmefit_call_arg_chr(x$call, "marker_var", "marker")
+    id_var <- .JoiNMefit_call_arg_chr(x$call, "id_var", "id")
+    time_var <- .JoiNMefit_call_arg_chr(x$call, "time_var", "time")
+    marker_var <- .JoiNMefit_call_arg_chr(x$call, "marker_var", "marker")
     response_var <- tryCatch(all.vars(x$formulaLong)[1], error = function(e) NA_character_)
     event_outcome_vars <- tryCatch(all.vars(x$formulaEvent[[2]]), error = function(e) character(0))
 
@@ -1863,7 +2090,7 @@ plot.JoinMeFit <- function(x,
     data_event_plot <- data_event
 
     protected_columns <- unique(stats::na.omit(c(id_var, time_var, marker_var, response_var, event_outcome_vars)))
-    conditioned_data <- .apply_joinmefit_plot_condition(
+    conditioned_data <- .apply_JoiNMefit_plot_condition(
         data_long = data_long,
         data_event = data_event,
         condition_row = condition,
@@ -1872,7 +2099,7 @@ plot.JoinMeFit <- function(x,
     data_long <- conditioned_data$longitudinal
     data_event <- conditioned_data$event
 
-    time_start_use <- .resolve_joinmefit_plot_time_start(
+    time_start_use <- .resolve_JoiNMefit_plot_time_start(
         data_long = data_long,
         id_var = id_var,
         time_var = time_var,
@@ -1890,7 +2117,7 @@ plot.JoinMeFit <- function(x,
     scale_use <- if (any(c("longitudinal", "longitudinal_heatmap") %in% which)) .normalize_prediction_scales(scale %||% c("epred", "linpred", "predict")) else NULL
     control_use <- utils::modifyList(list(n_samples = 100L), pred_control %||% list())
 
-    pred <- predict.JoinMeFit(
+    pred <- predict.JoiNMeFit(
         object = x,
         newdataLong = data_long,
         newdataEvent = data_event,
@@ -1911,7 +2138,7 @@ plot.JoinMeFit <- function(x,
     pred
 }
 
-.joinmefit_call_arg_chr <- function(call_obj, arg, default = NULL) {
+.JoiNMefit_call_arg_chr <- function(call_obj, arg, default = NULL) {
     expr <- call_obj[[arg]]
     if (is.null(expr)) return(default)
     if (is.character(expr)) return(expr[[1]])
@@ -1919,7 +2146,7 @@ plot.JoinMeFit <- function(x,
     if (identical(txt, "") || identical(txt, "NULL")) default else txt
 }
 
-.resolve_joinmefit_plot_time_start <- function(data_long, id_var, time_var, which, conditioning, time_start) {
+.resolve_JoiNMefit_plot_time_start <- function(data_long, id_var, time_var, which, conditioning, time_start) {
     if (!is.null(time_start)) return(time_start)
     if (!nrow(data_long)) return(NULL)
 
@@ -1936,7 +2163,7 @@ plot.JoinMeFit <- function(x,
     )
 }
 
-.plot_joinmefit_association <- function(x, association_term = NULL, marker = NULL, association_grid = NULL, association_range = NULL, association_points = 200,
+.plot_JoiNMefit_association <- function(x, association_term = NULL, marker = NULL, association_grid = NULL, association_range = NULL, association_points = 200,
                                         ci_levels = c(0.5, 0.95), ci_type = c("ribbon", "line", "both"),
                                         association_metric = c("hazard", "transform"),
                                         prediction_style = list(color = "steelblue", fill = "steelblue", linewidth = 0.8, alpha = 0.2),
@@ -1955,7 +2182,7 @@ plot.JoinMeFit <- function(x,
     }
 
     plots <- lapply(assoc_terms, function(term) {
-        .plot_joinmefit_association_single(
+        .plot_JoiNMefit_association_single(
             x = x,
             term = term,
             marker = marker,
@@ -2011,12 +2238,12 @@ plot.JoinMeFit <- function(x,
 
     # Fall back to a fresh association-draw extraction only when the data is
     # absent; this keeps plotting robust even if caching was skipped earlier.
-    assoc_draws <- extract.JoinMeFit(x, what = "assoc", keep_chains = FALSE)
+    assoc_draws <- extract.JoiNMeFit(x, what = "assoc", keep_chains = FALSE)
     terms <- unique(as.character(assoc_draws$term_map$term))
     terms[!grepl("^weight:\\s", terms)]
 }
 
-.plot_joinmefit_association_single <- function(x, term, marker, association_grid, association_range, association_points, ci_levels,
+.plot_JoiNMefit_association_single <- function(x, term, marker, association_grid, association_range, association_points, ci_levels,
                                                ci_type, association_metric, prediction_style, theme_fn, seed) {
     # Map concrete component labels back to the underlying transform channel so
     # downstream helpers can reuse corr/vcov-specific machinery while still
@@ -2242,7 +2469,7 @@ plot.JoinMeFit <- function(x,
 
     # For marker-resolved channels, discover the available marker levels from
     # the fitted longitudinal data so the plot mirrors the original fit input.
-    marker_var <- .joinmefit_call_arg_chr(x$call, "marker_var", "marker")
+    marker_var <- .JoiNMefit_call_arg_chr(x$call, "marker_var", "marker")
     available_markers <- if (!is.null(x$dataLong) && marker_var %in% names(x$dataLong)) {
         unique(as.character(stats::na.omit(x$dataLong[[marker_var]])))
     } else {
@@ -2369,7 +2596,7 @@ plot.JoinMeFit <- function(x,
     # If there is no cached support, fall back to heuristics based on observed
     # data, starting from the relevant marker subset when applicable.
     response_var <- all.vars(x$formulaLong)[1] %||% "y"
-    marker_var <- .joinmefit_call_arg_chr(x$call, "marker_var", "marker")
+    marker_var <- .JoiNMefit_call_arg_chr(x$call, "marker_var", "marker")
     data_long <- x$dataLong
     if (!is.null(marker) && marker_var %in% names(data_long)) {
         data_long <- data_long[as.character(data_long[[marker_var]]) %in% as.character(marker), , drop = FALSE]
@@ -2379,8 +2606,8 @@ plot.JoinMeFit <- function(x,
     # Slope channels derive their natural raw support from observed finite-
     # difference slopes within each (id, marker) trajectory.
     if (term_key %in% c("cs_total", "cs_mean", "cs_marker")) {
-        id_var <- .joinmefit_call_arg_chr(x$call, "id_var", "id")
-        time_var <- .joinmefit_call_arg_chr(x$call, "time_var", "time")
+        id_var <- .JoiNMefit_call_arg_chr(x$call, "id_var", "id")
+        time_var <- .JoiNMefit_call_arg_chr(x$call, "time_var", "time")
         dat <- data_long[, c(id_var, time_var, marker_var, response_var), drop = FALSE]
         names(dat) <- c("id", "time", "marker", "y")
         dat <- dat[order(dat$id, dat$marker, dat$time), , drop = FALSE]
@@ -2672,7 +2899,7 @@ plot.JoinMeFit <- function(x,
     # Functional and pwlin transforms can be evaluated once on the grid because
     # they do not depend on draw-specific spline coefficients.
     if (identical(tf_type, "functional")) {
-        tf_fun <- .joinme_make_assoc_transform(tf_spec, term_key)
+        tf_fun <- .JoiNMe_make_assoc_transform(tf_spec, term_key)
         iota_draws <- .transform_iota_draws(
             x = x,
             term_key = term_key,
@@ -2700,7 +2927,7 @@ plot.JoinMeFit <- function(x,
     }
 
     if (identical(tf_type, "pwlin")) {
-        tf_fun <- .joinme_make_assoc_transform(tf_spec, term_key)
+        tf_fun <- .JoiNMe_make_assoc_transform(tf_spec, term_key)
         vals <- as.numeric(tf_fun(x_grid))
         return(matrix(rep(vals, each = n_draws), nrow = n_draws))
     }
@@ -2713,7 +2940,7 @@ plot.JoinMeFit <- function(x,
 
     # The final fallback keeps plotting resilient to future transform types that
     # can still be represented by a deterministic pointwise transform function.
-    tf_fun <- .joinme_make_assoc_transform(tf_spec, term_key)
+    tf_fun <- .JoiNMe_make_assoc_transform(tf_spec, term_key)
     vals <- as.numeric(tf_fun(x_grid))
     matrix(rep(vals, each = n_draws), nrow = n_draws)
 }
@@ -2922,7 +3149,7 @@ plot.JoinMeFit <- function(x,
         return(as.numeric(vals))
     }
 
-    assoc_draws <- extract.JoinMeFit(x, what = "assoc", term = term, keep_chains = FALSE)$draws
+    assoc_draws <- extract.JoiNMeFit(x, what = "assoc", term = term, keep_chains = FALSE)$draws
     as.numeric(assoc_draws[, 1])
 }
 
@@ -3340,7 +3567,7 @@ plot.JoinMeFit <- function(x,
     do.call(rbind, out)
 }
 
-.joinme_make_assoc_transform <- function(spec, term_name) {
+.JoiNMe_make_assoc_transform <- function(spec, term_name) {
     if (is.null(spec) || is.null(spec$type) || identical(spec$type, "identity")) {
         return(function(x) x)
     }

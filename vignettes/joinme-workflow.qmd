@@ -31,8 +31,8 @@ options(width = 100)
 repo_root <- normalizePath(if (dir.exists("R")) "." else "..")
 if (requireNamespace("devtools", quietly = TRUE) && file.exists(file.path(repo_root, "DESCRIPTION"))) {
   devtools::load_all(repo_root, quiet = TRUE)
-} else if (requireNamespace("joinme", quietly = TRUE)) {
-  library(joinme)
+} else {
+  try(base::attachNamespace("JoiNMe"), silent = TRUE)
 }
 library(dplyr)
 library(ggplot2)
@@ -43,17 +43,18 @@ library(posterior)
 
 # Introduction
 
-Applying a joint model in a scientific publication requires more than just fitting the model. It requires a rigorous validation process to ensure the results are robust, converged, and meaningful. This vignette outlines a "best practice" workflow for using `joinme` in a research context, suitable for inclusion in high-impact statistical or clinical journals.
+Applying a joint model in a scientific publication requires more than just fitting the model. It requires a rigorous validation process to ensure the results are robust, converged, and meaningful. This vignette outlines a "best practice" workflow for using `JoiNMe` in a research context, suitable for inclusion in high-impact statistical or clinical journals.
 
 We will walk through a complete end-to-end simulation study:
 1.  Generating synthetic data with known ground truth.
 2.  Fitting the joint model.
-3.  Assessing convergence and model fit.
+3.  Assessing convergence and model fit with renamed posterior draws.
 4.  Performing dynamic predictions for individual subjects.
+5.  Reporting results with consistent summaries and plotting helpers.
 
 ## Program flow in practice
 
-The `joinme` workflow follows a fixed sequence that mirrors the Stan program:
+The `JoiNMe` workflow follows a fixed sequence that mirrors the Stan program:
 
 1. **Data assembly (R)**: build design matrices, scale time to $[0, 1]$,
   and prepare Gauss-Kronrod nodes (default 15, configurable) for survival integration.
@@ -66,6 +67,9 @@ The `joinme` workflow follows a fixed sequence that mirrors the Stan program:
   `reduce_sum`, which splits subjects across threads when requested.
 5. **Generated quantities (Stan)**: compute per-observation log-likelihoods,
   fitted values, and prediction summaries for posterior diagnostics.
+6. **Post-processing (R)**: expose the posterior through `draws()`,
+  summary helpers, `mcmc_plot()`, and explicit plotting wrappers such as
+  `longitudinal_plot()` and `survival_plot()`.
 
 This sequence is important because it clarifies where each modelling choice
 enters the inference: formula parsing happens in R, while all probability
@@ -170,7 +174,7 @@ formulaLong_marker_only <- y ~ time + x1 +
 
 ```{r priors}
 # Define explicit priors for transparency (optional but recommended)
-# Note: joinme exposes beta (fixed effects), alpha (associations), and lkj
+# Note: JoiNMe exposes beta (fixed effects), alpha (associations), and lkj
 priors <- joinme_priors(
   beta = list(scale = 2.5),       # Fixed effects (Student-t, df = 6)
   alpha = list(scale = 1.0),      # Association coefficients
@@ -180,10 +184,14 @@ priors <- joinme_priors(
 
 # Model Fitting
 
-We fit the model using Hamiltonian Monte Carlo (HMC) via the `cmdstanr` backend (recommended for speed and reliability).
+We fit the model using Hamiltonian Monte Carlo (HMC), preferring the
+`cmdstanr` backend when CmdStan is available and otherwise falling back to
+`rstan`.
 
 ```{r fit}
-engine <- if (requireNamespace("rstan", quietly = TRUE)) "rstan" else "cmdstanr"
+has_cmdstan <- requireNamespace("cmdstanr", quietly = TRUE) &&
+  !is.null(tryCatch(cmdstanr::cmdstan_version(error_on_NA = FALSE), error = function(e) NULL))
+engine <- if (has_cmdstan) "cmdstanr" else "rstan"
 
 control <- list(
   engine = engine,
@@ -221,16 +229,12 @@ fit <- joinme(
 Values of $\hat{R} < 1.01$ and ESS > 400 indicate reasonable convergence for inference.
 
 ```{r diagnostics}
-# robust summary of regression coefficients
-draws_obj <- if (inherits(fit$fit, "CmdStanMCMC")) {
-  fit$fit$draws()
-} else {
-  posterior::as_draws_array(fit$fit)
-}
+# robust summary of regression coefficients on the renamed user-facing scale
+draws_obj <- draws(fit, format = "draws_array")
 
 draws_sub <- posterior::subset_draws(
   draws_obj,
-  variable = c("^beta\\[", "^gamma_w\\[", "^alpha"),
+  variable = c("^\\(Intercept\\)$", "^time$", "^event", "^alpha_"),
   regex = TRUE
 )
 
@@ -246,8 +250,8 @@ posterior::summarise_draws(
 Visual inspection of traceplots helps identify mixing issues or stuck chains.
 
 ```{r trace}
-# Plot traces for the association parameter
-bayesplot::mcmc_trace(draws_obj, regex_pars = "alpha")
+# Plot traces for the association parameter using the helper API
+mcmc_plot(fit, variable = "alpha_cv_total", type = "trace")
 ```
 
 # Posterior Predictive Checks (PPC)
@@ -307,8 +311,11 @@ preds <- tryCatch(
   }
 )
 
-# The result is a list with survival and cumhaz data frames
-if (!is.null(preds)) head(preds$survival)
+# The result is a JoiNMeDynPred / PredJoiNMeFit object
+if (!is.null(preds)) {
+  inherits(preds, "JoiNMeDynPred")
+  head(preds$predictions$survival)
+}
 ```
 
 `concordance(fit, ...)` now evaluates dynamic prediction on a dense per-subject
@@ -321,10 +328,38 @@ Finally, we visualise the predicted survival curve. The shaded area represents t
 
 ```{r predict-plot}
 if (!is.null(preds)) {
-  plot(preds) +
+  survival_plot(preds) +
     ggtitle(paste("Dynamic Survival Prediction for Subject", target_id)) +
     geom_vline(xintercept = dataEvent$time[dataEvent$id == target_id], linetype = "dashed", color = "red") +
     annotate("text", x = dataEvent$time[dataEvent$id == target_id], y = 0.1, label = "Observed event time", color = "red", hjust = 1.1)
+}
+```
+
+# Posterior reporting helpers
+
+The scientific reporting layer should use the same user-facing parameter names
+as the tables returned by `summary(fit)`. The `draws()` and `mcmc_plot()`
+helpers make that possible without directly handling raw Stan variables.
+
+```{r posterior-reporting}
+renamed_draws <- draws(fit, variables = c("time", "alpha_cv_total"), format = "draws_df")
+head(renamed_draws)
+
+mcmc_plot(fit, variable = c("time", "alpha_cv_total"), type = "intervals")
+```
+
+The plotting wrappers expose the same fitted and predicted views as the main
+`plot()` methods while making the intent explicit in scripts and reports:
+
+```{r plot-wrappers, eval=FALSE}
+longitudinal_plot(fit, subject = 1, scale = "epred")
+association_plot(fit)
+diagnostic_plot(fit, type = "ess_bulk")
+
+if (!is.null(preds)) {
+  longitudinal_plot(preds)
+  survival_plot(preds)
+  cumhaz_plot(preds)
 }
 ```
 

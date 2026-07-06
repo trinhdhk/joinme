@@ -2,7 +2,7 @@
 % Please edit documentation in R/standata.R
 \name{joinme_standata}
 \alias{joinme_standata}
-\title{Build Stan data for joinme (time-internal scaling)}
+\title{Build Stan data for JoiNMe (time-internal scaling)}
 \usage{
 joinme_standata(
   formulaLong,
@@ -161,7 +161,7 @@ Only the node count is passed to Stan; GK nodes/weights are fixed in Stan.}
 \item{seed}{Optional random seed for deterministic components of standata.}
 }
 \description{
-Standata builder for the joinme joint model (multivariate longitudinal + survival).
+Standata builder for the JoiNMe joint model (multivariate longitudinal + survival).
 
 This function follows the notebook \code{joinme_standata()} design, with these updates:
 \enumerate{

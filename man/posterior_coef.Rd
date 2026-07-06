@@ -2,12 +2,12 @@
 % Please edit documentation in R/methods.R
 \name{posterior_coef}
 \alias{posterior_coef}
-\title{Posterior coefficient alias for fitted joinme models}
+\title{Posterior coefficient alias for fitted JoiNMe models}
 \usage{
 posterior_coef(object, ...)
 }
 \arguments{
-\item{object}{A \code{JoinMeFit} object.}
+\item{object}{A \code{JoiNMeFit} object.}
 
 \item{...}{Additional arguments forwarded to \code{\link[=coef]{coef()}}.}
 }
@@ -15,5 +15,5 @@ posterior_coef(object, ...)
 The same object returned by \code{coef(object, summary = FALSE, ...)}.
 }
 \description{
-Posterior coefficient alias for fitted joinme models
+Posterior coefficient alias for fitted JoiNMe models
 }

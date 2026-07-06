@@ -19,7 +19,7 @@ test_that("standata accepts spline time terms without raw-time rescaling", {
     assoc = c("cv_total")
   )
 
-  expect_s3_class(sd$design_blueprints$fixed, "joinme_mm_blueprint")
+  expect_s3_class(sd$design_blueprints$fixed, "JoiNMe_mm_blueprint")
   expect_true(length(sd$idx_time_beta) == 0L)
   expect_true(length(sd$idx_time_uid) == 0L)
   expect_true(length(sd$idx_time_idm) == 0L)
@@ -29,7 +29,7 @@ test_that("standata accepts spline time terms without raw-time rescaling", {
 
   probe <- sim$dataLong[seq_len(min(6L, nrow(sim$dataLong))), , drop = FALSE]
   probe[["time"]] <- seq(0, 1, length.out = nrow(probe))
-  probe_matrix <- joinme:::.mm(sd$design_blueprints$fixed, probe)
+  probe_matrix <- JoiNMe:::.mm(sd$design_blueprints$fixed, probe)
   expect_equal(ncol(probe_matrix), sd$P)
 })
 
@@ -112,7 +112,7 @@ test_that("fit and prediction support spline time terms in formulaLong", {
     )
   )
 
-  expect_s3_class(fit, "JoinMeFit")
+  expect_s3_class(fit, "JoiNMeFit")
   expect_true(length(fit$stan_data$idx_time_beta) == 0L)
 
   pred <- posterior_epred(
@@ -134,5 +134,5 @@ test_that("fit and prediction support spline time terms in formulaLong", {
     seed = 3102
   )
 
-  expect_s3_class(pred, "JoinMeDynPred")
+  expect_s3_class(pred, "JoiNMeDynPred")
 })

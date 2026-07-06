@@ -3,17 +3,17 @@
 \name{assoc}
 \alias{assoc}
 \alias{posterior_assoc}
-\alias{assoc.JoinMeFit}
-\title{Build posterior association effects for a fitted joinme model}
+\alias{assoc.JoiNMeFit}
+\title{Build posterior association effects for a fitted JoiNMe model}
 \usage{
 assoc(object, ...)
 
 posterior_assoc(object, ...)
 
-\method{assoc}{JoinMeFit}(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...)
+\method{assoc}{JoiNMeFit}(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...)
 }
 \arguments{
-\item{object}{A \code{JoinMeFit} object.}
+\item{object}{A \code{JoiNMeFit} object.}
 
 \item{...}{Unused.}
 
@@ -24,7 +24,7 @@ posterior_assoc(object, ...)
 \item{digits}{Number of digits used when \code{summary = TRUE}.}
 
 \item{summary}{Logical. If \code{TRUE}, return posterior summaries with the same
-inferential columns as \code{\link[=summary.JoinMeFit]{summary.JoinMeFit()}}. If \code{FALSE}, return raw MCMC
+inferential columns as \code{\link[=summary.JoiNMeFit]{summary.JoiNMeFit()}}. If \code{FALSE}, return raw MCMC
 sample matrices.}
 }
 \value{

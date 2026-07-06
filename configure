@@ -9,5 +9,4 @@ else
   Rscript tools/precompile-stan.R || true
 fi
 
-
 exit 0

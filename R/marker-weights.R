@@ -131,7 +131,7 @@
                                              active_terms,
                                              shared_marker_weights = TRUE,
                                              estimate_marker_weights = FALSE,
-                                             context = "joinme") {
+                                             context = "JoiNMe") {
   keys <- .weighted_assoc_term_keys()
   marker_levels <- as.character(marker_levels %||% character(0))
   n_markers <- length(marker_levels)
@@ -314,7 +314,7 @@
 
 #' Fetch marker-weight draw array for one association term
 #'
-#' @param object A `JoinMeFit` object.
+#' @param object A `JoiNMeFit` object.
 #' @param term_key Weighted association term key.
 #' @param draws Optional posterior draw subset size.
 #' @param seed Random seed used when subsetting draws.

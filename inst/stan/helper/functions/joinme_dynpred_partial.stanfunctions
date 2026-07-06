@@ -1,5 +1,5 @@
 /**
- * @file joinme_dynpred_partial.stanfunctions
+ * @file JoiNMe_dynpred_partial.stanfunctions
  * @brief Per-draw log-likelihood slice for dynamic prediction (reduce_sum target).
  *
  * @details This function computes the log-likelihood contribution of a subset of

@@ -1,5 +1,5 @@
 ---
-title: "The joinme Framework: Methodology and Statistical Theory"
+title: "The JoiNMe Framework: Methodology and Statistical Theory"
 output-dir: ../docs/articles
 format:
   html:
@@ -25,15 +25,15 @@ knitr::opts_chunk$set(
   fig.height = 4
 )
 options(width = 80)
-if (requireNamespace("joinme", quietly = TRUE)) {
-  library(joinme)
+if (requireNamespace("JoiNMe", quietly = TRUE)) {
+  library(JoiNMe)
 }
 library(dplyr)
 ```
 
 # Abstract
 
-The `joinme` package provides a Bayesian framework for joint analysis of
+The `JoiNMe` package provides a Bayesian framework for joint analysis of
 multivariate longitudinal biomarkers and time-to-event outcomes. The longitudinal
 process is expressed through a layered random-effects decomposition that separates
 subject-level signals, marker-level deviations, and marker-by-subject departures.
@@ -50,7 +50,7 @@ reported on the effective hazard scale used by the fitted model. This keeps the
 reported `corr[...]` and `vcov[...]` coefficients aligned with the printed
 matrix labels, association plots, and posterior extraction helpers.
 
-For monotone spline transforms, `joinme` supports both raw-scale I-splines and
+For monotone spline transforms, `JoiNMe` supports both raw-scale I-splines and
 bounded-domain I-splines evaluated on `plogis(x)`. The bounded-domain variant
 keeps the spline input inside $(0, 1)$, which often yields more stable knot
 placement and smoother optimisation when raw association features are wide or
@@ -68,7 +68,7 @@ limitations:
 1.  **Computational Scalability**: As the number of markers $D$ increases, the dimension of the random effects vector grows linearly or quadratically, creating a "curse of dimensionality" for numerical integration or MCMC sampling.
 2.  **Rigidity**: Models often assume Gaussian error terms and linear associations, limiting their applicability to skewed data or non-linear biological mechanisms.
 
-`joinme` addresses these challenges through a structural decomposition of the
+`JoiNMe` addresses these challenges through a structural decomposition of the
 linear predictor and a flexible distributional regression framework. This
 vignette outlines the statistical theory underpinning the package, using
 notation and narrative that are intended to be accessible to applied
@@ -103,7 +103,7 @@ $$
 y_{id}(t) \sim \mathcal{F}_d(\cdot | \eta_{id}(t), \boldsymbol{\psi}_{d})
 $$
 
-`joinme` supports a wide range of families $\mathcal{F}_d$, including:
+`JoiNMe` supports a wide range of families $\mathcal{F}_d$, including:
 
 -   **Gaussian / Student's $t$**: For continuous, potentially heavy-tailed data.
 -   **Beta**: For bounded $(0,1)$ proportions.
@@ -118,7 +118,7 @@ $$
 \log(\sigma_{id}(t)) = \mathbf{x}_{\sigma, id}(t)^\top \boldsymbol{\beta}_\sigma
 $$
 
-JoinME also supports **family-scoped** distributional regressions using bracket
+JoiNMe also supports **family-scoped** distributional regressions using bracket
 syntax on the left-hand side, e.g.
 
 - `sigma[family=student_t] ~ 1 + time`
@@ -130,7 +130,7 @@ the formula applies to all rows where the parameter exists.
 
 # Covariance Regression
 
-A unique feature of `joinme` is the ability to model the covariance structure of the marker-by-id effects $\mathbf{w}_{id}$. In standard models, $\Sigma_w$ is constant. In `joinme`, we can allow the variance to depend on subject-level covariates $\mathbf{x}_{cov, i}$:
+A unique feature of `JoiNMe` is the ability to model the covariance structure of the marker-by-id effects $\mathbf{w}_{id}$. In standard models, $\Sigma_w$ is constant. In `JoiNMe`, we can allow the variance to depend on subject-level covariates $\mathbf{x}_{cov, i}$:
 
 $$
 \Sigma_{w, i} = \text{diag}(\boldsymbol{\tau}_i) \, \Omega \, \text{diag}(\boldsymbol{\tau}_i)
@@ -176,7 +176,7 @@ where $B_l(t)$ are B-spline basis functions.
 
 ## Association Structure
 The term $\mathcal{H}_{i}(t) = \{ \eta_{id}(s) : s \le t, d=1\dots D \}$
-represents the history of the longitudinal processes. `joinme` summarises this
+represents the history of the longitudinal processes. `JoiNMe` summarises this
 history using a small set of interpretable features:
 
 - **Current value (CV)**: the value of the latent longitudinal linear predictor
@@ -212,7 +212,7 @@ $\lambda_m \ge 0$ and $z_{im} \sim \mathcal{N}(0, 1)$.
 
 ### Marker-weighted contributions (CV and CS)
 
-When multiple markers are present, `joinme` forms marker-average association components using weights $\omega_d$ (one per marker). These weights apply **both** to the current value (CV) and current slope (CS) summaries. Let $\eta_{id}^{(mk)}(t)$ denote the marker-specific deviation component of the linear predictor for marker $d$. Then the marker-weighted summaries are:
+When multiple markers are present, `JoiNMe` forms marker-average association components using weights $\omega_d$ (one per marker). These weights apply **both** to the current value (CV) and current slope (CS) summaries. Let $\eta_{id}^{(mk)}(t)$ denote the marker-specific deviation component of the linear predictor for marker $d$. Then the marker-weighted summaries are:
 
 $$
 \eta_{i}^{(mk)}(t) = \frac{1}{D}\sum_{d=1}^{D} \omega_d \eta_{id}^{(mk)}(t), \quad
@@ -244,7 +244,7 @@ current value and slope calculations.
 Marker weights and CV/CS association coefficients are regularized to avoid
 overfitting when $D$ is large.
 
-- **Marker weights**: when estimated, `joinme` uses latent additive perturbations
+- **Marker weights**: when estimated, `JoiNMe` uses latent additive perturbations
   $\,w^{raw} = w^{(0)} + z_w$ with $z_w \sim \mathcal{N}(0, I)$ and uses the
   resulting weights directly in marker-aggregated association terms.
 - **CV/CS total and marker coefficients**: non-centred priors
@@ -257,7 +257,7 @@ overfitting when $D$ is large.
 This keeps marker effects signed (positive or negative) while improving sampling
 geometry for hierarchical association parameters.
 
-Crucially, `joinme` supports non-linear transformations of these terms via the
+Crucially, `JoiNMe` supports non-linear transformations of these terms via the
 `transforms` argument. Available transformation modes include identity, a
 functional bytecode evaluator, monotone I-splines, and piecewise linear rules.
 
@@ -301,7 +301,7 @@ p(\theta, \mathbf{u}, \mathbf{v}, \mathbf{w} | \mathbf{y}, \mathbf{T}, \boldsymb
 $$
 
 ## The Stan Implementation
-`joinme` compiles this model to a Stan program. Key efficiency features include:
+`JoiNMe` compiles this model to a Stan program. Key efficiency features include:
 
 1.  **Analytic Gradient of the Log-Likelihood**: Stan's autodiff engine handles the complex chain rule derivatives required for the joint likelihood.
 2.  **Multithreading via `reduce_sum`**: The likelihood calculation is parallelised over subjects ("grainsize"). This allows linear scaling with the number of available CPU cores.
@@ -344,7 +344,7 @@ Default priors are weakly informative and aligned with the Stan implementation:
 
 # Competing risks and dynamic prediction
 
-`joinme` supports competing risks through the event-type indicator
+`JoiNMe` supports competing risks through the event-type indicator
 (`event_type`) or, when available, a multi-state pair of variables
 (`stage_from`, `stage_to`) that are collapsed into a single event-type factor.
 The baseline hazard and hazard covariates are then indexed by event type, so the

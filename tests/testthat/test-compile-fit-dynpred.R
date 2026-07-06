@@ -52,7 +52,7 @@ test_that("fit and dynpred compile with hardcoded GK nodes", {
       refresh = 0
     )
   )
-  expect_s3_class(fit, "JoinMeFit")
+  expect_s3_class(fit, "JoiNMeFit")
 
   # Run dynpred to compile the prediction program and exercise GK usage there.
   pred <- posterior_epred(
@@ -73,5 +73,5 @@ test_that("fit and dynpred compile with hardcoded GK nodes", {
     ),
     seed = 2026
   )
-  expect_s3_class(pred, "JoinMeDynPred")
+  expect_s3_class(pred, "JoiNMeDynPred")
 })

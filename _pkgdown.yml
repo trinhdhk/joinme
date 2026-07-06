@@ -1,4 +1,4 @@
-url: https://trinhdhk.github.io/joinme/
+url: https://trinhdhk.github.io/JoiNMe/
 template:
   bootstrap: 5
   bootswatch: sandstone
@@ -11,53 +11,53 @@ ignore:
 - vignettes/_quarto_out
 - vignettes/.quarto
 home:
-  title: JoinMe
-  description: Bayesian Joint Mixed-Effects (JoinME) models for multivariate longitudinal
+  title: joinme
+  description: Bayesian Joint Nested Mixed-effects (JoiNMe) models for multivariate longitudinal
     and survival data.
 articles:
 - title: Get started
   contents:
-  - joinme-intro
-  - joinme-demo
+  - JoiNMe-intro
+  - JoiNMe-demo
 - title: Modelling
   contents:
-  - joinme-workflow
-  - joinme-associations
-  - joinme-model
-  - joinme-theory
+  - JoiNMe-workflow
+  - JoiNMe-associations
+  - JoiNMe-model
+  - JoiNMe-theory
 reference:
 - title: Core modelling
   contents:
-  - joinme-package
-  - joinme
-  - joinme_standata
+  - JoiNMe-package
+  - JoiNMe
+  - JoiNMe_standata
   - build_standata_transforms
   - simulate_joinme
   - simulate_joinme_joint_student_t_cvtotal
-  - update.JoinMeFit
-  - print.JoinMeFit
-  - summary.JoinMeFit
-  - print.summary_JoinMeFit
+  - update.JoiNMeFit
+  - print.JoiNMeFit
+  - summary.JoiNMeFit
+  - print.summary_JoiNMeFit
 - title: Prediction
   contents:
-  - predict.JoinMeFit
-  - posterior_epred.JoinMeFit
-  - posterior_linpred.JoinMeFit
-  - posterior_predict.JoinMeFit
-  - plot.JoinMeDynPred
+  - predict.JoiNMeFit
+  - posterior_epred.JoiNMeFit
+  - posterior_linpred.JoiNMeFit
+  - posterior_predict.JoiNMeFit
+  - plot.JoiNMeDynPred
 - title: Model diagnosis and performance
   contents:
-  - loo.JoinMeFit
-  - waic.JoinMeFit
-  - elpd.JoinMeFit
-  - pp_check.JoinMeFit
-  - concordance.JoinMeFit
-  - log_lik.JoinMeFit
+  - loo.JoiNMeFit
+  - waic.JoiNMeFit
+  - elpd.JoiNMeFit
+  - pp_check.JoiNMeFit
+  - concordance.JoiNMeFit
+  - log_lik.JoiNMeFit
 - title: Utilities
   contents:
-  - fixef.JoinMeFit
-  - ranef.JoinMeFit
-  - corr.JoinMeFit
+  - fixef.JoiNMeFit
+  - ranef.JoiNMeFit
+  - corr.JoiNMeFit
 - title: Transforms
   contents:
   - parse_transform_expr
@@ -69,4 +69,4 @@ reference:
   - family_utils
   - weibull_h0
   - precompile_cmdstanr_models
-  - run_joinme_example
+  - run_JoiNMe_example

@@ -1,4 +1,4 @@
-#' Example runner for joinme
+#' Example runner for JoiNMe
 #'
 #' @description
 #' Runs a small end-to-end workflow: simulate data, build standata, fit the model,

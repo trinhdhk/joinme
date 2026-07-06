@@ -1,14 +1,14 @@
-#' @name joinme_methods
-#' @title joinme S3 Methods
+#' @name JoiNMe_methods
+#' @title JoiNMe S3 Methods
 #'
 #' @description
-#' S3 methods for joinme R6 objects with cached summaries
+#' S3 methods for JoiNMe R6 objects with cached summaries
 #' @keywords internal
 #' @author Trinh Dong
 NULL
 
 # File overview:
-# - S3 methods for JoinMeFit and summary output.
+# - S3 methods for JoiNMeFit and summary output.
 # - Internal helpers for diagnostics and draw summaries.
 
 # ---- internal helpers -----------------------------------------------------
@@ -375,7 +375,7 @@ NULL
 }
 
 #' @keywords internal
-.joinme_sampler_diagnostics <- function(fit) {
+.JoiNMe_sampler_diagnostics <- function(fit) {
   # Collect sampler diagnostics across cmdstanr or rstan backends
   out <- list(
     draws = NA_integer_,
@@ -687,11 +687,11 @@ NULL
   out
 }
 
-#' Round summary tables using the standard joinme summary schema
+#' Round summary tables using the standard JoiNMe summary schema
 #'
 #' @description
-#' Applies the same rounding rules used throughout joinme summaries so new
-#' posterior reports remain directly comparable to [summary.JoinMeFit()].
+#' Applies the same rounding rules used throughout JoiNMe summaries so new
+#' posterior reports remain directly comparable to [summary.JoiNMeFit()].
 #'
 #' The rounded columns are the inferential columns that users typically inspect
 #' first: posterior mean, posterior standard deviation, interval bounds, and
@@ -703,7 +703,7 @@ NULL
 #'
 #' @return The same data frame with rounded summary columns.
 #' @keywords internal
-.round_joinme_summary_table <- function(tbl, digits = 3) {
+.round_JoiNMe_summary_table <- function(tbl, digits = 3) {
   if (is.null(tbl) || !is.data.frame(tbl) || nrow(tbl) == 0L) {
     return(tbl)
   }
@@ -716,6 +716,71 @@ NULL
     rounded$Rhat <- round(rounded$Rhat, 3)
   }
   rounded
+}
+
+#' Convert renamed draw payloads into a chains-aware array
+#'
+#' @param x Posterior draws returned by [extract()] or [draws()].
+#'
+#' @return A three-dimensional array with dimensions iteration x chain x term.
+#' @keywords internal
+.JoiNMe_named_draw_array <- function(x) {
+  if (is.null(x)) {
+    return(NULL)
+  }
+  if (length(dim(x)) == 3L) {
+    return(x)
+  }
+  if (is.matrix(x)) {
+    return(array(
+      x,
+      dim = c(nrow(x), 1L, ncol(x)),
+      dimnames = list(
+        iteration = rownames(x) %||% as.character(seq_len(nrow(x))),
+        chain = "1",
+        variable = colnames(x) %||% as.character(seq_len(ncol(x)))
+      )
+    ))
+  }
+  NULL
+}
+
+#' Summarise renamed posterior draws
+#'
+#' @param draws_obj Posterior draw matrix or array with renamed variables.
+#' @param digits Number of decimal places used for posterior summaries.
+#'
+#' @return A summary table with the common JoiNMe schema.
+#' @keywords internal
+.summarise_JoiNMe_named_draws <- function(draws_obj, digits = 3) {
+  draw_array <- .JoiNMe_named_draw_array(draws_obj)
+  if (is.null(draw_array) || !length(dim(draw_array)) || dim(draw_array)[3] == 0L) {
+    return(NULL)
+  }
+  term_labels <- dimnames(draw_array)[[3]] %||% paste0("term_", seq_len(dim(draw_array)[3]))
+  .assoc_summary_from_draw_array(draw_array, term_labels = term_labels, digits = digits)
+}
+
+#' Summarise extracted draws for one JoiNMeFit component
+#'
+#' @param object A `JoiNMeFit` object.
+#' @param what Component selector passed to [extract.JoiNMeFit()].
+#' @param draws Optional number of posterior draws to keep.
+#' @param seed Integer seed used when subsetting draws.
+#' @param digits Number of decimal places used for posterior summaries.
+#' @param term Optional term filter passed through to [extract.JoiNMeFit()].
+#'
+#' @return A posterior summary table, or `NULL` when no draws match.
+#' @keywords internal
+.extract_JoiNMefit_summary <- function(object, what, draws = NULL, seed = 1, digits = 3, term = NULL) {
+  ext <- tryCatch(
+    extract.JoiNMeFit(object, what = what, term = term, draws = draws, seed = seed, keep_chains = TRUE),
+    error = function(e) NULL
+  )
+  if (is.null(ext) || is.null(ext$draws)) {
+    return(NULL)
+  }
+  .summarise_JoiNMe_named_draws(ext$draws, digits = digits)
 }
 
 #' Find the first posterior variable available in a candidate set
@@ -751,7 +816,7 @@ NULL
 #'
 #' @param term_key Association channel name. Supported values are `"corr"` and
 #'   `"vcov"`.
-#' @param sd Stan-data list stored in a `JoinMeFit` object.
+#' @param sd Stan-data list stored in a `JoiNMeFit` object.
 #' @param n_components Optional expected number of components. When supplied,
 #'   the output is truncated to this length.
 #'
@@ -936,7 +1001,7 @@ NULL
 #' @description
 #' Derived association effects do not necessarily exist as named Stan variables.
 #' This helper converts an iteration x chain x term array into the same summary
-#' schema used elsewhere in joinme: posterior mean, posterior standard
+#' schema used elsewhere in JoiNMe: posterior mean, posterior standard
 #' deviation, central 95% interval, split-chain R-hat, and bulk/tail effective
 #' sample sizes.
 #'
@@ -984,7 +1049,7 @@ NULL
     sum_df$ess_tail <- NA_real_
   }
 
-  .round_joinme_summary_table(sum_df, digits = digits)
+  .round_JoiNMe_summary_table(sum_df, digits = digits)
 }
 
 #' Flatten a derived posterior draw array into an MCMC sample matrix
@@ -1014,7 +1079,7 @@ NULL
   out[, term_labels, drop = FALSE]
 }
 
-#' Build posterior association effects for a fitted joinme model
+#' Build posterior association effects for a fitted JoiNMe model
 #'
 #' @description
 #' Reconstructs the posterior association effects that enter the survival linear
@@ -1029,12 +1094,12 @@ NULL
 #' posterior coefficient. For covariance-style channels (`corr`, `vcov`) the
 #' returned effects are grouped by their labelled covariance component.
 #'
-#' @param object A `JoinMeFit` object.
+#' @param object A `JoiNMeFit` object.
 #' @param draws Optional number of posterior draws to retain.
 #' @param seed Random seed used when subsetting posterior draws.
 #' @param digits Number of digits used when `summary = TRUE`.
 #' @param summary Logical. If `TRUE`, return posterior summaries with the same
-#'   inferential columns as [summary.JoinMeFit()]. If `FALSE`, return raw MCMC
+#'   inferential columns as [summary.JoiNMeFit()]. If `FALSE`, return raw MCMC
 #'   sample matrices.
 #' @param ... Unused.
 #'
@@ -1054,8 +1119,8 @@ posterior_assoc <- function(object, ...) {
 
 #' @rdname assoc
 #' @export
-assoc.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
-  assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
+assoc.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
+  assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
 
   sd <- object$stan_data
   fit <- object$fit
@@ -1210,13 +1275,13 @@ assoc.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary 
   out
 }
 
-#' Posterior summary alias for joinme objects
+#' Posterior summary alias for JoiNMe objects
 #'
 #' @description
 #' Provides a user-facing alias to [summary()] so posterior summaries can be
 #' requested with terminology that emphasizes Bayesian output.
 #'
-#' @param object A joinme object.
+#' @param object A JoiNMe object.
 #' @param ... Additional arguments forwarded to [summary()].
 #'
 #' @return The same object that [summary()] would return for the supplied class.
@@ -1227,30 +1292,30 @@ posterior_summary <- function(object, ...) {
 
 #' @rdname posterior_summary
 #' @export
-posterior_summary.JoinMeFit <- function(object, ...) {
+posterior_summary.JoiNMeFit <- function(object, ...) {
   summary(object, ...)
 }
 
 #' @rdname posterior_summary
 #' @export
-posterior_summary.JoinMeDynPred <- function(object, ...) {
+posterior_summary.JoiNMeDynPred <- function(object, ...) {
   summary(object, ...)
 }
 
 # ---- print/summary --------------------------------------------------------
 
-#' Print a joinme object
+#' Print a JoiNMe object
 #'
-#' @param x A joinme fit object.
+#' @param x A JoiNMe fit object.
 #' @param ... Unused.
 #'
 #' @return Invisibly returns the object.
 #' @export
-print.JoinMeFit <- function(x, ...) {
+print.JoiNMeFit <- function(x, ...) {
   # User-facing summary header for fits
-  assertthat::assert_that(inherits(x, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
+  assertthat::assert_that(inherits(x, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
 
-  cat("JoinMe model fit\n")
+  cat("JoiNMe model fit\n")
   cat("===============\n")
   if (!is.null(x$call)) {
     cat("Call:\n")
@@ -1309,7 +1374,7 @@ print.JoinMeFit <- function(x, ...) {
 #'
 #' @description
 #' Prints association-effect summaries or raw posterior sample availability in a
-#' layout aligned with [print.summary_JoinMeFit()].
+#' layout aligned with [print.summary_JoiNMeFit()].
 #'
 #' @param x A `PosteriorAssoc` object returned by [assoc()] or
 #'   [posterior_assoc()].
@@ -1358,7 +1423,7 @@ print.PosteriorAssoc <- function(x, ...) {
   invisible(x)
 }
 
-#' Summarise a joinme object
+#' Summarise a JoiNMe object
 #'
 #' @description
 #' Builds posterior summaries for the longitudinal process, survival process,
@@ -1366,21 +1431,21 @@ print.PosteriorAssoc <- function(x, ...) {
 #' now includes a dedicated `survival_process` report whenever the event model
 #' contains non-intercept covariates beyond association features.
 #'
-#' @param object A joinme fit object.
+#' @param object A JoiNMe fit object.
 #' @param draws Number of draws to use for summaries.
 #' @param seed Random seed for subsetting draws.
 #' @param digits Number of digits to round summary values.
 #' @param include_corr Logical; include covariance summaries.
 #' @param ... Unused.
 #'
-#' @return A `summary_JoinMeFit` object containing tables such as `fixef`,
+#' @return A `summary_JoiNMeFit` object containing tables such as `fixef`,
 #'   `survival_process` (when applicable), `assoc`, covariance
 #'   summaries (`id`, `marker`), dedicated `id:marker` covariance-parameter
 #'   summaries (latent + covariance-regression blocks when `Q_idm > 0`), and diagnostics.
 #' @export
-summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
+summary.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
                            include_corr = TRUE, ...) {
-  assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
+  assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
 
   fit <- object$fit
   sd <- object$stan_data
@@ -1396,60 +1461,12 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
   cached <- object$cache_get(cache_key)
   if (!is.null(cached)) return(cached)
 
-  diag <- .joinme_sampler_diagnostics(fit)
+  diag <- .JoiNMe_sampler_diagnostics(fit)
   all_vars <- tryCatch(posterior::variables(.get_draws_obj(fit)), error = function(e) character(0))
 
-  beta_vars <- paste0("beta[", seq_len(sd$P), "]")
-  s_beta <- as.data.frame(.summarise_draws_diag(fit, beta_vars, draws = draws, seed = seed))
-  s_beta$term <- if (!is.null(sd$x_cols) && length(sd$x_cols) == nrow(s_beta)) sd$x_cols else s_beta$variable
-  s_beta <- s_beta[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
-  s_beta$Estimate <- round(s_beta$Estimate, digits)
-  s_beta$Est.Error <- round(s_beta$Est.Error, digits)
-  s_beta$Q2.5 <- round(s_beta$Q2.5, digits)
-  s_beta$Q97.5 <- round(s_beta$Q97.5, digits)
-  s_beta$Rhat <- round(s_beta$Rhat, 3)
+  s_beta <- .extract_JoiNMefit_summary(object, what = "fixef", draws = draws, seed = seed, digits = digits)
 
-  s_g <- NULL
-  if (sd$p_w > 0) {
-    g_vars <- paste0("gamma_w[", seq_len(sd$p_w), "]")
-    g_vars <- g_vars[g_vars %in% all_vars]
-
-    if (length(g_vars) == 0) {
-      k_event <- sd$K_event %||% 1L
-      g_vars_mat <- outer(
-        seq_len(k_event),
-        seq_len(sd$p_w),
-        function(k, j) paste0("gamma_w[", k, ",", j, "]")
-      )
-      g_vars <- as.vector(g_vars_mat)
-      g_vars <- g_vars[g_vars %in% all_vars]
-    }
-
-    if (length(g_vars) > 0) {
-      s_g <- as.data.frame(.summarise_draws_diag(fit, g_vars, draws = draws, seed = seed))
-      if (!is.null(sd$w_cols)) {
-        var_idx <- regmatches(s_g$variable, regexec("^gamma_w\\[(\\d+)(?:,(\\d+))?\\]$", s_g$variable))
-        k_idx <- vapply(var_idx, function(x) if (length(x) >= 2) as.integer(x[2]) else NA_integer_, integer(1))
-        j_idx <- vapply(var_idx, function(x) if (length(x) >= 3 && nzchar(x[3])) as.integer(x[3]) else NA_integer_, integer(1))
-        k_event <- sd$K_event %||% 1L
-        term_base <- s_g$variable
-        if (any(!is.na(j_idx))) term_base[!is.na(j_idx)] <- sd$w_cols[j_idx[!is.na(j_idx)]]
-        if (k_event > 1 && !all(is.na(k_idx))) {
-          s_g$term <- paste0("event", k_idx, ": ", term_base)
-        } else {
-          s_g$term <- term_base
-        }
-      } else {
-        s_g$term <- s_g$variable
-      }
-      s_g <- s_g[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
-      s_g$Estimate <- round(s_g$Estimate, digits)
-      s_g$Est.Error <- round(s_g$Est.Error, digits)
-      s_g$Q2.5 <- round(s_g$Q2.5, digits)
-      s_g$Q97.5 <- round(s_g$Q97.5, digits)
-      s_g$Rhat <- round(s_g$Rhat, 3)
-    }
-  }
+  s_g <- .extract_JoiNMefit_summary(object, what = "gamma_w", draws = draws, seed = seed, digits = digits)
 
   # Survival-process report (non-association baseline covariates only)
   #
@@ -1471,11 +1488,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
       tolower(term_chr) %in% c("(intercept)", "intercept", "1")
     }
 
-    baseline_terms <- if (!is.null(sd$w_cols) && length(sd$w_cols) == nrow(s_g)) {
-      as.character(sd$w_cols)
-    } else {
-      as.character(s_g$term)
-    }
+    baseline_terms <- sub("^event[0-9]+:\\s*", "", as.character(s_g$term))
 
     keep_idx <- !vapply(baseline_terms, is_intercept_term, logical(1))
     if (!any(keep_idx) && length(baseline_terms) > 0) {
@@ -1496,54 +1509,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     }
   }
 
-  corr_assoc_vars <- grep("^alpha_corr_eff\\[", all_vars, value = TRUE)
-  if (length(corr_assoc_vars) == 0L) corr_assoc_vars <- grep("^alpha_corr\\[", all_vars, value = TRUE)
-  vcov_assoc_vars <- grep("^alpha_vcov_eff\\[", all_vars, value = TRUE)
-  if (length(vcov_assoc_vars) == 0L) vcov_assoc_vars <- grep("^alpha_vcov\\[", all_vars, value = TRUE)
-  a_vars <- c("alpha_cv_total", "alpha_cv_mean", "alpha_cv_marker", "alpha_cs_total", "alpha_cs_mean", "alpha_cs_marker")
-  a_vars <- c(a_vars, corr_assoc_vars)
-  a_vars <- c(a_vars, vcov_assoc_vars)
-  a_vars <- a_vars[a_vars %in% all_vars]
-  active_vars <- c(
-    if (isTRUE(sd$assoc_cv_total == 1)) "alpha_cv_total",
-    if (isTRUE(sd$assoc_cv_mean == 1)) "alpha_cv_mean",
-    if (isTRUE(sd$assoc_cv_marker == 1)) "alpha_cv_marker",
-    if (isTRUE(sd$assoc_cs_total == 1)) "alpha_cs_total",
-    if (isTRUE(sd$assoc_cs_mean == 1)) "alpha_cs_mean",
-    if (isTRUE(sd$assoc_cs_marker == 1)) "alpha_cs_marker",
-    if (isTRUE(sd$assoc_corr == 1)) corr_assoc_vars,
-    if (isTRUE(sd$assoc_vcov == 1)) vcov_assoc_vars
-  )
-  if (length(active_vars) > 0) {
-    a_vars <- a_vars[a_vars %in% active_vars]
-  }
-  # Association coefficient summaries (respect assoc flags)
-  s_a <- NULL
-  if (length(a_vars) > 0) {
-    s_a <- as.data.frame(.summarise_draws_diag(fit, a_vars, draws = draws, seed = seed))
-    assoc_map <- c(
-      alpha_cv_total = "cv_total",
-      alpha_cv_mean = "cv_mean",
-      alpha_cv_marker = "cv_marker",
-      alpha_cs_total = "cs_total",
-      alpha_cs_mean = "cs_mean",
-      alpha_cs_marker = "cs_marker"
-    )
-    s_a$term <- assoc_map[s_a$variable]
-    s_a$term[is.na(s_a$term)] <- sub("^alpha_", "", s_a$variable[is.na(s_a$term)])
-    s_a$term <- sub("_eff\\[", "[", s_a$term, perl = TRUE)
-    positive_terms <- .positive_weighted_assoc_terms(sd)
-    if (length(positive_terms) > 0L) {
-      positive_idx <- s_a$term %in% positive_terms
-      s_a$term[positive_idx] <- paste0(s_a$term[positive_idx], " (+)")
-    }
-    s_a <- s_a[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
-    s_a$Estimate <- round(s_a$Estimate, digits)
-    s_a$Est.Error <- round(s_a$Est.Error, digits)
-    s_a$Q2.5 <- round(s_a$Q2.5, digits)
-    s_a$Q97.5 <- round(s_a$Q97.5, digits)
-    s_a$Rhat <- round(s_a$Rhat, 3)
-  }
+  s_a <- .extract_JoiNMefit_summary(object, what = "assoc", draws = draws, seed = seed, digits = digits)
 
   # Marker-weight association summaries are shown only when marker-weighted
   # association terms are active (cv_total/cv_marker/cs_total/cs_marker).
@@ -1601,52 +1567,12 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
   # Reporting rules:
   # - Include only parameters required by each marker family.
   # - Replace numeric marker indices with marker names in term labels.
-  dist_term_map <- .distributional_term_map(sd, cfg, all_vars)
-  dist_vars <- names(dist_term_map)
-  s_d <- NULL
-  if (length(dist_vars) > 0) {
-    s_d <- as.data.frame(.summarise_draws_diag(fit, dist_vars, draws = draws, seed = seed))
-    s_d$term <- unname(dist_term_map[s_d$variable])
-    s_d <- s_d[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
-    s_d$Estimate <- round(s_d$Estimate, digits)
-    s_d$Est.Error <- round(s_d$Est.Error, digits)
-    s_d$Q2.5 <- round(s_d$Q2.5, digits)
-    s_d$Q97.5 <- round(s_d$Q97.5, digits)
-    s_d$Rhat <- round(s_d$Rhat, 3)
-  }
+  s_d <- .extract_JoiNMefit_summary(object, what = "distributional", draws = draws, seed = seed, digits = digits)
 
-  s_dr <- NULL
-  dist_cols <- cfg$dist$dist_cols %||% list()
-  # Distributional regression summaries (fixed effects)
-  dist_reg_specs <- list(
-    sigma = list(prefix = "beta_sigma", cols = dist_cols$sigma %||% character(0)),
-    nu = list(prefix = "beta_nu", cols = dist_cols$nu %||% character(0)),
-    phi = list(prefix = "beta_phi", cols = dist_cols$phi %||% character(0)),
-    alpha = list(prefix = "beta_alpha", cols = dist_cols$alpha %||% character(0))
-  )
-  dist_reg_tables <- list()
-  for (nm in names(dist_reg_specs)) {
-    spec <- dist_reg_specs[[nm]]
-    vars <- grep(paste0("^", spec$prefix, "\\["), all_vars, value = TRUE)
-    if (length(vars) > 0) {
-      tmp <- as.data.frame(.summarise_draws_diag(fit, vars, draws = draws, seed = seed))
-      if (length(spec$cols) == nrow(tmp)) {
-        tmp$term <- paste0(nm, ": ", spec$cols)
-      } else {
-        tmp$term <- tmp$variable
-      }
-      tmp$parameter <- nm
-      tmp <- tmp[, c("parameter", "term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
-      tmp$Estimate <- round(tmp$Estimate, digits)
-      tmp$Est.Error <- round(tmp$Est.Error, digits)
-      tmp$Q2.5 <- round(tmp$Q2.5, digits)
-      tmp$Q97.5 <- round(tmp$Q97.5, digits)
-      tmp$Rhat <- round(tmp$Rhat, 3)
-      dist_reg_tables[[nm]] <- tmp
-    }
-  }
-  if (length(dist_reg_tables) > 0) {
-    s_dr <- do.call(rbind, dist_reg_tables)
+  s_dr <- .extract_JoiNMefit_summary(object, what = "distributional_regression", draws = draws, seed = seed, digits = digits)
+  if (!is.null(s_dr) && nrow(s_dr) > 0L) {
+    s_dr$parameter <- sub(":.*$", "", s_dr$term)
+    s_dr <- s_dr[, c("parameter", "term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
   }
 
   # Optional variance/covariance summaries (costly)
@@ -1954,7 +1880,7 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     n_terms_low_ess_tail = as.numeric(term_diag$n_terms_low_ess_tail %||% 0)
   )
 
-  summary_obj <- SummaryJoinMeFit$new(
+  summary_obj <- SummaryJoiNMeFit$new(
     tables = list(
       diagnostics = diag_table,
       fixef = s_beta,
@@ -1981,13 +1907,13 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
   summary_obj
 }
 
-#' Update a joinme fit
+#' Update a JoiNMe fit
 #'
 #' @description
-#' Refits a joinme model using the stored call, with optional updates to formulas,
+#' Refits a JoiNMe model using the stored call, with optional updates to formulas,
 #' data, and control arguments. This mirrors the pattern used by brms::update.
 #'
-#' @param object A joinme fit object.
+#' @param object A JoiNMe fit object.
 #' @param formulaLong Optional updated longitudinal formula. Use an update formula
 #'   (e.g., `~ . + x`) to modify the existing model.
 #' @param dataLong Optional updated longitudinal dataset.
@@ -2003,10 +1929,10 @@ summary.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
 #' @param priors Optional updated priors list.
 #' @param ... Additional arguments passed to `joinme()`.
 #'
-#' @return A refitted joinme object.
-#' @method update JoinMeFit
+#' @return A refitted JoiNMe object.
+#' @method update JoiNMeFit
 #' @export
-update.JoinMeFit <- function(
+update.JoiNMeFit <- function(
   object,
   formulaLong = NULL,
   dataLong = NULL,
@@ -2021,13 +1947,13 @@ update.JoinMeFit <- function(
   priors = NULL,
   ...
 ) {
-  assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
+  assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
 
   call_obj <- object$call
   if (is.null(call_obj) || !is.call(call_obj)) {
-    call_obj <- call("joinme")
+    call_obj <- call("JoiNMe")
   }
-  call_obj[[1]] <- quote(joinme)
+  call_obj[[1]] <- quote(JoiNMe)
 
   update_formula <- function(current, updated, name) {
     # Support update formulas ("~ . + x") while preserving original
@@ -2120,14 +2046,14 @@ update.JoinMeFit <- function(
   eval(call_obj, parent.frame())
 }
 
-#' Print a summary_JoinMeFit object
+#' Print a summary_JoiNMeFit object
 #'
-#' @param x A summary_JoinMeFit object.
+#' @param x A summary_JoiNMeFit object.
 #' @param ... Unused.
 #'
 #' @return Invisibly returns the summary object.
 #' @export
-print.summary_JoinMeFit <- function(x, ...) {
+print.summary_JoiNMeFit <- function(x, ...) {
   .cli_summary_heading("Joint mixed effects model summary", level = 1L)
   meta_lines <- character(0)
   if (!is.null(x$metadata$call) && nzchar(x$metadata$call)) {
@@ -2191,7 +2117,7 @@ print.summary_JoinMeFit <- function(x, ...) {
 # ---- fixef / ranef --------------------------------------------------------
 
 #' @keywords internal
-.joinme_draw_long_from_matrix <- function(draw_matrix, meta) {
+.JoiNMe_draw_long_from_matrix <- function(draw_matrix, meta) {
   if (is.null(draw_matrix) || !is.matrix(draw_matrix) || ncol(draw_matrix) == 0L || nrow(meta) == 0L) {
     return(data.frame())
   }
@@ -2207,7 +2133,7 @@ print.summary_JoinMeFit <- function(x, ...) {
 }
 
 #' @keywords internal
-.joinme_summarize_value <- function(values) {
+.JoiNMe_summarize_value <- function(values) {
   values <- as.numeric(values)
   values <- values[is.finite(values)]
   if (!length(values)) {
@@ -2229,7 +2155,7 @@ print.summary_JoinMeFit <- function(x, ...) {
 }
 
 #' @keywords internal
-.joinme_summarize_long_draws <- function(draws_df, group_cols, digits = 3, value_col = "value") {
+.JoiNMe_summarize_long_draws <- function(draws_df, group_cols, digits = 3, value_col = "value") {
   if (is.null(draws_df) || !nrow(draws_df)) {
     return(NULL)
   }
@@ -2238,7 +2164,7 @@ print.summary_JoinMeFit <- function(x, ...) {
   idx_split <- split(seq_len(nrow(draws_df)), split_key)
   out_rows <- lapply(idx_split, function(idx) {
     base_row <- draws_df[idx[1], setdiff(group_cols, value_col), drop = FALSE]
-    stats_row <- .joinme_summarize_value(draws_df[[value_col]][idx])
+    stats_row <- .JoiNMe_summarize_value(draws_df[[value_col]][idx])
     cbind(base_row, as.data.frame(as.list(stats_row), stringsAsFactors = FALSE), stringsAsFactors = FALSE)
   })
   out <- do.call(rbind, out_rows)
@@ -2252,7 +2178,7 @@ print.summary_JoinMeFit <- function(x, ...) {
 }
 
 #' @keywords internal
-.joinme_public_time_scale <- function(stan_data) {
+.JoiNMe_public_time_scale <- function(stan_data) {
   scale_factor <- suppressWarnings(as.numeric(stan_data$tmax_internal %||% 1.0))
   if (!is.finite(scale_factor) || length(scale_factor) != 1L || scale_factor <= 0) {
     return(1.0)
@@ -2264,7 +2190,7 @@ print.summary_JoinMeFit <- function(x, ...) {
 .rescale_public_longitudinal_draws <- function(draws_df, stan_data, idx, term_labels) {
   if (is.null(draws_df) || !nrow(draws_df)) return(draws_df)
 
-  scale_factor <- .joinme_public_time_scale(stan_data)
+  scale_factor <- .JoiNMe_public_time_scale(stan_data)
   if (abs(scale_factor - 1.0) < 1e-12) return(draws_df)
 
   idx <- as.integer(idx %||% integer(0))
@@ -2286,7 +2212,7 @@ print.summary_JoinMeFit <- function(x, ...) {
 .rescale_public_longitudinal_summary <- function(summary_df, stan_data, idx, term_labels) {
   if (is.null(summary_df) || !nrow(summary_df)) return(summary_df)
 
-  scale_factor <- .joinme_public_time_scale(stan_data)
+  scale_factor <- .JoiNMe_public_time_scale(stan_data)
   if (abs(scale_factor - 1.0) < 1e-12) return(summary_df)
 
   idx <- as.integer(idx %||% integer(0))
@@ -2308,7 +2234,7 @@ print.summary_JoinMeFit <- function(x, ...) {
 }
 
 #' @keywords internal
-.joinme_id_labels <- function(object, n_id) {
+.JoiNMe_id_labels <- function(object, n_id) {
   ids <- object$dataLong$id %||% object$dataEvent$id %||% seq_len(n_id)
   ids <- unique(as.character(ids))
   if (length(ids) < n_id) {
@@ -2398,7 +2324,7 @@ print.summary_JoinMeFit <- function(x, ...) {
     term = as.character(term_labels[j_idx]),
     stringsAsFactors = FALSE
   )
-  .joinme_draw_long_from_matrix(dmat, meta)
+  .JoiNMe_draw_long_from_matrix(dmat, meta)
 }
 
 #' @keywords internal
@@ -2424,20 +2350,20 @@ print.summary_JoinMeFit <- function(x, ...) {
     if (!length(vars)) next
     dmat <- .get_draws_matrix(fit, variables = vars, draws = draws, seed = seed)
     term_labels <- if (length(spec$cols) == length(vars)) spec$cols else vars
-    out[[nm]] <- .joinme_draw_long_from_matrix(dmat, data.frame(term = term_labels, stringsAsFactors = FALSE))
+    out[[nm]] <- .JoiNMe_draw_long_from_matrix(dmat, data.frame(term = term_labels, stringsAsFactors = FALSE))
   }
   out
 }
 
 #' @keywords internal
-.posterior_ranef_joinmefit <- function(object, draws = NULL, seed = 1) {
+.posterior_ranef_JoiNMefit <- function(object, draws = NULL, seed = 1) {
   fit <- object$fit
   sd <- object$stan_data
   cfg <- object$config
   if (is.null(draws)) draws <- object$config$draws_default
   all_vars <- tryCatch(posterior::variables(.get_draws_obj(fit)), error = function(e) character(0))
   n_id <- as.integer(sd$n_id %||% 0L)
-  id_labels <- .joinme_id_labels(object, n_id)
+  id_labels <- .JoiNMe_id_labels(object, n_id)
   marker_labels <- as.character(sd$marker_levels %||% paste0("marker_", seq_len(as.integer(sd$D %||% 0L))))
 
   extract_grouped_draws <- function(var_builder, meta_builder) {
@@ -2449,7 +2375,7 @@ print.summary_JoinMeFit <- function(x, ...) {
     if (!nrow(meta)) return(NULL)
     dmat <- .get_draws_matrix(fit, variables = meta$variable, draws = draws, seed = seed)
     meta$variable <- NULL
-    .joinme_draw_long_from_matrix(dmat, meta)
+    .JoiNMe_draw_long_from_matrix(dmat, meta)
   }
 
   out_long <- list(
@@ -2535,7 +2461,7 @@ print.summary_JoinMeFit <- function(x, ...) {
         }, character(1)),
         stringsAsFactors = FALSE
       )
-      weight_rows[[length(weight_rows) + 1L]] <- .joinme_draw_long_from_matrix(dmat, meta)
+      weight_rows[[length(weight_rows) + 1L]] <- .JoiNMe_draw_long_from_matrix(dmat, meta)
     }
     if (length(weight_rows) > 0L) out_long$assoc_weight <- do.call(rbind, weight_rows)
   }
@@ -2583,7 +2509,7 @@ print.summary_JoinMeFit <- function(x, ...) {
       }
     }
     if (!length(value_cols)) return(NULL)
-    out <- .joinme_draw_long_from_matrix(do.call(cbind, value_cols), do.call(rbind, meta_rows))
+    out <- .JoiNMe_draw_long_from_matrix(do.call(cbind, value_cols), do.call(rbind, meta_rows))
     out$scope <- ifelse(grepl("^family=", out$term), sub("^family=([^:]+)::.*$", "\\1", out$term), "allFamilies")
     out
   }
@@ -2644,7 +2570,7 @@ print.summary_JoinMeFit <- function(x, ...) {
         }
       }
       if (length(value_cols) > 0L) {
-        out_vcov <- .joinme_draw_long_from_matrix(do.call(cbind, value_cols), do.call(rbind, meta_rows))
+        out_vcov <- .JoiNMe_draw_long_from_matrix(do.call(cbind, value_cols), do.call(rbind, meta_rows))
       }
     }
   }
@@ -2674,14 +2600,14 @@ print.summary_JoinMeFit <- function(x, ...) {
 }
 
 #' @keywords internal
-.posterior_coef_joinmefit <- function(object, draws = NULL, seed = 1) {
+.posterior_coef_JoiNMefit <- function(object, draws = NULL, seed = 1) {
   fixed_long <- .posterior_fixef_matrix(object, draws = draws, seed = seed)
   beta_only <- fixed_long
   if (is.matrix(beta_only) && ncol(beta_only) > 0L) {
     weight_cols <- grepl("^weight", colnames(beta_only))
     if (any(weight_cols)) beta_only <- beta_only[, !weight_cols, drop = FALSE]
   }
-  ranef_draws <- .posterior_ranef_joinmefit(object, draws = draws, seed = seed)
+  ranef_draws <- .posterior_ranef_JoiNMefit(object, draws = draws, seed = seed)
   dist_fixed <- .posterior_distreg_draws(object, draws = draws, seed = seed)
   event_fixed <- .posterior_event_coef_draws(object, draws = draws, seed = seed)
 
@@ -2690,7 +2616,7 @@ print.summary_JoinMeFit <- function(x, ...) {
   out_long$marker <- .combine_fixed_random_long_draws(out_long$marker, beta_only)
   out_long$marker_by_id <- .combine_fixed_random_long_draws(out_long$marker_by_id, beta_only)
   out_long$population <- if (is.matrix(beta_only) && ncol(beta_only) > 0L) {
-    .joinme_draw_long_from_matrix(beta_only, data.frame(term = colnames(beta_only), stringsAsFactors = FALSE))
+    .JoiNMe_draw_long_from_matrix(beta_only, data.frame(term = colnames(beta_only), stringsAsFactors = FALSE))
   } else NULL
 
   out_dist <- list()
@@ -2732,7 +2658,7 @@ print.summary_JoinMeFit <- function(x, ...) {
 
 #' Extract fixed effects
 #'
-#' @param object A joinme fit object.
+#' @param object A JoiNMe fit object.
 #' @param draws Number of draws to use for summaries.
 #' @param seed Random seed for subsetting draws.
 #' @param digits Number of digits to round summary values.
@@ -2745,8 +2671,8 @@ print.summary_JoinMeFit <- function(x, ...) {
 #'   `summary = FALSE`, a draws-by-term matrix.
 #' @importFrom lme4 fixef
 #' @export
-fixef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
-  assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
+fixef.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
+  assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
   assertthat::assert_that(is.logical(summary) && length(summary) == 1L && !is.na(summary),
                           msg = "summary must be TRUE or FALSE.")
   fit <- object$fit
@@ -2822,9 +2748,9 @@ fixef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary 
   out
 }
 
-#' Posterior fixed-effect alias for fitted joinme models
+#' Posterior fixed-effect alias for fitted JoiNMe models
 #'
-#' @param object A `JoinMeFit` object.
+#' @param object A `JoiNMeFit` object.
 #' @param ... Additional arguments forwarded to [fixef()].
 #'
 #' @return The same object returned by `fixef(object, summary = FALSE, ...)`.
@@ -2835,7 +2761,7 @@ posterior_fixef <- function(object, ...) {
 
 #' Extract random effects
 #'
-#' @param object A joinme fit object.
+#' @param object A JoiNMeFit fit object.
 #' @param draws Number of draws to use for summaries.
 #' @param seed Random seed for subsetting draws.
 #' @param digits Number of digits to round summary values.
@@ -2850,8 +2776,8 @@ posterior_fixef <- function(object, ...) {
 #'   parameter and family scope (e.g., `sigma$student_t`, `nu$allFamilies`).
 #' @importFrom lme4 ranef
 #' @export
-ranef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
-  assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
+ranef.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
+  assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
   assertthat::assert_that(is.logical(summary) && length(summary) == 1L && !is.na(summary),
                           msg = "summary must be TRUE or FALSE.")
   fit <- object$fit
@@ -2862,7 +2788,7 @@ ranef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary 
     cache_key <- paste0("posterior_ranef_", draws)
     cached <- object$cache_get(cache_key)
     if (!is.null(cached)) return(cached)
-    out <- .posterior_ranef_joinmefit(object, draws = draws, seed = seed)
+    out <- .posterior_ranef_JoiNMefit(object, draws = draws, seed = seed)
     object$cache_set(cache_key, out)
     return(out)
   }
@@ -3064,9 +2990,9 @@ ranef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary 
   out
 }
 
-#' Posterior random-effect alias for fitted joinme models
+#' Posterior random-effect alias for fitted JoiNMe models
 #'
-#' @param object A `JoinMeFit` object.
+#' @param object A `JoiNMeFit` object.
 #' @param ... Additional arguments forwarded to [ranef()].
 #'
 #' @return The same object returned by `ranef(object, summary = FALSE, ...)`.
@@ -3075,7 +3001,7 @@ posterior_ranef <- function(object, ...) {
   ranef(object, summary = FALSE, ...)
 }
 
-#' Combined posterior coefficients for fitted joinme models
+#' Combined posterior coefficients for fitted JoiNMe models
 #'
 #' @description
 #' Returns posterior coefficients on the scale used by each model component.
@@ -3090,7 +3016,7 @@ posterior_ranef <- function(object, ...) {
 #' a subject-specific or marker-specific coefficient is the coefficient that
 #' would multiply the corresponding column of the model matrix for that unit.
 #'
-#' @param object A `JoinMeFit` object.
+#' @param object A `JoiNMeFit` object.
 #' @param draws Optional number of posterior draws to retain.
 #' @param seed Integer seed used when subsetting posterior draws.
 #' @param digits Number of digits used when `summary = TRUE`.
@@ -3103,10 +3029,10 @@ posterior_ranef <- function(object, ...) {
 #'   the model. When `summary = TRUE`, the same structure is returned after
 #'   summarising each coefficient with posterior means, posterior uncertainty,
 #'   interval estimates, and MCMC diagnostics.
-#' @method coef JoinMeFit
+#' @method coef JoiNMeFit
 #' @export
-coef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
-  assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
+coef.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
+  assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
   assertthat::assert_that(is.logical(summary) && length(summary) == 1L && !is.na(summary),
                           msg = "summary must be TRUE or FALSE.")
   if (is.null(draws)) draws <- object$config$draws_default
@@ -3119,13 +3045,13 @@ coef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary =
   cached <- object$cache_get(cache_key)
   if (!is.null(cached)) return(cached)
 
-  out <- .posterior_coef_joinmefit(object, draws = draws, seed = seed)
+  out <- .posterior_coef_JoiNMefit(object, draws = draws, seed = seed)
   if (isTRUE(summary)) {
     summarize_component <- function(x) {
       if (is.null(x)) return(NULL)
       if (is.data.frame(x) && all(c("draw", "value") %in% names(x))) {
         keep_cols <- setdiff(names(x), c("draw", "value", "fixed", "random"))
-        tbl <- .joinme_summarize_long_draws(x, group_cols = c(keep_cols, "value"), digits = digits)
+        tbl <- .JoiNMe_summarize_long_draws(x, group_cols = c(keep_cols, "value"), digits = digits)
         if ("event" %in% names(tbl)) {
           tbl$Hazard.Ratio <- round(exp(tbl$Estimate), digits)
           tbl$HR.Q2.5 <- round(exp(tbl$Q2.5), digits)
@@ -3143,9 +3069,9 @@ coef.JoinMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary =
   out
 }
 
-#' Posterior coefficient alias for fitted joinme models
+#' Posterior coefficient alias for fitted JoiNMe models
 #'
-#' @param object A `JoinMeFit` object.
+#' @param object A `JoiNMeFit` object.
 #' @param ... Additional arguments forwarded to [coef()].
 #'
 #' @return The same object returned by `coef(object, summary = FALSE, ...)`.
@@ -3159,10 +3085,10 @@ posterior_coef <- function(object, ...) {
 #' Extract posterior covariance summaries
 #'
 #' @description
-#' Returns posterior covariance summaries for fitted joinme models. Supports
+#' Returns posterior covariance summaries for fitted JoiNMe models. Supports
 #' selecting specific blocks through `what` (for example, `what = "id"`).
 #'
-#' @param object A joinme fit object.
+#' @param object A JoiNMe fit object.
 #' @param what Optional covariance block selector (`"id"`, `"marker"`).
 #'   When `NULL` (default), returns a nested list for
 #'   all covariance components in `formulaLong` and `formulaDist`.
@@ -3172,10 +3098,10 @@ posterior_coef <- function(object, ...) {
 #' @return If `what` is supplied, a data frame for the requested covariance
 #'   block. Otherwise, a nested list with `formulaLong` and `formulaDist`
 #'   covariance summaries.
-#' @method vcov JoinMeFit
+#' @method vcov JoiNMeFit
 #' @export
-vcov.JoinMeFit <- function(object, what = NULL, draws = NULL, ...) {
-  assertthat::assert_that(inherits(object, "JoinMeFit"), msg = "Object must be a JoinMeFit instance.")
+vcov.JoiNMeFit <- function(object, what = NULL, draws = NULL, ...) {
+  assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
   fit <- object$fit
   sd <- object$stan_data
   if (is.null(draws)) draws <- object$config$draws_default

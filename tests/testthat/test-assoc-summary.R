@@ -116,14 +116,14 @@ test_that("summary prefers effective vcov association coefficients", {
     config = list(draws_default = NULL),
     cache_get = function(key) NULL,
     cache_set = function(key, value) value
-  ), class = "JoinMeFit")
+  ), class = "JoiNMeFit")
 
   testthat::local_mocked_bindings(
     .get_draws_obj = function(fit, variables = NULL, draws = NULL, seed = 1, keep_chains = FALSE) {
       if (is.null(variables)) return(draws_obj)
       posterior::subset_draws(draws_obj, variable = variables)
     },
-    .joinme_sampler_diagnostics = function(fit) list(),
+    .JoiNMe_sampler_diagnostics = function(fit) list(),
     .package = "joinme"
   )
 
@@ -183,14 +183,14 @@ test_that("summary labels constrained weighted association terms and term-specif
     config = list(draws_default = NULL),
     cache_get = function(key) NULL,
     cache_set = function(key, value) value
-  ), class = "JoinMeFit")
+  ), class = "JoiNMeFit")
 
   testthat::local_mocked_bindings(
     .get_draws_obj = function(fit, variables = NULL, draws = NULL, seed = 1, keep_chains = FALSE) {
       if (is.null(variables)) return(draws_obj)
       posterior::subset_draws(draws_obj, variable = variables)
     },
-    .joinme_sampler_diagnostics = function(fit) list(),
+    .JoiNMe_sampler_diagnostics = function(fit) list(),
     .package = "joinme"
   )
 

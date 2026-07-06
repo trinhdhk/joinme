@@ -1,4 +1,4 @@
-make_mock_joinme_fit_for_coef <- function(draws_obj, stan_data, config = list(), dataLong = NULL, dataEvent = NULL) {
+make_mock_JoiNMe_fit_for_coef <- function(draws_obj, stan_data, config = list(), dataLong = NULL, dataEvent = NULL) {
   cache_env <- new.env(parent = emptyenv())
   fit_obj <- structure(
     list(
@@ -24,7 +24,7 @@ make_mock_joinme_fit_for_coef <- function(draws_obj, stan_data, config = list(),
         invisible(value)
       }
     ),
-    class = "JoinMeFit"
+    class = "JoiNMeFit"
   )
   list(object = fit_obj, cache = cache_env)
 }
@@ -59,7 +59,7 @@ test_that("posterior_fixef and posterior_ranef expose posterior extraction", {
     )
   ))
 
-  fit_bundle <- make_mock_joinme_fit_for_coef(
+  fit_bundle <- make_mock_JoiNMe_fit_for_coef(
     draws_obj = draws_obj,
     stan_data = list(
       P = 2L,
@@ -161,7 +161,7 @@ test_that("coef summary reports grouped posterior summaries", {
     dimnames = list(iteration = c("1", "2"), chain = c("1", "2"), variable = vars)
   ))
 
-  fit_bundle <- make_mock_joinme_fit_for_coef(
+  fit_bundle <- make_mock_JoiNMe_fit_for_coef(
     draws_obj = draws_obj,
     stan_data = list(
       P = 1L,
@@ -227,7 +227,7 @@ test_that("ranef and coef return original-time longitudinal terms", {
     )
   ))
 
-  fit_bundle <- make_mock_joinme_fit_for_coef(
+  fit_bundle <- make_mock_JoiNMe_fit_for_coef(
     draws_obj = draws_obj,
     stan_data = list(
       P = 2L,
@@ -286,7 +286,7 @@ test_that("ranef and coef return original-time longitudinal terms", {
   expect_equal(unique(cf$formulaLong$marker_by_id$value[cf$formulaLong$marker_by_id$term == "time"]), 2.5)
 })
 
-test_that("coef extractors work on a fitted joinme object", {
+test_that("coef extractors work on a fitted JoiNMe object", {
   skip_on_cran()
   skip_if_not_installed("cmdstanr")
 

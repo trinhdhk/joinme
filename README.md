@@ -1,15 +1,24 @@
-# Bayesian joint mixed-effects (JoinME) model using Stan
+# Bayesian joint mixed-effects (JoiNMe) model using Stan
 
-JoinMe fit Bayesian joint mixed-effects modelling of multivariate longitudinal markers and time-to-event outcomes.
-It supports multiple outcome families (Gaussian, Student-t, binary, count),
-flexible association structures (e.g. conditional or cumulative associations),
-covariance regression, transform-based modelling for functional effects, and
-dynamic prediction for individualised risk and trajectory forecasts.
+`JoiNMe` fits Bayesian joint mixed-effects models for multivariate longitudinal
+markers and time-to-event outcomes. It supports multiple outcome families
+(Gaussian, Student-t, binary, count, beta, ordinal, skewed families), flexible
+association structures, covariance regression, transform-based modelling for
+nonlinear effects, and dynamic prediction for individualised trajectory and risk
+forecasting.
 
-JoinMe work with CmdStanR (recommended) or rstan for
-estimation, and includes helpers for data preparation, model diagnostics (ELPD,
-LOO, WAIC), simulation utilities and plotting. See the vignettes and reference
-for worked examples and API details.
+The package is designed around a single user-facing workflow:
+
+1. simulate or assemble longitudinal and event data,
+2. fit the joint model with `joinme()`,
+3. inspect renamed posterior draws and diagnostics,
+4. summarise and plot fitted effects,
+5. generate dynamic predictions and plot future trajectories or survival.
+
+`JoiNMe` works with CmdStanR (preferred) and RStan (compatibility backend). It
+also includes helpers for data preparation, posterior diagnostics, simulation,
+dynamic prediction, and plotting. See the vignettes and reference for worked
+examples and API details.
 
 For marker-aggregated association terms (`cv_total`, `cv_marker`, `cs_total`,
 `cs_marker`), transforms are applied at marker level before weighted averaging
@@ -24,7 +33,7 @@ support extrapolation for nonlinear transforms.
 
 ## Family-shared distributional parameters
 
-When you fit mixed longitudinal families, `joinme` now uses **family-shared**
+When you fit mixed longitudinal families, `JoiNMe` now uses **family-shared**
 distributional parameters by default (when no distributional regression is
 provided for that parameter).
 
@@ -37,7 +46,7 @@ provided for that parameter).
 - This is family-level pooling, not marker-level duplication.
 
 If you specify `formulaDist` for a distributional parameter (for example
-`sigma ~ 1 + time`), `joinme` uses that regression structure instead of a
+`sigma ~ 1 + time`), `JoiNMe` uses that regression structure instead of a
 constant family-shared baseline for that parameter. In that case, summaries
 report regression terms (fixed/random effects) for the distributional model.
 
@@ -82,25 +91,53 @@ formulaDist <- list(
 
 ```r
 # install.packages("remotes")
-# remotes::install_github("trinhdhk/joinme")
+# remotes::install_github("trinhdhk/JoiNMe")
 ```
 
-We can use Rstan or cmdstanr.
+`JoiNMe` is typically fastest and easiest to run with CmdStanR.
 
 ```r
-# CmdStanR backend
-# install.packages("cmdstanr", repos = repos = c('https://stan-dev.r-universe.dev', getOption("repos")))
+# Preferred: CmdStanR backend
+# install.packages("cmdstanr", repos = c("https://stan-dev.r-universe.dev", getOption("repos")))
 # cmdstanr::install_cmdstan()
 
-# RStan backend
+# Compatibility backend: RStan
 # install.packages("rstan")
 ```
+
+### Backend behaviour and threading
+
+- At runtime, `JoiNMe` prefers CmdStanR when CmdStan is installed.
+- If the preferred backend is unavailable in the current session, `JoiNMe`
+  falls back to the other available Stan backend and warns.
+- The runtime now always uses the threaded Stan programs. Setting
+  `threads_per_chain = 1` keeps execution serial while reusing the same
+  thread-capable Stan code path.
+- Install-time RStan precompilation is optional and is attempted only when
+  `JoiNMe_COMPILE_RSTAN=1` is set in the installation environment.
+
+### Public fit, prediction, and posterior interfaces
+
+The canonical public fit and prediction classes are now `JoiNMeFit` and
+`JoiNMeDynPred`, while `JoiNMeFit` and `PredJoiNMeFit` remain as compatibility
+aliases. Objects carry both class labels so existing S3 methods continue to
+dispatch without breaking old code.
+
+Posterior draws are now available through a dedicated renamed-draw interface:
+
+- `draws(fit, ...)` and `draws(pred, ...)` return `posterior`-compatible draws
+  with user-facing parameter names,
+- `as.array(fit)` and `as.array(pred)` return the same renamed posterior arrays,
+- `mcmc_plot()` forwards those renamed draws to `bayesplot`,
+- `longitudinal_plot()`, `survival_plot()`, `cumhaz_plot()`,
+  `association_plot()`, and `diagnostic_plot()` provide explicit plotting entry
+  points alongside the main `plot()` methods.
 
 ## Quick example
 
 ``` r
 
-library(joinme)
+library(JoiNMe)
 
 set.seed(2026)
 
@@ -149,11 +186,20 @@ fit <- joinme(
   )
 )
 
+inherits(fit, "JoiNMeFit")
+inherits(fit, "JoiNMeFit")
+
 # Summaries
 summary(fit)
 diagnosis(fit)
 fixef(fit)
 coef(fit)
+
+# Renamed posterior draws
+draws(fit, variables = c("time", "alpha_cv_total"), format = "draws_df")
+
+# Bayesplot-backed posterior display with renamed variables
+mcmc_plot(fit, variable = c("time", "alpha_cv_total"), type = "trace")
 
 # Random effects / covariance / combined coefficients (nested by formula block)
 re_fit <- ranef(fit)
@@ -192,6 +238,8 @@ if (isTRUE(pred$metadata$marker_corr_depends_on_id)) {
 
 # Plot longitudinal and survival predictions
 plot(pred, type = c("longitudinal", "survival"), combined = TRUE)
+longitudinal_plot(pred)
+survival_plot(pred)
 
 # Alternative longitudinal display: posterior mean change heatmap
 plot(
@@ -218,6 +266,10 @@ posterior_fixef(fit)
 posterior_ranef(fit)
 posterior_coef(fit)
 posterior_assoc(fit, summary = TRUE)
+
+# Explicit fitted-object plot helpers
+association_plot(fit)
+diagnostic_plot(fit, type = "rhat")
 
 # All coefficient extractors support summary = TRUE/FALSE
 fixef(fit, summary = TRUE)

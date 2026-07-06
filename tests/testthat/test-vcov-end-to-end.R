@@ -76,6 +76,6 @@ test_that("vcov association fits and predicts end-to-end", {
   )
 
   pred_summary <- summary(pred)
-  expect_s3_class(pred_summary, "summary_JoinMeDynPred")
+  expect_s3_class(pred_summary, "summary_JoiNMeDynPred")
   expect_true("corr_marker_id" %in% names(pred_summary$tables))
 })

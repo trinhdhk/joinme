@@ -1,9 +1,9 @@
-#' Build Stan data for joinme (time-internal scaling)
+#' Build Stan data for JoiNMe (time-internal scaling)
 #'
 #' @importFrom stats predict setNames
 #'
 #' @description
-#' Standata builder for the joinme joint model (multivariate longitudinal + survival).
+#' Standata builder for the JoiNMe joint model (multivariate longitudinal + survival).
 #'
 #' This function follows the notebook `joinme_standata()` design, with these updates:
 #'
@@ -362,7 +362,7 @@ joinme_standata <- function(
   # - link_codes drive family-specific inverse-link mapping in Stan
   if (!is.null(families)) {
     # Treat a single family spec object/list as scalar and recycle to D markers.
-    if (inherits(families, "joinme_family_spec") || (is.list(families) && !is.null(families$family))) {
+    if (inherits(families, "JoiNMe_family_spec") || (is.list(families) && !is.null(families$family))) {
       families <- rep(list(families), D)
     }
     # If only length 1, duplicate to all markers
@@ -505,7 +505,7 @@ joinme_standata <- function(
     marker_levels = marker_levels,
     family_codes = family_codes
   )
-  attr(dl, "joinme_family_by_row") <- family_by_row
+  attr(dl, "JoiNMe_family_by_row") <- family_by_row
 
   dist_sigma <- .build_dist_matrix(dist_formulas$sigma, dl, family_by_row = family_by_row)
   dist_nu <- .build_dist_matrix(dist_formulas$nu, dl, family_by_row = family_by_row)

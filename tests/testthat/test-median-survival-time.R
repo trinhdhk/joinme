@@ -5,7 +5,7 @@ test_that(".median_survival_time_by_draw extrapolates when threshold not reached
   )
   t_grid <- c(1, 2, 3)
 
-  out <- joinme:::.median_survival_time_by_draw(
+  out <- JoiNMe:::.median_survival_time_by_draw(
     survival_draw_matrix = s_mat,
     time_grid = t_grid,
     threshold = 0.5

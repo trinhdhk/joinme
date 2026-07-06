@@ -4,7 +4,7 @@
 \alias{.build_vcov_design}
 \title{Build the subject-level covariance-regression design matrix}
 \usage{
-.build_vcov_design(formulaVCov, dataEvent, time_var, context = "joinme")
+.build_vcov_design(formulaVCov, dataEvent, time_var, context = "JoiNMe")
 }
 \arguments{
 \item{formulaVCov}{Covariance-regression formula.}

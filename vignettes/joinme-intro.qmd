@@ -1,5 +1,5 @@
 ---
-title: "Introduction to joinme"
+title: "Introduction to JoiNMe"
 output-dir: ../docs/articles
 format:
   html:
@@ -15,7 +15,7 @@ execute:
 
 ```r
 # install.packages("remotes")
-# remotes::install_github("trinhdhk/joinme")
+# remotes::install_github("trinhdhk/JoiNMe")
 ```
 
 For Stan backends:
@@ -33,7 +33,7 @@ For Stan backends:
 
 ## Conceptual overview
 
-The `joinme` model links two components:
+The `JoiNMe` model links two components:
 
 1. A multivariate longitudinal model for repeated biomarker measurements.
 2. A survival model whose hazard depends on summaries of the longitudinal
@@ -47,7 +47,7 @@ optional marker-by-subject random effects. The survival part uses a
 proportional hazards model with a flexible spline baseline hazard and
 time-dependent association terms.
 
-The association terms implemented in `joinme` are:
+The association terms implemented in `JoiNMe` are:
 
 - Current value (CV) of the latent linear predictor.
 - Current slope (CS) of the latent linear predictor.
@@ -63,7 +63,7 @@ data so that the likelihood remains fully deterministic.
 
 ## Family-shared distributional semantics
 
-For mixed longitudinal families, `joinme` treats distributional parameters as
+For mixed longitudinal families, `JoiNMe` treats distributional parameters as
 **shared by family** when no distributional regression is supplied.
 
 Concretely:
@@ -124,10 +124,10 @@ if (requireNamespace("pkgload", quietly = TRUE)) {
   if (file.exists(file.path(repo_root, "DESCRIPTION"))) {
     pkgload::load_all(repo_root, quiet = TRUE, compile = FALSE)
   } else {
-    library(joinme)
+    library(JoiNMe)
   }
 } else {
-  library(joinme)
+  library(JoiNMe)
 }
 library(survival)
 
@@ -239,7 +239,7 @@ ndL <- sim$dataLong[sim$dataLong$id == 1, ]
 ndE <- sim$dataEvent[sim$dataEvent$id == 1, ]
 time_start <- max(ndL$time)
 
-pred <- rstantools::posterior_epred(
+pred <- posterior_epred(
   fit,
   newdataLong = ndL,
   newdataEvent = ndE,
@@ -298,6 +298,6 @@ depend on id.
 
 ## Next steps
 
-- See the modelling workflow in `joinme-workflow`.
-- Explore association structures in `joinme-associations`.
-- Review the statistical details in `joinme-model` and `joinme-theory`.
+- See the modelling workflow in `JoiNMe-workflow`.
+- Explore association structures in `JoiNMe-associations`.
+- Review the statistical details in `JoiNMe-model` and `JoiNMe-theory`.

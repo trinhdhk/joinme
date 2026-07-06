@@ -17,5 +17,5 @@ Invisibly returns \code{x}.
 }
 \description{
 Prints association-effect summaries or raw posterior sample availability in a
-layout aligned with \code{\link[=print.summary_JoinMeFit]{print.summary_JoinMeFit()}}.
+layout aligned with \code{\link[=print.summary_JoiNMeFit]{print.summary_JoiNMeFit()}}.
 }

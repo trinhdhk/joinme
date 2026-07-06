@@ -56,6 +56,6 @@ test_that("posterior_predict handles single-covariate hazard/corr shapes", {
     )
   )
 
-  expect_s3_class(pred, "JoinMeDynPred")
+  expect_s3_class(pred, "JoiNMeDynPred")
   expect_true(is.data.frame(pred$results$survival))
 })

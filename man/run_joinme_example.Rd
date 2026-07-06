@@ -2,7 +2,7 @@
 % Please edit documentation in R/run-example.R
 \name{run_joinme_example}
 \alias{run_joinme_example}
-\title{Example runner for joinme}
+\title{Example runner for JoiNMe}
 \usage{
 run_joinme_example()
 }

@@ -20,7 +20,7 @@ test_that("penalised_ispline_transform uses anchored endpoint coefficients", {
 test_that("expit-domain penalised spline keeps the same anchored monotone contract", {
   skip_if_not_installed("splines2")
 
-  tf <- joinme:::.make_penalised_ispline_transform(list(
+  tf <- JoiNMe:::.make_penalised_ispline_transform(list(
     type = "ispline_expit_penalised",
     x = seq(0.05, 0.95, length.out = 8),
     y = seq(0.05, 0.95, length.out = 8)^0.8,
@@ -40,7 +40,7 @@ test_that("penalised spline supports decreasing monotone fits", {
   skip_if_not_installed("splines2")
 
   z_grid <- seq(-2, 2, length.out = 8)
-  tf <- joinme:::.make_penalised_ispline_transform(list(
+  tf <- JoiNMe:::.make_penalised_ispline_transform(list(
     type = "ispline_expit_penalised",
     x = stats::plogis(z_grid),
     y = exp(-0.5 * z_grid),
@@ -50,7 +50,7 @@ test_that("penalised spline supports decreasing monotone fits", {
     direction = "decreasing"
   ))
 
-  tf_fun <- joinme:::.joinme_make_assoc_transform(tf, "vcov")
+  tf_fun <- JoiNMe:::.JoiNMe_make_assoc_transform(tf, "vcov")
   vals <- tf_fun(z_grid)
 
   expect_identical(tf$direction, "decreasing")
@@ -62,14 +62,14 @@ test_that("penalised spline supports decreasing monotone fits", {
 })
 
 test_that("Stan-estimated penalised spline and expit variant share the same monotone setup", {
-  tf_raw <- joinme:::.make_stan_penalised_ispline_transform(list(
+  tf_raw <- JoiNMe:::.make_stan_penalised_ispline_transform(list(
     type = "ispline_penalised",
     x = seq(-2, 2, length.out = 10),
     n_knots = 5,
     degree = 3,
     lambda = 0.5
   ))
-  tf_expit <- joinme:::.make_stan_penalised_ispline_transform(list(
+  tf_expit <- JoiNMe:::.make_stan_penalised_ispline_transform(list(
     type = "ispline_expit_penalised",
     x = seq(0.05, 0.95, length.out = 10),
     n_knots = 5,
@@ -85,7 +85,7 @@ test_that("Stan-estimated penalised spline and expit variant share the same mono
 })
 
 test_that("Stan-estimated penalised spline stores decreasing direction metadata", {
-  tf <- joinme:::.make_stan_penalised_ispline_transform(list(
+  tf <- JoiNMe:::.make_stan_penalised_ispline_transform(list(
     type = "ispline_expit_penalised",
     x = seq(0.05, 0.95, length.out = 10),
     n_knots = 5,

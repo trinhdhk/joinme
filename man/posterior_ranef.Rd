@@ -2,12 +2,12 @@
 % Please edit documentation in R/methods.R
 \name{posterior_ranef}
 \alias{posterior_ranef}
-\title{Posterior random-effect alias for fitted joinme models}
+\title{Posterior random-effect alias for fitted JoiNMe models}
 \usage{
 posterior_ranef(object, ...)
 }
 \arguments{
-\item{object}{A \code{JoinMeFit} object.}
+\item{object}{A \code{JoiNMeFit} object.}
 
 \item{...}{Additional arguments forwarded to \code{\link[nlme:random.effects]{nlme::ranef()}}.}
 }
@@ -15,5 +15,5 @@ posterior_ranef(object, ...)
 The same object returned by \code{ranef(object, summary = FALSE, ...)}.
 }
 \description{
-Posterior random-effect alias for fitted joinme models
+Posterior random-effect alias for fitted JoiNMe models
 }

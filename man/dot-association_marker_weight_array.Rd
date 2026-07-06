@@ -13,7 +13,7 @@
 )
 }
 \arguments{
-\item{object}{A \code{JoinMeFit} object.}
+\item{object}{A \code{JoiNMeFit} object.}
 
 \item{term_key}{Weighted association term key.}
 

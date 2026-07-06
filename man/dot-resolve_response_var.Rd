@@ -4,7 +4,7 @@
 \alias{.resolve_response_var}
 \title{Resolve longitudinal response column name from formula LHS}
 \usage{
-.resolve_response_var(formulaLong, dataLong, context = "joinme")
+.resolve_response_var(formulaLong, dataLong, context = "JoiNMe")
 }
 \arguments{
 \item{formulaLong}{Longitudinal formula.}
