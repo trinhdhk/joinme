@@ -19,6 +19,7 @@ test_that("fit supports end-to-end split marker-weight structures", {
     times_obs = seq(0, 7, length.out = 10),
     marker_weights = term_weights,
     shared_marker_weights = FALSE,
+    fixed_marker_weights = TRUE,
     assoc = c("cv_total", "cv_marker"),
     assoc_coefs = assoc_truth,
     transforms = list(

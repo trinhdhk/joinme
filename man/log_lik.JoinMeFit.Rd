@@ -24,5 +24,5 @@ A matrix
 Log-likelihood summary
 }
 \seealso{
-\code{\link{log_lik}}
+\code{\link[=log_lik]{log_lik()}}
 }

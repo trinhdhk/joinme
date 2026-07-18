@@ -381,7 +381,7 @@ build_standata_transforms <- function(
         standata[[paste0("tf_mode_", mode_suffix)]] <- 0
       } else if (spec$type == "functional") {
         bc <- parse_transform_expr(spec$expr, iota_nodes = .transform_iota_nodes(spec))
-        ops <- bc$bytecode %||% bc$opcodes
+        ops <- bc$bytecode
         standata[[paste0("tf_mode_", mode_suffix)]] <- 1
         standata[[paste0("n_functional_ops_", short_suffix)]] <- length(ops)
         standata[[paste0("functional_ops_", short_suffix)]] <- ops

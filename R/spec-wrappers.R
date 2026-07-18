@@ -512,9 +512,9 @@ make_conditions <- function(x, ...) {
     lkj = priors$lkj %||% NULL
   )
 
-  .validate_JoiNMe_prior_component(out$beta, "beta")
-  .validate_JoiNMe_prior_component(out$alpha, "alpha")
-  .validate_JoiNMe_prior_component(out$iota, "iota")
+  .validate_joinme_prior_component(out$beta, "beta")
+  .validate_joinme_prior_component(out$alpha, "alpha")
+  .validate_joinme_prior_component(out$iota, "iota")
   if (!is.null(out$lkj)) {
     if (!is.numeric(out$lkj) || length(out$lkj) != 1L || !is.finite(out$lkj) || out$lkj <= 0) {
       cli::cli_abort(c(
@@ -533,7 +533,7 @@ make_conditions <- function(x, ...) {
 }
 
 #' @keywords internal
-.validate_JoiNMe_prior_component <- function(x, name) {
+.validate_joinme_prior_component <- function(x, name) {
   if (is.null(x)) return(invisible(NULL))
   if (is.numeric(x)) {
     if (length(x) < 1L || any(!is.finite(x)) || any(x <= 0)) {

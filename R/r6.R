@@ -31,9 +31,6 @@
 #' @export JoiNMeFit JoiNMeFit JoiNMeDynPred PredJoiNMeFit SummaryJoiNMeFit SummaryJoiNMeDynPred
 NULL
 
-# File overview:
-# - R6 containers for fit, prediction, and summary objects.
-# - Lightweight cache support for expensive summaries.
 
 #' @noRd
 JoiNMeFit <- R6::R6Class(
@@ -68,6 +65,10 @@ JoiNMeFit <- R6::R6Class(
     },
     cache_set = function(key, value) {
       private$cache[[key]] <- value
+      invisible(self)
+    },
+    cache_clear = function() {
+      private$cache <- list()
       invisible(self)
     }
   ),
@@ -110,6 +111,10 @@ JoiNMeDynPred <- R6::R6Class(
     },
     cache_set = function(key, value) {
       private$cache[[key]] <- value
+      invisible(self)
+    },
+    cache_clear = function() {
+      private$cache <- list()
       invisible(self)
     }
   ),

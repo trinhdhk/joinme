@@ -5,7 +5,7 @@
  * @details Applies a left-to-right sequence of operations to a scalar or
  * vector. Some operations consume parameters from the `params` vector.
  * This is a lightweight, ordered transform pipeline distinct from the
- * opcode stack in functional_transform.stanfunctions.
+ * bytecode stack in functional_transform.stanfunctions.
  *
  * Operation codes:
  *   0: identity (no-op)

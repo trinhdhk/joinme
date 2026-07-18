@@ -49,7 +49,7 @@ Additional implementation details that are central to the interpretation:
   then reused consistently in both parts of the survival likelihood: the exact
   event log-hazard and the Gauss-Kronrod cumulative-hazard approximation.
 - Non-linear transforms are applied to CV, CS, CORR, and VCOV before they enter the
-  hazard, using identity, functional opcodes, monotone I-splines,
+  hazard, using identity, functional bytecode, monotone I-splines,
   expit-domain monotone I-splines, or piecewise linear rules.
 - Random-effects independence follows lme4-style `||` syntax in `formulaLong`,
   mapping to diagonal covariance structures for id, marker, and nested marker-by-id blocks.
@@ -61,6 +61,10 @@ Additional implementation details that are central to the interpretation:
   user-selected credible bands for longitudinal, survival, and cumulative hazard trajectories.
 - Competing risks are supported through event-type indexing; the overall survival
   in prediction integrates the sum of cause-specific hazards.
+- Event rows now carry a dedicated `event_censor_type` code
+  (`0=right`, `1=exact`, `2=left`, `3=interval2`) so the fit kernel can switch
+  between exact hazard contributions and interval-probability contributions in a
+  single threaded likelihood path.
 
 ## Diagnostics and extraction alignment
 
@@ -211,7 +215,7 @@ model-selection logic.
 graph LR
     subgraph Input["Data Block"]
         LongObs["Longitudinal<br/>y_real, y_int<br/>X_obs, Z_*_obs"]
-        SurvObs["Survival<br/>S_event, d_event<br/>W, Bs_*"]
+        SurvObs["Survival<br/>N_event intervals<br/>S_entry, S_event, d_event<br/>W, Bs_*"]
         Design["Design Matrices<br/>X_gk_*, Z_*_gk_*<br/>Association info"]
     end
     
@@ -235,7 +239,7 @@ graph LR
     
     subgraph SubjectLik["Subject i Likelihood"]
         LongLoop["For each obs n âˆˆ [id_start[i], id_end[i]]:<br/>Compute Î· = XÎ² + Zu + Zv + Zw<br/>Accumulate log p(y[n] | Î·, family)"]
-        SurvCalc["Compute association features:<br/>CV, CS at GK nodes & event time<br/>Transform via functional ops<br/>Compute log h(t) & cumulative hazard"]
+        SurvCalc["For each subject interval:<br/>CV/CS at GK nodes & stop time<br/>Transform via functional ops<br/>Compute log h(stop) and interval cumulative hazard"]
     end
     
     Input --> TransData
@@ -494,7 +498,7 @@ where $x_j \in [0,1]$ are GK nodes and $\omega_j$ are weights. Design matrices a
 
 Association features can be transformed before entering survival predictor. Transformation modes:
 - **0**: Identity ($f(x)=x$)
-- **1**: Functional opcodes (log, exp, sqrt, compositions)
+- **1**: Functional bytecode (log, exp, sqrt, compositions)
 - **2**: I-spline basis (for monotonic smooth transforms)
 - **3**: Piecewise linear
 - **4**: I-spline basis evaluated on $\operatorname{inv\_logit}(x)$
@@ -820,7 +824,7 @@ Using weights $\omega = [0.0229, 0.0631, \dots]$:
 3. Scale result:
    $$ \Lambda(S) = \frac{S}{2} \cdot \exp(\max(z)) \cdot \text{acc} $$
 
-## `eta_corr_varonly_weighted_const(K, L_i, a_corr)`: Variance Association
+## `eta_chol_corr(K, L_i, a_corr)`: Variance Association
 
 **Purpose**: Compute weighted log-variances from a Cholesky decomposition, used as an association feature.
 
@@ -841,7 +845,7 @@ Returns a constant vector of length $K$.
 
 1. **Identity** (`mode = 0`): $f(x) = x$
 
-2. **Functional Opcodes** (`mode = 1`):
+2. **Functional Bytecode** (`mode = 1`):
    - Stack-based evaluator for compositions: $f(x) = \log(1 + \exp(x))$
    - Operations: log, exp, sqrt, inv_logit, logit, square, reciprocal, add/mult const, power, min/max, abs, trig functions.
 
@@ -858,13 +862,13 @@ Returns a constant vector of length $K$.
   - Keeps the spline basis on a bounded domain while preserving the raw
     association feature everywhere else in the model.
 
-**Algorithm** (functional opcodes):
-Evaluates reverse polish notation Opcodes on a stack.
+**Algorithm** (functional bytecode):
+Evaluates reverse polish notation bytecode on a stack.
 For example `PUSH_X, PUSH_1, ADD, LOG` computes $\log(x+1)$.
 
 
 **Vectorized Version**:
-- For vectors, apply element-wise (same opcodes, broadcast constants)
+- For vectors, apply element-wise (same bytecode, broadcast constants)
 - Efficient for evaluating at multiple GK nodes simultaneously
 
 # Computational Considerations
@@ -1186,7 +1190,8 @@ The total association is often a sum of a mean term, a marker-specific deviation
 - **Base Effect ($\alpha_{mean}$)**: Normal($0, 1$). Weakly informative.
 - **CV/CS total + marker effects**:
   - Non-centred latent form: $\alpha_d = z_d \cdot \sigma_d$.
-  - Latent: $z_d \sim \mathcal{N}(0, 1)$ (or Laplace under shrinkage mode).
+  - Latent: `shrinkage = 0, 1, 2` selects standard Student-$t_6$, Laplace,
+    or Normal draws, respectively.
   - Scale: $\sigma_d > 0$ with weakly informative half-normal prior.
   - **Sign anchor**: when any marker-weight-involving channel is active
     (`cv_total`, `cs_total`, `cv_marker`, `cs_marker`), only the first active
@@ -1196,9 +1201,14 @@ The total association is often a sum of a mean term, a marker-specific deviation
 
 ### Marker Weights ($\omega_d$)
 When estimating a composite score (e.g., weighted sum of current values), weights are modelled as signed perturbations around base weights.
-- **Prior**: Standard normal perturbations $z_d \sim \mathcal{N}(0,1)$ in
-  $\omega_d = \omega_d^{(0)} + z_d$.
+- **Prior**: $\omega_d = \omega_d^{(0)} + z_d$, with `shrinkage = 0, 1, 2`
+  selecting $z_d \sim t_6(0,1)$, $\operatorname{Laplace}(0,1)$, or
+  $\mathcal{N}(0,1)$, respectively.
 - **Rationale**: Allows protective and harmful marker contributions (negative/positive weights) while regularizing perturbations in high dimensions.
+- **Simulator contract**: `fixed_marker_weights = FALSE` draws the same latent
+  family and uses a zero base when none is supplied; `TRUE` sets $z_d=0$.
+  Shared and term-specific weight sets use the same row-major layout as Stan's
+  flattened `z_marker_weights` vector.
 
 ### Nonlinear Transformations
 When `type = "ispline_penalised"`, the association function $f(x)$ is modelled via Monotone I-splines.

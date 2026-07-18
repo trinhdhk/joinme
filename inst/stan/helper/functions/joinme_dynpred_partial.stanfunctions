@@ -1,5 +1,5 @@
 /**
- * @file JoiNMe_dynpred_partial.stanfunctions
+ * @file joinme_dynpred_partial.stanfunctions
  * @brief Per-draw log-likelihood slice for dynamic prediction (reduce_sum target).
  *
  * @details This function computes the log-likelihood contribution of a subset of
@@ -577,7 +577,7 @@ real partial_draw(
                  + ((n_random_marker > 0) ? dot_product(mat_marker_obs[n], v_marker[d]) : 0.0)
                  + dot_product(mat_marker_id_obs[n], w_idm[d]);
       // eta: linear predictor for observed row n
-      int link_d = canonical_link_code_from_program(d, inv_link_n_ops, inv_link_ops, inv_link_n_const);
+      int link_d = make_canonical_link(d, inv_link_n_ops, inv_link_ops, inv_link_n_const);
       real mu = inv_link_bytecode(eta, d, inv_link_n_ops, inv_link_ops, inv_link_n_const, inv_link_const);
 
       // Evaluate log-likelihood based on family type and distributional
@@ -730,7 +730,7 @@ real partial_draw(
     // Variance association feature:
     // transform raw corr terms first, then apply assoc coefficients.
     int M_corr_local = num_elements(coeff_assoc_corr[k]);
-    vector[M_corr_local] corr_terms_raw = eta_corr_varonly_weighted_const(Li);
+    vector[M_corr_local] corr_terms_raw = eta_chol_corr(Li);
     int M_vcov_local = num_elements(coeff_assoc_vcov[k]);
     vector[M_vcov_local] vcov_terms_raw = eta_vcov_weighted_const(Li_eff, flag_indep_idmarker_cov);
 

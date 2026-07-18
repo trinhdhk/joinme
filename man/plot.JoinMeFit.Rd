@@ -10,22 +10,18 @@
     "running_quantile", "mcmc"),
   pars = NULL,
   regex_pars = NULL,
-  draws = NULL,
+  draws = 400,
   seed = 1,
   max_vars = 4,
-  mcmc_type = c("intervals", "areas", "dens", "dens_overlay", "hist", "trace",
-    "violin", "acf", "rhat", "neff"),
+  mcmc_type = c("intervals", "areas", "dens", "dens_overlay", "hist", "trace", "violin",
+    "acf", "rhat", "neff"),
   quantile_probs = c(0.1, 0.5, 0.9),
   subject = NULL,
   marker = NA,
   scale = NULL,
   longitudinal_style = c("curves", "heatmap"),
-  condition = NULL,
-  conditioning = c("auto", "last", "origin"),
-  time_start = NULL,
-  times = NULL,
-  time_horizon = NULL,
-  pred_control = list(n_samples = 100),
+  longitudinal_times = NULL,
+  longitudinal_points = 80L,
   threshold = 0.05,
   smooth_trajectory = TRUE,
   smooth_method = c("loess", "spline"),
@@ -53,8 +49,8 @@
 \item{type}{Plot type. Diagnostic types are \code{"rhat"}, \code{"ess_bulk"},
 \code{"ess_tail"}, \code{"mcse_mean"}, \code{"mcse_sd"}, \code{"running_mean"}, and
 \code{"running_quantile"}. Fitted-data types are \code{"longitudinal"},
-\code{"survival"}, \code{"cumhaz"}, and \code{"association"}. \code{"mcmc"} delegates
-to \code{\link{mcmc_plot}} for bayesplot-backed posterior displays. The compatibility alias
+\code{"survival"}, \code{"cumhaz"}, and \code{"association"}. \code{"mcmc"} delegates to
+\code{\link[=mcmc_plot]{mcmc_plot()}} for bayesplot-backed posterior displays. The compatibility alias
 \code{"longitudinal_heatmap"} is treated as
 \verb{type = "longitudinal", longitudinal_style = "heatmap"}.}
 
@@ -64,7 +60,10 @@ diagnostic plots.}
 \item{regex_pars}{Optional regular expression for parameter selection for
 diagnostic plots.}
 
-\item{draws}{Optional number of posterior draws to subset for diagnostics.}
+\item{draws}{Optional number of posterior draws to subset for diagnostics.
+For fitted-data plotting types (\code{"longitudinal"}, \code{"survival"},
+\code{"cumhaz"}), this also controls the number of fitted posterior draws
+used to build plot summaries directly from the fitted object.}
 
 \item{seed}{Random seed for draw subsetting and fitted plotting.}
 
@@ -91,41 +90,51 @@ aggregation across the selected subjects. The heatmap is therefore an
 alternative display for the longitudinal process rather than a separate
 modelling target.}
 
-\item{condition}{Optional conditioning specification for fitted-data plots.
-Supply either a named list for one condition or a data frame with one row
-per condition, such as the output of \code{\link[=make_conditions]{make_conditions()}}. Each condition
-row may contain baseline covariates from the longitudinal data, the event
-data, or both. For ordinary fitted trajectories, multiple rows return a
-named list of condition-specific plots unless a single plot type is
-requested with \code{combined = TRUE}, in which case the condition-specific
-panels are combined. For \code{longitudinal_style = "heatmap"}, multiple
-condition rows are shown as separate facets.}
+\item{longitudinal_times}{Optional numeric vector of times at which fitted
+longitudinal trajectories are evaluated. Times are expressed on the
+original study-time scale. When \code{NULL}, an evenly spaced sequence spanning
+the selected subjects' observed follow-up is used.}
 
-\item{conditioning}{Conditioning-time convention when \code{time_start} is not
-supplied. \code{"last"} uses each subject's last observed longitudinal time,
-\code{"origin"} uses the first observed time, and \code{"auto"} chooses \code{"last"}
-when longitudinal curves are requested and \code{"origin"} otherwise.}
-
-\item{time_start}{Optional conditioning time passed to fitted-data
-predictions. Can be scalar numeric, named numeric vector, or an event-data
-column name.}
-
-\item{times}{Optional time grid for fitted-data prediction.}
-
-\item{time_horizon}{Optional prediction horizon for fitted-data prediction.}
-
-\item{pred_control}{Named list passed to \code{predict.JoiNMeFit()} for fitted-data
-plotting. By default this uses a modest draw count for plotting.}
+\item{longitudinal_points}{Number of evenly spaced evaluation times used when
+\code{longitudinal_times = NULL}. The default is 80.}
 
 \item{threshold}{Posterior sign-certainty threshold for
 \code{longitudinal_style = "heatmap"}. A tile is shown as significant when the
 posterior probability of either a positive or a negative change, relative
 to the earliest plotted time for that marker, is at least \code{1 - threshold}.
-Tiles that do not meet that criterion are drawn transparently.}
+Tiles that do not meet that criterion remain visible at reduced opacity.}
 
-\item{smooth_trajectory, smooth_method, smooth_span, ci_levels, ci_type, }{observed_first,facet_by,facet_scales,combined,show_data,
-show_observed_line,observed_style,prediction_style,theme_fn,
-palette_marker Passed to \code{plot.JoiNMeDynPred()} for fitted-data plots.}
+\item{smooth_trajectory}{Logical; add a secondary smooth of the posterior
+median trajectory.}
+
+\item{smooth_method}{Smoothing method, either \code{"loess"} or \code{"spline"}.}
+
+\item{smooth_span}{Numeric span used by the loess smoother.}
+
+\item{ci_levels}{Numeric credible interval levels.}
+
+\item{ci_type}{Credible interval display: \code{"ribbon"}, \code{"line"}, or \code{"both"}.}
+
+\item{observed_first}{Logical; shade the observed-history region for dynamic
+prediction plots.}
+
+\item{facet_by}{Faceting choice, either \code{"marker"} or \code{"none"}.}
+
+\item{facet_scales}{Scale rule passed to marker facets.}
+
+\item{combined}{Logical; combine requested panels when possible.}
+
+\item{show_data}{Logical; display measured longitudinal responses.}
+
+\item{show_observed_line}{Logical; connect measured responses within marker.}
+
+\item{observed_style}{Named list controlling measured-response appearance.}
+
+\item{prediction_style}{Named list controlling posterior trajectory appearance.}
+
+\item{theme_fn}{Function returning a ggplot2 theme.}
+
+\item{palette_marker}{Optional marker colour palette.}
 
 \item{association_options}{Named list of options for
 \code{type = "association"}. Supported entries are
@@ -150,4 +159,13 @@ A \code{ggplot} object, a combined plot, or a named list of plots.
 }
 \description{
 Plot diagnostics, fitted trajectories, and association curves for JoiNMe fits
+}
+\details{
+Fitted-data plotting from \code{JoiNMeFit} uses fitted posterior samples
+and does not accept conditioning or future-prediction arguments
+(\code{condition}, \code{conditioning}, \code{time_start}, \code{times}, \code{time_horizon}, or
+\code{pred_control}). For conditioning-based trajectories, call \code{\link[=predict]{predict()}} and
+then plot the resulting \code{JoiNMeDynPred} object. At fitted trajectory times,
+covariates other than time are held at their first observed value within
+each selected subject-marker combination.
 }

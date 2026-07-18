@@ -62,6 +62,27 @@ Each component can be included or excluded using the `assoc` argument. If
 `assoc` does not include a component, the corresponding coefficient is prior-only
 and does not enter the likelihood.
 
+### Scale recovery and exponentiation in summaries
+
+`JoiNMe` reports association and survival-process coefficients on the linear
+predictor scale first. Any internal time normalisation used by the Stan model
+is recovered on that linear scale before exponentiation.
+
+For multiplicative interpretations:
+
+- `summary(fit)$tables$baseline_hazard` reports baseline-hazard coefficients on
+  the log scale and hazard-ratio scale. Only the intercept is adjusted by
+  `-log(tmax)`; non-intercept basis coefficients are unchanged.
+- `summary(fit)$tables$survival_process` reports baseline covariate coefficients
+  and `Hazard.Ratio` interval columns from exponentiated log-scale summaries.
+- `summary(fit)$tables$assoc` reports association coefficients on their native
+  linear scale (including marker-weight terms when active).
+
+The intercept-only baseline adjustment follows the proportional-hazards identity
+that internal time scaling contributes a constant offset on the log-hazard
+scale. Therefore only the intercept is shifted; spline/formula basis terms are
+kept as fitted.
+
 The CORR and VCOV components require marker-by-id random effects. If the marker
 block does not include an inner `( ... | id )` term, then `Q_idm = 0` and these
 covariance-style associations are not available.
@@ -94,12 +115,16 @@ $$
 and analogously for `cs_marker`. This is intentionally not equal to
 $f_{cs}(\frac{1}{D}\sum_d \omega_d CS_{id}(t))$ unless $f_{cs}$ is linear.
 
-In practice, provide fixed weights via `marker_weights`, or set
-`fixed_marker_weights = FALSE` to estimate signed perturbations around base
-weights via `marker_weights + z_marker_weights` with
-`z_marker_weights ~ N(0, 1)`. The resulting weights are used directly in
-marker-aggregated association terms. The simulator reports them in
-`truth$marker_weights`.
+In practice, provide fixed weights with `marker_weights` and
+`fixed_marker_weights = TRUE`, or set `fixed_marker_weights = FALSE` to use
+signed perturbations around base weights,
+$\omega_d = \omega_d^{(0)} + z_d$. The `shrinkage` switch controls the
+standardized latent family in both fitting and simulation: `0` is
+Student-$t_6(0,1)$, `1` is Laplace$(0,1)$, and `2` is Normal$(0,1)$. With
+estimated weights and no supplied base, $\omega^{(0)}=0$. The simulator stores
+the base, latent, and effective truths in `truth$marker_weights_base`,
+`truth$marker_weights_latent`, and `truth$marker_weights`; the last of these is
+the effective weight used to generate survival times.
 
 ## Plotting fitted association curves
 

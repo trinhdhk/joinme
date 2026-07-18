@@ -133,6 +133,17 @@ Posterior draws are now available through a dedicated renamed-draw interface:
   `association_plot()`, and `diagnostic_plot()` provide explicit plotting entry
   points alongside the main `plot()` methods.
 
+Summary-scale consistency:
+
+- Baseline hazard summaries are reported in `summary(fit)$tables$baseline_hazard`
+  on both log and hazard-ratio scales.
+- Only the baseline-hazard intercept is adjusted by `-log(tmax)`; non-intercept
+  basis coefficients are kept as fitted because time scaling contributes a
+  constant log-hazard offset.
+- Baseline survival covariates are reported separately in
+  `summary(fit)$tables$survival_process` with hazard-ratio columns from
+  exponentiated log-scale summaries.
+
 ## Quick example
 
 ``` r
@@ -252,12 +263,17 @@ plot(
 
 # Conditioned plotting, compatible with brms::conditional_effects workflows
 cond <- make_conditions(sim$dataEvent, vars = "x1")
-plot(
+pred_cond <- predict(
   fit,
-  type = "longitudinal",
-  longitudinal_style = "heatmap",
   condition = cond,
+  process = c("longitudinal", "event"),
   scale = "epred"
+)
+plot(
+  pred_cond,
+  type = c("longitudinal", "survival"),
+  scale = "epred",
+  combined = TRUE
 )
 
 # Posterior summary/extraction helpers

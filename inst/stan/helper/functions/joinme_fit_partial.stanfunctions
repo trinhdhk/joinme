@@ -1,5 +1,5 @@
 /**
- * @file JoiNMe_fit_partial.stanfunctions
+ * @file joinme_fit_partial.stanfunctions
  * @brief Subject-specific joint log-likelihood for reduce_sum parallelisation.
  *
  * @details This function computes the combined longitudinal and survival log-likelihood
@@ -117,6 +117,9 @@
  * @param start Start index in `id_seq`.
  * @param end End index in `id_seq`.
  * @param id Array mapping observation rows to subjects.
+ * @param event_id Array mapping event-process rows to subjects.
+ * @param event_start_idx First event-row index for each subject.
+ * @param event_end_idx Last event-row index for each subject.
  * @param marker Array mapping observation rows to marker types.
  * @param y_real Vector of continuous response values.
  * @param y_int Array of integer response values (for ordinal/count).
@@ -230,8 +233,10 @@
  * @param Kbs Number of B-spline basis functions for baseline hazard.
  * @param Bs_event_c B-spline basis at event times.
  * @param Bs_gk_c B-spline basis at Gauss-Kronrod nodes.
- * @param S_event Event times.
- * @param d_event Event indicators.
+ * @param S_entry Interval start times (scaled) for event-process rows.
+ * @param S_event Interval stop times (scaled) for event-process rows.
+ * @param d_event Event indicators at interval stop times.
+ * @param event_censor_type Censoring type per row (0 right, 1 exact, 2 left, 3 interval2).
  * @param subject_weights Per-subject likelihood weights.
  * @param K_event Number of competing risks.
  * @param event_type Type of event for each subject.
@@ -324,6 +329,9 @@ real partial_joinme(
     int start,
     int end,
     array[] int id,
+  array[] int event_id,
+  array[] int event_start_idx,
+  array[] int event_end_idx,
     array[] int marker,
     vector y_real,
     array[] int y_int,
@@ -437,8 +445,10 @@ real partial_joinme(
     int Kbs,
     matrix Bs_event_c,
     array[] matrix Bs_gk_c,
+    vector S_entry,
     vector S_event,
     array[] int d_event,
+    array[] int event_censor_type,
     vector subject_weights,
     int K_event,
     array[] int event_type,
@@ -616,7 +626,7 @@ real partial_joinme(
       //   - Global constant (sigma_y)
       
       // Per-marker inverse-link mapping from eta to mean/location scale.
-      int link_d = canonical_link_code_from_program(d, inv_link_n_ops, inv_link_ops, inv_link_n_const);
+      int link_d = make_canonical_link(d, inv_link_n_ops, inv_link_ops, inv_link_n_const);
       real mu_long = inv_link_bytecode(eta_long, d, inv_link_n_ops, inv_link_ops, inv_link_n_const, inv_link_const);
 
       // FAMILY 1: GAUSSIAN
@@ -873,362 +883,247 @@ real partial_joinme(
 
 
     // ---------------------------------------------------------------------
-    // PART 2: SURVIVAL LOG-LIKELIHOOD (TIME-TO-EVENT SUBMODEL)
+    // PART 2: SURVIVAL LOG-LIKELIHOOD (INTERVAL FORM)
     // ---------------------------------------------------------------------
-    // Integrates longitudinal trajectory information into survival hazard
-    // via association features (current value, current slope, variance components).
-    //
-    // STEP 2.1: Compute association features at quadrature nodes
-    // - Composite Gauss-Kronrod-15 approximates integral_0^S h(t) dt
-    // - Evaluate current values (CV) and forward values (for slopes) at each node
-    // Gauss-Kronrod node count is passed from data; weights are hardcoded.
-    
-    // Storage for association features at quadrature nodes
-    vector[n_gk] cvm_now;  // Current Value - Mean component at node j
-    vector[n_gk] cvm_fwd;  // Forward value (for finite difference slope)
-
-    // Algorithm detail for marker-aggregated channels at each GK node j:
-    //   Step A: reconstruct marker-specific CV components for each marker d.
-    //   Step B: compute marker-specific slopes via finite differences.
-    //   Step C: apply per-marker transforms for CV/CS total+marker channels.
-    //   Step D: aggregate transformed marker channels with signed weights.
-    //   Step E: normalise by D_mkrs to keep scale stable across marker counts.
-    for (j in 1 : n_gk) {
-      // CURRENT VALUE - MEAN COMPONENT
-      // cvm(t) = X(t)*beta + Z_id(t)*u_i
-      // Captures subject-average trajectory (population + subject deviation)
-      cvm_now[j] = dot_product(X_gk_now[i][j], beta_scaled) 
-                 + dot_product(Z_id_gk_now[i][j], u_id[i]);
-      
-      // Forward step: cvm(t + eps) for finite-difference slope approximation
-      cvm_fwd[j] = dot_product(X_gk_fwd[i][j], beta_scaled) 
-                 + dot_product(Z_id_gk_fwd[i][j], u_id[i]);
-
-    }
-
-    // STEP 2.2: Compute current slopes via finite differences
-    // CS(t) approx [CV(t + eps) - CV(t)] / eps
-    // Captures rate of change of longitudinal trajectory at time t
-    // Time rescaling: divide by tmax (since time internally scaled to [0,1])
-    vector[n_gk] csm_raw = eta_fd(cvm_now, cvm_fwd, eps_fd) / tmax; // mean slope
-    vector[n_gk] csk_raw; // marker slope (weighted across markers)
-
-    // STEP 2.3: Compute Cholesky-factor association feature
-    // CORR feature pipeline:
-    // 1) extract raw off-diagonal correlations from Sigma_i,
-    // 2) apply corr transform term-wise,
-    // 3) apply association weights a_corr after transform.
-    // This enforces: a_corr * transform(corr_raw), not transform(a_corr * corr_raw).
-    int M_corr_local = num_elements(a_corr);
-    vector[M_corr_local] corr_terms_raw = eta_corr_varonly_weighted_const(L_i[i]);
-    int M_vcov_local = num_elements(a_vcov);
-    matrix[Q_idm, Q_idm] L_i_eff_assoc = diag_pre_multiply(row_scale_idm, L_i[i]);
-    vector[M_vcov_local] vcov_terms_raw = eta_vcov_weighted_const(L_i_eff_assoc, (M_vcov_local == Q_idm));
-
-    // STEP 2.4: Apply nonlinear transformations
-    // Each association feature can be transformed flexibly before entering hazard
-    // Transformation modes: 0=identity, 1=functional bytecode, 2=I-spline, 3=piecewise
-    //
-    // Example: If CV exhibits nonlinear association with hazard risk,
-    //          we can transform via f(CV) = log(CV), spline(CV), etc.
-    
-    // Transform CV features
-    // CV total and CV marker are transformed at marker level, then weighted-averaged.
+    // Supports both right-censoring and counting-process event layouts:
+    // - right-censoring corresponds to one interval per subject [0, T_i]
+    // - left truncation / time-split uses multiple intervals [start_e, stop_e]
+    int e_lo = event_start_idx[i];
+    int e_hi = event_end_idx[i];
     int D_mkrs = size(v_marker);
-    vector[n_gk] cv_tot_tf;
-    vector[n_gk] cv_mean_tf = apply_transform_vector(cvm_now, tf_mode_cv_mean, 
-                             functional_ops_cv_mean, functional_iota_intercept_idx_cv_mean, functional_iota_slope_idx_cv_mean, const_data_cv_mean, 
-                                                     knots_cv_mean, coeff_cv_mean, spline_degree_cv_mean,
-                                                     iota_intercept_cv_mean, iota_slope_cv_mean);
-    vector[n_gk] cv_marker_tf;
-    vector[n_gk] cs_tot_tf;
-    vector[n_gk] cs_marker_tf;
-    for (j in 1 : n_gk) {
-      real acc_cv_tot_tf = 0;
-      real acc_cv_marker_tf = 0;
-      real acc_csk_raw = 0;
-      real acc_cs_tot_tf = 0;
-      real acc_cs_marker_tf = 0;
-      // Step A/B/C/D: per-marker build -> transform -> weighted sum.
-      for (d in 1 : D_mkrs) {
-        // Marker-d reconstruction (current and forward) so slope channels are
-        // always formed at marker resolution before transformation.
-        real mk_part_now_d = 0;
-        real mk_part_fwd_d = 0;
-        if (R_mk > 0) {
-          mk_part_now_d = dot_product(Z_mk_gk_now[i][j], v_marker[d]);
-          mk_part_fwd_d = dot_product(Z_mk_gk_fwd[i][j], v_marker[d]);
-        }
-        real cvk_now_d = mk_part_now_d + dot_product(Z_idm_gk_now[i][j], w_idm[i, d]);
-        real cvk_fwd_d = mk_part_fwd_d + dot_product(Z_idm_gk_fwd[i][j], w_idm[i, d]);
-        real cv_tot_now_d = cvm_now[j] + cvk_now_d;
+    int M_corr_local = num_elements(a_corr);
+    int M_vcov_local = num_elements(a_vcov);
 
-        acc_cv_tot_tf += marker_weights_eff_cv_total[d]
-          * apply_transform_scalar(cv_tot_now_d, tf_mode_cv_tot,
-                                   functional_ops_cv, functional_iota_intercept_idx_cv, functional_iota_slope_idx_cv, const_data_cv,
-                                   knots_cv, coeff_cv, spline_degree_cv,
-                                   iota_intercept_cv, iota_slope_cv);
-        acc_cv_marker_tf += marker_weights_eff_cv_marker[d]
-          * apply_transform_scalar(cvk_now_d, tf_mode_cv_marker,
-                                   functional_ops_cv_marker, functional_iota_intercept_idx_cv_marker, functional_iota_slope_idx_cv_marker, const_data_cv_marker,
-                                   knots_cv_marker, coeff_cv_marker, spline_degree_cv_marker,
-                                   iota_intercept_cv_marker, iota_slope_cv_marker);
-        {
-          // Marker-level slope channels:
-          //   csk_raw_d    = marker-only slope
-          //   cs_tot_raw_d = mean slope + marker slope
-          // Both are transformed at marker level and then aggregated.
+    for (e in e_lo:e_hi) {
+      vector[n_gk] cvm_now;
+      vector[n_gk] cvm_fwd;
+      vector[n_gk] csk_raw;
+      vector[n_gk] cv_tot_tf;
+      vector[n_gk] cv_marker_tf;
+      vector[n_gk] cs_tot_tf;
+      vector[n_gk] cs_marker_tf;
+      vector[n_gk] log_h_total;
+
+      for (j in 1:n_gk) {
+        cvm_now[j] = dot_product(X_gk_now[e][j], beta_scaled)
+                   + dot_product(Z_id_gk_now[e][j], u_id[i]);
+        cvm_fwd[j] = dot_product(X_gk_fwd[e][j], beta_scaled)
+                   + dot_product(Z_id_gk_fwd[e][j], u_id[i]);
+      }
+      vector[n_gk] csm_raw = eta_fd(cvm_now, cvm_fwd, eps_fd) / tmax;
+
+      vector[M_corr_local] corr_terms_raw = eta_chol_corr(L_i[i]);
+      matrix[Q_idm, Q_idm] L_i_eff_assoc = diag_pre_multiply(row_scale_idm, L_i[i]);
+      vector[M_vcov_local] vcov_terms_raw = eta_vcov_weighted_const(L_i_eff_assoc, (M_vcov_local == Q_idm));
+
+      vector[n_gk] cv_mean_tf = apply_transform_vector(cvm_now, tf_mode_cv_mean,
+        functional_ops_cv_mean, functional_iota_intercept_idx_cv_mean, functional_iota_slope_idx_cv_mean, const_data_cv_mean,
+        knots_cv_mean, coeff_cv_mean, spline_degree_cv_mean,
+        iota_intercept_cv_mean, iota_slope_cv_mean);
+
+      for (j in 1:n_gk) {
+        real acc_cv_tot_tf = 0;
+        real acc_cv_marker_tf = 0;
+        real acc_csk_raw = 0;
+        real acc_cs_tot_tf = 0;
+        real acc_cs_marker_tf = 0;
+        for (d in 1:D_mkrs) {
+          real mk_part_now_d = 0;
+          real mk_part_fwd_d = 0;
+          if (R_mk > 0) {
+            mk_part_now_d = dot_product(Z_mk_gk_now[e][j], v_marker[d]);
+            mk_part_fwd_d = dot_product(Z_mk_gk_fwd[e][j], v_marker[d]);
+          }
+          real cvk_now_d = mk_part_now_d + dot_product(Z_idm_gk_now[e][j], w_idm[i, d]);
+          real cvk_fwd_d = mk_part_fwd_d + dot_product(Z_idm_gk_fwd[e][j], w_idm[i, d]);
+          real cv_tot_now_d = cvm_now[j] + cvk_now_d;
+
+          acc_cv_tot_tf += marker_weights_eff_cv_total[d] * apply_transform_scalar(
+            cv_tot_now_d, tf_mode_cv_tot,
+            functional_ops_cv, functional_iota_intercept_idx_cv, functional_iota_slope_idx_cv, const_data_cv,
+            knots_cv, coeff_cv, spline_degree_cv,
+            iota_intercept_cv, iota_slope_cv
+          );
+          acc_cv_marker_tf += marker_weights_eff_cv_marker[d] * apply_transform_scalar(
+            cvk_now_d, tf_mode_cv_marker,
+            functional_ops_cv_marker, functional_iota_intercept_idx_cv_marker, functional_iota_slope_idx_cv_marker, const_data_cv_marker,
+            knots_cv_marker, coeff_cv_marker, spline_degree_cv_marker,
+            iota_intercept_cv_marker, iota_slope_cv_marker
+          );
+
           real csk_raw_d = ((cvk_fwd_d - cvk_now_d) / eps_fd) / tmax;
           real cs_tot_raw_d = csm_raw[j] + csk_raw_d;
-
           acc_csk_raw += marker_weights_eff_cs_marker[d] * csk_raw_d;
-          acc_cs_tot_tf += marker_weights_eff_cs_total[d]
-            * apply_transform_scalar(cs_tot_raw_d, tf_mode_cs_tot,
-                                     functional_ops_cs, functional_iota_intercept_idx_cs, functional_iota_slope_idx_cs, const_data_cs,
-                                     knots_cs, coeff_cs, spline_degree_cs,
-                                     iota_intercept_cs, iota_slope_cs);
-          acc_cs_marker_tf += marker_weights_eff_cs_marker[d]
-            * apply_transform_scalar(csk_raw_d, tf_mode_cs_marker,
-                                     functional_ops_cs_marker, functional_iota_intercept_idx_cs_marker, functional_iota_slope_idx_cs_marker, const_data_cs_marker,
-                                     knots_cs_marker, coeff_cs_marker, spline_degree_cs_marker,
-                                     iota_intercept_cs_marker, iota_slope_cs_marker);
+          acc_cs_tot_tf += marker_weights_eff_cs_total[d] * apply_transform_scalar(
+            cs_tot_raw_d, tf_mode_cs_tot,
+            functional_ops_cs, functional_iota_intercept_idx_cs, functional_iota_slope_idx_cs, const_data_cs,
+            knots_cs, coeff_cs, spline_degree_cs,
+            iota_intercept_cs, iota_slope_cs
+          );
+          acc_cs_marker_tf += marker_weights_eff_cs_marker[d] * apply_transform_scalar(
+            csk_raw_d, tf_mode_cs_marker,
+            functional_ops_cs_marker, functional_iota_intercept_idx_cs_marker, functional_iota_slope_idx_cs_marker, const_data_cs_marker,
+            knots_cs_marker, coeff_cs_marker, spline_degree_cs_marker,
+            iota_intercept_cs_marker, iota_slope_cs_marker
+          );
         }
-      }
-      // Step E: finalize marker-aggregated channels at GK node j.
-      cv_tot_tf[j] = acc_cv_tot_tf / D_mkrs;
-      cv_marker_tf[j] = acc_cv_marker_tf / D_mkrs;
-      csk_raw[j] = acc_csk_raw / D_mkrs;
-      cs_tot_tf[j] = acc_cs_tot_tf / D_mkrs;
-      cs_marker_tf[j] = acc_cs_marker_tf / D_mkrs;
-    }
 
-    // Transform CS features
-    vector[n_gk] cs_mean_tf = apply_transform_vector(csm_raw, tf_mode_cs_mean, 
-                             functional_ops_cs_mean, functional_iota_intercept_idx_cs_mean, functional_iota_slope_idx_cs_mean, const_data_cs_mean, 
-                                                     knots_cs_mean, coeff_cs_mean, spline_degree_cs_mean,
-                                                     iota_intercept_cs_mean, iota_slope_cs_mean);
-
-    // Transform CORR terms and apply a_corr after transform.
-        vector[M_corr_local] corr_terms_tf = apply_transform_vector_by_component(corr_terms_raw, tf_mode_corr,
-            functional_ops_corr, functional_iota_intercept_idx_corr, functional_iota_slope_idx_corr, const_data_corr,
-          knots_corr, coeff_corr, spline_degree_corr,
-          n_iota_intercept_corr, iota_intercept_corr, n_iota_slope_corr, iota_slope_corr);
-        vector[M_corr_local] corr_terms_ref = apply_transform_vector_by_component(rep_vector(0, M_corr_local), tf_mode_corr,
-            functional_ops_corr, functional_iota_intercept_idx_corr, functional_iota_slope_idx_corr, const_data_corr,
-          knots_corr, coeff_corr, spline_degree_corr,
-          n_iota_intercept_corr, iota_intercept_corr, n_iota_slope_corr, iota_slope_corr);
-        corr_terms_tf = corr_terms_tf - corr_terms_ref;
-    real corr_assoc_scalar = dot_product(a_corr, corr_terms_tf);
-    vector[n_gk] corr_assoc = rep_vector(corr_assoc_scalar, n_gk);
-    vector[M_vcov_local] vcov_terms_tf = apply_transform_vector_by_component(vcov_terms_raw, tf_mode_vcov,
-            functional_ops_vcov, functional_iota_intercept_idx_vcov, functional_iota_slope_idx_vcov, const_data_vcov,
-            knots_vcov, coeff_vcov, spline_degree_vcov,
-            n_iota_intercept_vcov, iota_intercept_vcov, n_iota_slope_vcov, iota_slope_vcov);
-        vector[M_vcov_local] vcov_terms_ref = apply_transform_vector_by_component(rep_vector(0, M_vcov_local), tf_mode_vcov,
-          functional_ops_vcov, functional_iota_intercept_idx_vcov, functional_iota_slope_idx_vcov, const_data_vcov,
-          knots_vcov, coeff_vcov, spline_degree_vcov,
-          n_iota_intercept_vcov, iota_intercept_vcov, n_iota_slope_vcov, iota_slope_vcov);
-        vcov_terms_tf = vcov_terms_tf - vcov_terms_ref;
-    real vcov_assoc_scalar = dot_product(a_vcov, vcov_terms_tf);
-    vector[n_gk] vcov_assoc = rep_vector(vcov_assoc_scalar, n_gk);
-
-    // STEP 2.6: Combine into survival predictor at GK nodes
-    // eta_assoc(t) = sum(coefficient * transformed_association_feature)
-    //
-    // This predictor enters the hazard function:
-    //   h(t) = h0(t) * exp(W'gamma + eta_assoc(t))
-    //
-    // Coefficients (a_*) quantify strength and direction of association:
-    //   - Positive: Higher longitudinal value/slope -> Higher hazard
-    //   - Negative: Higher longitudinal value/slope -> Lower hazard (protective)
-    vector[n_gk] eta_assoc_nodes = a_cv_total * cv_tot_tf
-                     + a_cv_mean * cv_mean_tf
-                     + a_cv_marker * cv_marker_tf
-                     + a_cs_total * cs_tot_tf
-                     + a_cs_mean * cs_mean_tf
-                     + a_cs_marker * cs_marker_tf
-                                 + corr_assoc
-                                 + vcov_assoc;
-    // eta_assoc_nodes: association predictor at GK nodes
-
-
-    // STEP 2.7: Log-hazard at event time (if event occurred)
-
-    // If subject i experienced an event (d_event[i] = 1), add log h(S_i) to likelihood
-    // For censored subjects (d_event[i] = 0), only survival function S(S_i) contributes
-    if (d_event[i] == 1) {
-      int k_ev = event_type[i];  // Which competing risk caused the event (1, ..., K_event)
-      
-      // Hazard covariates effect
-      // nu*_w = W[i]' * gamma_w[k_ev]
-      // W = baseline covariates (e.g., treatment, age, sex)
-      real eta_w_ev = 0; // hazard covariate contribution
-      if (p_w > 0)
-        eta_w_ev = dot_product(to_vector(W[i]'), gamma_w[k_ev]);
-
-      // Baseline log-hazard at event time
-      // log h0(S_i) = Bs_event_c[i]' * bs_gamma_c[k_ev]
-      // where Bs_event_c = B-spline basis evaluated at S_event[i]
-      // This gives flexible nonparametric baseline hazard
-      real log_h0_S = dot_product(Bs_event_c[i], bs_gamma_c[k_ev]);
-      // log_h0_S: baseline log-hazard at event time
-
-      // Association features at event time
-      // Same computation as GK nodes, but for exact event time S_event[i]
-      real cvm_S = dot_product(X_event_now[i], beta_scaled) 
-                 + dot_product(Z_id_event_now[i], u_id[i]);
-      real cvm_S_fwd = dot_product(X_event_fwd[i], beta_scaled) 
-                     + dot_product(Z_id_event_fwd[i], u_id[i]);
-      // cvm_S/cvm_S_fwd: mean CV at event time and forward shift
-
-      real mk_part_S = 0; // marker-only CV at event time
-      real mk_part_S_fwd = 0; // marker-only CV forward
-      if (R_mk > 0) {
-        mk_part_S = dot_product(Z_mk_event_now[i], vbar);
-        mk_part_S_fwd = dot_product(Z_mk_event_fwd[i], vbar);
+        cv_tot_tf[j] = acc_cv_tot_tf / D_mkrs;
+        cv_marker_tf[j] = acc_cv_marker_tf / D_mkrs;
+        csk_raw[j] = acc_csk_raw / D_mkrs;
+        cs_tot_tf[j] = acc_cs_tot_tf / D_mkrs;
+        cs_marker_tf[j] = acc_cs_marker_tf / D_mkrs;
       }
 
-      // Current slopes at event time (finite difference)
-      real csm_S_raw = ((cvm_S_fwd - cvm_S) / eps_fd) / tmax; // mean slope at event
+      vector[n_gk] cs_mean_tf = apply_transform_vector(csm_raw, tf_mode_cs_mean,
+        functional_ops_cs_mean, functional_iota_intercept_idx_cs_mean, functional_iota_slope_idx_cs_mean, const_data_cs_mean,
+        knots_cs_mean, coeff_cs_mean, spline_degree_cs_mean,
+        iota_intercept_cs_mean, iota_slope_cs_mean);
 
-      // Covariance-style channels are time-constant for a fixed subject because
-      // they depend only on the subject-specific Cholesky factor L_i.
-      // We therefore reuse the already transformed-and-weighted scalars from the
-      // GK-node calculation rather than rebuilding them at S_event[i].
-      real corr_S_assoc = corr_assoc_scalar;
-      real vcov_S_assoc = vcov_assoc_scalar;
+      vector[M_corr_local] corr_terms_tf = apply_transform_vector_by_component(corr_terms_raw, tf_mode_corr,
+        functional_ops_corr, functional_iota_intercept_idx_corr, functional_iota_slope_idx_corr, const_data_corr,
+        knots_corr, coeff_corr, spline_degree_corr,
+        n_iota_intercept_corr, iota_intercept_corr, n_iota_slope_corr, iota_slope_corr);
+      vector[M_corr_local] corr_terms_ref = apply_transform_vector_by_component(rep_vector(0, M_corr_local), tf_mode_corr,
+        functional_ops_corr, functional_iota_intercept_idx_corr, functional_iota_slope_idx_corr, const_data_corr,
+        knots_corr, coeff_corr, spline_degree_corr,
+        n_iota_intercept_corr, iota_intercept_corr, n_iota_slope_corr, iota_slope_corr);
+      corr_terms_tf = corr_terms_tf - corr_terms_ref;
+      real corr_assoc_scalar = dot_product(a_corr, corr_terms_tf);
+      vector[n_gk] corr_assoc = rep_vector(corr_assoc_scalar, n_gk);
 
-      // Association features at event time
-      real cv_S_tot_tf = 0;
-      real cv_S_mean_tf = apply_transform_scalar(cvm_S, tf_mode_cv_mean, 
-                       functional_ops_cv_mean, functional_iota_intercept_idx_cv_mean, functional_iota_slope_idx_cv_mean, const_data_cv_mean, 
-                                                   knots_cv_mean, coeff_cv_mean, spline_degree_cv_mean,
-                                                   iota_intercept_cv_mean, iota_slope_cv_mean);
-      real cv_S_marker_tf = 0;
-      real cs_S_tot_tf = 0;
-      real cs_S_marker_tf = 0;
-      // Event-time marker pipeline:
-      //   Step A: rebuild marker-specific CV/CS pieces at S_event.
-      //   Step B: apply transforms per marker.
-      //   Step C: aggregate with weights and normalise.
-      for (d in 1 : D_mkrs) {
-        real mk_part_S_d = 0;
-        real mk_part_S_fwd_d = 0;
-        if (R_mk > 0) {
-          mk_part_S_d = dot_product(Z_mk_event_now[i], v_marker[d]);
-          mk_part_S_fwd_d = dot_product(Z_mk_event_fwd[i], v_marker[d]);
-        }
-        real cvk_S_d = mk_part_S_d + dot_product(Z_idm_event_now[i], w_idm[i, d]);
-        real cvk_S_fwd_d = mk_part_S_fwd_d + dot_product(Z_idm_event_fwd[i], w_idm[i, d]);
-        real cv_S_tot_d = cvm_S + cvk_S_d;
+      vector[M_vcov_local] vcov_terms_tf = apply_transform_vector_by_component(vcov_terms_raw, tf_mode_vcov,
+        functional_ops_vcov, functional_iota_intercept_idx_vcov, functional_iota_slope_idx_vcov, const_data_vcov,
+        knots_vcov, coeff_vcov, spline_degree_vcov,
+        n_iota_intercept_vcov, iota_intercept_vcov, n_iota_slope_vcov, iota_slope_vcov);
+      vector[M_vcov_local] vcov_terms_ref = apply_transform_vector_by_component(rep_vector(0, M_vcov_local), tf_mode_vcov,
+        functional_ops_vcov, functional_iota_intercept_idx_vcov, functional_iota_slope_idx_vcov, const_data_vcov,
+        knots_vcov, coeff_vcov, spline_degree_vcov,
+        n_iota_intercept_vcov, iota_intercept_vcov, n_iota_slope_vcov, iota_slope_vcov);
+      vcov_terms_tf = vcov_terms_tf - vcov_terms_ref;
+      real vcov_assoc_scalar = dot_product(a_vcov, vcov_terms_tf);
+      vector[n_gk] vcov_assoc = rep_vector(vcov_assoc_scalar, n_gk);
 
-        cv_S_tot_tf += marker_weights_eff_cv_total[d]
-          * apply_transform_scalar(cv_S_tot_d, tf_mode_cv_tot,
-                                   functional_ops_cv, functional_iota_intercept_idx_cv, functional_iota_slope_idx_cv, const_data_cv,
-                                   knots_cv, coeff_cv, spline_degree_cv,
-                                   iota_intercept_cv, iota_slope_cv);
-        cv_S_marker_tf += marker_weights_eff_cv_marker[d]
-          * apply_transform_scalar(cvk_S_d, tf_mode_cv_marker,
-                                   functional_ops_cv_marker, functional_iota_intercept_idx_cv_marker, functional_iota_slope_idx_cv_marker, const_data_cv_marker,
-                                   knots_cv_marker, coeff_cv_marker, spline_degree_cv_marker,
-                                   iota_intercept_cv_marker, iota_slope_cv_marker);
-        {
-          // Event-time marker-level slope channels used by CS associations.
+      vector[n_gk] eta_assoc_nodes = a_cv_total * cv_tot_tf
+        + a_cv_mean * cv_mean_tf
+        + a_cv_marker * cv_marker_tf
+        + a_cs_total * cs_tot_tf
+        + a_cs_mean * cs_mean_tf
+        + a_cs_marker * cs_marker_tf
+        + corr_assoc
+        + vcov_assoc;
+
+      if (event_censor_type[e] == 1) {
+        int k_ev = event_type[e];
+        real eta_w_ev = 0;
+        if (p_w > 0)
+          eta_w_ev = dot_product(to_vector(W[e]'), gamma_w[k_ev]);
+
+        real log_h0_S = dot_product(Bs_event_c[e], bs_gamma_c[k_ev]);
+        real cvm_S = dot_product(X_event_now[e], beta_scaled)
+                   + dot_product(Z_id_event_now[e], u_id[i]);
+        real cvm_S_fwd = dot_product(X_event_fwd[e], beta_scaled)
+                       + dot_product(Z_id_event_fwd[e], u_id[i]);
+        real csm_S_raw = ((cvm_S_fwd - cvm_S) / eps_fd) / tmax;
+
+        real cv_S_tot_tf = 0;
+        real cv_S_mean_tf = apply_transform_scalar(cvm_S, tf_mode_cv_mean,
+          functional_ops_cv_mean, functional_iota_intercept_idx_cv_mean, functional_iota_slope_idx_cv_mean, const_data_cv_mean,
+          knots_cv_mean, coeff_cv_mean, spline_degree_cv_mean,
+          iota_intercept_cv_mean, iota_slope_cv_mean);
+        real cv_S_marker_tf = 0;
+        real cs_S_tot_tf = 0;
+        real cs_S_marker_tf = 0;
+
+        for (d in 1:D_mkrs) {
+          real mk_part_S_d = 0;
+          real mk_part_S_fwd_d = 0;
+          if (R_mk > 0) {
+            mk_part_S_d = dot_product(Z_mk_event_now[e], v_marker[d]);
+            mk_part_S_fwd_d = dot_product(Z_mk_event_fwd[e], v_marker[d]);
+          }
+          real cvk_S_d = mk_part_S_d + dot_product(Z_idm_event_now[e], w_idm[i, d]);
+          real cvk_S_fwd_d = mk_part_S_fwd_d + dot_product(Z_idm_event_fwd[e], w_idm[i, d]);
+          real cv_S_tot_d = cvm_S + cvk_S_d;
+
+          cv_S_tot_tf += marker_weights_eff_cv_total[d] * apply_transform_scalar(
+            cv_S_tot_d, tf_mode_cv_tot,
+            functional_ops_cv, functional_iota_intercept_idx_cv, functional_iota_slope_idx_cv, const_data_cv,
+            knots_cv, coeff_cv, spline_degree_cv,
+            iota_intercept_cv, iota_slope_cv
+          );
+          cv_S_marker_tf += marker_weights_eff_cv_marker[d] * apply_transform_scalar(
+            cvk_S_d, tf_mode_cv_marker,
+            functional_ops_cv_marker, functional_iota_intercept_idx_cv_marker, functional_iota_slope_idx_cv_marker, const_data_cv_marker,
+            knots_cv_marker, coeff_cv_marker, spline_degree_cv_marker,
+            iota_intercept_cv_marker, iota_slope_cv_marker
+          );
+
           real csk_S_raw_d = ((cvk_S_fwd_d - cvk_S_d) / eps_fd) / tmax;
           real cs_S_tot_raw_d = csm_S_raw + csk_S_raw_d;
+          cs_S_tot_tf += marker_weights_eff_cs_total[d] * apply_transform_scalar(
+            cs_S_tot_raw_d, tf_mode_cs_tot,
+            functional_ops_cs, functional_iota_intercept_idx_cs, functional_iota_slope_idx_cs, const_data_cs,
+            knots_cs, coeff_cs, spline_degree_cs,
+            iota_intercept_cs, iota_slope_cs
+          );
+          cs_S_marker_tf += marker_weights_eff_cs_marker[d] * apply_transform_scalar(
+            csk_S_raw_d, tf_mode_cs_marker,
+            functional_ops_cs_marker, functional_iota_intercept_idx_cs_marker, functional_iota_slope_idx_cs_marker, const_data_cs_marker,
+            knots_cs_marker, coeff_cs_marker, spline_degree_cs_marker,
+            iota_intercept_cs_marker, iota_slope_cs_marker
+          );
+        }
 
-          cs_S_tot_tf += marker_weights_eff_cs_total[d]
-            * apply_transform_scalar(cs_S_tot_raw_d, tf_mode_cs_tot,
-                                     functional_ops_cs, functional_iota_intercept_idx_cs, functional_iota_slope_idx_cs, const_data_cs,
-                                     knots_cs, coeff_cs, spline_degree_cs,
-                                     iota_intercept_cs, iota_slope_cs);
-          cs_S_marker_tf += marker_weights_eff_cs_marker[d]
-            * apply_transform_scalar(csk_S_raw_d, tf_mode_cs_marker,
-                                     functional_ops_cs_marker, functional_iota_intercept_idx_cs_marker, functional_iota_slope_idx_cs_marker, const_data_cs_marker,
-                                     knots_cs_marker, coeff_cs_marker, spline_degree_cs_marker,
-                                     iota_intercept_cs_marker, iota_slope_cs_marker);
+        cv_S_tot_tf /= D_mkrs;
+        cv_S_marker_tf /= D_mkrs;
+        cs_S_tot_tf /= D_mkrs;
+        cs_S_marker_tf /= D_mkrs;
+
+        real cs_S_mean_tf = apply_transform_scalar(csm_S_raw, tf_mode_cs_mean,
+          functional_ops_cs_mean, functional_iota_intercept_idx_cs_mean, functional_iota_slope_idx_cs_mean, const_data_cs_mean,
+          knots_cs_mean, coeff_cs_mean, spline_degree_cs_mean,
+          iota_intercept_cs_mean, iota_slope_cs_mean);
+
+        real eta_assoc_S = a_cv_total * cv_S_tot_tf
+          + a_cv_mean * cv_S_mean_tf
+          + a_cv_marker * cv_S_marker_tf
+          + a_cs_total * cs_S_tot_tf
+          + a_cs_mean * cs_S_mean_tf
+          + a_cs_marker * cs_S_marker_tf
+          + corr_assoc_scalar
+          + vcov_assoc_scalar;
+
+        lp_i += log_h0_S + eta_w_ev + eta_assoc_S;
+      }
+
+      for (j in 1:n_gk) {
+        vector[K_event] log_h_cause;
+        for (k_ev in 1:K_event) {
+          real eta_w = 0;
+          if (p_w > 0)
+            eta_w = dot_product(to_vector(W[e]'), gamma_w[k_ev]);
+          log_h_cause[k_ev] = dot_product(Bs_gk_c[e][j], bs_gamma_c[k_ev])
+            + eta_w
+            + eta_assoc_nodes[j];
+        }
+        log_h_total[j] = log_sum_exp(log_h_cause);
+      }
+
+      {
+        real cumhaz_interval = cumhaz(S_event[e] - S_entry[e], n_gk, log_h_total, rep_vector(0.0, n_gk));
+        if (event_censor_type[e] == 0 || event_censor_type[e] == 1) {
+          lp_i += -cumhaz_interval;
+        } else {
+          // Left/interval2 censoring contributes P(event in interval) = 1 - exp(-Lambda).
+          if (cumhaz_interval < 1e-8) {
+            lp_i += log(fmax(cumhaz_interval, 1e-12));
+          } else {
+            lp_i += log1m_exp(-cumhaz_interval);
+          }
         }
       }
-      // Step C: normalise aggregated marker channels.
-      cv_S_tot_tf /= D_mkrs;
-      cv_S_marker_tf /= D_mkrs;
-      cs_S_tot_tf /= D_mkrs;
-      cs_S_marker_tf /= D_mkrs;
-
-      real cs_S_mean_tf = apply_transform_scalar(csm_S_raw, tf_mode_cs_mean, 
-                       functional_ops_cs_mean, functional_iota_intercept_idx_cs_mean, functional_iota_slope_idx_cs_mean, const_data_cs_mean, 
-                                                   knots_cs_mean, coeff_cs_mean, spline_degree_cs_mean,
-                                                   iota_intercept_cs_mean, iota_slope_cs_mean);
-
-      // Combine every active association channel into the exact event-time
-      // predictor. This must mirror the GK-node construction above, otherwise
-      // the event log-hazard and the integrated hazard would target different
-      // models and coefficient recovery would drift.
-      real eta_assoc_S = a_cv_total * cv_S_tot_tf
-                   + a_cv_mean * cv_S_mean_tf
-                   + a_cv_marker * cv_S_marker_tf
-                   + a_cs_total * cs_S_tot_tf
-                   + a_cs_mean * cs_S_mean_tf
-                   + a_cs_marker * cs_S_marker_tf
-           + corr_S_assoc
-           + vcov_S_assoc;
-      // eta_assoc_S: association predictor at event time
-      
-
-      // log h0(S_i) = Bs_event_c[i]' * bs_gamma_c[k_ev]
-      lp_i += log_h0_S + eta_w_ev + eta_assoc_S;
     }
-
-
-
-
-
-    //
-    // For COMPETING RISKS, total hazard at time t is SUM across all event types:
-    //
-    // Each cause-specific hazard:
-
-    //
-    // Numerical integration via n-gk-point Gauss-Kronrod:
-
-    //   where t_j are GK nodes in [0, S_i], w_j are GK weights
-    
-    vector[n_gk] log_h_total;  // Total log-hazard at each quadrature node
-    
-    for (j in 1 : n_gk) {
-      // Storage for log-hazard from each competing risk
-      vector[K_event] log_h_cause; // cause-specific log hazards
-      
-      // Compute cause-specific hazard for each event type k
-      for (k_ev in 1 : K_event) {
-        // Hazard covariate effect for cause k
-        real eta_w = 0; // hazard covariate effect
-        if (p_w > 0)
-          eta_w = dot_product(to_vector(W[i]'), gamma_w[k_ev]);
-        
-        // Cause-specific log-hazard:
-
-        log_h_cause[k_ev] = dot_product(Bs_gk_c[i][j], bs_gamma_c[k_ev])  // Baseline hazard
-                            + eta_w                                          // Covariate effect
-                            + eta_assoc_nodes[j];                            // Association effect
-      }
-      
-
-      // Computed via log-sum-exp for numerical stability
-      log_h_total[j] = log_sum_exp(log_h_cause);
-    }
-
-
-    // cumhaz(S, log_h0_nodes, eta_nodes) computes:
-
-    // 
-    // Here we pass:
-    //   - S_event[i]: integration upper limit
-    //   - log_h_total: already includes baseline + covariates + associations
-    //   - zeros: no additional eta (already included)
-    //
-
-    lp_i += -cumhaz(S_event[i], n_gk, log_h_total, rep_vector(0.0, n_gk));
     lp += subj_w * lp_i;
     
   } // End subject loop

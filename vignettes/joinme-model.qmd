@@ -109,8 +109,9 @@ using weights $\omega_d$ (one per marker). These weights apply to marker summari
 after transformation and before association scaling.
 When marker-weight estimation is enabled, latent perturbations are added to base
 weights and the resulting weights are used directly before aggregation.
-Marker weights and association coefficients are regularized with Normal or Laplace
-priors depending on the `shrinkage` setting, using a positive non-centred
+Marker weights and association coefficients are regularized with standard
+Student-$t_6$, Laplace, or Normal priors for `shrinkage = 0, 1, 2`, respectively,
+using a positive non-centred
 parameterisation $\alpha = z_{\alpha} \cdot sd_{\alpha}$.
 
 For covariance-style channels (`corr`, `vcov`), the fitted association

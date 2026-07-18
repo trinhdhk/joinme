@@ -7,7 +7,7 @@
 \method{ranef}{JoiNMeFit}(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...)
 }
 \arguments{
-\item{object}{A JoiNMe fit object.}
+\item{object}{A JoiNMeFit fit object.}
 
 \item{draws}{Number of draws to use for summaries.}
 

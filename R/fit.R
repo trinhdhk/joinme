@@ -149,8 +149,14 @@
 #' @param dataLong Long-format longitudinal data with columns for id, marker, time,
 #'   outcome, and covariates referenced in `formulaLong`.
 #' @param formulaEvent Survival formula for baseline covariates and event model.
-#' @param dataEvent One row per id event data with event time, event indicator, and
-#'   covariates referenced in `formulaEvent`.
+#'   Supported LHS forms are `survival::Surv(time, status)`,
+#'   `survival::Surv(start, stop, status)`,
+#'   `survival::Surv(time, status, type = "left")`, and
+#'   `survival::Surv(time1, time2, type = "interval2")`.
+#'   The legacy `type = "interval"` representation is not supported.
+#' @param dataEvent Event-process data with either one row per id
+#'   (`Surv(time, status)`) or multiple interval rows per id
+#'   (`Surv(start, stop, status)`). Covariates in `formulaEvent` may vary by interval.
 #' @param formulaVCov Covariance regression formula for id-specific marker-by-id effects.
 #'   If the marker block omits the inner `( ... | id )`, marker-by-id effects are
 #'   absent and covariance-style associations (`corr`, `vcov`) are not allowed.
@@ -219,7 +225,9 @@
 #' @param priors Prior declaration. Prefer `joinme_priors(...)`; raw named lists
 #'   with components `beta`, `alpha`, `iota`, and `lkj` remain supported.
 #' @param fixed_marker_weights Logical; if TRUE, marker weights are fixed at the
-#'   supplied base values. If FALSE, marker-weight perturbations are estimated.
+#'   supplied base values. If FALSE, marker-weight perturbations are estimated
+#'   using the family selected by `shrinkage` (0 = Student-t(6), 1 = Laplace,
+#'   2 = Normal).
 #' @param shared_marker_weights Logical; if TRUE, all weighted marker-based
 #'   association terms share one marker-weight structure. If FALSE, each active
 #'   weighted marker-based association term gets its own marker-weight structure.
@@ -363,7 +371,7 @@ joinme <- function(
   }
 
   stan_file <- .get_stan_file(
-    program = "JoiNMe_fit",
+    program = "joinme_fit",
     threaded = TRUE
   )
 
@@ -408,6 +416,7 @@ joinme <- function(
   sd_stan$basehaz <- NULL
   sd_stan$n_knots <- NULL
   sd_stan$basehaz_degree <- NULL
+  sd_stan$basehaz_cols <- NULL
   sd_stan$Bs_obj <- NULL
   sd_stan$dist_cols <- NULL
   sd_stan$dist_re_terms <- NULL
@@ -531,10 +540,12 @@ joinme <- function(
       warmup = iter_warmup,
       seed = args$seed %||% defaults$seed,
       refresh = args$refresh %||% defaults$refresh,
+      open_progress = FALSE,
       cores = min(args$chains %||% 1, parallel::detectCores(logical = FALSE) %||% 1)
     )
     if (length(control_list) > 0) rstan_args$control <- control_list
-    fit <- do.call(rstan::sampling, rstan_args)
+    # Rstan returns warnings about NA in Rhat which is untrue. Can easily work out with diagnosis tho so let's suppress it for now.
+    fit <- suppressWarnings(do.call(rstan::sampling, rstan_args))
   }
 
   cfg <- list(
@@ -581,7 +592,7 @@ joinme <- function(
     dims = c(n_id = sd$n_id, N = sd$N, D = sd$D, P = sd$P, R_id = sd$R_id, R_mk = sd$R_mk, Q_idm = sd$Q_idm),
     draws_default = draws,
     threads_per_chain = threads_per_chain,
-    tmax_internal = sd$tmax_internal,
+    # tmax_internal = sd$tmax,
     time_indices = list(
       idx_time_beta = sd$idx_time_beta,
       idx_time_uid = sd$idx_time_uid,
@@ -594,6 +605,8 @@ joinme <- function(
     n_knots = sd$n_knots,
     basehaz_degree = sd$basehaz_degree,
     K_event = sd$K_event,
+    surv_type = sd$surv_type,
+    event_censor_types_present = sd$event_censor_types_present,
     vcov_diag_link = sd$vcov_diag_link,
     use_tau_sde_fixed = sd$use_tau_sde_fixed,
     tau_sde_fixed = sd$tau_sde_fixed
@@ -608,7 +621,7 @@ joinme <- function(
     formulaVCov = formulaVCov,
     config = cfg,
     call = match.call(),
-    tmax = sd$tmax_internal,
+    tmax = sd$tmax,
     dataLong = dataLong,
     dataEvent = dataEvent
   )

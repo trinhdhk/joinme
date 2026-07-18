@@ -1,17 +1,39 @@
 #' Plot longitudinal trajectories from JoiNMe objects
 #'
 #' @param object A `JoiNMeFit` or `JoiNMeDynPred` object.
+#' @param longitudinal_times Optional numeric vector of fitted trajectory times
+#'   on the original study-time scale. This argument applies to `JoiNMeFit`
+#'   objects; existing `JoiNMeDynPred` objects retain their stored time grid.
+#' @param longitudinal_points Number of evenly spaced fitted trajectory times
+#'   used for a `JoiNMeFit` object when `longitudinal_times = NULL`.
 #' @param ... Additional arguments forwarded to [plot()].
 #'
 #' @return A `ggplot` object, a combined plot, or a named list of plots.
 #' @export
-longitudinal_plot <- function(object, ...) {
+longitudinal_plot <- function(object,
+                              longitudinal_times = NULL,
+                              longitudinal_points = 80L,
+                              ...) {
+  # Step 1: For a fitted model, evaluate posterior trajectories on the explicit
+  # or default smooth time design before constructing the longitudinal display.
   if (inherits(object, "JoiNMeFit")) {
-    return(plot.JoiNMeFit(object, type = "longitudinal", ..., .use_wrapper_dispatch = FALSE))
+    return(plot.JoiNMeFit(
+      object,
+      type = "longitudinal",
+      longitudinal_times = longitudinal_times,
+      longitudinal_points = longitudinal_points,
+      ...,
+      .use_wrapper_dispatch = FALSE
+    ))
   }
+
+  # Step 2: For an existing dynamic-prediction object, retain the time design
+  # on which its posterior trajectories were originally estimated.
   if (inherits(object, "JoiNMeDynPred")) {
     return(plot.JoiNMeDynPred(object, type = "longitudinal", ..., .use_wrapper_dispatch = FALSE))
   }
+
+  # Step 3: Reject objects that do not contain fitted or predicted trajectories.
   cli::cli_abort("{.arg object} must inherit from JoiNMeFit or JoiNMeDynPred.")
 }
 

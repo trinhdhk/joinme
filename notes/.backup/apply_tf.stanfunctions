@@ -4,7 +4,7 @@
  *
  * @details Applies one of a small set of predefined scalar transforms
  * used for light-weight association transformations. This is a simpler
- * alternative to the opcode and spline-based transformations.
+ * alternative to the bytecode and spline-based transformations.
  *
  * @param x Input scalar to transform.
  * @param tf Transformation code:

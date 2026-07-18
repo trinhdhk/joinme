@@ -151,6 +151,35 @@ where:
 
 Under competing risks, the event time $T_i$ and cause $\delta_i$ contribute to the likelihood via the cause-specific hazard $\lambda_{\delta_i}(T_i)$ and the overall survival $S(T_i) = \exp(-\sum_k \Lambda_k(T_i))$ (Putter et al. 2007).
 
+`JoiNMe` also supports counting-process event syntax from
+`survival::Surv(start, stop, status)` with repeated rows per subject. In that
+representation, subject $i$ contributes over intervals $e=1,\ldots,E_i$:
+
+$$
+\log L_i = \sum_{e=1}^{E_i}
+\left[
+\mathbb{1}(d_{ie}=1)\log \lambda_{k_{ie}}(t^{\text{stop}}_{ie})
+- \int_{t^{\text{start}}_{ie}}^{t^{\text{stop}}_{ie}} \sum_{k=1}^{K} \lambda_k(u)\,du
+\right].
+$$
+
+This directly handles delayed entry (left truncation) and time-dependent event
+covariates by evaluating hazard covariates on each interval row while keeping
+longitudinal random effects subject-specific.
+
+Beyond right-censored and counting-process layouts, the event parser supports
+`Surv(..., type = "left")` and `Surv(time1, time2, type = "interval2")`.
+In these cases, the likelihood uses interval probability contributions over
+`[t_{start}, t_{stop}]`:
+
+$$
+\log L_{ie}^{\text{left/interval2}} = \log\left(1 - \exp\left[-\int_{t_{start}}^{t_{stop}} h_i(u)\,du\right]\right),
+$$
+
+while exact/right rows keep the usual hazard-survival decomposition.
+The legacy `Surv(..., type = "interval")` encoding is rejected explicitly to
+avoid ambiguous event-status semantics.
+
 # Association Structures
 
 The power of `JoiNMe` lies in how $\mathcal{A}_{iq}(t)$ is constructed. We move beyond simple "current value" associations.
@@ -169,7 +198,7 @@ We compute three fundamental features from the reconstructed trajectories:
 
 Raw biomarkers often affect survival nonlinearly (e.g., only extremely high values increase risk). `JoiNMe` implements a runtime transformation engine:
 
-*   **Functional Opcodes**: A stack-based evaluator allows users to specify compositions like $\log(1 + \exp(x))$ or $\sqrt{\max(0, x)}$ which are evaluated inside the Stan leapfrog integrator.
+*   **Functional Bytecode**: A stack-based evaluator allows users to specify compositions like $\log(1 + \exp(x))$ or $\sqrt{\max(0, x)}$ which are evaluated inside the Stan leapfrog integrator.
 *   **Monotone I-Splines**: For data-driven shapes, we use Integrated Splines (I-splines) with non-negative coefficients, ensuring the association is monotonic but nonlinear.
 *   **Expit-Domain I-Splines**: For wide or poorly scaled association features, we also support I-splines evaluated on $\operatorname{expit}(x)$, which moves the spline basis to the bounded interval $(0,1)$ while preserving the raw association feature outside the spline map.
 
@@ -192,8 +221,9 @@ Valid inference in high dimensions requires principled priors. `JoiNMe` employs 
 When $D$ is large, we use shrinkage priors on non-centred association latents
 $z_{\alpha,d}$, with $\alpha_d = z_{\alpha,d}\,\sigma_{\alpha,d}$:
 
-*   **Bayesian Lasso (Laplace)**: $z_{\alpha,d} \sim \text{Laplace}(0, \lambda)$. Promotes sparsity (shrinking irrelevant markers toward zero).
-*   **Bayesian Ridge (Normal)**: $z_{\alpha,d} \sim \mathcal{N}(0, \tau)$. Promotes grouping (shrinkage toward the mean).
+*   **Robust default** (`shrinkage = 0`): $z_{\alpha,d} \sim t_6(0,1)$.
+*   **Bayesian Lasso** (`shrinkage = 1`): $z_{\alpha,d} \sim \text{Laplace}(0,1)$.
+*   **Bayesian Ridge** (`shrinkage = 2`): $z_{\alpha,d} \sim \mathcal{N}(0,1)$.
 
 This allows the model to "select" relevant biomarkers automatically.
 
@@ -213,8 +243,9 @@ $$
 \omega_d^{raw} = \omega^{(0)}_d + z_d,
 $$
 
-with $z_d \sim \mathcal{N}(0,1)$. Effective marker intensities used in
-association aggregation use the raw latent weights:
+where $z_d$ follows the same standardized shrinkage family: Student-$t_6$ for
+`shrinkage = 0`, Laplace for `1`, and Normal for `2`. Effective marker
+intensities used in association aggregation use the raw latent weights:
 
 $$
 \omega_d^{eff} = \omega^{raw}_d.
@@ -222,6 +253,14 @@ $$
 
 The $\omega^{(0)}$ offsets act as priors that shift the latent weight distribution,
 and no additional normalisation is applied.
+
+The simulator implements this hierarchy one-for-one. With
+`fixed_marker_weights = FALSE`, omitted base weights are zero and a fresh
+$z_d$ is drawn from the selected family; supplied weights are offsets. With
+`fixed_marker_weights = TRUE`, $z_d=0$ and supplied weights are used exactly.
+Simulation truth separates `marker_weights_base`, `marker_weights_latent`, and
+the effective `marker_weights`, preventing recovery checks from comparing a
+posterior effective weight with the wrong generative quantity.
 
 ## Regularising Smoothness
 For B-spline baseline hazards and penalised I-spline associations, we impose a second-order random walk prior on spline coefficients (excluding the intercept):
@@ -232,6 +271,10 @@ This prevents overfitting to small clusters of events (spikes in the hazard) and
 
 The baseline hazard level is carried by the spline intercept basis coefficient
 inside $\gamma_{bs}$; there is no separate baseline-intercept parameter.
+The simulator retains the resolved baseline specification and any compatible
+log-hazard coefficients in its truth object, so recovery checks compare the
+same scale reported by the fitted model (for example, a constant rate
+$\lambda$ corresponds to intercept $\log\lambda$).
 
 ## Robustness
 *   **Fixed Effects**: Student-$t(\nu=6)$ priors provide heavier tails than the Normal, robustifying against outliers.

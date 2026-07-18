@@ -23,13 +23,14 @@ joinme_standata(
   iota_prior = NULL,
   lkj_prior = NULL,
   allow_marker_crosscorr = 1L,
-  shrinkage = 2L,
+  shrinkage = 0L,
   marker_weights = NULL,
   fixed_marker_weights = FALSE,
   shared_marker_weights = TRUE,
   flag_resid_dim = 0L,
   basehaz = c("bs", "ns", "formula"),
-  n_knots = 5L,
+  basehaz_n_knots = 5L,
+  basehaz_knots = NULL,
   basehaz_degree = 3L,
   basehaz_formula = ~1 + time,
   tau_spline = 0.4,
@@ -53,10 +54,20 @@ to define formula-scoped positive subject/group weights.}
 \item{dataLong}{Long-format longitudinal data with columns for id, marker, time,
 outcome, and covariates referenced in \code{formulaLong}.}
 
-\item{formulaEvent}{Survival formula for baseline covariates and event model.}
+\item{formulaEvent}{Survival formula for baseline covariates and event model.
+Supported LHS forms are:
+\itemize{
+\item \code{survival::Surv(time, status)}
+\item \code{survival::Surv(start, stop, status)}
+\item \code{survival::Surv(time, status, type = "left")}
+\item \code{survival::Surv(time1, time2, type = "interval2")}
+The legacy \code{type = "interval"} form is intentionally rejected.
+}}
 
-\item{dataEvent}{One row per id event data with event time, event indicator, and
-covariates referenced in \code{formulaEvent}.}
+\item{dataEvent}{Event-process data with either one row per id
+(\code{Surv(time, status)}) or multiple time-split rows per id
+(\code{Surv(start, stop, status)}).
+Covariates referenced in \code{formulaEvent} may vary by interval in the split form.}
 
 \item{formulaVCov}{Covariance regression formula for id-specific marker-by-id effects.
 If the marker block omits the inner \code{( ... | id )}, then marker-by-id effects
@@ -116,7 +127,8 @@ slope parameters used by functional association transforms.}
 
 \item{allow_marker_crosscorr}{Integer flag; 1 allows cross-marker correlation in marker RE.}
 
-\item{shrinkage}{Integer flag controlling shrinkage behaviour for marker-by-id effects.}
+\item{shrinkage}{Integer flag controlling shrinkage behaviour for marker-by-id effects.
+0 = student_t(6, 0, 1), 1 = double_exponential(0, 1), 2 = std_normal();}
 
 \item{marker_weights}{Optional base weights for marker-specific association
 components. If \code{shared_marker_weights = TRUE}, provide one numeric vector of
@@ -130,7 +142,8 @@ weighted association term.}
 \item{fixed_marker_weights}{Logical; if TRUE, marker weights are kept fixed
 at \code{marker_weights} (no perturbation). If FALSE, marker weights are estimated
 via signed additive perturbations,
-\code{marker_weights + z_marker_weights}, with \code{z_marker_weights ~ N(0, 1)}.}
+\code{marker_weights + z_marker_weights}. The standardized latent family is
+selected by \code{shrinkage}: Student-t(6), Laplace, or Normal for 0, 1, or 2.}
 
 \item{shared_marker_weights}{Logical; if TRUE, all active weighted
 marker-based association terms share one marker-weight structure. If FALSE,
@@ -141,7 +154,9 @@ structure.}
 
 \item{basehaz}{Baseline hazard basis type: "bs", "ns", or "formula".}
 
-\item{n_knots}{Number of internal knots for spline baseline hazards.}
+\item{basehaz_n_knots}{Number of internal knots for spline baseline hazards.}
+
+\item{basehaz_knots}{Optional numeric vector of internal knots for spline baseline hazards.}
 
 \item{basehaz_degree}{Degree of spline basis for baseline hazard.}
 

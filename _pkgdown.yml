@@ -1,4 +1,4 @@
-url: https://trinhdhk.github.io/JoiNMe/
+url: https://trinhdhk.github.io/joinme/
 template:
   bootstrap: 5
   bootswatch: sandstone
@@ -11,8 +11,8 @@ ignore:
 - vignettes/_quarto_out
 - vignettes/.quarto
 home:
-  title: joinme
-  description: Bayesian Joint Nested Mixed-effects (JoiNMe) models for multivariate longitudinal
+  title: JoiNMe
+  description: Bayesian Joint Nested Mixed-Effects (JoiNMe) models for multivariate longitudinal
     and survival data.
 articles:
 - title: Get started
@@ -29,11 +29,10 @@ reference:
 - title: Core modelling
   contents:
   - JoiNMe-package
-  - JoiNMe
-  - JoiNMe_standata
+  - joinme
+  - joinme_standata
   - build_standata_transforms
   - simulate_joinme
-  - simulate_joinme_joint_student_t_cvtotal
   - update.JoiNMeFit
   - print.JoiNMeFit
   - summary.JoiNMeFit
@@ -57,7 +56,6 @@ reference:
   contents:
   - fixef.JoiNMeFit
   - ranef.JoiNMeFit
-  - corr.JoiNMeFit
 - title: Transforms
   contents:
   - parse_transform_expr
@@ -69,4 +67,5 @@ reference:
   - family_utils
   - weibull_h0
   - precompile_cmdstanr_models
-  - run_JoiNMe_example
+  - simulate_joinme_joint_student_t_cvtotal
+  - run_joinme_example

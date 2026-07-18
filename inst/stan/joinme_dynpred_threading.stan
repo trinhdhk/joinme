@@ -1,5 +1,5 @@
 /**
- * @file JoiNMe_dynpred_threading.stan
+ * @file joinme_dynpred_threading.stan
  * @brief Thread-capable dynamic prediction program that reuses the same `partial_draw` helper for serial and parallel execution.
  *
  * ### Inputs
@@ -15,7 +15,7 @@
 
 functions {
   #include helper/functions/eta_fd.stanfunctions
-  #include helper/functions/eta_corr_varonly_weighted_const.stanfunctions
+  #include helper/functions/eta_chol_corr.stanfunctions
   #include helper/functions/eta_vcov_weighted_const.stanfunctions
   #include helper/functions/cumhaz.stanfunctions
   #include helper/functions/bytecode_transform.stanfunctions
@@ -23,11 +23,11 @@ functions {
   #include helper/functions/basis_functions.stanfunctions
   #include helper/functions/composite_transform.stanfunctions
 
-  #include helper/functions/JoiNMe_dynpred_partial.stanfunctions
+  #include helper/functions/joinme_dynpred_partial.stanfunctions
 }
 
 data {
-  #include helper/data/JoiNMe_dynpred_common.stan
+  #include helper/data/joinme_dynpred_common.stan
   int<lower=1> grainsize;
 
   int flag_indep_id_re;
@@ -45,7 +45,7 @@ transformed data {
 }
 
 parameters {
-  #include helper/parameters/JoiNMe_dynpred_common.stan
+  #include helper/parameters/joinme_dynpred_common.stan
 }
 
 model {

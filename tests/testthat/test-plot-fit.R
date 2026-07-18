@@ -1,77 +1,16 @@
-test_that("plot.JoiNMeFit reuses fitted-data prediction plotting", {
+test_that("plot.JoiNMeFit uses fitted draw builder for fitted plots", {
   captured <- new.env(parent = emptyenv())
   captured$args <- NULL
 
   testthat::local_mocked_bindings(
-    predict.JoiNMeFit = function(object, newdataLong, newdataEvent, process, pred_type, scale,
-                                 times, time_start, time_horizon, ci_levels, control, seed, ...) {
-      captured$args <- list(
-        process = process,
-        scale = scale,
-        time_start = time_start,
-        ids = unique(newdataEvent$id)
-      )
-
-      time_grid <- seq(0, 1, length.out = 5)
-      quant_long <- do.call(rbind, lapply(unique(newdataEvent$id), function(id) {
-        data.frame(
-          id = id,
-          time = time_grid,
-          marker = "m1",
-          scale = "epred",
-          q2.5 = seq(0.1, 0.3, length.out = length(time_grid)),
-          q50 = seq(0.2, 0.4, length.out = length(time_grid)),
-          q97.5 = seq(0.3, 0.5, length.out = length(time_grid)),
-          mean = seq(0.2, 0.4, length.out = length(time_grid)),
-          sd = rep(0.05, length(time_grid)),
-          stringsAsFactors = FALSE
-        )
-      }))
-      quant_surv <- do.call(rbind, lapply(unique(newdataEvent$id), function(id) {
-        data.frame(
-          id = id,
-          time = time_grid,
-          q2.5 = pmax(0, 0.8 - time_grid),
-          q50 = pmax(0, 0.9 - time_grid),
-          q97.5 = pmax(0, 1.0 - time_grid),
-          mean = pmax(0, 0.9 - time_grid),
-          sd = rep(0.03, length(time_grid)),
-          stringsAsFactors = FALSE
-        )
-      }))
-
-      JoiNMe::JoiNMeDynPred$new(
-        predictions = list(longitudinal = NULL, survival = NULL, cumhaz = NULL),
-        quantiles = list(
-          longitudinal = quant_long,
-          longitudinal_fitted = quant_long,
-          longitudinal_marker_pop = NULL,
-          longitudinal_overall_pop = NULL,
-          survival = quant_surv,
-          cumhaz = NULL
-        ),
-        draws = list(longitudinal = list(), longitudinal_fitted = list(), survival = list(), cumhaz = list()),
-        data = list(longitudinal = newdataLong, event = newdataEvent),
-        metadata = list(
-          scales = "epred",
-          scale = "epred",
-          ci_levels = ci_levels,
-          conditioning_time = 0.5,
-          conditioning_time_by_id = stats::setNames(rep(0.5, length(unique(newdataEvent$id))), unique(newdataEvent$id)),
-          id_var = "id",
-          time_var = "time",
-          marker_var = "marker",
-          response_var = "y"
-        ),
-        call = quote(predict(fit_obj)),
-        tmax = 1,
-        n_samples = if (is.null(control$n_samples)) 10 else control$n_samples
-      )
+    longitudinal_plot = function(object, ...) {
+      captured$args <- list(...)
+      ggplot2::ggplot(data.frame(x = 1, y = 1), ggplot2::aes(x, y)) + ggplot2::geom_point()
     },
     .package = "joinme"
   )
 
-  fit <- JoiNMe::JoiNMeFit$new(
+  fit <- JoiNMeFit$new(
     fit = NULL,
     stan_data = list(),
     formulaLong = y ~ 1 + time,
@@ -86,17 +25,194 @@ test_that("plot.JoiNMeFit reuses fitted-data prediction plotting", {
 
   out <- plot(
     fit,
-    type = c("longitudinal", "survival"),
+    type = "longitudinal",
     subject = c(1, 2),
-    combined = FALSE,
-    show_data = FALSE,
-    pred_control = list(n_samples = 20)
+    scale = "epred",
+    longitudinal_times = c(0, 0.5, 1),
+    longitudinal_points = 40,
+    draws = 20,
+    show_data = FALSE
   )
 
-  expect_true(is.list(out) || inherits(out, "gg"))
-  expect_equal(sort(captured$args$process), c("event", "longitudinal"))
-  expect_equal(captured$args$scale, c("epred", "linpred", "predict"))
-  expect_equal(as.numeric(captured$args$time_start[c("1", "2")]), c(1, 1))
+  expect_s3_class(out, "ggplot")
+  expect_equal(captured$args$scale, "epred")
+  expect_equal(captured$args$draws, 20)
+  expect_equal(as.character(captured$args$subject), c("1", "2"))
+  expect_equal(captured$args$longitudinal_times, c(0, 0.5, 1))
+  expect_equal(captured$args$longitudinal_points, 40)
+})
+
+test_that("fitted sample builder aligns subset subjects to Stan longitudinal rows", {
+  base_draws <- matrix(
+    c(
+      0.10, 0.80, 0.70,
+      0.20, 0.75, 0.65,
+      0.15, 0.78, 0.68,
+      0.12, 0.82, 0.72,
+      0.18, 0.79, 0.69
+    ),
+    ncol = 3,
+    byrow = TRUE,
+    dimnames = list(NULL, c("beta[1]", "surv_prob_event[1]", "surv_prob_event[2]"))
+  )
+
+  testthat::local_mocked_bindings(
+    .get_draws_obj = function(fit, variables = NULL, draws = NULL, seed = 1, keep_chains = FALSE) {
+      posterior::as_draws_matrix(base_draws)
+    },
+    .get_draws_matrix = function(fit, variables = NULL, draws = NULL, seed = 1) {
+      if (is.null(variables)) {
+        return(base_draws)
+      }
+      keep <- intersect(variables, colnames(base_draws))
+      if (!length(keep)) {
+        return(matrix(0, nrow = nrow(base_draws), ncol = 0))
+      }
+      base_draws[, keep, drop = FALSE]
+    },
+    .package = "joinme"
+  )
+
+  fit <- JoiNMeFit$new(
+    fit = structure(list(), class = "mock_fit"),
+    stan_data = list(
+      n_id = 2L,
+      N = 4L,
+      D = 1L,
+      P = 1L,
+      R_id = 0L,
+      R_mk = 0L,
+      Q_idm = 0L,
+      X_obs = matrix(1, nrow = 4, ncol = 1),
+      Z_id_obs = matrix(0, nrow = 4, ncol = 0),
+      Z_mk_obs = matrix(0, nrow = 4, ncol = 0),
+      Z_idm_obs = matrix(0, nrow = 4, ncol = 0),
+      marker_levels = "m1",
+      link_long = 1L,
+      inv_link_n_ops = 0L,
+      inv_link_n_const = 0L,
+      inv_link_ops = matrix(0L, nrow = 1, ncol = 1),
+      inv_link_const = matrix(0, nrow = 1, ncol = 1)
+    ),
+    formulaLong = y ~ 1,
+    formulaEvent = survival::Surv(time, event) ~ 1,
+    formulaVCov = NULL,
+    config = list(draws_default = 5),
+    call = quote(JoiNMe::joinme(formulaLong = y ~ 1, formulaEvent = survival::Surv(time, event) ~ 1)),
+    tmax = 1,
+    dataLong = data.frame(
+      id = c(1, 1, 2, 2),
+      time = c(0, 1, 0, 1),
+      marker = "m1",
+      y = c(1.0, 1.1, 0.9, 1.0)
+    ),
+    dataEvent = data.frame(
+      id = c(1, 2),
+      time = c(2.0, 2.5),
+      event = c(0L, 1L)
+    )
+  )
+
+  pred <- .build_JoiNMefit_fitted_plot_samples(
+    x = fit,
+    which = "survival",
+    subject = 1,
+    scale = "epred",
+    draws = 5,
+    seed = 1,
+    ci_levels = c(0.5, 0.95)
+  )
+
+  expect_s3_class(pred, "JoiNMeDynPred")
+  expect_setequal(unique(as.character(pred$quantiles$survival$id)), "1")
+  expect_null(pred$quantiles$longitudinal)
+  expect_null(pred$quantiles$cumhaz)
+  expect_true(all(as.character(unique(pred$data$longitudinal$id)) == "1"))
+})
+
+test_that("fitted sample builder returns non-degenerate survival time grid", {
+  base_draws <- matrix(
+    c(
+      0.10, 0.80, 0.70,
+      0.20, 0.75, 0.65,
+      0.15, 0.78, 0.68,
+      0.12, 0.82, 0.72,
+      0.18, 0.79, 0.69
+    ),
+    ncol = 3,
+    byrow = TRUE,
+    dimnames = list(NULL, c("beta[1]", "surv_prob_event[1]", "surv_prob_event[2]"))
+  )
+
+  testthat::local_mocked_bindings(
+    .get_draws_obj = function(fit, variables = NULL, draws = NULL, seed = 1, keep_chains = FALSE) {
+      posterior::as_draws_matrix(base_draws)
+    },
+    .get_draws_matrix = function(fit, variables = NULL, draws = NULL, seed = 1) {
+      if (is.null(variables)) {
+        return(base_draws)
+      }
+      keep <- intersect(variables, colnames(base_draws))
+      if (!length(keep)) {
+        return(matrix(0, nrow = nrow(base_draws), ncol = 0))
+      }
+      base_draws[, keep, drop = FALSE]
+    },
+    .package = "joinme"
+  )
+
+  fit <- JoiNMeFit$new(
+    fit = structure(list(), class = "mock_fit"),
+    stan_data = list(
+      n_id = 2L,
+      N = 4L,
+      D = 1L,
+      P = 1L,
+      R_id = 0L,
+      R_mk = 0L,
+      Q_idm = 0L,
+      X_obs = matrix(1, nrow = 4, ncol = 1),
+      Z_id_obs = matrix(0, nrow = 4, ncol = 0),
+      Z_mk_obs = matrix(0, nrow = 4, ncol = 0),
+      Z_idm_obs = matrix(0, nrow = 4, ncol = 0),
+      marker_levels = "m1",
+      link_long = 1L,
+      inv_link_n_ops = 0L,
+      inv_link_n_const = 0L,
+      inv_link_ops = matrix(0L, nrow = 1, ncol = 1),
+      inv_link_const = matrix(0, nrow = 1, ncol = 1)
+    ),
+    formulaLong = y ~ 1,
+    formulaEvent = survival::Surv(time, event) ~ 1,
+    formulaVCov = NULL,
+    config = list(draws_default = 5),
+    call = quote(JoiNMe::joinme(formulaLong = y ~ 1, formulaEvent = survival::Surv(time, event) ~ 1)),
+    tmax = 1,
+    dataLong = data.frame(
+      id = c(1, 1, 2, 2),
+      time = c(0, 1, 0, 1),
+      marker = "m1",
+      y = c(1.0, 1.1, 0.9, 1.0)
+    ),
+    dataEvent = data.frame(
+      id = c(1, 2),
+      time = c(2.0, 2.5),
+      event = c(0L, 1L)
+    )
+  )
+
+  pred <- .build_JoiNMefit_fitted_plot_samples(
+    x = fit,
+    which = "survival",
+    subject = 1,
+    scale = "epred",
+    draws = 5,
+    seed = 1,
+    ci_levels = c(0.5, 0.95)
+  )
+
+  surv_id1 <- pred$quantiles$survival[pred$quantiles$survival$id == "1", , drop = FALSE]
+  expect_gt(length(unique(surv_id1$time)), 2)
 })
 
 test_that("plot.JoiNMeFit can plot association curves", {
@@ -198,61 +314,18 @@ test_that("plot.JoiNMeFit supports all diagnostic plot types with parameter filt
 })
 
 test_that("plot.JoiNMeFit filters fitted longitudinal plots by marker", {
-  captured <- new.env(parent = emptyenv())
-  captured$process <- NULL
-
   testthat::local_mocked_bindings(
-    predict.JoiNMeFit = function(object, newdataLong, newdataEvent, process, pred_type, scale,
-                                 times, time_start, time_horizon, ci_levels, control, seed, ...) {
-      captured$process <- process
-      time_grid <- seq(0, 1, length.out = 5)
-      quant_long <- do.call(rbind, lapply(c("m1", "m2"), function(marker) {
-        data.frame(
-          id = 1,
-          time = time_grid,
-          marker = marker,
-          scale = "epred",
-          q2.5 = seq(0.1, 0.3, length.out = length(time_grid)),
-          q50 = seq(0.2, 0.4, length.out = length(time_grid)),
-          q97.5 = seq(0.3, 0.5, length.out = length(time_grid)),
-          mean = seq(0.2, 0.4, length.out = length(time_grid)),
-          sd = rep(0.05, length(time_grid)),
-          stringsAsFactors = FALSE
-        )
-      }))
-
-      JoiNMe::JoiNMeDynPred$new(
-        predictions = list(longitudinal = NULL, survival = NULL, cumhaz = NULL),
-        quantiles = list(
-          longitudinal = quant_long,
-          longitudinal_fitted = quant_long,
-          longitudinal_marker_pop = NULL,
-          longitudinal_overall_pop = NULL,
-          survival = NULL,
-          cumhaz = NULL
-        ),
-        draws = list(longitudinal = list(), longitudinal_fitted = list(), survival = list(), cumhaz = list()),
-        data = list(longitudinal = newdataLong, event = newdataEvent),
-        metadata = list(
-          scales = "epred",
-          scale = "epred",
-          ci_levels = ci_levels,
-          conditioning_time = 0.5,
-          conditioning_time_by_id = c(`1` = 0.5),
-          id_var = "id",
-          time_var = "time",
-          marker_var = "marker",
-          response_var = "y"
-        ),
-        call = quote(predict(fit_obj)),
-        tmax = 1,
-        n_samples = 10
-      )
+    longitudinal_plot = function(object, ...) {
+      args <- list(...)
+      ggplot2::ggplot(
+        data.frame(marker = as.character(args$marker %||% NA_character_), x = 1, y = 1),
+        ggplot2::aes(x, y, color = marker)
+      ) + ggplot2::geom_point()
     },
     .package = "joinme"
   )
 
-  fit <- JoiNMe::JoiNMeFit$new(
+  fit <- JoiNMeFit$new(
     fit = NULL,
     stan_data = list(),
     formulaLong = y ~ 1 + time,
@@ -273,10 +346,9 @@ test_that("plot.JoiNMeFit filters fitted longitudinal plots by marker", {
   p <- plot(fit, type = "longitudinal", subject = 1, marker = "m1", show_data = FALSE)
   expect_s3_class(p, "ggplot")
   expect_equal(unique(as.character(p$data$marker)), "m1")
-  expect_equal(sort(captured$process), c("event", "longitudinal"))
 
   p_all <- plot(fit, type = "longitudinal", subject = 1, marker = NA, show_data = FALSE)
-  expect_setequal(unique(as.character(p_all$data$marker)), c("m1", "m2"))
+  expect_true(all(is.na(p_all$data$marker)))
 })
 
 test_that("plot.JoiNMeFit routes single longitudinal requests through longitudinal_plot", {
@@ -291,7 +363,7 @@ test_that("plot.JoiNMeFit routes single longitudinal requests through longitudin
     .package = "joinme"
   )
 
-  fit <- JoiNMe::JoiNMeFit$new(
+  fit <- JoiNMeFit$new(
     fit = NULL,
     stan_data = list(),
     formulaLong = y ~ 1 + time,
@@ -343,62 +415,7 @@ test_that("plot.JoiNMeFit forwards mcmc requests to mcmc_plot", {
   expect_s3_class(p, "ggplot")
 })
 
-test_that("plot.JoiNMeFit applies condition rows before prediction", {
-  captured <- new.env(parent = emptyenv())
-  captured$newdataLong <- NULL
-  captured$newdataEvent <- NULL
-
-  testthat::local_mocked_bindings(
-    predict.JoiNMeFit = function(object, newdataLong, newdataEvent, process, pred_type, scale,
-                                 times, time_start, time_horizon, ci_levels, control, seed, ...) {
-      captured$newdataLong <- newdataLong
-      captured$newdataEvent <- newdataEvent
-
-      time_grid <- seq(0, 1, length.out = 4)
-      quant_long <- data.frame(
-        id = 1,
-        time = time_grid,
-        marker = "m1",
-        scale = "epred",
-        q2.5 = seq(0.1, 0.2, length.out = length(time_grid)),
-        q50 = seq(0.2, 0.3, length.out = length(time_grid)),
-        q97.5 = seq(0.3, 0.4, length.out = length(time_grid)),
-        mean = seq(0.2, 0.3, length.out = length(time_grid)),
-        sd = rep(0.05, length(time_grid)),
-        stringsAsFactors = FALSE
-      )
-
-      JoiNMe::JoiNMeDynPred$new(
-        predictions = list(longitudinal = NULL, survival = NULL, cumhaz = NULL),
-        quantiles = list(
-          longitudinal = quant_long,
-          longitudinal_fitted = quant_long,
-          longitudinal_marker_pop = NULL,
-          longitudinal_overall_pop = NULL,
-          survival = NULL,
-          cumhaz = NULL
-        ),
-        draws = list(longitudinal = list(), longitudinal_fitted = list(), survival = list(), cumhaz = list()),
-        data = list(longitudinal = newdataLong, event = newdataEvent),
-        metadata = list(
-          scales = "epred",
-          scale = "epred",
-          ci_levels = ci_levels,
-          conditioning_time = 0.5,
-          conditioning_time_by_id = c(`1` = 0.5),
-          id_var = "id",
-          time_var = "time",
-          marker_var = "marker",
-          response_var = "y"
-        ),
-        call = quote(predict(fit_obj)),
-        tmax = 1,
-        n_samples = 10
-      )
-    },
-    .package = "joinme"
-  )
-
+test_that("plot.JoiNMeFit rejects removed conditioning and prediction arguments", {
   fit <- JoiNMe::JoiNMeFit$new(
     fit = NULL,
     stan_data = list(),
@@ -418,78 +435,267 @@ test_that("plot.JoiNMeFit applies condition rows before prediction", {
     dataEvent = data.frame(id = 1, time = 1.2, event = 0L, age = 55)
   )
 
-  p <- plot(
-    fit,
-    type = "longitudinal",
-    subject = 1,
-    condition = data.frame(trt = "B", age = 70, row.names = "Treatment B"),
-    show_data = FALSE
-  )
-
-  expect_s3_class(p, "ggplot")
-  expect_true(all(as.character(captured$newdataLong$trt) == "B"))
-  expect_true(all(captured$newdataEvent$age == 70))
+  expect_error(plot(fit, type = "longitudinal", condition = list(trt = "B")), "unused argument")
+  expect_error(plot(fit, type = "longitudinal", conditioning = "last"), "unused argument")
+  expect_error(plot(fit, type = "longitudinal", times = seq(0, 1, length.out = 5)), "unused argument")
+  expect_error(plot(fit, type = "longitudinal", time_horizon = 2), "unused argument")
+  expect_error(plot(fit, type = "longitudinal", pred_control = list(n_samples = 10)), "unused argument")
 })
 
-test_that("plot.JoiNMeFit longitudinal heatmap style orders markers and masks nonsignificant changes", {
-  testthat::local_mocked_bindings(
-    predict.JoiNMeFit = function(object, newdataLong, newdataEvent, process, pred_type, scale,
-                                 times, time_start, time_horizon, ci_levels, control, seed, ...) {
-      marker_idx <- c(1L, 1L, 1L, 2L, 2L, 2L)
-      time_grid <- c(0, 1, 2, 0, 1, 2)
-      draw_matrix_1 <- rbind(
-        c(0.0, 1.0, 2.0, 0.0, -0.1, 0.1),
-        c(0.0, 1.1, 2.1, 0.0, 0.1, -0.1),
-        c(0.0, 0.9, 1.9, 0.0, -0.1, 0.1),
-        c(0.0, 1.2, 2.2, 0.0, 0.1, -0.1)
-      )
-      draw_matrix_2 <- rbind(
-        c(0.0, 0.8, 1.8, 0.0, -0.1, 0.1),
-        c(0.0, 1.0, 2.0, 0.0, 0.1, -0.1),
-        c(0.0, 0.9, 1.9, 0.0, -0.1, 0.1),
-        c(0.0, 1.1, 2.1, 0.0, 0.1, -0.1)
-      )
+test_that("fitted longitudinal trajectories use a smooth common time design and retain observed responses", {
+  fitted_draws <- matrix(
+    c(
+      0.0, 0.8,
+      0.1, 1.0,
+      -0.1, 1.2
+    ),
+    nrow = 3,
+    byrow = TRUE,
+    dimnames = list(NULL, c("beta[1]", "beta[2]"))
+  )
 
-      JoiNMe::JoiNMeDynPred$new(
-        predictions = list(longitudinal = NULL, survival = NULL, cumhaz = NULL),
-        quantiles = list(
-          longitudinal = NULL,
-          longitudinal_fitted = NULL,
-          longitudinal_marker_pop = NULL,
-          longitudinal_overall_pop = NULL,
-          survival = NULL,
-          cumhaz = NULL
-        ),
-        draws = list(
-          longitudinal = list(
-            `1` = list(matrix = draw_matrix_1, marker_idx = marker_idx, time = time_grid, scale = "epred"),
-            `2` = list(matrix = draw_matrix_2, marker_idx = marker_idx, time = time_grid, scale = "epred")
-          ),
-          longitudinal_fitted = list(),
-          survival = list(),
-          cumhaz = list()
-        ),
-        data = list(longitudinal = newdataLong, event = newdataEvent),
-        metadata = list(
-          scales = "epred",
-          scale = "epred",
-          ci_levels = ci_levels,
-          conditioning_time = 0,
-          conditioning_time_by_id = c(`1` = 0, `2` = 0),
-          id_var = "id",
-          time_var = "time",
-          marker_var = "marker",
-          response_var = "y"
-        ),
-        call = quote(predict(fit_obj)),
-        tmax = 1,
-        n_samples = 4
-      )
+  testthat::local_mocked_bindings(
+    .get_draws_obj = function(fit, variables = NULL, draws = NULL, seed = 1, keep_chains = FALSE) {
+      posterior::as_draws_matrix(fitted_draws)
+    },
+    .get_draws_matrix = function(fit, variables = NULL, draws = NULL, seed = 1) {
+      retained_variables <- intersect(variables %||% colnames(fitted_draws), colnames(fitted_draws))
+      fitted_draws[, retained_variables, drop = FALSE]
     },
     .package = "joinme"
   )
 
-  fit <- JoiNMe::JoiNMeFit$new(
+  fit <- JoiNMeFit$new(
+    fit = structure(list(), class = "mock_fit"),
+    stan_data = list(
+      n_id = 2L,
+      N = 4L,
+      D = 1L,
+      P = 2L,
+      R_id = 0L,
+      R_mk = 0L,
+      Q_idm = 0L,
+      X_obs = cbind(1, c(0, 1, 0.2, 0.8)),
+      Z_id_obs = matrix(0, nrow = 4, ncol = 0),
+      Z_mk_obs = matrix(0, nrow = 4, ncol = 0),
+      Z_idm_obs = matrix(0, nrow = 4, ncol = 0),
+      marker_levels = "m1",
+      link_long = 1L,
+      inv_link_n_ops = 0L,
+      inv_link_n_const = 0L,
+      inv_link_ops = matrix(0L, nrow = 1, ncol = 1),
+      inv_link_const = matrix(0, nrow = 1, ncol = 1),
+      tmax = 1
+    ),
+    formulaLong = y ~ 1 + time,
+    formulaEvent = survival::Surv(time, event) ~ 1,
+    formulaVCov = NULL,
+    config = list(draws_default = 3),
+    call = quote(joinme(formulaLong = y ~ 1 + time)),
+    tmax = 1,
+    dataLong = data.frame(
+      id = c(1, 1, 2, 2),
+      time = c(0, 1, 0.2, 0.8),
+      marker = "m1",
+      y = c(10, 11, 20, 21)
+    ),
+    dataEvent = data.frame(id = c(1, 2), time = c(2, 2), event = 0L)
+  )
+
+  fitted_prediction <- .build_JoiNMefit_fitted_plot_samples(
+    x = fit,
+    which = "longitudinal",
+    subject = NULL,
+    scale = "epred",
+    draws = 3,
+    seed = 1,
+    ci_levels = c(0.5, 0.95),
+    longitudinal_times = c(0, 0.5, 1)
+  )
+
+  subject_times <- split(
+    fitted_prediction$quantiles$longitudinal$time,
+    fitted_prediction$quantiles$longitudinal$id
+  )
+  expect_true(all(vapply(subject_times, identical, logical(1), c(0, 0.5, 1))))
+  expect_s3_class(fitted_prediction, "JoiNMeDynPred")
+  expect_s3_class(fitted_prediction, "R6")
+  expect_equal(fitted_prediction$metadata$marker_levels, "m1")
+  expect_null(fitted_prediction$quantiles$survival)
+  expect_null(fitted_prediction$quantiles$cumhaz)
+  expect_equal(fitted_prediction$data$longitudinal$y, c(10, 11, 20, 21))
+
+  subject_plot <- plot(
+    fitted_prediction,
+    type = "longitudinal",
+    subject = 1,
+    scale = "epred",
+    smooth_trajectory = FALSE
+  )
+  point_layers <- Filter(function(layer) inherits(layer$geom, "GeomPoint"), subject_plot$layers)
+  expect_length(point_layers, 1L)
+  expect_equal(point_layers[[1L]]$data$value, c(10, 11))
+})
+
+
+test_that("longitudinal heatmap aggregates smooth trajectories without requiring identical marker availability", {
+  common_times <- c(0, 0.5, 1)
+  posterior_prediction <- list(
+    draws = list(
+      longitudinal = list(
+        `1` = list(
+          epred = list(
+            matrix = rbind(c(0, 1, 2, 4, 5, 6), c(0, 2, 4, 4, 6, 8)),
+            time = rep(common_times, 2),
+            marker_idx = rep(1:2, each = 3),
+            scale = "epred"
+          )
+        ),
+        `2` = list(
+          epred = list(
+            matrix = rbind(c(2, 3, 4), c(2, 4, 6)),
+            time = common_times,
+            marker_idx = rep(1L, 3),
+            scale = "epred"
+          )
+        )
+      )
+    ),
+    data = list(
+      longitudinal = data.frame(marker = factor(c("m1", "m2"), levels = c("m1", "m2")))
+    ),
+    metadata = list(marker_var = "marker")
+  )
+
+  heatmap_data <- .JoiNMefit_longitudinal_heatmap_data(
+    posterior_prediction = posterior_prediction,
+    prediction_scale = "epred",
+    sign_threshold = 0.05,
+    prediction_times = common_times
+  )
+
+  expect_setequal(as.character(unique(heatmap_data$marker)), c("m1", "m2"))
+  expect_equal(sort(unique(heatmap_data$time)), common_times)
+  expect_equal(heatmap_data$change[as.character(heatmap_data$marker) == "m1"], c(0, 1.5, 3))
+  expect_true(all(heatmap_data$alpha > 0))
+
+  testthat::local_mocked_bindings(
+    .build_JoiNMefit_fitted_plot_samples = function(...) posterior_prediction,
+    .package = "joinme"
+  )
+  heatmap_plot <- .plot_JoiNMefit_longitudinal_heatmap(
+    fitted_model = NULL,
+    subject_ids = NULL,
+    marker_levels = NULL,
+    prediction_scale = "epred",
+    posterior_draws = 2,
+    prediction_times = common_times,
+    number_time_points = 3,
+    sign_threshold = 0.05,
+    random_seed = 1,
+    credible_levels = 0.95,
+    plot_theme = ggplot2::theme_bw
+  )
+  tile_layer <- ggplot2::ggplot_build(heatmap_plot)$data[[1L]]
+  expect_equal(nrow(tile_layer), nrow(heatmap_data))
+  expect_true(all(tile_layer$alpha >= 0.3))
+})
+
+
+test_that("JoiNMeDynPred plotting preserves custom data-variable metadata", {
+  quantiles_longitudinal <- data.frame(
+    id = "A",
+    time = c(0, 1),
+    marker = "m1",
+    q2.5 = c(0, 0.5),
+    q50 = c(0.2, 0.8),
+    q97.5 = c(0.4, 1.1),
+    mean = c(0.2, 0.8),
+    scale = "epred"
+  )
+  prediction <- JoiNMeDynPred$new(
+    predictions = list(longitudinal = NULL, survival = NULL, cumhaz = NULL),
+    quantiles = list(
+      longitudinal = quantiles_longitudinal,
+      longitudinal_fitted = NULL,
+      longitudinal_marker_pop = NULL,
+      longitudinal_overall_pop = NULL,
+      survival = NULL,
+      cumhaz = NULL
+    ),
+    draws = list(longitudinal = list(), longitudinal_fitted = list(), survival = list(), cumhaz = list()),
+    data = list(
+      longitudinal = data.frame(
+        patient = c("A", "A", "B"),
+        visit_time = c(0, 1, 0),
+        outcome = c("m1", "m1", "m1"),
+        response = c(10, 11, 99)
+      ),
+      event = data.frame(patient = c("A", "B"), event_time = 2, event = 0L)
+    ),
+    metadata = list(
+      id_var = "patient",
+      time_var = "visit_time",
+      marker_var = "outcome",
+      marker_levels = "m1",
+      response_var = "response",
+      scale = "epred",
+      scales = "epred",
+      ci_levels = 0.95,
+      conditioning_time = 0,
+      conditioning_time_by_id = c(A = 0),
+      source = "fit_samples"
+    ),
+    call = quote(predict(fit)),
+    tmax = 1,
+    n_samples = 2
+  )
+
+  subject_plot <- plot(prediction, type = "longitudinal", subject = "A", smooth_trajectory = FALSE)
+  point_layers <- Filter(function(layer) inherits(layer$geom, "GeomPoint"), subject_plot$layers)
+
+  expect_length(point_layers, 1L)
+  expect_equal(point_layers[[1L]]$data$value, c(10, 11))
+})
+
+
+test_that("event-only JoiNMeDynPred objects do not require a longitudinal scale", {
+  quantiles_survival <- data.frame(
+    id = 1,
+    time = c(0, 1),
+    q2.5 = c(1, 0.6),
+    q50 = c(1, 0.8),
+    q97.5 = c(1, 0.95),
+    mean = c(1, 0.8)
+  )
+  prediction <- JoiNMeDynPred$new(
+    predictions = list(longitudinal = NULL, survival = NULL, cumhaz = NULL),
+    quantiles = list(longitudinal = NULL, survival = quantiles_survival, cumhaz = NULL),
+    draws = list(longitudinal = NULL, survival = list(), cumhaz = list()),
+    data = list(longitudinal = NULL, event = data.frame(id = 1, time = 1, event = 0L)),
+    metadata = list(ci_levels = 0.95, id_var = "id", time_var = "time", marker_var = "marker"),
+    call = quote(predict(fit)),
+    tmax = 1,
+    n_samples = 2
+  )
+
+  survival_plot_object <- plot(prediction, type = "survival")
+  expect_s3_class(survival_plot_object, "ggplot")
+})
+
+test_that("plot.JoiNMeFit longitudinal heatmap style orders markers and attenuates nonsignificant changes", {
+  testthat::local_mocked_bindings(
+    longitudinal_plot = function(object, ...) {
+      args <- list(...)
+      dat <- data.frame(time = c(0, 1), marker = c("m1", "m2"), change = c(0.5, 0.1), alpha = c(1, 0.3))
+      p <- ggplot2::ggplot(dat, ggplot2::aes(time, marker, fill = change, alpha = alpha)) + ggplot2::geom_tile()
+      attr(p, "longitudinal_style") <- args$longitudinal_style
+      p
+    },
+    .package = "joinme"
+  )
+
+  fit <- JoiNMeFit$new(
     fit = NULL,
     stan_data = list(),
     formulaLong = y ~ 1 + time,
@@ -516,69 +722,15 @@ test_that("plot.JoiNMeFit longitudinal heatmap style orders markers and masks no
   )
 
   expect_s3_class(p, "ggplot")
-  expect_equal(levels(p$data$marker)[1], "m1")
+  expect_equal(attr(p, "longitudinal_style"), "heatmap")
   expect_true(any(p$data$alpha == 1))
-  expect_true(any(p$data$alpha == 0))
+  expect_true(any(p$data$alpha == 0.3))
+  expect_true(all(p$data$alpha > 0))
   expect_true(all(c("m1", "m2") %in% unique(as.character(p$data$marker))))
 })
 
-test_that("plot.JoiNMeFit longitudinal heatmap facets across multiple condition rows", {
-  captured <- new.env(parent = emptyenv())
-  captured$conditions <- character(0)
-
-  testthat::local_mocked_bindings(
-    predict.JoiNMeFit = function(object, newdataLong, newdataEvent, process, pred_type, scale,
-                                 times, time_start, time_horizon, ci_levels, control, seed, ...) {
-      captured$conditions <- c(captured$conditions, as.character(stats::na.omit(unique(newdataEvent$trt))))
-
-      marker_idx <- c(1L, 1L, 2L, 2L)
-      time_grid <- c(0, 1, 0, 1)
-      draw_matrix <- rbind(
-        c(0.0, 0.8, 0.0, 0.1),
-        c(0.0, 0.9, 0.0, -0.1),
-        c(0.0, 1.0, 0.0, 0.1),
-        c(0.0, 1.1, 0.0, -0.1)
-      )
-
-      JoiNMe::JoiNMeDynPred$new(
-        predictions = list(longitudinal = NULL, survival = NULL, cumhaz = NULL),
-        quantiles = list(
-          longitudinal = NULL,
-          longitudinal_fitted = NULL,
-          longitudinal_marker_pop = NULL,
-          longitudinal_overall_pop = NULL,
-          survival = NULL,
-          cumhaz = NULL
-        ),
-        draws = list(
-          longitudinal = list(
-            `1` = list(matrix = draw_matrix, marker_idx = marker_idx, time = time_grid, scale = "epred")
-          ),
-          longitudinal_fitted = list(),
-          survival = list(),
-          cumhaz = list()
-        ),
-        data = list(longitudinal = newdataLong, event = newdataEvent),
-        metadata = list(
-          scales = "epred",
-          scale = "epred",
-          ci_levels = ci_levels,
-          conditioning_time = 0,
-          conditioning_time_by_id = c(`1` = 0),
-          id_var = "id",
-          time_var = "time",
-          marker_var = "marker",
-          response_var = "y"
-        ),
-        call = quote(predict(fit_obj)),
-        tmax = 1,
-        n_samples = 4
-      )
-    },
-    .package = "joinme"
-  )
-
-  fit <- JoiNMe::JoiNMeFit$new(
+test_that("plot.JoiNMeFit no longer accepts condition for heatmap plotting", {
+  fit <- JoiNMeFit$new(
     fit = NULL,
     stan_data = list(),
     formulaLong = y ~ 1 + trt + time,
@@ -594,7 +746,7 @@ test_that("plot.JoiNMeFit longitudinal heatmap facets across multiple condition 
       trt = factor(c("A", "A"), levels = c("A", "B")),
       y = c(1, 1.2)
     ),
-    dataEvent = data.frame(id = 1, time = 2, event = 0L, trt = factor("A", levels = c("A", "B")))
+    dataEvent = data.frame(id = 1, time = 2, event = 0L, trt = factor("A", levels = c("A", "B")) )
   )
 
   cond <- data.frame(
@@ -602,64 +754,25 @@ test_that("plot.JoiNMeFit longitudinal heatmap facets across multiple condition 
     row.names = c("Arm A", "Arm B")
   )
 
-  p <- plot(
-    fit,
-    type = "longitudinal",
-    longitudinal_style = "heatmap",
-    scale = "epred",
-    condition = cond,
-    threshold = 0.05
+  expect_error(
+    plot(fit, type = "longitudinal", longitudinal_style = "heatmap", scale = "epred", condition = cond, threshold = 0.05),
+    "unused argument"
   )
-
-  expect_s3_class(p, "ggplot")
-  expect_equal(sort(unique(captured$conditions)), c("A", "B"))
-  expect_setequal(unique(as.character(p$data$condition_label)), c("Arm A", "Arm B"))
-  expect_true(inherits(p$facet, "FacetWrap"))
 })
 
 test_that("plot.JoiNMeFit keeps longitudinal_heatmap as a compatibility alias", {
   testthat::local_mocked_bindings(
-    predict.JoiNMeFit = function(object, newdataLong, newdataEvent, process, pred_type, scale,
-                                 times, time_start, time_horizon, ci_levels, control, seed, ...) {
-      JoiNMe::JoiNMeDynPred$new(
-        predictions = list(longitudinal = NULL, survival = NULL, cumhaz = NULL),
-        quantiles = list(
-          longitudinal = NULL,
-          longitudinal_fitted = NULL,
-          longitudinal_marker_pop = NULL,
-          longitudinal_overall_pop = NULL,
-          survival = NULL,
-          cumhaz = NULL
-        ),
-        draws = list(
-          longitudinal = list(
-            `1` = list(matrix = matrix(c(0, 1), nrow = 1), marker_idx = c(1L, 1L), time = c(0, 1), scale = "epred")
-          ),
-          longitudinal_fitted = list(),
-          survival = list(),
-          cumhaz = list()
-        ),
-        data = list(longitudinal = newdataLong, event = newdataEvent),
-        metadata = list(
-          scales = "epred",
-          scale = "epred",
-          ci_levels = ci_levels,
-          conditioning_time = 0,
-          conditioning_time_by_id = c(`1` = 0),
-          id_var = "id",
-          time_var = "time",
-          marker_var = "marker",
-          response_var = "y"
-        ),
-        call = quote(predict(fit_obj)),
-        tmax = 1,
-        n_samples = 1
-      )
+    longitudinal_plot = function(object, ...) {
+      args <- list(...)
+      dat <- data.frame(time = c(0, 1), marker = c("m1", "m1"), change = c(0.0, 0.5), alpha = c(1, 1))
+      p <- ggplot2::ggplot(dat, ggplot2::aes(time, marker, fill = change, alpha = alpha)) + ggplot2::geom_tile()
+      attr(p, "longitudinal_style") <- args$longitudinal_style
+      p
     },
     .package = "joinme"
   )
 
-  fit <- JoiNMe::JoiNMeFit$new(
+  fit <- JoiNMeFit$new(
     fit = NULL,
     stan_data = list(),
     formulaLong = y ~ 1 + time,
@@ -672,7 +785,9 @@ test_that("plot.JoiNMeFit keeps longitudinal_heatmap as a compatibility alias", 
     dataEvent = data.frame(id = 1, time = 2, event = 0L)
   )
 
-  expect_s3_class(plot(fit, type = "longitudinal_heatmap", scale = "epred"), "ggplot")
+  p <- plot(fit, type = "longitudinal_heatmap", scale = "epred")
+  expect_s3_class(p, "ggplot")
+  expect_equal(attr(p, "longitudinal_style"), "heatmap")
 })
 
 test_that("make_conditions mirrors brms output", {

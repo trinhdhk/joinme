@@ -6,8 +6,8 @@
 \usage{
 \method{extract}{JoiNMeFit}(
   object,
-  what = c("fixef", "gamma_w", "assoc", "association_plot", "distributional",
-    "distributional_regression", "likelihood_scale", "raw"),
+  what = c("fixef", "gamma_w", "basehaz", "baseline_hazard", "assoc", "association_plot",
+    "distributional", "distributional_regression", "likelihood_scale", "raw"),
   term = NULL,
   variable = NULL,
   draws = NULL,
@@ -20,7 +20,8 @@
 \item{object}{A \code{JoiNMeFit} object.}
 
 \item{what}{Character component selector. One of
-\code{"fixef"}, \code{"gamma_w"}, \code{"assoc"}, \code{"association_plot"},
+\code{"fixef"}, \code{"gamma_w"}, \code{"basehaz"},
+\code{"baseline_hazard"}, \code{"assoc"}, \code{"association_plot"},
 \code{"distributional"}, \code{"distributional_regression"}, \code{"likelihood_scale"},
 or \code{"raw"}.}
 
@@ -51,15 +52,20 @@ support ranges used by association plotting.
 }
 }
 \description{
-Extract posterior draws from a fitted JoiNMe model.
+Extracts one fitted-model component at a time and returns both the draw-level
+values and the mapping that produced them.
 
-\code{extract()} differs from \code{draws()} in that it works one semantic
-component at a time and returns a structured list. That list contains the
-requested draw payload plus a \code{term_map}, and for
-\code{what = "association_plot"} it also includes the extra support objects
-used by the fitted association plotting code.
+This differs from \code{\link[=draws]{draws()}} in two important ways:
+\itemize{
+\item \code{extract()} keeps the request scoped to one semantic component such as
+fixed effects, survival coefficients, association terms, distributional
+terms, or likelihood-scale parameters.
+\item \code{extract()} returns a structured list with \code{draws} plus \code{term_map}
+(and for \code{what = "association_plot"}, additional plotting support data)
+instead of a single \code{posterior} draws object.
+}
 
-Use \code{extract.JoiNMeFit()} when you need component-aware extraction. Use
-\code{draws()} when you want one renamed \pkg{posterior}-compatible object for
-general downstream analysis.
+In short, use \code{extract()} when you need component-aware extraction and use
+\code{\link[=draws]{draws()}} when you need one renamed posterior object for general downstream
+analysis.
 }

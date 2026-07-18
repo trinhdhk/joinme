@@ -33,7 +33,7 @@
  * push-eta, apply-op. This allows fast paths elsewhere without misclassifying
  * user-specified programs.
  */
-int canonical_link_code_from_program(
+int make_canonical_link(
   int marker_idx,
   array[] int inv_link_n_ops,
   array[,] int inv_link_ops,

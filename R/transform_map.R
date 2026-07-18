@@ -6,7 +6,7 @@
 #' @description
 #' The `parse_transform_expr` function takes a formula, quosure, quoted expression,
 #' or character string and converts it to a functional bytecode representation compatible with the
-#' Stan-side opcode evaluator.
+#' Stan-side bytecode evaluator.
 #'
 #' Supported operations:
 #' - Arithmetic: +, -, *, /
@@ -93,9 +93,8 @@ parse_transform_expr <- function(expr, iota_nodes = NULL) {
   # Step 3: validate stack consistency so runtime evaluation is deterministic.
   verify_bytecode(result$bytecode, result$const_data)
 
-  # Step 4: return both `bytecode` and legacy `opcodes` aliases for compatibility.
+  # Step 4: return canonical bytecode payload.
   list(
-    opcodes = result$bytecode,
     bytecode = result$bytecode,
     const_data = result$const_data,
     op_iota_intercept_idx = result$op_iota_intercept_idx,
@@ -135,9 +134,8 @@ parse_transform_expr <- function(expr, iota_nodes = NULL) {
   )
 }
 
-#' @keywords internal
 #' Coerce input to a language object
-#
+#' @keywords internal
 .coerce_transform_expr <- function(expr) {
   # Normalise input to a single language object
   if (rlang::is_quosure(expr)) {
@@ -171,8 +169,8 @@ parse_transform_expr <- function(expr, iota_nodes = NULL) {
   ))
 }
 
-#' @keywords internal
 #' Emit bytecode from an R language object (calls, names, constants).
+#' @keywords internal
 .emit_bytecode_expr <- function(
   node,
   bytecode,
@@ -381,17 +379,13 @@ parse_transform_expr <- function(expr, iota_nodes = NULL) {
   ))
 }
 
-#' @keywords internal
-#' Legacy tokenizer/parser removed in favor of R's formula parsing.
-
-#' @keywords internal
 #' Verify functional bytecode for basic sanity (stack under/overflow, etc.)
-verify_bytecode <- function(opcodes, const_data) {
-  # Accept both historical `opcodes` naming and modern `bytecode` naming.
+#' @keywords internal
+verify_bytecode <- function(bytecode, const_data) {
   stack_height <- 0
   const_idx <- 0
 
-  for (op in opcodes) {
+  for (op in bytecode) {
     if (op == 0) {
       # PUSH_X
       stack_height <- stack_height + 1
@@ -399,7 +393,7 @@ verify_bytecode <- function(opcodes, const_data) {
       # PUSH_CONST
       const_idx <- const_idx + 1
       if (const_idx > length(const_data)) {
-        stop("Functional opcodes reference more constants than provided")
+        stop("Functional bytecode references more constants than provided")
       }
       stack_height <- stack_height + 1
     } else if (op %in% c(6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26)) {
@@ -431,7 +425,7 @@ verify_bytecode <- function(opcodes, const_data) {
 #' simulation, preprocessing checks, and Stan likelihood evaluation remain aligned.
 #'
 #' @param x Numeric scalar input.
-#' @param bytecode Integer bytecode sequence. Legacy name `opcodes` is also accepted.
+#' @param bytecode Integer bytecode sequence.
 #' @param const_data Numeric constants consumed by `PUSH_CONST` instructions.
 #'
 #' @return Numeric scalar result.
@@ -440,16 +434,14 @@ eval_bytecode_scalar <- function(
   x,
   bytecode = NULL,
   const_data = numeric(),
-  opcodes = NULL,
   iota_intercepts = numeric(0),
   iota_slopes = numeric(0),
   op_iota_intercept_idx = NULL,
   op_iota_slope_idx = NULL
 ) {
-  # Step 1: normalise inputs and resolve legacy naming aliases.
+  # Step 1: normalise inputs.
   program <- .normalize_bytecode_program(
     bytecode = bytecode,
-    opcodes = opcodes,
     const_data = const_data,
     op_iota_intercept_idx = op_iota_intercept_idx,
     op_iota_slope_idx = op_iota_slope_idx
@@ -556,7 +548,7 @@ eval_bytecode_scalar <- function(
 #' Applies `eval_bytecode_scalar()` element-wise to a numeric vector.
 #'
 #' @param x Numeric vector input.
-#' @param bytecode Integer bytecode sequence. Legacy name `opcodes` is also accepted.
+#' @param bytecode Integer bytecode sequence.
 #' @param const_data Numeric constants consumed by `PUSH_CONST` instructions.
 #'
 #' @return Numeric vector result.
@@ -565,7 +557,6 @@ eval_bytecode_vector <- function(
   x,
   bytecode = NULL,
   const_data = numeric(),
-  opcodes = NULL,
   iota_intercepts = numeric(0),
   iota_slopes = numeric(0),
   op_iota_intercept_idx = NULL,
@@ -573,7 +564,6 @@ eval_bytecode_vector <- function(
 ) {
   program <- .normalize_bytecode_program(
     bytecode = bytecode,
-    opcodes = opcodes,
     const_data = const_data,
     op_iota_intercept_idx = op_iota_intercept_idx,
     op_iota_slope_idx = op_iota_slope_idx
@@ -594,21 +584,16 @@ eval_bytecode_vector <- function(
 #' Normalise bytecode program inputs
 #'
 #' @param bytecode Integer bytecode sequence or `NULL`.
-#' @param opcodes Legacy alias for bytecode.
 #' @param const_data Numeric constant vector.
 #' @return List with normalised `bytecode` and `const_data`.
 #' @keywords internal
 .normalize_bytecode_program <- function(
   bytecode = NULL,
-  opcodes = NULL,
   const_data = numeric(),
   op_iota_intercept_idx = NULL,
   op_iota_slope_idx = NULL
 ) {
   code <- bytecode
-  if (is.null(code) && !is.null(opcodes)) {
-    code <- opcodes
-  }
   if (is.null(code)) {
     code <- integer(0)
   }

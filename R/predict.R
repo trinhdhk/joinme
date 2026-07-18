@@ -22,8 +22,12 @@ NULL
 #' @param object A fitted object of class `JoiNMeFit`.
 #' @param newdataLong Data frame containing longitudinal histories for one or more subjects.
 #' Must contain columns for id, time, marker, and response variables as specified in the original model formula.
-#' @param newdataEvent Data frame containing one row per subject with event time, event status,
-#' and baseline covariates used in the survival model.
+#' @param newdataEvent Data frame containing event information and covariates used
+#'   in the survival model. It may contain one row per subject or interval-split
+#'   rows (`Surv(start, stop, status)` layout). Left- and interval-censored
+#'   survival encodings (`type = "left"`, `type = "interval2"`) are accepted.
+#'   When interval rows are supplied, dynamic prediction uses the latest row per
+#'   subject for event-side covariates.
 #' @param process Character vector specifying which predictions to compute.
 #' Options: "longitudinal" (future trajectory), "event" (conditional survival probability). Default: both.
 #' @param pred_type Character. Type of longitudinal predictions:
@@ -48,7 +52,9 @@ NULL
 #' If numeric, a single value is reused for all subjects, or a named vector supplies
 #' subject-specific values. If character, it is interpreted as a column name in
 #' `newdataEvent` holding subject-specific conditioning times. If NULL, defaults to
-#' the maximum observed time in `newdataLong` for each subject.
+#' the maximum observed time in `newdataLong` for each subject; for delayed-entry
+#' counting-process data with strictly positive entry times, it defaults to the
+#' subject entry time.
 #' @param time_horizon Numeric scalar. Prediction horizon (in time units) used when
 #' `times` is NULL. The default is `tmax`.
 #' @param ci_levels Numeric vector of credible interval levels for plotting.
@@ -65,9 +71,9 @@ NULL
 #'   - n_times: integer; number of points in the prediction time grid when
 #'     `times` is `NULL`. Default 50.
 #'   - n_pred_draws: integer; number of prediction draws produced by the dynpred
-#'     object. This is independent of `n_samples` (posterior parameter draw
-#'     extraction count). If omitted, defaults to the extracted posterior draw
-#'     count.
+#'     object. Default to n_samples. Changing this can destabilise the results.
+#'     This is independent of `n_samples` (posterior parameter draw
+#'     extraction count). 
 #'   - threads_per_chain: integer; the threaded dynpred Stan program is always
 #'     used. `threads_per_chain = 1` keeps execution serial while preserving the
 #'     thread-capable kernel. For engine = "rstan", threading uses
@@ -159,6 +165,28 @@ predict.JoiNMeFit <- function(object,
 
     # 3. Identify Subjects
     id_var <- eval(object$call$id_var) %||% "id"
+    newdataEvent_all_rows <- newdataEvent
+    ev_vars <- .resolve_event_model_vars(
+        formulaEvent = forms$formulaEvent,
+        dataEvent = newdataEvent,
+        context = "predict.JoiNMeFit()"
+    )
+    if (anyDuplicated(newdataEvent[[id_var]]) > 0L) {
+        newdataEvent$.__joinme_event_start <- as.numeric(ev_vars$event_start)
+        newdataEvent$.__joinme_event_stop <- as.numeric(ev_vars$event_stop)
+        ord_ev <- order(newdataEvent[[id_var]], newdataEvent$.__joinme_event_stop, newdataEvent$.__joinme_event_start)
+        newdataEvent <- newdataEvent[ord_ev, , drop = FALSE]
+        keep_last <- !duplicated(newdataEvent[[id_var]], fromLast = TRUE)
+        newdataEvent <- newdataEvent[keep_last, , drop = FALSE]
+        newdataEvent$.__joinme_event_start <- NULL
+        newdataEvent$.__joinme_event_stop <- NULL
+
+        ev_vars <- .resolve_event_model_vars(
+            formulaEvent = forms$formulaEvent,
+            dataEvent = newdataEvent,
+            context = "predict.JoiNMeFit()"
+        )
+    }
     ids <- unique(newdataEvent[[id_var]])
     if (length(ids) == 0) {
         cli::cli_abort("No subjects found in {.code newdataEvent}.")
@@ -237,7 +265,7 @@ predict.JoiNMeFit <- function(object,
         }
     }
 
-    n_samples <- control$n_samples %||% 200L
+    n_samples <- control$n_samples %||% 20L
     if (!is.numeric(n_samples) || length(n_samples) != 1 || !is.finite(n_samples)) {
         cli::cli_abort(c(
             "x" = "{.arg control$n_samples} must be a single finite numeric value.",
@@ -293,10 +321,11 @@ predict.JoiNMeFit <- function(object,
     draws_list_raw <- .extract_draws_for_pred(object, n_samples, seed)
     draws_list_raw <- .scale_draw_dependent_time_terms(draws_list_raw, object$stan_data, tmax_val)
     n_samples_extracted <- .n_draws_in_prediction_list(draws_list_raw)
-    n_pred_draws <- .resolve_n_pred_draws(control$n_pred_draws, n_samples_extracted)
-    pred_draw_index <- .prediction_draw_index(n_samples_extracted, n_pred_draws, seed)
-    draws_list <- .subset_draws_for_prediction(draws_list_raw, pred_draw_index)
-
+    n_pred_draws_max <- (control$iter_sampling %||% control$n_pred_draws %||% 1) * n_samples_extracted * (control$chains %||% control$parallel_chains %||% 1L) / (control$thin %||% 1L)
+    n_pred_draws <- .resolve_n_pred_draws(control$n_pred_draws, n_samples_extracted, n_pred_draws_max)
+    # pred_draw_index <- .prediction_draw_index(n_samples_extracted, n_pred_draws, seed)
+    draws_list <- .subset_draws_for_prediction(draws_list_raw, seq_len(n_samples_extracted)) #pred_draw_index)
+    # browser()
     # Finalize threads_per_chain from control only, capped by available work.
     n_cores <- parallel::detectCores(logical = FALSE) %||% 1L
     max_threads <- min(n_pred_draws, n_cores)
@@ -309,7 +338,7 @@ predict.JoiNMeFit <- function(object,
     }
 
     stan_file <- .get_stan_file(
-        program = "JoiNMe_dynpred",
+        program = "joinme_dynpred",
         threaded = TRUE
     )
 
@@ -373,9 +402,9 @@ predict.JoiNMeFit <- function(object,
     # reduce_sum grainsize for prediction (draw-level parallelism)
     grainsize <- control$grainsize
     if (is.null(grainsize)) {
-        n_pred_draws_local <- n_pred_draws
+        n_pred_draws<- n_pred_draws
         if (threads_per_chain <= 1L) {
-            grainsize <- as.integer(n_pred_draws_local)
+            grainsize <- as.integer(n_pred_draws)
         } else {
             # reduce_sum in dynpred parallelizes over posterior draws, not subjects.
             # Tune default grainsize using number of draws to avoid overly tiny slices
@@ -383,7 +412,7 @@ predict.JoiNMeFit <- function(object,
             n_chains <- control$chains %||% 1L
             denom <- 4L * as.integer(threads_per_chain) * as.integer(n_chains)
             denom <- max(1L, denom)
-            grainsize <- max(1L, as.integer(ceiling(n_pred_draws_local / denom)))
+            grainsize <- max(1L, as.integer(ceiling(n_pred_draws / denom)))
             grainsize <- min(as.integer(n_cores), grainsize)
         }
     }
@@ -452,6 +481,7 @@ predict.JoiNMeFit <- function(object,
                 pb(amount = 0, message = sprintf("Subject %s", this_id))
             }
             dE <- newdataEvent[newdataEvent[[id_var]] == id, , drop = FALSE]
+            dE_all <- newdataEvent_all_rows[newdataEvent_all_rows[[id_var]] == id, , drop = FALSE]
             dL <- newdataLong[newdataLong[[id_var]] == id, , drop = FALSE]
 
             if (nrow(dL) == 0) {
@@ -468,7 +498,21 @@ predict.JoiNMeFit <- function(object,
             } else if (!is.null(time_start)) {
                 t_cond <- time_start
             } else {
-                t_cond <- max(dL[[time_var]], na.rm = TRUE)
+                # Delayed-entry default: when counting-process input includes a
+                # strictly positive entry time, use that entry as the default
+                # conditioning origin so survival does not implicitly restart at
+                # the first observed longitudinal measurement.
+                ev_vars_i <- .resolve_event_model_vars(
+                    formulaEvent = forms$formulaEvent,
+                    dataEvent = dE_all,
+                    context = "predict.JoiNMeFit()"
+                )
+                delayed_entry_i <- suppressWarnings(min(as.numeric(ev_vars_i$event_start), na.rm = TRUE))
+                if (is.finite(delayed_entry_i) && delayed_entry_i > 0) {
+                    t_cond <- delayed_entry_i
+                } else {
+                    t_cond <- max(dL[[time_var]], na.rm = TRUE)
+                }
             }
             if (!is.finite(t_cond)) {
                 cli::cli_abort(c(
@@ -554,7 +598,7 @@ predict.JoiNMeFit <- function(object,
             sample_args <- list(
                 chains = 1,
                 iter_warmup = 100,
-                iter_sampling = 1, # Single pass over n_samples array
+                iter_sampling = max(3, ceiling(n_pred_draws / n_samples_extracted)), # Ideally one but Stan does not like it. Single pass over n_samples array
                 fixed_param = FALSE,
                 refresh = 0,
                 show_messages = FALSE,
@@ -572,12 +616,12 @@ predict.JoiNMeFit <- function(object,
                 pred_diag <- .JoiNMe_sampler_diagnostics(fit_pred)
                 if (is.na(pred_diag$draws) || pred_diag$draws < 1) {
                     retry_args <- sample_args
-                    retry_args$init <- 0.1
+                    retry_args$init <- 0.25
                     cli::cli_warn(c(
                         x = "Prediction sampling failed to initialise for subject {id}.",
-                        i = "Retrying with narrower random init range ({.code init = 0.1})."
+                        i = "Retrying with narrower random init range ({.code init = 0.=25})."
                     ))
-                    fit_pred <- do.call(mod$sample, retry_args)
+                    fit_pred <- suppressWarnings(do.call(mod$sample, retry_args))
                     pred_diag <- .JoiNMe_sampler_diagnostics(fit_pred)
                 }
             } else {
@@ -601,9 +645,12 @@ predict.JoiNMeFit <- function(object,
                     rstan_args$algorithm <- "Fixed_param"
                 }
                 if (length(control_list) > 0) rstan_args$control <- control_list
-                fit_pred <- do.call(rstan::sampling, rstan_args)
+                # There is a known issue with rstan::sampling() where it can emit warnings about
+                # Rhat NA. Cannot do anything about it.
+                fit_pred <- suppressWarnings(do.call(rstan::sampling, rstan_args))
                 pred_diag <- .JoiNMe_sampler_diagnostics(fit_pred)
             }
+            # browser()
             pred_sampler_diag_list[[as.character(id)]] <- pred_diag
 
             draw_variables <- .prediction_draw_variables(scale, sd_pred)
@@ -874,6 +921,8 @@ predict.JoiNMeFit <- function(object,
         n_pred_draws = n_pred_draws,
         n_subjects = length(ids),
         marker_corr_depends_on_id = marker_corr_depends_on_id,
+        event_surv_type = ev_vars$surv_type %||% "right",
+        event_censor_types = sort(unique(as.integer(ev_vars$event_censor_type %||% 0L))),
         indep_id_re = sd$indep_id_re,
         indep_marker_re = sd$indep_marker_re,
         indep_idmarker_cov = sd$indep_idmarker_cov,
@@ -895,7 +944,8 @@ predict.JoiNMeFit <- function(object,
         response_var = resp_var,
         id_var = eval(object$call$id_var) %||% "id",
         time_var = eval(object$call$time_var) %||% "time",
-        marker_var = eval(object$call$marker_var) %||% "marker"
+        marker_var = eval(object$call$marker_var) %||% "marker",
+        marker_levels = as.character(object$stan_data$marker_levels %||% character(0))
     )
 
     JoiNMeDynPred$new(
@@ -941,8 +991,11 @@ predict.JoiNMeFit <- function(object,
 }
 
 # Resolve prediction draw count independent of posterior extraction count.
-.resolve_n_pred_draws <- function(n_pred_draws, n_available) {
+.resolve_n_pred_draws <- function(n_pred_draws, n_available, iter_sampling) {
+
     if (is.null(n_pred_draws)) {
+        n_available <- if (n_available <= 50) 20 * n_available else n_available
+        cli::cli_alert_info(c(i = "Setting {.arg n_pred_draws} to {n_available}."))
         return(as.integer(n_available))
     }
     if (!is.numeric(n_pred_draws) || length(n_pred_draws) != 1 || !is.finite(n_pred_draws)) {
@@ -958,7 +1011,13 @@ predict.JoiNMeFit <- function(object,
             i = "Use a positive integer for dynpred output draw count."
         ))
     }
-    n_pred_draws
+    if (n_pred_draws > iter_sampling) {
+        cli::cli_warn(c(
+            x = "{.arg control$n_pred_draws} ({n_pred_draws}) exceeds the number of posterior draws ({iter_sampling}).",
+            i = "{.arg control$n_pred_draws} is now capped at {iter_sampling}."
+        ))
+    }
+    min(n_pred_draws, iter_sampling)
 }
 
 .normalize_prediction_scales <- function(scale) {
@@ -993,9 +1052,11 @@ predict.JoiNMeFit <- function(object,
 }
 
 # Build draw re-index map from extracted posterior draws to prediction draws.
-.prediction_draw_index <- function(n_available, n_target, seed) {
+# Unused
+.prediction_draw_index <- function(
+    n_available, n_target, seed) {
     n_available <- as.integer(n_available)
-    n_target <- as.integer(n_target)
+    # n_target <- as.integer(n_target)
     if (n_available < 1L || n_target < 1L) {
         cli::cli_abort("Both available and target draw counts must be >= 1.")
     }
@@ -1115,20 +1176,35 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
     # embedded in Stan variable indices and N_cols is the observation/time index.
     # To preserve conditional uncertainty (and avoid over-shrunk intervals),
     # pair each draw index with a posterior row instead of averaging rows.
+    # browser()
     mat <- matrix(0, N_rows, N_cols)
     n_post_rows <- nrow(draws_mat)
     row_idx <- ((seq_len(N_rows) - 1L) %% max(1L, n_post_rows)) + 1L
+    
     for (n in 1:N_cols) {
-        nms <- paste0(var_name, "[", 1:N_rows, ",", n, "]")
-        alt_nms <- paste0(var_name, "[", n, ",", 1:N_rows, "]")
-
-        if (all(nms %in% colnames(draws_mat))) {
-            cur <- draws_mat[row_idx, nms, drop = FALSE]
-            mat[, n] <- as.numeric(diag(cur))
-        } else if (all(alt_nms %in% colnames(draws_mat))) {
-            cur <- draws_mat[row_idx, alt_nms, drop = FALSE]
-            mat[, n] <- as.numeric(diag(cur))
+        # nms <- paste0(var_name, "[", 1:N_rows, ",", n, "]")
+        # alt_nms <- paste0(var_name, "[", n, ",", 1:N_rows, "]")
+        
+        mat_vars <- grepv(paste0(var_name, '\\[.*,',n, ']'), colnames(draws_mat), fixed = FALSE)
+        N_samples <- length(mat_vars) 
+        # decide how many times a variable is extracted
+        n_post_sampling <- ceiling(N_rows/N_samples)
+        nms <- paste0(var_name, "[", 1:N_samples, ",", n, "]")
+        
+        # Sampling n time the draws to fill the matrix
+        cur <- c()
+        for (i in 1:n_post_sampling) {
+            cur <- c(cur, draws_mat[i, nms])
         }
+        mat[, n] <- cur[1:N_rows]
+      
+        # if (all(nms %in% colnames(draws_mat))) {
+        #     cur <- draws_mat[row_idx, nms, drop = FALSE]
+        #     mat[, n] <- as.numeric(diag(cur))
+        # } else if (all(alt_nms %in% colnames(draws_mat))) {
+        #     cur <- draws_mat[row_idx, alt_nms, drop = FALSE]
+        #     mat[, n] <- as.numeric(diag(cur))
+        # }
     }
     mat
 }
@@ -1176,7 +1252,7 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
 .recover_metadata <- function(object, tmax_arg) {
     tmax <- tmax_arg
     if (is.null(tmax)) {
-        tmax <- object$config$tmax_internal %||% object$stan_data$tmax_internal
+        tmax <- object$config$tmax %||% object$stan_data$tmax
     }
     if (is.null(tmax)) {
         cli::cli_warn(c(
@@ -1282,16 +1358,16 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         rep(default, n)
     }
 
-    get_transform_coeff_draws <- function(eff_prefix, base_coeff, n_coeff, n_components = 1L) {
+    get_transform_coeff_draws <- function(eff_prefix, base_coeff, n_coeff, n_components = 0L) {
         n_coeff <- as.integer(n_coeff %||% 0L)
         n_components <- as.integer(n_components %||% 1L)
         if (n_coeff < 1L) {
-            if (n_components > 1L) {
+            if (n_components > 0L) {
                 return(array(0, dim = c(n, n_components, 0L)))
             }
             return(matrix(0, n, 0))
         }
-        if (n_components > 1L) {
+        if (n_components > 0L) {
             eff_names <- as.vector(outer(seq_len(n_components), seq_len(n_coeff), function(m, j) paste0(eff_prefix, "[", m, ",", j, "]")))
             eff_names <- eff_names[eff_names %in% colnames(dmat)]
             if (length(eff_names) > 0L) {
@@ -1931,13 +2007,13 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
     names(marker_weights_base) <- .weighted_assoc_term_keys()
 
     marker_weights_draws <- draws_list$marker_weights_draws %||% list()
-    n_pred_draws <- nrow(draws_list$beta_fixed)
+    n_draws <- nrow(draws_list$beta_fixed)
     for (term_key in .weighted_assoc_term_keys()) {
         term_draws <- marker_weights_draws[[term_key]]
-        if (is.null(term_draws) || nrow(term_draws) != n_pred_draws) {
+        if (is.null(term_draws) || nrow(term_draws) != n_draws) {
             marker_weights_draws[[term_key]] <- matrix(
-                rep(marker_weights_base[[term_key]], each = n_pred_draws),
-                nrow = n_pred_draws,
+                rep(marker_weights_base[[term_key]], each = n_draws),
+                nrow = n_draws,
                 byrow = TRUE
             )
         }
@@ -2002,10 +2078,10 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
     marker_to_alpha_family_out <- .default_marker_family_map(sd$marker_to_alpha_family, n_family_alpha_out)
     marker_to_phi_beta_family_out <- .default_marker_family_map(sd$marker_to_phi_beta_family, n_family_phi_beta_out)
     marker_to_tau_sde_family_out <- .default_marker_family_map(sd$marker_to_tau_sde_family, n_family_tau_sde_out)
-
+    # browser()
     out <- list(
-        n_draws = n_pred_draws,
-        n_obs_long = nrow(dL), idx_marker_obs = marker_int, n_marker_types = sd$D,
+        n_draws = n_draws,
+        n_obs_long = nrow(dL), idx_marker_obs = as.array(as.integer(marker_int)), n_marker_types = sd$D,
         marker_weights_cv_total = as.numeric(marker_weights_base$cv_total),
         marker_weights_cs_total = as.numeric(marker_weights_base$cs_total),
         marker_weights_cv_marker = as.numeric(marker_weights_base$cv_marker),
@@ -2014,9 +2090,9 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         marker_weights_draws_cs_total = marker_weights_draws$cs_total,
         marker_weights_draws_cv_marker = marker_weights_draws$cv_marker,
         marker_weights_draws_cs_marker = marker_weights_draws$cs_marker,
-        y_real = as.numeric(dL[[y_var]]),
-        y_int = as.integer(dL[[y_var]]),
-        trials_obs = as.integer(trials_obs),
+        y_real = as.array(as.numeric(dL[[y_var]])),
+        y_int = as.array(as.integer(dL[[y_var]])),
+        trials_obs = as.array(as.integer(trials_obs)),
         n_fixed_effects = sd$P, n_random_id = sd$R_id, n_random_marker = sd$R_mk, n_random_marker_id = sd$Q_idm,
         mat_fixed_obs = mat_fixed_obs, mat_id_obs = mat_id_obs, mat_marker_obs = mat_marker_obs, mat_marker_id_obs = mat_marker_id_obs,
         marker_id_row_scale = as.numeric(marker_id_row_scale),
@@ -2048,7 +2124,7 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         X_tau_sde_pred = dist_tau_sde_pred$X,
         n_obs_pred = n_obs_pred, idx_marker_pred = as.array(as.integer(idx_marker_pred)),
         mat_fixed_pred = mat_fixed_pred, mat_id_pred = mat_id_pred, mat_marker_pred = mat_marker_pred, mat_marker_id_pred = mat_marker_id_pred,
-        trials_pred = as.integer(trials_pred),
+        trials_pred = as.array(as.integer(trials_pred)),
         n_times_surv = n_times_surv, vec_time_surv = as.array(t_surv_grid / tmax),
         mat_basis_gk_surv = mat_basis_gk_surv,
         mat_fixed_gk_surv = mat_fixed_gk_surv, mat_id_gk_surv = mat_id_gk_surv, mat_marker_gk_surv = mat_marker_gk_surv, mat_marker_id_gk_surv = mat_marker_id_gk_surv,
@@ -2326,8 +2402,10 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
     z_u_draws <- .extract_matrix_from_stan(draws_matrix, "z_u", n_random_id, n_draws_target)
     if (is.null(z_u_draws) || nrow(z_u_draws) == 0 || ncol(z_u_draws) != n_random_id) return(NULL)
 
-    tau_id_draws <- standata_subject$tau_id
-    lcorr_id_draws <- standata_subject$Lcorr_id
+    n_sample <- dim(standata_subject$tau_id)[1]
+    idx_sample <- rep(seq_len(n_sample), ceiling(n_draws_target / n_sample))[seq_len(n_draws_target)]
+    tau_id_draws <- standata_subject$tau_id[idx_sample, , drop=FALSE]
+    lcorr_id_draws <- standata_subject$Lcorr_id[idx_sample, , , drop=FALSE]
     if (is.null(tau_id_draws) || is.null(lcorr_id_draws)) return(NULL)
 
     is_indep <- as.integer(standata_subject$flag_indep_id_re %||% standata_subject$indep_id_re %||% 0L) == 1L
@@ -2355,6 +2433,8 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
     if (n_random_marker_id <= 0L || n_marker_types <= 0L) {
         return(NULL)
     }
+    n_sample <- dim(standata_subject$tau_marker)[1]
+    idx_sample <- rep(seq_len(n_sample), ceiling(n_draws_target / n_sample))[seq_len(n_draws_target)]
 
     alpha_vcov_reg <- standata_subject$alpha_vcov_reg
     beta_vcov_reg_flat <- standata_subject$beta_vcov_reg_flat
@@ -2366,12 +2446,16 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
     if (is.null(alpha_vcov_reg) || is.null(beta_vcov_reg_flat) || is.null(lambda_vcov_reg) ||
         length(idx_row_cov) == 0 || length(idx_col_cov) == 0) {
         return(NULL)
+    } else {
+      alpha_vcov_reg <- alpha_vcov_reg[idx_sample, ]
+      beta_vcov_reg_flat <- beta_vcov_reg_flat[idx_sample, ]
+      lambda_vcov_reg <- lambda_vcov_reg[idx_sample, ]
     }
 
     n_random_marker <- as.integer(standata_subject$n_random_marker %||% 0L)
-    tau_marker_draws <- standata_subject$tau_marker
-    lcorr_marker_draws <- standata_subject$Lcorr_marker
-    b_cross_draws <- standata_subject$B_cross
+    tau_marker_draws <- standata_subject$tau_marker[idx_sample, , drop=FALSE]
+    lcorr_marker_draws <- standata_subject$Lcorr_marker[idx_sample, , , drop=FALSE]
+    b_cross_draws <- standata_subject$B_cross[idx_sample, , , drop=FALSE]
 
     is_indep_marker <- as.integer(standata_subject$flag_indep_marker_re %||% 0L) == 1L
     allow_marker_crosscorr <- as.integer(standata_subject$flag_allow_marker_crosscorr %||% 0L) == 1L
@@ -2815,10 +2899,8 @@ vcov.JoiNMeDynPred <- function(object, ...) {
 #' @return Invisibly returns the object.
 #' @export
 print.JoiNMeDynPred <- function(x, ...) {
-    assertthat::assert_that(inherits(x, "JoiNMeDynPred"), msg = "Object must be a JoiNMeDynPred instance.")
-
-    cat("JoiNMe dynamic prediction\n")
-    cat("=======================\n")
+    
+    .cli_summary_heading("Joint mixed effects dynamic prediction", level = 1L)
     if (!is.null(x$call)) {
         cat("Call:\n")
         print(x$call)
@@ -2839,9 +2921,6 @@ print.JoiNMeDynPred <- function(x, ...) {
     }
     if (!is.null(x$n_samples)) {
         cat("Posterior draws: ", x$n_samples, "\n", sep = "")
-    }
-    if (!is.null(x$tmax)) {
-        cat("tmax: ", x$tmax, "\n", sep = "")
     }
     cat("Use summary() for prediction summaries.\n")
     cat("Use plot() for trajectory and interval visualisation.\n")

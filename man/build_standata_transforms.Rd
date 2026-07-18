@@ -121,3 +121,4 @@ normalises channel specifications before they are passed here.
 Use \code{build_standata_transforms()} to construct the data list entries,
 and \code{validate_transforms()} to verify consistency before sampling.
 }
+

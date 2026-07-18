@@ -52,7 +52,7 @@
                        : 0.0)
                     + dot_product(Z_idm_obs[n], w_idm[i, d]);
      // eta_long: linear predictor for longitudinal outcome
-    int link_d = canonical_link_code_from_program(d, inv_link_n_ops, inv_link_ops, inv_link_n_const);
+    int link_d = make_canonical_link(d, inv_link_n_ops, inv_link_ops, inv_link_n_const);
     real mu_long = inv_link_bytecode(eta_long, d, inv_link_n_ops, inv_link_ops, inv_link_n_const, inv_link_const);
 
     if (family_long[d] == 1) {
@@ -241,7 +241,7 @@
     vector[n_gk] csm_raw = eta_fd(cvm_now, cvm_fwd, eps_fd) / tmax; // mean slope
     vector[n_gk] csk_raw; // marker slope (weighted across markers)
     int M_corr_local = num_elements(a_corr);
-    vector[M_corr_local] corr_terms_raw = eta_corr_varonly_weighted_const(L_i[i]); // raw off-diagonal K_i terms
+    vector[M_corr_local] corr_terms_raw = eta_chol_corr(L_i[i]); // raw off-diagonal K_i terms
     int M_vcov_local = num_elements(a_vcov);
     matrix[Q_idm, Q_idm] L_i_eff_assoc = diag_pre_multiply(row_scale_idm, L_i[i]);
     vector[M_vcov_local] vcov_terms_raw = eta_vcov_weighted_const(L_i_eff_assoc, (M_vcov_local == Q_idm)); // raw K_i off-diagonals plus effective SD_i entries

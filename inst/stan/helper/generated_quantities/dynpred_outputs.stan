@@ -37,7 +37,7 @@ for (k in 1 : n_draws) {
 
   // Marker-by-ID Latent Effects: z_w
   // These latent seeds are iid standard normal. The full subject-specific
-  // covariance now lives in Li, so there is no separate marker-by-id baseline
+  // covariance lives in Li, there is no separate marker-by-id baseline
   // covariance matrix to reconstruct here.
   array[n_marker_types] vector[n_random_marker_id] z_w; // latent marker-id effects
   for (d in 1 : n_marker_types) {
@@ -160,7 +160,7 @@ for (k in 1 : n_draws) {
 
     y_fit_linpred[k, n] = eta_long;
     {
-      int link_d = canonical_link_code_from_program(d, inv_link_n_ops, inv_link_ops, inv_link_n_const);
+      int link_d = make_canonical_link(d, inv_link_n_ops, inv_link_ops, inv_link_n_const);
       real mu_long = inv_link_bytecode(eta_long, d, inv_link_n_ops, inv_link_ops, inv_link_n_const, inv_link_const);
 
       if (family_long[d] == 1) {
@@ -212,7 +212,7 @@ for (k in 1 : n_draws) {
 
     y_pred_linpred[k, n] = eta_long;
     {
-      int link_d = canonical_link_code_from_program(d, inv_link_n_ops, inv_link_ops, inv_link_n_const);
+      int link_d = make_canonical_link(d, inv_link_n_ops, inv_link_ops, inv_link_n_const);
       real mu_long = inv_link_bytecode(eta_long, d, inv_link_n_ops, inv_link_ops, inv_link_n_const, inv_link_const);
 
       if (family_long[d] == 1) {
@@ -336,7 +336,7 @@ for (k in 1 : n_draws) {
     vector[n_gk] csm_raw = eta_fd(cvm, cvm_f, eps_finite_diff); // mean slope
     vector[n_gk] csk_raw; // marker slope (weighted across markers)
     int M_corr_local = num_elements(a_corr);
-    vector[M_corr_local] corr_terms_raw = eta_corr_varonly_weighted_const(Li);
+    vector[M_corr_local] corr_terms_raw = eta_chol_corr(Li);
     int M_vcov_local = num_elements(a_vcov);
     vector[M_vcov_local] vcov_terms_raw = eta_vcov_weighted_const(Li_eff, flag_indep_idmarker_cov);
 
@@ -534,7 +534,7 @@ for (k in 1 : n_draws) {
     vector[n_gk] csm_raw = eta_fd(cvm, cvm_f, eps_finite_diff); // mean slope
     vector[n_gk] csk_raw; // marker slope (weighted across markers)
     int M_corr_local2 = num_elements(a_corr);
-    vector[M_corr_local2] corr_terms_raw = eta_corr_varonly_weighted_const(Li);
+    vector[M_corr_local2] corr_terms_raw = eta_chol_corr(Li);
     int M_vcov_local2 = num_elements(a_vcov);
     vector[M_vcov_local2] vcov_terms_raw = eta_vcov_weighted_const(Li_eff, flag_indep_idmarker_cov);
 

@@ -26,7 +26,7 @@
 #'   extraction payload.
 #'
 #' Use [extract()] instead when you want:
-#' - one model component at a time (`"fixef"`, `"assoc"`, `"gamma_w"`, etc.),
+#' - one model component at a time (`"fixef"`, `"assoc"`, `"gamma_w"`, `"basehaz"`, etc.),
 #' - the explicit `term_map` telling you how user-facing labels map back to raw
 #'   Stan variables,
 #' - special structured payloads such as `what = "association_plot"`,
@@ -39,6 +39,8 @@
 #'   expressions.
 #' @param draws Optional number of posterior draws to retain.
 #' @param seed Integer seed used when subsetting draws.
+#' @param what For `JoiNMeFit` objects, either `"all"` (default renamed
+#'   posterior variables), `"basehaz"`, or `"baseline_hazard"`.
 #' @param format Output format. Supported values are `"draws_array"`,
 #'   `"draws_matrix"`, and `"draws_df"`.
 #' @param ... Unused.
@@ -66,6 +68,17 @@ draws <- function(object, ...) {
   map <- do.call(rbind, mapped)
   map <- map[!duplicated(map$variable), , drop = FALSE]
   leftover <- setdiff(all_vars, map$variable)
+  p <- as.integer(object$stan_data$P %||% 0L)
+  if (p > 0L) {
+    fixed_map <- .JoiNMe_fixed_effect_var_map(sd = object$stan_data, all_vars = all_vars)
+    chosen_fixed <- as.character(fixed_map$variable)
+    if (length(chosen_fixed) > 0L) {
+      beta_raw <- paste0("beta[", seq_len(p), "]")
+      beta_scaled <- paste0("beta_scaled[", seq_len(p), "]")
+      drop_beta <- setdiff(c(beta_raw, beta_scaled), chosen_fixed)
+      leftover <- setdiff(leftover, drop_beta)
+    }
+  }
   if (length(leftover) > 0L) {
     map <- rbind(
       map,
@@ -279,8 +292,29 @@ draws <- function(object, ...) {
 #' @rdname draws
 #' @export
 draws.JoiNMeFit <- function(object, variables = NULL, regex = FALSE, draws = NULL, seed = 1,
+                            what = c("all", "basehaz", "baseline_hazard"),
                             format = c("draws_array", "draws_matrix", "draws_df"), ...) {
   assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
+  what <- match.arg(what)
+
+  if (!identical(what, "all")) {
+    ext_what <- switch(
+      what,
+      basehaz = "basehaz",
+      baseline_hazard = "baseline_hazard"
+    )
+    ext <- extract.JoiNMeFit(
+      object,
+      what = ext_what,
+      draws = draws,
+      seed = seed,
+      keep_chains = TRUE
+    )
+    arr <- ext$draws
+    arr <- .subset_JoiNMe_draws(arr, variables = variables, regex = regex, draws = NULL, seed = seed)
+    return(.format_JoiNMe_draws(arr, format = format))
+  }
+
   draw_array <- .JoiNMefit_cached_draws_array(object)
   draw_array <- .subset_JoiNMe_draws(draw_array, variables = variables, regex = regex, draws = draws, seed = seed)
   .format_JoiNMe_draws(draw_array, format = format)

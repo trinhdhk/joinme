@@ -284,7 +284,11 @@ test_that("simulate_joinme exposes fit-aligned truth for defaults and scaled par
   expect_equal(unname(fit_truth$tau_u), sim$truth$re_effective$id$sd)
   expect_equal(unname(fit_truth$Lcorr_u), sim$truth$re_effective$id$Lcorr)
   expect_equal(unname(fit_truth$Sigma_u), sim$truth$re_effective$id$cov)
-  expect_equal(length(fit_truth$beta_eff_in_likelihood), length(sim$truth$beta_long))
+  expect_equal(length(fit_truth$beta_scaled), length(sim$truth$beta_long))
+  expect_true(is.finite(fit_truth$time_scale_generation))
+  expect_true(is.finite(fit_truth$time_scale_observed_max))
+  expect_gt(fit_truth$time_scale_generation, 0)
+  expect_gt(fit_truth$time_scale_observed_max, 0)
   expect_equal(length(fit_truth$marker_id_row_scale_eff), length(sim$truth$re_effective$id_marker_cov$latent$sd))
   expect_true("student_t" %in% names(fit_truth$sigma_family))
   expect_true("student_t" %in% names(fit_truth$nu_family))
@@ -321,4 +325,56 @@ test_that("simulate_joinme exposes public random-effect draws on the original-ti
     sim$truth$re_draws_likelihood$id[, 2],
     tolerance = 1e-8
   )
+})
+
+test_that("joinme_standata time scale is determined from observed event times", {
+  sim <- simulate_joinme(
+    n_id = 10,
+    families = rep("gaussian", 2),
+    n_obs_per_marker_per_id = 3,
+    times_obs = seq(0, 8, length.out = 10),
+    time_cens = 8,
+    seed = 4424
+  )
+
+  sd <- joinme_standata(
+    formulaLong = sim$truth$formulaLong,
+    dataLong = sim$dataLong,
+    formulaEvent = sim$truth$formulaEvent,
+    dataEvent = sim$dataEvent,
+    assoc = sim$truth$assoc,
+    families = sim$marker_info$families
+  )
+
+  expect_equal(as.numeric(sd$tmax), max(sim$dataEvent$time_stop, na.rm = TRUE))
+
+  idx_time_beta <- as.integer(sim$truth$stan_fit$idx_time_beta %||% integer(0))
+  if (length(idx_time_beta) > 0L) {
+    expect_equal(
+      sim$truth$stan_fit$beta_scaled[idx_time_beta],
+      sim$truth$beta_long[idx_time_beta] * as.numeric(sd$tmax),
+      tolerance = 1e-8
+    )
+  }
+})
+
+test_that("simulate_joinme draws id random effects from zero-mean MVN", {
+  sim <- simulate_joinme(
+    formulaLong = y ~ 1 + time + (1 + time | id) + (0 + (1 + time | id) | marker),
+    n_id = 600,
+    families = rep("gaussian", 2),
+    n_obs_per_marker_per_id = 2,
+    times_obs = seq(0, 2, length.out = 3),
+    seed = 4423,
+    re_params = list(
+      id = list(sd = c(0.6, 0.3), corr = matrix(c(1, 0.25, 0.25, 1), 2, 2))
+    )
+  )
+
+  u_draw <- sim$truth$re_draws_likelihood$id
+  sigma_u <- sim$truth$stan_fit$Sigma_u
+
+  expect_true(is.matrix(u_draw))
+  expect_equal(colMeans(u_draw), c(0, 0), tolerance = 0.07)
+  expect_equal(stats::cov(u_draw), sigma_u, tolerance = 0.08)
 })

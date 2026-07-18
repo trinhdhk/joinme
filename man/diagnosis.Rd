@@ -12,13 +12,21 @@ diagnosis(object, ...)
 \item{...}{Additional arguments passed to class-specific methods.}
 }
 \value{
-A data frame with \code{metric} and \code{value} columns.
+For \code{JoiNMeFit}, a \code{JoiNMe_diagnosis} object with components \code{summary} and
+\code{by_parameter}. For \code{JoiNMeDynPred}, a data frame with \code{metric} and \code{value}
+columns.
 }
 \description{
-Returns a compact diagnostics table for fitted (\code{JoiNMeFit}) and dynamic
+Returns diagnostic summaries for fitted (\code{JoiNMeFit}) and dynamic
 prediction (\code{JoiNMeDynPred}) objects.
 
-For \code{JoiNMeFit}, diagnostics summarise the Stan sampler run. For
-\code{JoiNMeDynPred}, diagnostics summarise posterior-draw quality for predicted
-quantities and are aligned to the same metric schema used for \code{JoiNMeFit}.
+For \code{JoiNMeFit}, diagnostics include both an overall summary table and a
+parameter-level diagnostics table built from the same cached posterior
+summaries used by \code{\link[=summary.JoiNMeFit]{summary.JoiNMeFit()}}. This avoids the slower backend-wide
+diagnostic pass and keeps the reported metrics aligned with the summary
+sections users already inspect.
+
+For \code{JoiNMeDynPred}, diagnostics summarise posterior-draw quality for
+predicted quantities and are aligned to the same metric schema used for
+\code{JoiNMeFit}.
 }

@@ -3,7 +3,6 @@
 \name{JoiNMe_r6_classes}
 \alias{JoiNMe_r6_classes}
 \alias{JoiNMeFit}
-\alias{JoiNMeFit}
 \alias{JoiNMeDynPred}
 \alias{PredJoiNMeFit}
 \alias{SummaryJoiNMeFit}
@@ -12,13 +11,8 @@
 \description{
 R6 classes used to hold JoiNMe fit and prediction results with mutable state.
 
-\code{JoiNMeFit} is the canonical exported fit class. \code{JoiNMeFit} remains
-as a compatibility alias for older code.
-
-\strong{JoiNMeFit} and \strong{PredJoiNMeFit} are exported compatibility aliases
-for the public fit and prediction classes. Instances carry both the renamed and
-legacy class names so existing S3 methods continue to dispatch through
-\code{JoiNMeFit} and \code{JoiNMeDynPred} methods.
+\code{JoiNMeFit} is the canonical exported fit class. \code{JoiNMeFit} remains as a
+compatibility alias.
 
 \strong{JoiNMeFit}: holds fitted model, Stan data, and formulas.
 Public fields: fit, stan_data, formulaLong, formulaEvent, formulaVCov, config, call, tmax,

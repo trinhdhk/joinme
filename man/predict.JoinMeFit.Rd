@@ -37,8 +37,12 @@
 \item{newdataLong}{Data frame containing longitudinal histories for one or more subjects.
 Must contain columns for id, time, marker, and response variables as specified in the original model formula.}
 
-\item{newdataEvent}{Data frame containing one row per subject with event time, event status,
-and baseline covariates used in the survival model.}
+\item{newdataEvent}{Data frame containing event information and covariates used
+in the survival model. It may contain one row per subject or interval-split
+rows (\code{Surv(start, stop, status)} layout). Left- and interval-censored
+survival encodings (\code{type = "left"}, \code{type = "interval2"}) are accepted.
+When interval rows are supplied, dynamic prediction uses the latest row per
+subject for event-side covariates.}
 
 \item{process}{Character vector specifying which predictions to compute.
 Options: "longitudinal" (future trajectory), "event" (conditional survival probability). Default: both.}
@@ -72,7 +76,9 @@ a warning is emitted when \code{control$n_times = 50}.}
 If numeric, a single value is reused for all subjects, or a named vector supplies
 subject-specific values. If character, it is interpreted as a column name in
 \code{newdataEvent} holding subject-specific conditioning times. If NULL, defaults to
-the maximum observed time in \code{newdataLong} for each subject.}
+the maximum observed time in \code{newdataLong} for each subject; for delayed-entry
+counting-process data with strictly positive entry times, it defaults to the
+subject entry time.}
 
 \item{time_horizon}{Numeric scalar. Prediction horizon (in time units) used when
 \code{times} is NULL. The default is \code{tmax}.}
@@ -94,16 +100,16 @@ fitted object before dynamic prediction. Default 200.
 \item n_times: integer; number of points in the prediction time grid when
 \code{times} is \code{NULL}. Default 50.
 \item n_pred_draws: integer; number of prediction draws produced by the dynpred
-object. This is independent of \code{n_samples} (posterior parameter draw
-extraction count). If omitted, defaults to the extracted posterior draw
-count.
+object. Default to n_samples. Changing this can destabilise the results.
+This is independent of \code{n_samples} (posterior parameter draw
+extraction count).
 \item threads_per_chain: integer; the threaded dynpred Stan program is always
 used. \code{threads_per_chain = 1} keeps execution serial while preserving the
 thread-capable kernel. For engine = "rstan", threading uses
 options(stan.thread = threads_per_chain).
 \item grainsize: integer; reduce_sum grainsize for threaded prediction.
 Defaults to the full prediction draw count when \code{threads_per_chain = 1},
-and to \code{max(1, ceiling(n_pred_draws/(4 * threads_per_chain * chains)))}
+and to \code{max(1, ceiling(n_pred_draws/(4*threads_per_chain*chains)))}
 otherwise.
 \item quadrature_nodes: optional positive integer target for total quadrature
 points during dynamic prediction. Allowed values are exactly \code{7}, \code{15},

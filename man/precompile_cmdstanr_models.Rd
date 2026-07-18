@@ -15,8 +15,7 @@ precompile_cmdstanr_models(force_recompile = TRUE, cleanup = TRUE)
 Invisibly returns a named list of compiled CmdStanR models.
 }
 \description{
-Manually precompiles the packaged threaded Stan models using CmdStanR. This is
+Manually precompiles the packaged Stan models using CmdStanR. This is
 useful when you want to force compilation ahead of time, rather than
-waiting for the first call with engine = "cmdstanr". RStan installation-time
-precompile is handled separately and only when \code{JoiNMe_COMPILE_RSTAN=1}.
+waiting for the first call with engine = "cmdstanr".
 }

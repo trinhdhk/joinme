@@ -4,7 +4,7 @@
  *
  * @details Each transform is applied sequentially (left-to-right) to
  * form a composition. This allows lightweight nonlinear mappings
- * without using the more general opcode interpreter.
+ * without using the more general bytecode interpreter.
  *
  * Transform IDs:
  *   0 = no-op

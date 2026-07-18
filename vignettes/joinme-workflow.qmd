@@ -100,17 +100,32 @@ sim <- simulate_joinme(
   quadrature_nodes = 31,
   beta_long = c("(Intercept)" = 1.0, "time" = 0.5, "x1" = 0.4),
   assoc = c("cv_total"),
-  assoc_coefs = c(cv_total = 0.5)
+  assoc_coefs = c(cv_total = 0.5),
+  fixed_marker_weights = FALSE,
+  shrinkage = 0L
 )
 
 # Gauss-Kronrod nodes/weights are fixed in Stan; `quadrature_nodes` selects
 # the node count used to build the design matrices in R.
 
-# When estimating marker weights, compare against sim$truth$marker_weights
-# because weights are used directly in Stan.
+# `truth$marker_weights` is the effective base + latent value used in the hazard.
+# The decomposition is available as marker_weights_base/marker_weights_latent.
 
 dataLong <- sim$dataLong
 dataEvent <- sim$dataEvent
+
+# Optional: generate counting-process event rows with delayed entry.
+sim_split <- simulate_joinme(
+  n_id = 20,
+  formulaEvent = survival::Surv(time_start, time_stop, event) ~ x1 + x2,
+  covariate_formulas = list(
+    x1 ~ time_varyring(rnorm, c(2, 5), mean = 0, sd = 1),
+    x2 ~ rnorm(n_id)
+  ),
+  left_truncation_max = 1.0,
+  seed = 2026
+)
+dataEvent_split <- sim_split$dataEvent
 
 # Preview the data
 head(dataLong)
@@ -218,6 +233,16 @@ fit <- joinme(
   priors = priors,
   control = control
 )
+
+# Counting-process fit with left truncation/time-split covariates:
+fit_split <- joinme(
+  dataLong = sim_split$dataLong,
+  dataEvent = dataEvent_split,
+  formulaLong = y ~ time + x1 + (1 + time || id) + (0 + x1 + (1 + time || id) || marker),
+  formulaEvent = survival::Surv(time_start, time_stop, event) ~ x1 + x2,
+  assoc = c("cv_total"),
+  control = control
+)
 ```
 
 # Convergence Diagnostics
@@ -251,7 +276,7 @@ Visual inspection of traceplots helps identify mixing issues or stuck chains.
 
 ```{r trace}
 # Plot traces for the association parameter using the helper API
-mcmc_plot(fit, variable = "alpha_cv_total", type = "trace")
+mcmc_plot(fit, variable = "alpha_cv_marker", type = "trace")
 ```
 
 # Posterior Predictive Checks (PPC)
@@ -376,18 +401,26 @@ plot(
 )
 ```
 
-When you want those fitted displays at named baseline profiles, build them with
-`make_conditions()` and pass the result through `condition = ...`:
+`plot(fit, ...)` uses fitted posterior samples directly (no conditioning).
+When you want displays at named baseline profiles, build conditions with
+`make_conditions()` and pass them through `predict()`, then plot the returned
+`JoiNMeDynPred` object:
 
 ```{r predict-conditions, eval=FALSE}
 cond <- make_conditions(dataEvent, vars = c("x1", "x2"))
 
-plot(
+pred_cond <- predict(
   fit,
-  type = "longitudinal",
-  longitudinal_style = "heatmap",
   condition = cond,
+  process = c("longitudinal", "event"),
   scale = "epred"
+)
+
+plot(
+  pred_cond,
+  type = c("longitudinal", "survival"),
+  scale = "epred",
+  combined = TRUE
 )
 ```
 

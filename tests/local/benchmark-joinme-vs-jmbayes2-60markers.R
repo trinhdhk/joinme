@@ -233,6 +233,7 @@ sim <- simulate_joinme(
   assoc = c("cv_mean", "cv_marker"),
   assoc_coefs = c(cv_mean = 1, cv_marker = 0.5),
   marker_weights = rep(1, cfg$n_markers),
+  fixed_marker_weights = TRUE,
   shared_marker_weights = TRUE,
   beta_long = c(-1, 0.5),
   beta_event = c(-0.5, 0.25),

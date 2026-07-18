@@ -420,6 +420,8 @@ NULL
     params <- tryCatch(rstan::get_sampler_params(fit, inc_warmup = FALSE), error = function(e) NULL)
     if (!is.null(params)) {
       out$divergences <- sum(vapply(params, function(x) sum(x[, "divergent__"], na.rm = TRUE), numeric(1)))
+      out$treedepth_hits <- rstan::get_num_max_treedepth(fit)
+      out$ebfmi_min <- min(rstan::get_bfmi(fit))
     }
     sumdf <- tryCatch(rstan::summary(fit)$summary, error = function(e) NULL)
     if (!is.null(sumdf)) {
@@ -620,7 +622,7 @@ NULL
   dfs <- lapply(dfs, function(df) {
     miss <- setdiff(all_cols, names(df))
     if (length(miss) > 0) {
-      for (m in miss) df[[m]] <- NA_real_
+      for (m in miss) df[[m]] <- rep(NA_real_, nrow(df))
     }
     df[, all_cols, drop = FALSE]
   })
@@ -1120,8 +1122,7 @@ posterior_assoc <- function(object, ...) {
 #' @rdname assoc
 #' @export
 assoc.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
-  assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
-
+  
   sd <- object$stan_data
   fit <- object$fit
   if (is.null(draws)) {
@@ -1313,11 +1314,8 @@ posterior_summary.JoiNMeDynPred <- function(object, ...) {
 #' @export
 print.JoiNMeFit <- function(x, ...) {
   # User-facing summary header for fits
-  assertthat::assert_that(inherits(x, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
-
-  cat("JoiNMe model fit\n")
-  cat("===============\n")
-  if (!is.null(x$call)) {
+ .cli_summary_heading("Joint mixed effects model summary", level = 1L)
+ if (!is.null(x$call)) {
     cat("Call:\n")
     print(x$call)
   }
@@ -1329,10 +1327,7 @@ print.JoiNMeFit <- function(x, ...) {
       paste(family, collapse = ", ")
     cat("Family: ", fml, "\n", sep = "")
   }
-  if (!is.null(x$tmax)) {
-    cat("tmax: ", x$tmax, "\n", sep = "")
-  }
-  cat("Use summary() for parameter summaries.\n")
+  cli::cli_bullets("Use {.code summary()} for parameter summaries.\n")
   invisible(x)
 }
 
@@ -1386,10 +1381,11 @@ print.PosteriorAssoc <- function(x, ...) {
   meta <- attr(x, "metadata") %||% list()
 
   .cli_summary_heading("Posterior association effects", level = 1L)
-  .cli_print_bullets(c(
-    if (!is.null(meta$draws)) paste0("Posterior draws: ", meta$draws) else NULL,
-    paste0("Returned scale: ", if (isTRUE(meta$summary)) "posterior summary" else "MCMC samples")
-  ))
+  if (!is.null(meta$draws)) {
+    .cli_print_bullets(c(
+      paste0("Posterior draws: ", meta$draws)
+    ))
+  }
 
   if (!length(x)) {
     return(invisible(x))
@@ -1439,7 +1435,8 @@ print.PosteriorAssoc <- function(x, ...) {
 #' @param ... Unused.
 #'
 #' @return A `summary_JoiNMeFit` object containing tables such as `fixef`,
-#'   `survival_process` (when applicable), `assoc`, covariance
+#'   `baseline_hazard` (when applicable), `survival_process` (when applicable),
+#'   `assoc`, covariance
 #'   summaries (`id`, `marker`), dedicated `id:marker` covariance-parameter
 #'   summaries (latent + covariance-regression blocks when `Q_idm > 0`), and diagnostics.
 #' @export
@@ -1466,7 +1463,63 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
 
   s_beta <- .extract_JoiNMefit_summary(object, what = "fixef", draws = draws, seed = seed, digits = digits)
 
-  s_g <- .extract_JoiNMefit_summary(object, what = "gamma_w", draws = draws, seed = seed, digits = digits)
+  g_ext <- tryCatch(
+    extract.JoiNMeFit(object, what = "gamma_w", draws = draws, seed = seed, keep_chains = TRUE),
+    error = function(e) NULL
+  )
+  s_g <- .summarise_JoiNMe_named_draws(g_ext$draws %||% NULL, digits = digits)
+
+  s_basehaz <- NULL
+  k_event <- as.integer(sd$K_event %||% 1L)
+  k_bs <- as.integer(sd$Kbs %||% 0L)
+  if (k_bs > 0L) {
+    bh_vars <- as.vector(outer(seq_len(k_event), seq_len(k_bs), function(k, j) paste0("bs_gamma_c[", k, ",", j, "]")))
+    bh_vars <- bh_vars[bh_vars %in% all_vars]
+    if (length(bh_vars) > 0L) {
+      s_basehaz <- as.data.frame(.summarise_draws_diag(fit, bh_vars, draws = draws, seed = seed))
+      var_idx <- regmatches(as.character(s_basehaz$variable), regexec("^bs_gamma_c\\[(\\d+),(\\d+)\\]$", as.character(s_basehaz$variable)))
+      k_idx <- vapply(var_idx, function(x) as.integer(x[2]), integer(1))
+      j_idx <- vapply(var_idx, function(x) as.integer(x[3]), integer(1))
+      bh_terms <- as.character(sd$basehaz_cols %||% paste0("basis_", seq_len(k_bs)))
+      if (length(bh_terms) < max(j_idx)) {
+        bh_terms <- c(bh_terms, paste0("basis_", seq.int(length(bh_terms) + 1L, max(j_idx))))
+      }
+      term_labels <- bh_terms[j_idx]
+      if (k_event > 1L) {
+        term_labels <- paste0("event", k_idx, ": ", term_labels)
+      }
+      s_basehaz$term <- as.character(term_labels)
+      s_basehaz <- s_basehaz[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
+      s_basehaz$Estimate <- round(s_basehaz$Estimate, digits)
+      s_basehaz$Est.Error <- round(s_basehaz$Est.Error, digits)
+      s_basehaz$Q2.5 <- round(s_basehaz$Q2.5, digits)
+      s_basehaz$Q97.5 <- round(s_basehaz$Q97.5, digits)
+      s_basehaz$Rhat <- round(s_basehaz$Rhat, 3)
+    }
+  }
+  if (!is.null(s_basehaz) && nrow(s_basehaz) > 0L) {
+    tmax <- suppressWarnings(as.numeric(sd$tmax %||% 1.0))
+    if (!is.finite(tmax) || length(tmax) != 1L || tmax <= 0) {
+      tmax <- 1.0
+    }
+    # browser()
+    term_base <- sub("^event[0-9]+:\\s*", "", as.character(s_basehaz$term))
+    # is_intercept <- tolower(trimws(term_base)) %in% c("(intercept)", "intercept", "1")
+    is_intercept <- grepl(",1]", trimws(bh_vars), fixed=TRUE)
+    if (any(is_intercept) && tmax != 1.0) {
+      log_tmax <- log(tmax)
+      s_basehaz$Estimate[is_intercept] <- s_basehaz$Estimate[is_intercept] - log_tmax
+      s_basehaz$Q2.5[is_intercept] <- s_basehaz$Q2.5[is_intercept] - log_tmax
+      s_basehaz$Q97.5[is_intercept] <- s_basehaz$Q97.5[is_intercept] - log_tmax
+    }
+    s_basehaz$Hazard.Ratio <- round(exp(s_basehaz$Estimate), digits)
+    s_basehaz$HR.Q2.5 <- round(exp(s_basehaz$Q2.5), digits)
+    s_basehaz$HR.Q97.5 <- round(exp(s_basehaz$Q97.5), digits)
+    s_basehaz <- s_basehaz[, c(
+      "term", "Estimate", "Hazard.Ratio", "Est.Error", "Q2.5", "Q97.5",
+      "HR.Q2.5", "HR.Q97.5", "Rhat", "ess_bulk", "ess_tail"
+    ), drop = FALSE]
+  }
 
   # Survival-process report (non-association baseline covariates only)
   #
@@ -1476,23 +1529,24 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
   # - These terms must match the event design columns (e.g., x1, x2) and must
   #   not be silently dropped.
   #
-  # Algorithm:
+  # SUMMARY
   # 1) Start from gamma_w summaries (the survival linear predictor terms).
   # 2) Re-label terms from standata event columns when available (`w_cols`).
   # 3) Keep only non-intercept baseline covariates.
   # 4) Add hazard-ratio summaries exp(beta) for direct interpretation.
   s_surv <- NULL
   if (!is.null(s_g) && nrow(s_g) > 0 && isTRUE((sd$p_w %||% 0L) > 0L)) {
+    raw_terms <- as.character(s_g$term)
     is_intercept_term <- function(term) {
       term_chr <- trimws(as.character(term))
       tolower(term_chr) %in% c("(intercept)", "intercept", "1")
     }
 
-    baseline_terms <- sub("^event[0-9]+:\\s*", "", as.character(s_g$term))
+    baseline_terms <- sub("^event[0-9]+:\\s*", "", raw_terms)
 
     keep_idx <- !vapply(baseline_terms, is_intercept_term, logical(1))
     if (!any(keep_idx) && length(baseline_terms) > 0) {
-      # Defensive fallback: if intercept filtering drops everything, keep all
+      # if intercept filtering drops everything, keep all
       # baseline terms rather than hiding survival covariates.
       keep_idx <- rep(TRUE, length(baseline_terms))
     }
@@ -1509,7 +1563,11 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     }
   }
 
-  s_a <- .extract_JoiNMefit_summary(object, what = "assoc", draws = draws, seed = seed, digits = digits)
+  a_ext <- tryCatch(
+    extract.JoiNMeFit(object, what = "assoc", draws = draws, seed = seed, keep_chains = TRUE),
+    error = function(e) NULL
+  )
+  s_a <- .summarise_JoiNMe_named_draws(a_ext$draws %||% NULL, digits = digits)
 
   # Marker-weight association summaries are shown only when marker-weighted
   # association terms are active (cv_total/cv_marker/cs_total/cs_marker).
@@ -1558,7 +1616,21 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     weight_tables <- Filter(Negate(is.null), weight_tables)
     if (length(weight_tables) > 0L) {
       s_mw <- do.call(rbind, weight_tables)
-      s_a <- if (is.null(s_a)) s_mw else rbind(s_a, s_mw)
+      if (is.null(s_a)) {
+        s_a <- s_mw
+      } else {
+        all_cols <- union(names(s_a), names(s_mw))
+        add_missing_cols <- function(tbl, cols) {
+          miss <- setdiff(cols, names(tbl))
+          if (length(miss) > 0L) {
+            for (nm in miss) tbl[[nm]] <- NA_real_
+          }
+          tbl[, cols, drop = FALSE]
+        }
+        s_a <- add_missing_cols(s_a, all_cols)
+        s_mw <- add_missing_cols(s_mw, all_cols)
+        s_a <- rbind(s_a, s_mw)
+      }
     }
   }
 
@@ -1865,7 +1937,7 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     )
   }
 
-  term_diag <- .term_diagnostics_from_tables(list(s_beta, s_surv, s_a, transform_params, s_d, s_dr, corr_tables, id_marker_cov_tables))
+  term_diag <- .term_diagnostics_from_tables(list(s_beta, s_basehaz, s_surv, s_a, transform_params, s_d, s_dr, corr_tables, id_marker_cov_tables))
   diag_table <- .build_common_diagnostics_table(
     draws = as.numeric(diag$draws %||% NA_real_),
     divergences = as.numeric(diag$divergences %||% NA_real_),
@@ -1884,6 +1956,7 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     tables = list(
       diagnostics = diag_table,
       fixef = s_beta,
+      baseline_hazard = s_basehaz,
       survival_process = s_surv,
       assoc = s_a,
       transform_parameters = transform_params,
@@ -1896,7 +1969,8 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     metadata = list(
       call = if (!is.null(object$call)) paste(deparse(object$call, width.cutoff = 500L), collapse = " ") else NULL,
       family = sd$family_names %||% .family_code_to_name(cfg$family_long),
-      tmax = sd$tmax_internal %||% 1.0,
+      basehaz = sd$basehaz %||% NULL,
+      tmax = sd$tmax %||% 1.0,
       draws = draws,
       transforms = cfg$transforms,
       transform_formulas = transform_formulas
@@ -2073,6 +2147,9 @@ print.summary_JoiNMeFit <- function(x, ...) {
 
     meta_lines <- c(meta_lines, paste0("Family: ", family))
   }
+  if (!is.null(x$metadata$basehaz)) {
+    meta_lines <- c(meta_lines, paste0("Baseline hazard type: ", x$metadata$basehaz))
+  }
   if (!is.null(x$metadata$tmax)) {
     meta_lines <- c(meta_lines, paste0("tmax: ", x$metadata$tmax))
   }
@@ -2084,6 +2161,7 @@ print.summary_JoiNMeFit <- function(x, ...) {
   .cli_print_table_section("Sampler diagnostics", diag_tbl, level = 2L, formatter = .format_common_diagnostics_for_print)
   .cli_print_table_section("Transformations", x$metadata$transform_formulas, level = 2L)
   .cli_print_table_section("Fixed effects (beta)", x$tables$fixef, level = 2L)
+  .cli_print_table_section("Baseline hazard coefficients", x$tables$baseline_hazard, level = 2L)
   .cli_print_table_section("Survival process (non-association covariates)", x$tables$survival_process, level = 2L)
   .cli_print_table_section("Association parameters", x$tables$assoc, level = 2L)
   .cli_print_table_section("Transform parameters", x$tables$transform_parameters, level = 2L)
@@ -2179,7 +2257,7 @@ print.summary_JoiNMeFit <- function(x, ...) {
 
 #' @keywords internal
 .JoiNMe_public_time_scale <- function(stan_data) {
-  scale_factor <- suppressWarnings(as.numeric(stan_data$tmax_internal %||% 1.0))
+  scale_factor <- suppressWarnings(as.numeric(stan_data$tmax %||% 1.0))
   if (!is.finite(scale_factor) || length(scale_factor) != 1L || scale_factor <= 0) {
     return(1.0)
   }
@@ -2234,6 +2312,27 @@ print.summary_JoiNMeFit <- function(x, ...) {
 }
 
 #' @keywords internal
+.rescale_public_event_draws <- function(draws_df, stan_data) {
+  if (is.null(draws_df) || !nrow(draws_df)) return(draws_df)
+  if (!("term" %in% names(draws_df)) || !("value" %in% names(draws_df))) return(draws_df)
+
+  scale_factor <- .JoiNMe_public_time_scale(stan_data)
+  if (abs(scale_factor - 1.0) < 1e-12) return(draws_df)
+
+  idx <- as.integer(stan_data$idx_time_gamma %||% integer(0))
+  idx <- idx[is.finite(idx) & idx >= 1L]
+  term_labels <- as.character(stan_data$w_cols %||% character(0))
+  if (!length(idx) || length(term_labels) < max(idx)) return(draws_df)
+
+  time_terms <- unique(term_labels[idx])
+  keep <- draws_df$term %in% time_terms
+  if (!any(keep)) return(draws_df)
+
+  draws_df$value[keep] <- draws_df$value[keep] / scale_factor
+  draws_df
+}
+
+#' @keywords internal
 .JoiNMe_id_labels <- function(object, n_id) {
   ids <- object$dataLong$id %||% object$dataEvent$id %||% seq_len(n_id)
   ids <- unique(as.character(ids))
@@ -2250,10 +2349,9 @@ print.summary_JoiNMeFit <- function(x, ...) {
   if (is.null(draws)) draws <- object$config$draws_default
   all_vars <- tryCatch(posterior::variables(.get_draws_obj(fit)), error = function(e) character(0))
 
-  beta_vars <- paste0("beta[", seq_len(sd$P %||% 0L), "]")
-  beta_vars <- beta_vars[beta_vars %in% all_vars]
-  beta_terms <- sd$x_cols %||% beta_vars
-  if (length(beta_terms) != length(beta_vars)) beta_terms <- beta_vars
+  beta_map <- .JoiNMe_fixed_effect_var_map(sd = sd, all_vars = all_vars)
+  beta_vars <- as.character(beta_map$variable)
+  beta_terms <- as.character(beta_map$term)
 
   mats <- list()
   labels <- character(0)
@@ -2324,7 +2422,8 @@ print.summary_JoiNMeFit <- function(x, ...) {
     term = as.character(term_labels[j_idx]),
     stringsAsFactors = FALSE
   )
-  .JoiNMe_draw_long_from_matrix(dmat, meta)
+  out <- .JoiNMe_draw_long_from_matrix(dmat, meta)
+  .rescale_public_event_draws(out, sd)
 }
 
 #' @keywords internal
@@ -2693,11 +2792,20 @@ fixef.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary 
   if (!is.null(cached)) return(cached)
 
   all_vars <- tryCatch(posterior::variables(.get_draws_obj(fit)), error = function(e) character(0))
-  beta_vars <- all_vars[grepl("^beta\\[", all_vars)]
-  if (length(beta_vars) == 0) beta_vars <- paste0("beta[", seq_len(sd$P), "]")
+  beta_map <- .JoiNMe_fixed_effect_var_map(sd = sd, all_vars = all_vars)
+  beta_vars <- as.character(beta_map$variable)
+  if (length(beta_vars) == 0L) {
+    beta_vars <- paste0("beta[", seq_len(sd$P), "]")
+  }
 
   s <- as.data.frame(.summarise_draws_diag(fit, beta_vars, draws = draws, seed = seed))
-  s$term <- if (!is.null(sd$x_cols) && length(sd$x_cols) == nrow(s)) sd$x_cols else s$variable
+  if (nrow(beta_map) > 0L) {
+    idx <- match(s$variable, beta_map$variable)
+    s$term <- beta_map$term[idx]
+    s$term[is.na(s$term)] <- s$variable[is.na(s$term)]
+  } else {
+    s$term <- if (!is.null(sd$x_cols) && length(sd$x_cols) == nrow(s)) sd$x_cols else s$variable
+  }
   out <- s[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
 
   out$Estimate <- round(out$Estimate, digits)
@@ -3113,7 +3221,7 @@ vcov.JoiNMeFit <- function(object, what = NULL, draws = NULL, ...) {
   summarize_cov_matrix <- function(tau_prefix, Lcorr_prefix, dim, label, diagonal_only = FALSE) {
     if (dim <= 0) {
       return(data.frame(
-        block = label, row = integer(0), col = integer(0),
+        block = character(0), row = integer(0), col = integer(0),
         Estimate = numeric(0), Est.Error = numeric(0), Q2.5 = numeric(0), Q97.5 = numeric(0),
         Rhat = numeric(0), ess_bulk = numeric(0), ess_tail = numeric(0)
       ))

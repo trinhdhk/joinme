@@ -21,6 +21,41 @@ extract <- function(object, ...) {
   UseMethod("extract")
 }
 
+#' @keywords internal
+.JoiNMe_fixed_effect_var_map <- function(sd, all_vars) {
+  p <- as.integer(sd$P %||% 0L)
+  if (p <= 0L) {
+    return(data.frame(term = character(0), variable = character(0), stringsAsFactors = FALSE))
+  }
+
+  beta_scaled_vars <- paste0("beta_scaled[", seq_len(p), "]")
+  beta_vars <- paste0("beta[", seq_len(p), "]")
+
+  if (all(beta_vars %in% all_vars)) {
+    chosen <- beta_vars
+  } else if (all(beta_scaled_vars %in% all_vars)) {
+    chosen <- beta_scaled_vars
+  } else {
+    chosen <- beta_vars[beta_vars %in% all_vars]
+  }
+
+  if (!length(chosen)) {
+    return(data.frame(term = character(0), variable = character(0), stringsAsFactors = FALSE))
+  }
+
+  idx <- suppressWarnings(as.integer(sub("^.*\\[(\\d+)\\]$", "\\1", chosen)))
+  term_labels <- as.character(sd$x_cols %||% paste0("beta_", seq_len(p)))
+  if (length(term_labels) < max(idx, na.rm = TRUE)) {
+    term_labels <- c(term_labels, paste0("beta_", seq.int(length(term_labels) + 1L, max(idx, na.rm = TRUE))))
+  }
+
+  data.frame(
+    term = term_labels[idx],
+    variable = chosen,
+    stringsAsFactors = FALSE
+  )
+}
+
 # File overview:
 # - Extract draw matrices from JoiNMeFit by summary-like components.
 # - Extract draw matrices from JoiNMeDynPred from stored draw components.
@@ -49,11 +84,7 @@ extract <- function(object, ...) {
   map <- data.frame(term = character(0), variable = character(0), stringsAsFactors = FALSE)
 
   if (what == "fixef") {
-    beta_vars <- paste0("beta[", seq_len(sd$P), "]")
-    beta_vars <- beta_vars[beta_vars %in% all_vars]
-    beta_terms <- sd$x_cols %||% beta_vars
-    if (length(beta_terms) != length(beta_vars)) beta_terms <- beta_vars
-    map <- data.frame(term = as.character(beta_terms), variable = as.character(beta_vars), stringsAsFactors = FALSE)
+    map <- .JoiNMe_fixed_effect_var_map(sd = sd, all_vars = all_vars)
   } else if (what == "gamma_w") {
     g_vars <- paste0("gamma_w[", seq_len(sd$p_w %||% 0L), "]")
     g_vars <- g_vars[g_vars %in% all_vars]
@@ -183,13 +214,17 @@ extract <- function(object, ...) {
   } else if (what == "likelihood_scale") {
     map_rows <- list()
 
-    beta_vars <- paste0("beta_eff_in_likelihood[", seq_len(sd$P), "]")
+    beta_vars <- paste0("beta_scaled[", seq_len(sd$P), "]")
+    beta_vars <- beta_vars[beta_vars %in% all_vars]
+    if (length(beta_vars) == 0L) {
+      beta_vars <- paste0("beta[", seq_len(sd$P), "]")
+    }
     beta_vars <- beta_vars[beta_vars %in% all_vars]
     if (length(beta_vars) > 0) {
       beta_terms <- sd$x_cols %||% beta_vars
       if (length(beta_terms) != length(beta_vars)) beta_terms <- beta_vars
       map_rows[[length(map_rows) + 1L]] <- data.frame(
-        term = paste0("beta_eff: ", as.character(beta_terms)),
+        term = paste0("beta_scaled: ", as.character(beta_terms)),
         variable = as.character(beta_vars),
         stringsAsFactors = FALSE
       )
@@ -259,7 +294,8 @@ extract <- function(object, ...) {
 #'
 #' @param object A `JoiNMeFit` object.
 #' @param what Character component selector. One of
-#'   `"fixef"`, `"gamma_w"`, `"assoc"`, `"association_plot"`,
+#'   `"fixef"`, `"gamma_w"`, `"basehaz"`,
+#'   `"baseline_hazard"`, `"assoc"`, `"association_plot"`,
 #'   `"distributional"`, `"distributional_regression"`, `"likelihood_scale"`,
 #'   or `"raw"`.
 #' @param term Optional character vector of friendly term names (summary-style)
@@ -282,7 +318,7 @@ extract <- function(object, ...) {
 #'     support ranges used by association plotting.
 #' @export
 extract.JoiNMeFit <- function(object,
-                              what = c("fixef", "gamma_w", "assoc", "association_plot", "distributional", "distributional_regression", "likelihood_scale", "raw"),
+                              what = c("fixef", "gamma_w", "basehaz", "baseline_hazard", "assoc", "association_plot", "distributional", "distributional_regression", "likelihood_scale", "raw"),
                               term = NULL,
                               variable = NULL,
                               draws = NULL,
@@ -324,6 +360,93 @@ extract.JoiNMeFit <- function(object,
     ))
   }
 
+  if (what %in% c("basehaz", "baseline_hazard")) {
+    sd <- object$stan_data
+    fit <- object$fit
+    k_event <- as.integer(sd$K_event %||% 1L)
+    k_bs <- as.integer(sd$Kbs %||% 0L)
+    tmax <- suppressWarnings(as.numeric(sd$tmax %||% 1.0))
+    if (!is.finite(tmax) || length(tmax) != 1L || tmax <= 0) {
+      tmax <- 1.0
+    }
+    b_event <- as.matrix(sd$Bs_event_c %||% matrix(0, 0, 0))
+    if (k_bs <= 0L || nrow(b_event) == 0L || ncol(b_event) != k_bs) {
+      cli::cli_abort(c(
+        x = "No baseline-hazard basis is available for extraction.",
+        i = "Fit a survival model with baseline hazard terms before requesting basehaz extraction."
+      ))
+    }
+
+    bh_vars <- as.vector(outer(seq_len(k_event), seq_len(k_bs), function(k, j) paste0("bs_gamma_c[", k, ",", j, "]")))
+    all_vars <- tryCatch(posterior::variables(.get_draws_obj(fit)), error = function(e) character(0))
+    bh_vars <- bh_vars[bh_vars %in% all_vars]
+    if (!length(bh_vars)) {
+      cli::cli_abort("No baseline-hazard coefficient draws were found in the fitted object.")
+    }
+
+    event_rows <- seq_len(nrow(b_event))
+    row_labels <- if (!is.null(object$dataEvent) && nrow(object$dataEvent) == nrow(b_event)) {
+      ids <- as.character(object$dataEvent$id %||% event_rows)
+      tvals <- as.numeric(object$dataEvent$time %||% rep(NA_real_, nrow(b_event)))
+      if (k_event > 1L && !is.null(sd$event_type) && length(sd$event_type) == nrow(b_event)) {
+        paste0("etype", sd$event_type, "|id=", ids, "|time=", signif(tvals, 6))
+      } else {
+        paste0("id=", ids, "|time=", signif(tvals, 6))
+      }
+    } else {
+      paste0("event_row_", event_rows)
+    }
+
+    if (isTRUE(keep_chains)) {
+      arr <- .get_draws_array(fit, variables = bh_vars, draws = draws, seed = seed)
+      out <- array(NA_real_, dim = c(dim(arr)[1], dim(arr)[2], k_event * nrow(b_event)),
+                   dimnames = list(iteration = dimnames(arr)[[1]], chain = dimnames(arr)[[2]], term = character(k_event * nrow(b_event))))
+      col_pos <- 1L
+      for (k in seq_len(k_event)) {
+        k_vars <- paste0("bs_gamma_c[", k, ",", seq_len(k_bs), "]")
+        k_idx <- match(k_vars, dimnames(arr)[[3]])
+        if (any(is.na(k_idx))) next
+        for (ch in seq_len(dim(arr)[2])) {
+          coef_mat <- arr[, ch, k_idx, drop = FALSE]
+          out[, ch, col_pos:(col_pos + nrow(b_event) - 1L)] <- exp(as.matrix(coef_mat) %*% t(b_event)) / tmax
+        }
+        prefix <- if (k_event > 1L) paste0("event", k, ":") else ""
+        dimnames(out)[[3]][col_pos:(col_pos + nrow(b_event) - 1L)] <- paste0(prefix, row_labels)
+        col_pos <- col_pos + nrow(b_event)
+      }
+      map <- data.frame(term = dimnames(out)[[3]], variable = rep("basehaz", length(dimnames(out)[[3]])), stringsAsFactors = FALSE)
+      if (!is.null(term)) {
+        keep <- map$term %in% term
+        map <- map[keep, , drop = FALSE]
+        out <- out[, , keep, drop = FALSE]
+      }
+      return(list(draws = out, term_map = map))
+    }
+
+    dm <- .get_draws_matrix(fit, variables = bh_vars, draws = draws, seed = seed)
+    out <- matrix(NA_real_, nrow = nrow(dm), ncol = k_event * nrow(b_event))
+    col_names <- character(0)
+    col_pos <- 1L
+    for (k in seq_len(k_event)) {
+      k_vars <- paste0("bs_gamma_c[", k, ",", seq_len(k_bs), "]")
+      k_idx <- match(k_vars, colnames(dm))
+      if (any(is.na(k_idx))) next
+      out[, col_pos:(col_pos + nrow(b_event) - 1L)] <- exp(as.matrix(dm[, k_idx, drop = FALSE]) %*% t(b_event)) / tmax
+      prefix <- if (k_event > 1L) paste0("event", k, ":") else ""
+      col_names <- c(col_names, paste0(prefix, row_labels))
+      col_pos <- col_pos + nrow(b_event)
+    }
+    out <- out[, seq_along(col_names), drop = FALSE]
+    colnames(out) <- make.unique(col_names)
+    map <- data.frame(term = colnames(out), variable = rep("basehaz", ncol(out)), stringsAsFactors = FALSE)
+    if (!is.null(term)) {
+      keep <- map$term %in% term
+      map <- map[keep, , drop = FALSE]
+      out <- out[, keep, drop = FALSE]
+    }
+    return(list(draws = out, term_map = map))
+  }
+
   all_vars <- tryCatch(posterior::variables(.get_draws_obj(fit)), error = function(e) character(0))
   map <- .JoiNMefit_component_term_map(object, what = what, all_vars = all_vars)
 
@@ -339,6 +462,23 @@ extract.JoiNMeFit <- function(object,
       x = "No matching variables found for extraction.",
       i = "Check {.arg what}, {.arg term}, and {.arg variable} filters."
     ))
+  }
+
+  .event_time_terms <- function(sd, mapped_terms) {
+    idx <- as.integer(sd$idx_time_gamma %||% integer(0))
+    idx <- idx[is.finite(idx) & idx >= 1L]
+    labels <- as.character(sd$w_cols %||% character(0))
+    if (!length(idx) || length(labels) < max(idx)) {
+      return(character(0))
+    }
+    base_terms <- unique(labels[idx])
+    if (isTRUE(as.integer(sd$K_event %||% 1L) > 1L)) {
+      base_terms <- c(
+        base_terms,
+        as.vector(outer(seq_len(as.integer(sd$K_event %||% 1L)), base_terms, function(k, term_label) paste0("event", k, ": ", term_label)))
+      )
+    }
+    intersect(as.character(mapped_terms %||% character(0)), base_terms)
   }
 
   # Preserve order and duplicates from the map for user-facing terms.
@@ -361,12 +501,32 @@ extract.JoiNMeFit <- function(object,
     for (j in seq_len(nrow(map))) {
       out[, , j] <- arr[, , var_idx[j]]
     }
+    if (identical(what, "gamma_w")) {
+      tmax <- suppressWarnings(as.numeric(sd$tmax %||% 1.0))
+      if (is.finite(tmax) && length(tmax) == 1L && tmax > 0) {
+        time_terms <- .event_time_terms(sd, map$term)
+        if (length(time_terms) > 0L) {
+          keep <- map$term %in% time_terms
+          out[, , keep] <- out[, , keep, drop = FALSE] / tmax
+        }
+      }
+    }
   } else {
     dm <- .get_draws_matrix(fit, variables = var_unique, draws = draws, seed = seed)
     out <- matrix(NA_real_, nrow = nrow(dm), ncol = nrow(map))
     colnames(out) <- make.unique(map$term)
     for (j in seq_len(nrow(map))) {
       out[, j] <- dm[, map$variable[j]]
+    }
+    if (identical(what, "gamma_w")) {
+      tmax <- suppressWarnings(as.numeric(sd$tmax %||% 1.0))
+      if (is.finite(tmax) && length(tmax) == 1L && tmax > 0) {
+        time_terms <- .event_time_terms(sd, map$term)
+        if (length(time_terms) > 0L) {
+          keep <- map$term %in% time_terms
+          out[, keep] <- out[, keep, drop = FALSE] / tmax
+        }
+      }
     }
   }
 

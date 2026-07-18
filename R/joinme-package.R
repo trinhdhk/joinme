@@ -12,10 +12,11 @@
 #' @import methods
 #' @import Rcpp
 #' @importFrom RcppParallel RcppParallelLibs
-#' @useDynLib JoiNMe, .registration = TRUE
+#' @importFrom rstan sampling
+#' @importFrom rstantools rstan_config
+#' @useDynLib joinme, .registration = TRUE
 #'
 #' @references
 #' Stan Development Team (NA). RStan: the R interface to Stan. R package version 2.36.0.9000. https://mc-stan.org
 #'
 "_PACKAGE"  # roxygen entry point for package-level docs
-## @useDynLib JoiNMe, .registration = TRUE

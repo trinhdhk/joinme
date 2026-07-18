@@ -21,7 +21,8 @@
 }
 \value{
 A \code{summary_JoiNMeFit} object containing tables such as \code{fixef},
-\code{survival_process} (when applicable), \code{assoc}, covariance
+\code{baseline_hazard} (when applicable), \code{survival_process} (when applicable),
+\code{assoc}, covariance
 summaries (\code{id}, \code{marker}), dedicated \code{id:marker} covariance-parameter
 summaries (latent + covariance-regression blocks when \code{Q_idm > 0}), and diagnostics.
 }

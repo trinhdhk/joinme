@@ -29,7 +29,7 @@ For Stan backends:
 # install.packages("rstan", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
 ```
 
-## Quick start: simulate â†’ fit â†’ predict â†’ plot
+## Quick start
 
 ## Conceptual overview
 
@@ -47,7 +47,7 @@ optional marker-by-subject random effects. The survival part uses a
 proportional hazards model with a flexible spline baseline hazard and
 time-dependent association terms.
 
-The association terms implemented in `JoiNMe` are:
+The association terms implemented in `joinme` package are:
 
 - Current value (CV) of the latent linear predictor.
 - Current slope (CS) of the latent linear predictor.
@@ -118,16 +118,16 @@ returns coefficients on the original time scale.
 
 ### Step 1: Load packages and set a reproducible seed
 
-```{r intro-setup}
+```{r setup}
 if (requireNamespace("pkgload", quietly = TRUE)) {
   repo_root <- normalizePath("..", mustWork = FALSE)
   if (file.exists(file.path(repo_root, "DESCRIPTION"))) {
     pkgload::load_all(repo_root, quiet = TRUE, compile = FALSE)
   } else {
-    library(JoiNMe)
+    library(joinme)
   }
 } else {
-  library(JoiNMe)
+  library(joinme)
 }
 library(survival)
 
@@ -144,10 +144,11 @@ sim <- simulate_joinme(
   n_id = 10,
   families = list(
     jm_family("student_t"),
-    jm_family("student_t", inv_link = ~ inv_logit(x / 2))
+    jm_family("student_t")
   ),
   n_obs_per_marker_per_id = 4,
   times_obs = seq(0, 5, length.out = 8),
+  baseline_hazard = list(type='weibull', shape = 2, scale = 20),
   quadrature_nodes = 31,
   seed = 2026,
   assoc = c("cv_total"),
@@ -195,17 +196,18 @@ fit <- joinme(
   formulaEvent = formulaEvent,
   dataEvent = sim$dataEvent,
   assoc = c("cv_total"),
-  families = rep("student_t", 2),
+  families = "student_t",
   transforms = joinme_tf(cv_total = "identity"),
+  basehaz = 'bs', 
   control = list(
     engine = "rstan",
     chains = 1,
     parallel_chains = 1,
-    iter_warmup = 100,
-    iter_sampling = 100,
+    iter_warmup = 500,
+    iter_sampling = 500,
     seed = 2026,
     refresh = 0,
-    adapt_delta = 0.9
+    adapt_delta = 0.85
   )
 )
 ```
@@ -213,9 +215,7 @@ fit <- joinme(
 ### Step 5: Summarise fixed effects and associations
 
 ```{r intro-summaries}
-summary(fit)
-posterior_summary(fit)
-fixef(fit)
+summary(fit) # or posterior_summary(fit)fixef(fit)
 coef(fit)
 posterior_assoc(fit, summary = TRUE)
 ```
@@ -239,13 +239,18 @@ ndL <- sim$dataLong[sim$dataLong$id == 1, ]
 ndE <- sim$dataEvent[sim$dataEvent$id == 1, ]
 time_start <- max(ndL$time)
 
-pred <- posterior_epred(
+pred <- posterior_predict(
   fit,
   newdataLong = ndL,
   newdataEvent = ndE,
   time_start = time_start,
   times = seq(time_start, time_start + 1, length.out = 20),
-  control = list(n_samples = 50, n_pred_draws = 80),
+  control = list(
+    n_samples = 50, 
+    n_pred_draws = 1000,
+    iter_warmup = 200,
+    chains = 1
+    ),
   seed = 2026
 )
 
@@ -259,16 +264,7 @@ pred <- posterior_epred(
 ### Step 7: Plot longitudinal and survival predictions
 
 ```{r intro-plot}
-plot(pred, type = c("longitudinal", "survival"), scale = "epred", combined = TRUE)
-
-# Alternative display for the longitudinal process
-plot(
-  fit,
-  type = "longitudinal",
-  longitudinal_style = "heatmap",
-  scale = "epred",
-  threshold = 0.05
-)
+plot(pred, type = c("longitudinal", "survival"), combined = TRUE)
 ```
 
 If `patchwork`/`cowplot` is unavailable, `combined = TRUE` falls back to the
@@ -279,8 +275,9 @@ The heatmap is an alternative to the usual separated marker curves. It orders
 markers by the magnitude of posterior mean change and makes tiles transparent
 when the posterior sign certainty does not exceed `1 - threshold`.
 
-When you want to evaluate fitted curves or heatmaps at named baseline profiles,
-pass `condition = make_conditions(...)` to `plot(fit, ...)`.
+`plot(fit, ...)` uses fitted posterior samples directly. For conditioning at
+named baseline profiles, call `predict(fit, ..., condition = make_conditions(...))`
+and then plot the resulting `JoiNMeDynPred` object.
 
 ### Step 8: Diagnostics and extraction helpers
 

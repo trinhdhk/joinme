@@ -17,11 +17,15 @@ simulate_joinme(
   times_obs = seq(0, 5, length.out = 8),
   obs_time_noise_sd = 0,
   censor_longitudinal_after_event = TRUE,
+  left_truncation_max = 0,
+  truncate_longitudinal_before_entry = TRUE,
   ...,
   seed = 42,
   covariate_formulas = list(x1 ~ rnorm(n_id), x2 ~ rnorm(n_id)),
   marker_weights = NULL,
   shared_marker_weights = TRUE,
+  fixed_marker_weights = FALSE,
+  shrinkage = 0L,
   assoc = c("cv_total"),
   assoc_coefs = c(cv_total = 0.6),
   beta_long = NULL,
@@ -160,12 +164,26 @@ longitudinal observations are truncated at the subject event time. If FALSE,
 the longitudinal schedule may continue after the event time up to
 \code{time_cens}.}
 
+\item{left_truncation_max}{Optional non-negative delayed-entry bound. When > 0,
+each subject receives a sampled entry in
+\verb{[0, min(left_truncation_max, stop_time))}.}
+
+\item{truncate_longitudinal_before_entry}{Logical; when TRUE and delayed entry
+is active (\code{left_truncation_max > 0}), longitudinal rows observed before the
+sampled entry time are removed.}
+
 \item{...}{Additional arguments passed to fun.}
 
 \item{seed}{RNG seed.}
 
 \item{covariate_formulas}{Named or LHS formulas used to generate event-level covariates,
-e.g. \code{list(x1 ~ rnorm(n_id), x2 ~ rt(n_id, df = 5))}.}
+e.g. \code{list(x1 ~ rnorm(n_id), x2 ~ rt(n_id, df = 5))}.
+Time-varying step covariates are supported via
+\code{time_varyring(fun, n_step, steps, ...)}, for example
+\code{list(x ~ time_varyring(rnorm, c(3, 6), mean = 0, sd = 1))} or
+\code{list(x ~ time_varyring(rnorm, steps = c(1, 3, 5), mean = 0, sd = 1))}.
+In this mode, each id receives stepwise periods over \verb{[0, time_cens]}, and
+each period value is sampled from \code{fun}.}
 
 \item{marker_weights}{Optional base marker weights used for association
 aggregation. If \code{shared_marker_weights = TRUE}, supply one numeric vector to
@@ -177,6 +195,20 @@ entries \code{cv_total}, \code{cs_total}, \code{cv_marker}, and \code{cs_marker}
 marker-based association terms share one marker-weight structure. If
 \code{FALSE}, each active weighted marker-based association term uses its own
 marker-weight structure.}
+
+\item{fixed_marker_weights}{Logical. This has the same meaning as in
+\code{joinme()}. If \code{TRUE}, \code{marker_weights} are the effective weights and no
+latent perturbation is drawn. If \code{FALSE} (the default), \code{marker_weights}
+are base weights and the effective weights are
+\code{marker_weights + z_marker_weights}. When base weights are omitted they
+default to zero, exactly as they do in \code{joinme()} when marker weights are
+estimated.}
+
+\item{shrinkage}{Integer selecting the distribution of each standardized
+latent marker-weight perturbation when \code{fixed_marker_weights = FALSE}:
+\code{0} draws Student-t with 6 degrees of freedom, \code{1} draws standard Laplace,
+and \code{2} draws standard Normal. This is the same switch used by the Stan
+priors. It does not change explicitly supplied fixed weights.}
 
 \item{assoc}{Association components (same names as fit): \code{cv_total}, \code{cv_mean},
 \code{cv_marker}, \code{cs_total}, \code{cs_mean}, \code{cs_marker}, \code{corr}, \code{vcov}.
@@ -299,7 +331,7 @@ controls (same \code{sd}/\code{corr} fields as above).
 
 \item{family_params}{Family-specific simulation parameters.}
 
-\item{h0}{Optional baseline hazard function \code{h0(t)} for backward compatibility.
+\item{h0}{Optional baseline hazard function \code{h0(t)}
 If supplied, it takes precedence over \code{baseline_hazard}/\code{formulaBasehaz}.}
 
 \item{baseline_hazard}{Optional baseline hazard specification. Supported forms:
@@ -343,7 +375,11 @@ with \code{joinme_standata()} defaults.}
 \item{D}{Number of markers.}
 }
 \value{
-list(dataLong, dataEvent, true_params, marker_info, helpers, tmax)
+A list containing \code{dataLong}, \code{dataEvent}, \code{truth} (also available as
+\code{true_params}), \code{marker_info}, \code{helpers}, and \code{tmax}. Marker-weight truth
+distinguishes base, latent, and effective values. Baseline-hazard truth is
+stored in \code{truth$baseline_hazard}; when a log-linear representation exists,
+its resolved coefficients are also in \code{truth$stan_fit$bs_gamma_c}.
 
 List of results.
 
@@ -381,6 +417,23 @@ sim <- simulate_joinme(
     nu[family=student_t] ~ 1,
     alpha_skew[family=skew_normal] ~ 1 + x1
   )
+)
+
+sim_split <- simulate_joinme(
+  n_id = 20,
+  formulaEvent = survival::Surv(time_start, time_stop, event) ~ x1 + x2,
+  left_truncation_max = 1.0,
+  seed = 99
+)
+
+sim_tv <- simulate_joinme(
+  n_id = 20,
+  formulaEvent = survival::Surv(time_start, time_stop, event) ~ x + x2,
+  covariate_formulas = list(
+    x ~ time_varyring(rnorm, steps = c(1, 3, 5), mean = 0, sd = 1),
+    x2 ~ rnorm(n_id)
+  ),
+  left_truncation_max = 0.5
 )
 }
 }

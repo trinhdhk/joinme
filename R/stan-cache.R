@@ -142,7 +142,7 @@ NULL
 #'
 #' @keywords internal
 .stan_cache_dir <- function() {
-  # Canonical per-user cache directory for compiled Stan models
+  # Cache directory for compiled Stan models
   # Use the standardised per-package cache location for portability.
   dir <- tools::R_user_dir("joinme", "cache")
   # Ensure the directory exists before we return it.

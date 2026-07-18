@@ -321,10 +321,12 @@ Default priors are weakly informative and aligned with the Stan implementation:
   marker-weight-involving channels (`cv_total`, `cs_total`, `cv_marker`,
   `cs_marker`), only the first active latent is sign-anchored non-negative to
   improve identifiability; other channels remain free to be positive or negative.
-- **Marker weights**: when estimated, marker-weight perturbations use
-  standard normal priors in additive latent form around user-supplied base
-  weights, and the resulting weights enter marker-aggregated association terms
-  without additional normalisation.
+- **Marker weights**: when estimated, marker-weight perturbations use additive
+  latent form around user-supplied base weights. `shrinkage = 0, 1, 2` selects
+  standard Student-$t_6$, Laplace, or Normal latents, respectively. The resulting
+  signed weights enter marker-aggregated association terms without additional
+  normalisation. `simulate_joinme()` uses the identical switch and defaults to
+  a zero base when it simulates estimated weights.
 - **Random-effect scales**: subject, marker, and marker-by-subject standard
   deviations use half-normal priors on the original scale for weakly informative
   positivity constraints.

@@ -123,20 +123,20 @@ jm_family <- function(name, link = NULL, inv_link = NULL) {
   nm <- .normalize_link_name(link_name)
   bc <- switch(
     nm,
-    identity = list(opcodes = c(0L), const_data = numeric(0)),
-    log = list(opcodes = c(0L, 6L), const_data = numeric(0)),
-    logit = list(opcodes = c(0L, 9L), const_data = numeric(0)),
-    probit = list(opcodes = c(0L, 26L), const_data = numeric(0)),
-    exp = list(opcodes = c(0L, 7L), const_data = numeric(0))
+    identity = list(bytecode = c(0L), const_data = numeric(0)),
+    log = list(bytecode = c(0L, 6L), const_data = numeric(0)),
+    logit = list(bytecode = c(0L, 9L), const_data = numeric(0)),
+    probit = list(bytecode = c(0L, 26L), const_data = numeric(0)),
+    exp = list(bytecode = c(0L, 7L), const_data = numeric(0))
   )
-  bc$n_ops <- length(bc$opcodes)
+  bc$n_ops <- length(bc$bytecode)
   bc$n_const <- length(bc$const_data)
   bc
 }
 
 #' @keywords internal
 .canonical_link_from_inv_link_bc <- function(inv_link_bc) {
-  ops <- as.integer(inv_link_bc$opcodes %||% integer(0))
+  ops <- as.integer(inv_link_bc$bytecode %||% integer(0))
   const_data <- as.numeric(inv_link_bc$const_data %||% numeric(0))
   if (length(const_data) > 0L) {
     return(NA_character_)
@@ -162,7 +162,7 @@ jm_family <- function(name, link = NULL, inv_link = NULL) {
     19L # cosh
     # 20L  # tanh (bounded; may flatten heavily)
   )
-  ops <- as.integer(inv_link_bc$bytecode %||% inv_link_bc$opcodes %||% integer(0))
+  ops <- as.integer(inv_link_bc$bytecode %||% integer(0))
   any(ops %in% risky_ops)
 }
 
@@ -171,7 +171,7 @@ jm_family <- function(name, link = NULL, inv_link = NULL) {
                                                     grid = seq(-8, 8, length.out = 257L),
                                                     tol = 1e-10) {
   vals <- tryCatch(
-    eval_bytecode_vector(grid, bytecode = inv_link_bc$bytecode %||% inv_link_bc$opcodes, const_data = inv_link_bc$const_data %||% numeric(0)),
+    eval_bytecode_vector(grid, bytecode = inv_link_bc$bytecode, const_data = inv_link_bc$const_data %||% numeric(0)),
     error = function(e) NULL
   )
 
@@ -517,14 +517,14 @@ jm_family <- function(name, link = NULL, inv_link = NULL) {
     link_codes[d] <- if (is.na(spec_d$link_name)) 0L else .link_code_from_name(spec_d$link_name)
   }
 
-  inv_link_n_ops <- as.integer(vapply(inv_link_specs, function(x) length(x$opcodes %||% integer(0)), integer(1)))
+  inv_link_n_ops <- as.integer(vapply(inv_link_specs, function(x) length(x$bytecode %||% integer(0)), integer(1)))
   inv_link_n_const <- as.integer(vapply(inv_link_specs, function(x) length(x$const_data %||% numeric(0)), integer(1)))
   max_inv_link_ops <- as.integer(max(inv_link_n_ops, 1L))
   max_inv_link_const <- as.integer(max(inv_link_n_const, 1L))
   inv_link_ops <- matrix(0L, nrow = D, ncol = max_inv_link_ops)
   inv_link_const <- matrix(0.0, nrow = D, ncol = max_inv_link_const)
   for (d in seq_len(D)) {
-    ops_d <- as.integer(inv_link_specs[[d]]$opcodes %||% integer(0))
+    ops_d <- as.integer(inv_link_specs[[d]]$bytecode %||% integer(0))
     const_d <- as.numeric(inv_link_specs[[d]]$const_data %||% numeric(0))
     if (length(ops_d) > 0L) inv_link_ops[d, seq_along(ops_d)] <- ops_d
     if (length(const_d) > 0L) inv_link_const[d, seq_along(const_d)] <- const_d

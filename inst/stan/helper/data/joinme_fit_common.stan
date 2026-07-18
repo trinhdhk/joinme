@@ -1,7 +1,11 @@
   /* -------------------- Longitudinal (long format) */
   int<lower=1> n_id;             // number of subjects (ids)
+  int<lower=1> N_event;          // number of event-process rows (intervals)
   int<lower=1> N;                // total longitudinal rows across all subjects
   array[N] int<lower=1, upper=n_id> id; // subject index for each row
+  array[N_event] int<lower=1, upper=n_id> event_id; // subject index for each event interval row
+  array[n_id] int<lower=1, upper=N_event> event_start_idx; // first interval row per subject
+  array[n_id] int<lower=1, upper=N_event> event_end_idx;   // last interval row per subject
   array[N] int<lower=1> marker;  // marker index per row (1..D)
   int<lower=1> D;                // total number of markers
   vector<lower=0>[n_id] subject_weights; // subject-level weights for longitudinal/survival likelihood
@@ -152,7 +156,7 @@
 
   /* Hazard covariates */
   int<lower=0> p_w;              // number of baseline hazard covariates
-  matrix[n_id, p_w] W;           // hazard covariate design per subject
+  matrix[N_event, p_w] W;        // hazard covariate design per event interval
 
   /* Covariance regression covariates for L_i */
   int<lower=0> K_cov;            // number of covariates in covariance regression
@@ -160,16 +164,18 @@
 
   /* Baseline hazard spline (centred basis) */
   int<lower=1> Kbs;              // number of baseline hazard basis functions
-  matrix[n_id, Kbs] Bs_event_c;  // event-time basis per subject (centred)
+  matrix[N_event, Kbs] Bs_event_c;  // event-time basis per event interval (centred)
   int<lower=1> n_gk;             // quadrature node count (nodes/weights hardcoded in Stan)
-  array[n_id] matrix[n_gk, Kbs] Bs_gk_c; // quadrature-node basis per subject (centred)
+  array[N_event] matrix[n_gk, Kbs] Bs_gk_c; // quadrature-node basis per interval (centred)
   real<lower=0> tau_spline;      // spline penalty scale for baseline hazard
 
   /* Survival outcomes */
-  vector<lower=0, upper=1>[n_id] S_event; // scaled event/censoring time in [0,1]
-  array[n_id] int<lower=0, upper=1> d_event; // event indicator (1 event, 0 censored)
+  vector<lower=0, upper=1>[N_event] S_entry; // scaled left endpoints in [0,1]
+  vector<lower=0, upper=1>[N_event] S_event; // scaled right endpoints in [0,1]
+  array[N_event] int<lower=0, upper=1> d_event; // event indicator for interval endpoint
+  array[N_event] int<lower=0, upper=3> event_censor_type; // 0 right, 1 exact, 2 left, 3 interval2
   int<lower=1> K_event;                    // number of competing risks
-  array[n_id] int<lower=1, upper=K_event> event_type; // event type per subject
+  array[N_event] int<lower=1, upper=K_event> event_type; // event type per interval endpoint
 
   /* Ordinal (cumulative logit) categories */
   int<lower=2> K_ord;            // number of ordinal categories (shared)
@@ -178,24 +184,24 @@
   real<lower=1e-6> eps_fd;       // finite-difference step for slope approximation
 
   /* Mean association designs (CV_mean) */
-  array[n_id] matrix[n_gk, P] X_gk_now;
-  array[n_id] matrix[n_gk, P] X_gk_fwd;
-  array[n_id] matrix[n_gk, R_id] Z_id_gk_now;
-  array[n_id] matrix[n_gk, R_id] Z_id_gk_fwd;
-  matrix[n_id, P] X_event_now;
-  matrix[n_id, P] X_event_fwd;
-  matrix[n_id, R_id] Z_id_event_now;
-  matrix[n_id, R_id] Z_id_event_fwd;
+  array[N_event] matrix[n_gk, P] X_gk_now;
+  array[N_event] matrix[n_gk, P] X_gk_fwd;
+  array[N_event] matrix[n_gk, R_id] Z_id_gk_now;
+  array[N_event] matrix[n_gk, R_id] Z_id_gk_fwd;
+  matrix[N_event, P] X_event_now;
+  matrix[N_event, P] X_event_fwd;
+  matrix[N_event, R_id] Z_id_event_now;
+  matrix[N_event, R_id] Z_id_event_fwd;
 
   /* Marker association designs (CV_marker) */
-  array[n_id] matrix[n_gk, R_mk] Z_mk_gk_now;
-  array[n_id] matrix[n_gk, R_mk] Z_mk_gk_fwd;
-  array[n_id] matrix[n_gk, Q_idm] Z_idm_gk_now;
-  array[n_id] matrix[n_gk, Q_idm] Z_idm_gk_fwd;
-  matrix[n_id, R_mk] Z_mk_event_now;
-  matrix[n_id, R_mk] Z_mk_event_fwd;
-  matrix[n_id, Q_idm] Z_idm_event_now;
-  matrix[n_id, Q_idm] Z_idm_event_fwd;
+  array[N_event] matrix[n_gk, R_mk] Z_mk_gk_now;
+  array[N_event] matrix[n_gk, R_mk] Z_mk_gk_fwd;
+  array[N_event] matrix[n_gk, Q_idm] Z_idm_gk_now;
+  array[N_event] matrix[n_gk, Q_idm] Z_idm_gk_fwd;
+  matrix[N_event, R_mk] Z_mk_event_now;
+  matrix[N_event, R_mk] Z_mk_event_fwd;
+  matrix[N_event, Q_idm] Z_idm_event_now;
+  matrix[N_event, Q_idm] Z_idm_event_fwd;
 
   /* Association include flags */
   int<lower=0, upper=1> assoc_cv_total;   // include total current value term
@@ -210,11 +216,11 @@
   /* Prior scales */
   vector[P] beta_scale;        // per-coefficient scale for fixed effects
   real<lower=0> alpha_scale;   // scale for association + baseline hazard priors
-  real<lower=0> iota_scale;    // scale for fit-only functional transform intercept/slope priors
+  real<lower=0> iota_scale;    // scale for functional transform intercept/slope priors
   real<lower=0> lkj_eta;       // LKJ concentration for correlation priors
 
   /* Marker-side association shrinkage */
-  int<lower=1, upper=2> shrinkage; // 1 Laplace, 2 Gaussian
+  int<lower=0, upper=2> shrinkage; // 0 Student t // 1 Laplace, 2 Gaussian
 
   /* Time scaling metadata */
   real<lower=0> tmax;                         // original time scale max

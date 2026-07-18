@@ -104,11 +104,13 @@ test_that("posterior_fixef and posterior_ranef expose posterior extraction", {
   testthat::local_mocked_bindings(
     .get_draws_obj = function(fit, variables = NULL, draws = NULL, seed = 1, keep_chains = FALSE) {
       if (is.null(variables)) return(draws_obj)
-      posterior::subset_draws(draws_obj, variable = variables)
+      vars_keep <- intersect(variables, posterior::variables(draws_obj))
+      posterior::subset_draws(draws_obj, variable = vars_keep)
     },
     .get_draws_matrix = function(fit, variables = NULL, draws = NULL, seed = 1) {
-      mat <- posterior::as_draws_matrix(posterior::subset_draws(draws_obj, variable = variables))
-      as.matrix(mat[, variables, drop = FALSE])
+      vars_keep <- intersect(variables, posterior::variables(draws_obj))
+      mat <- posterior::as_draws_matrix(posterior::subset_draws(draws_obj, variable = vars_keep))
+      as.matrix(mat[, vars_keep, drop = FALSE])
     },
     .package = "joinme"
   )
@@ -188,11 +190,13 @@ test_that("coef summary reports grouped posterior summaries", {
   testthat::local_mocked_bindings(
     .get_draws_obj = function(fit, variables = NULL, draws = NULL, seed = 1, keep_chains = FALSE) {
       if (is.null(variables)) return(draws_obj)
-      posterior::subset_draws(draws_obj, variable = variables)
+      vars_keep <- intersect(variables, posterior::variables(draws_obj))
+      posterior::subset_draws(draws_obj, variable = vars_keep)
     },
     .get_draws_matrix = function(fit, variables = NULL, draws = NULL, seed = 1) {
-      mat <- posterior::as_draws_matrix(posterior::subset_draws(draws_obj, variable = variables))
-      as.matrix(mat[, variables, drop = FALSE])
+      vars_keep <- intersect(variables, posterior::variables(draws_obj))
+      mat <- posterior::as_draws_matrix(posterior::subset_draws(draws_obj, variable = vars_keep))
+      as.matrix(mat[, vars_keep, drop = FALSE])
     },
     .package = "joinme"
   )
@@ -250,7 +254,7 @@ test_that("ranef and coef return original-time longitudinal terms", {
       assoc_cs_marker = 0L,
       assoc_corr = 0L,
       assoc_vcov = 0L,
-      tmax_internal = 4,
+      tmax = 4,
       idx_time_uid = 2L,
       idx_time_vmk = 2L,
       idx_time_idm = 2L
@@ -262,11 +266,13 @@ test_that("ranef and coef return original-time longitudinal terms", {
   testthat::local_mocked_bindings(
     .get_draws_obj = function(fit, variables = NULL, draws = NULL, seed = 1, keep_chains = FALSE) {
       if (is.null(variables)) return(draws_obj)
-      posterior::subset_draws(draws_obj, variable = variables)
+      vars_keep <- intersect(variables, posterior::variables(draws_obj))
+      posterior::subset_draws(draws_obj, variable = vars_keep)
     },
     .get_draws_matrix = function(fit, variables = NULL, draws = NULL, seed = 1) {
-      mat <- posterior::as_draws_matrix(posterior::subset_draws(draws_obj, variable = variables))
-      as.matrix(mat[, variables, drop = FALSE])
+      vars_keep <- intersect(variables, posterior::variables(draws_obj))
+      mat <- posterior::as_draws_matrix(posterior::subset_draws(draws_obj, variable = vars_keep))
+      as.matrix(mat[, vars_keep, drop = FALSE])
     },
     .package = "joinme"
   )
@@ -340,3 +346,133 @@ test_that("coef extractors work on a fitted JoiNMe object", {
   expect_true(all(c("term", "Estimate", "Q2.5", "Q97.5") %in% names(cf_summary$formulaLong$population)))
   expect_true(all(c("draw", "id", "term", "value") %in% names(cf_draws$formulaLong$id)))
 })
+
+test_that("baseline hazard coefficients and predictions are extractable", {
+  vars <- c("bs_gamma_c[1,1]", "bs_gamma_c[1,2]")
+  vals <- c(
+    0.1, 0.3,  # draw 1
+    0.2, 0.4   # draw 2
+  )
+  draws_obj <- posterior::as_draws_array(array(
+    vals,
+    dim = c(2, 1, length(vars)),
+    dimnames = list(iteration = c("1", "2"), chain = "1", variable = vars)
+  ))
+
+  fit_bundle <- make_mock_JoiNMe_fit_for_coef(
+    draws_obj = draws_obj,
+    stan_data = list(
+      P = 0L,
+      p_w = 0L,
+      K_event = 1L,
+      Kbs = 2L,
+      tmax = 2,
+      Bs_event_c = matrix(c(1, 0, 1, 1), nrow = 2, byrow = TRUE),
+      basehaz = "formula",
+      basehaz_cols = c("(Intercept)", "time")
+    ),
+    dataEvent = data.frame(id = c("id1", "id2"), time = c(1, 2))
+  )
+
+  testthat::local_mocked_bindings(
+    .get_draws_obj = function(fit, variables = NULL, draws = NULL, seed = 1, keep_chains = FALSE) {
+      if (is.null(variables)) return(draws_obj)
+      vars_keep <- intersect(variables, posterior::variables(draws_obj))
+      posterior::subset_draws(draws_obj, variable = vars_keep)
+    },
+    .get_draws_matrix = function(fit, variables = NULL, draws = NULL, seed = 1) {
+      vars_keep <- intersect(variables, posterior::variables(draws_obj))
+      mat <- posterior::as_draws_matrix(posterior::subset_draws(draws_obj, variable = vars_keep))
+      as.matrix(mat[, vars_keep, drop = FALSE])
+    },
+    .get_draws_array = function(fit, variables = NULL, draws = NULL, seed = 1) {
+      if (is.null(variables)) return(draws_obj)
+      vars_keep <- intersect(variables, posterior::variables(draws_obj))
+      posterior::as_draws_array(posterior::subset_draws(draws_obj, variable = vars_keep))
+    },
+    .package = "joinme"
+  )
+
+  bh_pred <- extract(fit_bundle$object, what = "basehaz", keep_chains = FALSE)
+  expect_true(is.matrix(bh_pred$draws))
+  expect_equal(nrow(bh_pred$draws), 2L)
+  expect_equal(ncol(bh_pred$draws), 2L)
+  expect_true(all(bh_pred$draws > 0))
+  dm <- posterior::as_draws_matrix(draws_obj)
+  coef_mat <- as.matrix(dm[, vars, drop = FALSE])
+  expected <- exp(coef_mat %*% t(fit_bundle$object$stan_data$Bs_event_c)) / fit_bundle$object$stan_data$tmax
+  expect_equal(unname(bh_pred$draws), unname(expected), tolerance = 1e-10)
+
+  bh_draws <- draws(fit_bundle$object, what = "basehaz", format = "draws_matrix")
+  expect_true(is.matrix(bh_draws))
+  expect_true(all(grepl("id=", colnames(bh_draws), fixed = TRUE)))
+
+  bh_pred_alias <- extract(fit_bundle$object, what = "baseline_hazard", keep_chains = FALSE)
+  expect_equal(unname(bh_pred_alias$draws), unname(bh_pred$draws), tolerance = 1e-12)
+})
+
+test_that("summary reports intercept-only baseline hazard with intercept adjusted by log(tmax)", {
+  vars <- c("bs_gamma_c[1,1]")
+  vals <- c(log(0.2 * 2), log(0.3 * 2))
+  draws_obj <- posterior::as_draws_array(array(
+    vals,
+    dim = c(2, 1, length(vars)),
+    dimnames = list(iteration = c("1", "2"), chain = "1", variable = vars)
+  ))
+
+  fit_bundle <- make_mock_JoiNMe_fit_for_coef(
+    draws_obj = draws_obj,
+    stan_data = list(
+      P = 0L,
+      p_w = 0L,
+      family_long = 1L,
+      family_names = "gaussian",
+      n_id = 1L,
+      R_id = 0L,
+      R_mk = 0L,
+      indep_id_re = 1L,
+      indep_marker_re = 1L,
+      K_event = 1L,
+      Kbs = 1L,
+      tmax = 2,
+      Bs_event_c = matrix(1, nrow = 2, ncol = 1),
+      basehaz = "formula",
+      basehaz_cols = "(Intercept)"
+    ),
+    dataEvent = data.frame(id = c("id1", "id2"), time = c(1, 2))
+  )
+
+  testthat::local_mocked_bindings(
+    .get_draws_obj = function(fit, variables = NULL, draws = NULL, seed = 1, keep_chains = FALSE) {
+      if (is.null(variables)) return(draws_obj)
+      vars_keep <- intersect(variables, posterior::variables(draws_obj))
+      posterior::subset_draws(draws_obj, variable = vars_keep)
+    },
+    .get_draws_matrix = function(fit, variables = NULL, draws = NULL, seed = 1) {
+      vars_keep <- intersect(variables, posterior::variables(draws_obj))
+      mat <- posterior::as_draws_matrix(posterior::subset_draws(draws_obj, variable = vars_keep))
+      as.matrix(mat[, vars_keep, drop = FALSE])
+    },
+    .get_draws_array = function(fit, variables = NULL, draws = NULL, seed = 1) {
+      if (is.null(variables)) return(draws_obj)
+      vars_keep <- intersect(variables, posterior::variables(draws_obj))
+      posterior::as_draws_array(posterior::subset_draws(draws_obj, variable = vars_keep))
+    },
+    .JoiNMe_sampler_diagnostics = function(fit) NULL,
+    .package = "joinme"
+  )
+
+  sum_obj <- summary(fit_bundle$object, digits = 6)
+  bh_tbl <- sum_obj$tables$baseline_hazard
+  expect_true(is.data.frame(bh_tbl))
+  expect_equal(bh_tbl$term, "(Intercept)")
+  expect_true(all(c("Estimate", "Hazard.Ratio", "HR.Q2.5", "HR.Q97.5") %in% names(bh_tbl)))
+  expected_log <- log(c(0.2, 0.3))
+  expect_equal(bh_tbl$Estimate, mean(expected_log), tolerance = 1e-6)
+  expect_equal(bh_tbl$Q2.5, as.numeric(stats::quantile(expected_log, 0.025)), tolerance = 1e-6)
+  expect_equal(bh_tbl$Q97.5, as.numeric(stats::quantile(expected_log, 0.975)), tolerance = 1e-6)
+  expect_equal(bh_tbl$Hazard.Ratio, exp(bh_tbl$Estimate), tolerance = 1e-6)
+  expect_equal(bh_tbl$HR.Q2.5, exp(bh_tbl$Q2.5), tolerance = 1e-6)
+  expect_equal(bh_tbl$HR.Q97.5, exp(bh_tbl$Q97.5), tolerance = 1e-6)
+})
+

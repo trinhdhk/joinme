@@ -4,8 +4,11 @@
 ^\.github$
 ^notes
 ^src$
+^sim
 tmp
 ^tests$
 \.RDS$
 \.rds$
-test$
+^\.artifacts$
+^\.vscode
+\.tmp*

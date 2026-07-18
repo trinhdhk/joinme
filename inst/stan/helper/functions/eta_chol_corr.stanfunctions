@@ -1,5 +1,5 @@
 /**
- * @file eta_corr_varonly_weighted_const.stanfunctions
+ * @file eta_chol_corr.stanfunctions
  * @brief Off-diagonal Cholesky-correlation extractor from subject-specific covariance factors.
  *
  * @details
@@ -22,7 +22,7 @@
  * @return Vector of length Q_idm*(Q_idm-1)/2 in lower-triangular row-major order:
  *   (2,1), (3,1), (3,2), ..., (Q,Q-1).
  */
-vector eta_corr_varonly_weighted_const(matrix L_i) {
+vector eta_chol_corr(matrix L_i) {
   int Q = rows(L_i);
   int M = (Q * (Q - 1)) %/% 2;
   int m = 1;

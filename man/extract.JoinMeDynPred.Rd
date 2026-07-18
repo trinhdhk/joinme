@@ -31,14 +31,11 @@ A list with fields:
 }
 }
 \description{
-Extract stored posterior draw components from dynamic prediction objects.
+Extracts stored prediction draw blocks without flattening them first.
 
-Unlike \code{draws.JoiNMeDynPred()}, this method does not flatten all stored
-prediction draws into one posterior object. Instead, it preserves the semantic
-prediction blocks such as longitudinal, survival, cumulative-hazard, and
-random-effect payloads, optionally filtered by id or scale.
-
-Use \code{extract.JoiNMeDynPred()} when you want the original prediction-block
-structure. Use \code{draws()} when you want a single flattened
-\pkg{posterior}-compatible draw object.
+This is the structured companion to \code{\link[=draws.JoiNMeDynPred]{draws.JoiNMeDynPred()}}. Use
+\code{extract()} when you want to keep the original prediction block semantics
+(\code{longitudinal}, \code{survival}, \code{cumhaz}, random effects, and scale/id filters).
+Use \code{\link[=draws]{draws()}} when you want those blocks flattened into one
+\code{posterior}-compatible draw object with composite variable labels.
 }

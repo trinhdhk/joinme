@@ -51,7 +51,7 @@
   * @brief Functional bytecode evaluator for scalar inputs.
   *
   * @param x Input value
-  * @param bytecode Array of bytecode instructions. Accepted opcodes are 0-26 as
+  * @param bytecode Array of bytecode instructions. Accepted instruction IDs are 0-26 as
   *   enumerated in the file-level description.
   * @param const_data Vector of constant values for PUSH_CONST operations
   * @return Scalar result of bytecode evaluation
@@ -201,7 +201,7 @@
   * @brief Functional bytecode evaluator for vector inputs (element-wise).
    *
    * @param x Vector of input values
-  * @param bytecode Array of bytecode instructions. Accepted opcodes are 0-26 as
+  * @param bytecode Array of bytecode instructions. Accepted instruction IDs are 0-26 as
   *   enumerated in the file-level description.
    * @param const_data Vector of constant values for PUSH_CONST operations
    * @return Vector result of bytecode evaluation applied element-wise
@@ -239,13 +239,13 @@
   /**
   * @brief Backward-compatible alias for older functional interpreter naming.
    */
-  real eval_functional_scalar(real x, array[] int opcodes, vector const_data) {
-    return eval_bytecode_scalar(x, opcodes, const_data);
+  real eval_functional_scalar(real x, array[] int bytecode, vector const_data) {
+    return eval_bytecode_scalar(x, bytecode, const_data);
   }
 
   /**
   * @brief Backward-compatible alias for older functional interpreter naming.
    */
-  vector eval_functional_vector(vector x, array[] int opcodes, vector const_data) {
-    return eval_bytecode_vector(x, opcodes, const_data);
+  vector eval_functional_vector(vector x, array[] int bytecode, vector const_data) {
+    return eval_bytecode_vector(x, bytecode, const_data);
   }

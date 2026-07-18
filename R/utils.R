@@ -65,7 +65,9 @@ suppressPackageStartupMessages({
 #' @param dataEvent Event dataset.
 #' @param context Character label for error messages.
 #'
-#' @return Named list with extracted `event_time`, `event_status`, and `surv_type`.
+#' @return Named list with parsed event-process vectors:
+#'   `event_start`, `event_stop`, `event_time`, `event_status`,
+#'   `d_event_exact`, `d_event_any`, `event_censor_type`, and `surv_type`.
 #' @keywords internal
 .resolve_event_model_vars <- function(formulaEvent, dataEvent, context = "JoiNMe") {
   if (!inherits(formulaEvent, "formula") || length(formulaEvent) < 3) {
@@ -92,6 +94,18 @@ suppressPackageStartupMessages({
     ))
   }
 
+  lhs_call <- formulaEvent[[2]]
+  surv_type_arg <- NULL
+  if (is.call(lhs_call) && length(lhs_call) >= 2) {
+    arg_names <- names(lhs_call)
+    if (!is.null(arg_names) && any(arg_names == "type")) {
+      idx_type <- which(arg_names == "type")[1]
+      if (idx_type > 0 && idx_type <= length(lhs_call)) {
+        surv_type_arg <- tolower(as.character(lhs_call[[idx_type]])[1])
+      }
+    }
+  }
+
   surv_mat <- unclass(y)
   if (!is.matrix(surv_mat) || ncol(surv_mat) < 2L) {
     cli::cli_abort(c(
@@ -100,18 +114,155 @@ suppressPackageStartupMessages({
     ))
   }
 
-  if (ncol(surv_mat) == 2L) {
-    event_time <- surv_mat[, 1]
-    event_status <- surv_mat[, 2]
-  } else {
-    event_time <- surv_mat[, 2]
-    event_status <- surv_mat[, 3]
+  surv_type_raw <- tolower(as.character(attr(y, "type") %||% "right"))
+  surv_type <- surv_type_raw
+
+  event_start <- rep(0, nrow(surv_mat))
+  event_stop <- rep(NA_real_, nrow(surv_mat))
+  event_status <- rep(0, nrow(surv_mat))
+  event_censor_type <- rep(0L, nrow(surv_mat))
+
+  if (surv_type_raw %in% c("right", "counting")) {
+    if (ncol(surv_mat) == 2L) {
+      event_start <- rep(0, nrow(surv_mat))
+      event_stop <- surv_mat[, 1]
+      event_status <- surv_mat[, 2]
+    } else {
+      event_start <- surv_mat[, 1]
+      event_stop <- surv_mat[, 2]
+      event_status <- surv_mat[, 3]
+    }
+    event_censor_type <- ifelse(as.numeric(event_status) == 0, 0L, 1L)
+  } else if (surv_type_raw == "left") {
+    if (ncol(surv_mat) != 2L) {
+      cli::cli_abort(c(
+        x = "{context}: unsupported {.code Surv(...)} layout for left-censored data.",
+        i = "Use {.code survival::Surv(time, status, type='left')} with two columns."
+      ))
+    }
+    event_stop <- as.numeric(surv_mat[, 1])
+    event_status <- as.numeric(surv_mat[, 2])
+    event_censor_type <- ifelse(event_status == 0, 0L, 2L)
+    surv_type <- "left"
+  } else if (surv_type_raw == "interval") {
+    if (identical(surv_type_arg, "interval")) {
+      cli::cli_abort(c(
+        x = "{context}: {.code Surv(..., type='interval')} is not supported.",
+        i = "Use {.code survival::Surv(time1, time2, type='interval2')} instead."
+      ))
+    }
+    if (ncol(surv_mat) < 3L) {
+      cli::cli_abort(c(
+        x = "{context}: interval-censored survival input requires {.code time1}, {.code time2}, and status columns.",
+        i = "Use {.code survival::Surv(time1, time2, type='interval2')} for interval-censored data."
+      ))
+    }
+
+    t1 <- as.numeric(surv_mat[, 1])
+    t2 <- as.numeric(surv_mat[, 2])
+    st <- as.integer(surv_mat[, 3])
+
+    is_right <- st == 0L
+    is_exact <- st == 1L
+    is_left <- st == 2L
+    is_interval <- st == 3L
+
+    event_start <- ifelse(is_interval, t1, 0)
+    event_stop <- ifelse(is_right, t1,
+      ifelse(is_exact, t1,
+        ifelse(is_left, t2, t2)
+      )
+    )
+
+    event_status <- st
+    event_censor_type <- ifelse(is_right, 0L,
+      ifelse(is_exact, 1L,
+        ifelse(is_left, 2L, 3L)
+      )
+    )
+    surv_type <- "interval2"
+  }
+
+  event_start <- as.numeric(event_start)
+  event_stop <- as.numeric(event_stop)
+
+  if (any(!is.finite(event_start)) || any(!is.finite(event_stop))) {
+    cli::cli_abort(c(
+      x = "{context}: event start/stop times from {.code Surv(...)} must be finite.",
+      i = "Check missing or non-numeric values in the event-time columns."
+    ))
+  }
+  if (any(event_start < 0)) {
+    cli::cli_abort(c(
+      x = "{context}: event start times must be >= 0.",
+      i = "Use non-negative delayed-entry times in {.code Surv(start, stop, status)}."
+    ))
+  }
+  if (any(event_stop <= event_start)) {
+    cli::cli_abort(c(
+      x = "{context}: every event interval must satisfy {.code stop > start}.",
+      i = "Ensure {.code Surv(start, stop, status)} has strictly increasing interval endpoints."
+    ))
+  }
+
+  if (!surv_type %in% c("right", "counting", "left", "interval2")) {
+    cli::cli_abort(c(
+      x = "{context}: unsupported Surv type {.val {surv_type}}.",
+      i = "Supported types are right, counting, left, and interval2."
+    ))
+  }
+
+  event_time <- as.numeric(event_stop)
+  d_event_exact <- as.integer(event_censor_type == 1L)
+  d_event_any <- as.integer(event_censor_type %in% c(1L, 2L, 3L))
+
+  list(
+    event_start = event_start,
+    event_stop = event_stop,
+    event_status = event_status,
+    event_time = event_time,
+    d_event_exact = d_event_exact,
+    d_event_any = d_event_any,
+    event_censor_type = as.integer(event_censor_type),
+    surv_type = surv_type
+  )
+}
+
+#' Build interval index ranges for event rows grouped by id
+#'
+#' @param id_int Integer id index vector for event rows.
+#' @param n_id Number of unique subjects.
+#' @param context Character label for error messages.
+#'
+#' @return Named list with `event_start_idx` and `event_end_idx` arrays.
+#' @keywords internal
+.build_event_interval_index <- function(id_int, n_id, context = "JoiNMe") {
+  if (length(id_int) == 0L) {
+    cli::cli_abort(c(
+      x = "{context}: event data must contain at least one row.",
+      i = "Provide event rows with {.code Surv(...)} outcomes."
+    ))
+  }
+
+  split_idx <- split(seq_along(id_int), id_int)
+  start_idx <- integer(n_id)
+  end_idx <- integer(n_id)
+
+  for (i in seq_len(n_id)) {
+    rows_i <- split_idx[[as.character(i)]]
+    if (is.null(rows_i) || length(rows_i) == 0L) {
+      cli::cli_abort(c(
+        x = "{context}: each subject id must have at least one event interval row.",
+        i = "Missing interval rows for subject index {i}."
+      ))
+    }
+    start_idx[i] <- min(rows_i)
+    end_idx[i] <- max(rows_i)
   }
 
   list(
-    event_time = as.numeric(event_time),
-    event_status = event_status,
-    surv_type = as.character(attr(y, "type") %||% "right")
+    event_start_idx = as.integer(start_idx),
+    event_end_idx = as.integer(end_idx)
   )
 }
 
@@ -1649,8 +1800,8 @@ gk_quadrature <- function(nodes = 15L) {
   if (length(mats) == 0) {
     return(array(0.0, dim = c(n_id, K, 0)))
   }
-  Xbig <- do.call(cbind, mats)
-  array(Xbig, dim = c(n_id, K, ncol(Xbig)))
+  X <- do.call(cbind, mats)
+  array(X, dim = c(n_id, K, ncol(X)))
 }
 
 #' Evaluate RHS list at event times
@@ -2131,14 +2282,19 @@ gk_quadrature <- function(nodes = 15L) {
   if (.is_cmdstanr_fit(fit)) {
     d <- fit$draws(variables = variables)
   } else if (.is_rstan_fit(fit)) {
-    d <- posterior::as_draws_array(fit)
+    extract_args <- list(
+      object = fit,
+      permuted = FALSE,
+      inc_warmup = FALSE
+    )
     if (!is.null(variables)) {
-      vars_avail <- intersect(variables, posterior::variables(d))
-      d <- posterior::subset_draws(d, variable = vars_avail)
+      extract_args$pars <- variables
     }
+    d <- posterior::as_draws_array(do.call(rstan::extract, extract_args))
   } else {
     cli::cli_abort("Unsupported Stan fit object; expected CmdStanR or rstan.")
   }
+
   if (!is.null(draws) && is.finite(draws) && !isTRUE(keep_chains)) {
     nd <- posterior::ndraws(d)
     if (draws < nd) {
@@ -2147,6 +2303,7 @@ gk_quadrature <- function(nodes = 15L) {
       d <- posterior::subset_draws(d, draw = idx)
     }
   }
+
   d
 }
 

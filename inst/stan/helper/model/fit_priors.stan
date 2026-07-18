@@ -114,15 +114,22 @@
   /* Baseline hazard priors (per event type) */
   for (k_ev in 1 : K_event) { // event-specific baseline hazard
     // Intercept is encoded in the first basis column (constant 1s).
-    bs_gamma_c[k_ev][1] ~ normal(-3, alpha_scale);
+    // bs_gamma_c[k_ev][1] ~ normal(-3, alpha_scale);
+    bs_gamma_c[k_ev][1] ~ student_t(3, -5, 6);
     if (Kbs > 1)
-      bs_gamma_c[k_ev][2:Kbs] ~ normal(0, alpha_scale);
+      bs_gamma_c[k_ev][2:Kbs] ~ student_t(3, 0, alpha_scale);
     if (Kbs >= 4) // penalised spline second differences (exclude intercept)
       for (k in 4 : Kbs)
         target += normal_lpdf(
                               bs_gamma_c[k_ev][k] - 2 * bs_gamma_c[k_ev][k - 1]
                               + bs_gamma_c[k_ev][k - 2] | 0, tau_spline);
-    gamma_w[k_ev] ~ std_normal();
+    if (shrinkage == 1) {
+      gamma_w[k_ev] ~ double_exponential(0, alpha_scale);
+    } else if (shrinkage == 2) {
+      gamma_w[k_ev] ~ normal(0, alpha_scale);
+    } else {
+      gamma_w[k_ev] ~ student_t(6, 0, alpha_scale);
+    }
   }
   
   /* Distributional parameters (marker-specific + ordinal cutpoints) */
@@ -164,19 +171,19 @@
     z_marker_weights ~ double_exponential(0, 1);
 
     /* Penalised monotone spline shape priors */
-  // Tight prior on the latent increment logits:
-  // - z = 0 implies equal increments,
-  // - expit(z) gives positive increments summing to 1,
-  // - smaller prior scale keeps the learned shape close to a smooth default
-  //   unless the data clearly support bends.
-  if (n_free_spline_cv > 0) z_spline_cv ~ double_exponential(0, 1);
-  if (n_free_spline_cs > 0) z_spline_cs ~ double_exponential(0, 1);
-  if (n_free_spline_corr > 0) to_vector(z_spline_corr) ~ double_exponential(0, 1);
-  if (n_free_spline_vcov > 0) to_vector(z_spline_vcov) ~ double_exponential(0, 1);
-  if (n_free_spline_cv_mean > 0) z_spline_cv_mean ~ double_exponential(0, 1);
-  if (n_free_spline_cv_marker > 0) z_spline_cv_marker ~ double_exponential(0, 1);
-  if (n_free_spline_cs_mean > 0) z_spline_cs_mean ~ double_exponential(0, 1);
-  if (n_free_spline_cs_marker > 0) z_spline_cs_marker ~ double_exponential(0, 1);
+    // Tight prior on the latent increment logits:
+    // - z = 0 implies equal increments,
+    // - expit(z) gives positive increments summing to 1,
+    // - smaller prior scale keeps the learned shape close to a smooth default
+    //   unless the data clearly support bends.
+    if (n_free_spline_cv > 0) z_spline_cv ~ double_exponential(0, 1);
+    if (n_free_spline_cs > 0) z_spline_cs ~ double_exponential(0, 1);
+    if (n_free_spline_corr > 0) to_vector(z_spline_corr) ~ double_exponential(0, 1);
+    if (n_free_spline_vcov > 0) to_vector(z_spline_vcov) ~ double_exponential(0, 1);
+    if (n_free_spline_cv_mean > 0) z_spline_cv_mean ~ double_exponential(0, 1);
+    if (n_free_spline_cv_marker > 0) z_spline_cv_marker ~ double_exponential(0, 1);
+    if (n_free_spline_cs_mean > 0) z_spline_cs_mean ~ double_exponential(0, 1);
+    if (n_free_spline_cs_marker > 0) z_spline_cs_marker ~ double_exponential(0, 1);
     if (estimate_iota_intercept_cv > 0) z_iota_intercept_cv ~ std_normal();
     if (estimate_iota_slope_cv > 0) z_iota_slope_cv ~ std_normal();
     if (estimate_iota_intercept_cs > 0) z_iota_intercept_cs ~ std_normal();
@@ -235,6 +242,48 @@
     if (estimate_iota_slope_cs_mean > 0) z_iota_slope_cs_mean ~ std_normal();
     if (estimate_iota_intercept_cs_marker > 0) z_iota_intercept_cs_marker ~ std_normal();
     if (estimate_iota_slope_cs_marker > 0) z_iota_slope_cs_marker ~ std_normal();
+  } else {
+    alpha_corr ~ student_t(6, 0, 1);
+    alpha_vcov ~ student_t(6, 0, 1);
+    z_alpha_cv_total ~ student_t(6, 0, 1);
+    z_alpha_cs_total ~ student_t(6, 0, 1);
+    z_alpha_cv_mean ~ student_t(6, 0, 1);
+    z_alpha_cs_mean ~ student_t(6, 0, 1);
+    z_alpha_cv_marker ~ student_t(6, 0, 1);
+    z_alpha_cs_marker ~ student_t(6, 0, 1);
+    // if (estimate_marker_weights == 1 && use_marker_weight_assoc == 1)
+    z_marker_weights ~ student_t(6, 0, 1);
+
+    /* Penalised monotone spline shape priors */
+    // Tight prior on the latent increment logits:
+    // - z = 0 implies equal increments,
+    // - expit(z) gives positive increments summing to 1,
+    // - smaller prior scale keeps the learned shape close to a smooth default
+    //   unless the data clearly support bends.
+    if (n_free_spline_cv > 0) z_spline_cv ~ student_t(6, 0, 1);
+    if (n_free_spline_cs > 0) z_spline_cs ~ student_t(6, 0, 1);
+    if (n_free_spline_corr > 0) to_vector(z_spline_corr) ~ student_t(6, 0, 1);
+    if (n_free_spline_vcov > 0) to_vector(z_spline_vcov) ~ student_t(6, 0, 1);
+    if (n_free_spline_cv_mean > 0) z_spline_cv_mean ~ student_t(6, 0, 1);
+    if (n_free_spline_cv_marker > 0) z_spline_cv_marker ~ student_t(6, 0, 1);
+    if (n_free_spline_cs_mean > 0) z_spline_cs_mean ~ student_t(6, 0, 1);
+    if (n_free_spline_cs_marker > 0) z_spline_cs_marker ~ student_t(6, 0, 1);
+    if (estimate_iota_intercept_cv > 0) z_iota_intercept_cv ~ student_t(6, 0, 1);
+    if (estimate_iota_slope_cv > 0) z_iota_slope_cv ~ student_t(6, 0, 1);
+    if (estimate_iota_intercept_cs > 0) z_iota_intercept_cs ~ student_t(6, 0, 1);
+    if (estimate_iota_slope_cs > 0) z_iota_slope_cs ~ student_t(6, 0, 1);
+    if (estimate_iota_intercept_corr > 0) z_iota_intercept_corr ~ student_t(6, 0, 1);
+    if (estimate_iota_slope_corr > 0) z_iota_slope_corr ~ student_t(6, 0, 1);
+    if (estimate_iota_intercept_vcov > 0) z_iota_intercept_vcov ~ student_t(6, 0, 1);
+    if (estimate_iota_slope_vcov > 0) z_iota_slope_vcov ~ student_t(6, 0, 1);
+    if (estimate_iota_intercept_cv_mean > 0) z_iota_intercept_cv_mean ~ student_t(6, 0, 1);
+    if (estimate_iota_slope_cv_mean > 0) z_iota_slope_cv_mean ~ student_t(6, 0, 1);
+    if (estimate_iota_intercept_cv_marker > 0) z_iota_intercept_cv_marker ~ student_t(6, 0, 1);
+    if (estimate_iota_slope_cv_marker > 0) z_iota_slope_cv_marker ~ student_t(6, 0, 1);
+    if (estimate_iota_intercept_cs_mean > 0) z_iota_intercept_cs_mean ~ student_t(6, 0, 1);
+    if (estimate_iota_slope_cs_mean > 0) z_iota_slope_cs_mean ~ student_t(6, 0, 1);
+    if (estimate_iota_intercept_cs_marker > 0) z_iota_intercept_cs_marker ~ student_t(6, 0, 1);
+    if (estimate_iota_slope_cs_marker > 0) z_iota_slope_cs_marker ~ student_t(6, 0, 1);
   }
 
   

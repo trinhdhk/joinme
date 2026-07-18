@@ -14,7 +14,9 @@
 \item{context}{Character label for error messages.}
 }
 \value{
-Named list with extracted \code{event_time}, \code{event_status}, and \code{surv_type}.
+Named list with parsed event-process vectors:
+\code{event_start}, \code{event_stop}, \code{event_time}, \code{event_status},
+\code{d_event_exact}, \code{d_event_any}, \code{event_censor_type}, and \code{surv_type}.
 }
 \description{
 Resolve event outcomes from formulaEvent via Surv model response

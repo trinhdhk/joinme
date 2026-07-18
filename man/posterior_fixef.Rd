@@ -9,7 +9,7 @@ posterior_fixef(object, ...)
 \arguments{
 \item{object}{A \code{JoiNMeFit} object.}
 
-\item{...}{Additional arguments forwarded to \code{\link[nlme:fixed.effects]{nlme::fixef()}}.}
+\item{...}{Additional arguments forwarded to \code{\link[nlme:fixef]{fixef()}}.}
 }
 \value{
 The same object returned by \code{fixef(object, summary = FALSE, ...)}.

@@ -218,11 +218,17 @@ plot.JoiNMeDynPred <- function(
         }
     }
 
-    available_scales <- .available_longitudinal_scales(x)
-    if (!is.null(scale)) {
-        scale <- match.arg(scale, choices = available_scales)
-    } else if (length(available_scales) > 0) {
-        scale <- if ("epred" %in% available_scales) "epred" else available_scales[1]
+    # Resolve a longitudinal scale only when a longitudinal panel is requested.
+    # Event-only prediction objects need not contain longitudinal summaries.
+    if ("longitudinal" %in% type) {
+        available_scales <- .available_longitudinal_scales(x)
+        if (!is.null(scale)) {
+            scale <- match.arg(scale, choices = available_scales)
+        } else if (length(available_scales) > 0) {
+            scale <- if ("epred" %in% available_scales) "epred" else available_scales[1]
+        }
+    } else {
+        scale <- NULL
     }
 
     # Identify subjects
@@ -418,11 +424,7 @@ plot.JoiNMeDynPred <- function(
     # Filter by id if not population level
     if (trajectory_type == "id_marker") {
         quant_df <- quant_df[quant_df$id == id, , drop = FALSE]
-    } else if (trajectory_type == "marker_pop") {
-        # Already filtered - use all rows
-    } else if (trajectory_type == "overall_pop") {
-        # Already filtered - use all rows
-    }
+    } 
     if (!is.null(marker) && "marker" %in% names(quant_df)) {
         quant_df <- quant_df[as.character(quant_df$marker) %in% marker, , drop = FALSE]
     }
@@ -439,15 +441,20 @@ plot.JoiNMeDynPred <- function(
     }
     if (!scale_long %in% c("epred", "linpred", "predict")) scale_long <- "epred"
 
-    # Get observed data
-    data_long <- x$data$longitudinal
-    data_long_id <- data_long[data_long$id == id, , drop = FALSE]
-
     # Identify variable names from metadata (stored during prediction)
     # Fall back to x$call if not available
     id_var <- x$metadata$id_var %||% eval(x$call$id_var) %||% "id"
     time_var <- x$metadata$time_var %||% eval(x$call$time_var) %||% "time"
     marker_var <- x$metadata$marker_var %||% eval(x$call$marker_var) %||% "marker"
+
+    # Get observed data using the fitted subject-variable name rather than a
+    # hard-coded column, preserving custom interfaces through JoiNMeDynPred.
+    data_long <- x$data$longitudinal
+    data_long_id <- data_long[
+        as.character(data_long[[id_var]]) == as.character(id),
+        ,
+        drop = FALSE
+    ]
     if (!is.null(marker) && marker_var %in% names(data_long_id)) {
         data_long_id <- data_long_id[as.character(data_long_id[[marker_var]]) %in% marker, , drop = FALSE]
     }
@@ -477,22 +484,22 @@ plot.JoiNMeDynPred <- function(
     }
     
     # Final fallback: try to guess from data if still missing
-    if (is.na(resp_var)) {
-        # Check if data has a column that looks like response
-        resp_candidates <- setdiff(names(data_long_id), c(id_var, time_var, marker_var))
-        # Prioritize "y" as response variable if it exists
-        if ("y" %in% resp_candidates) {
-            resp_var <- "y"
-        } else if (length(resp_candidates) > 0) {
-            # Otherwise take the first non-key column
-            resp_var <- resp_candidates[1]
-        } else {
-            cli::cli_abort(c(
-                x = "Cannot determine response variable name for longitudinal data.",
-                i = "Ensure the prediction object includes metadata$response_var or a valid formulaLong with a response, or that the data contains a recognizable response column."
-            ))
-        }
-    }
+    # if (is.na(resp_var)) {
+    #     # Check if data has a column that looks like response
+    #     resp_candidates <- setdiff(names(data_long_id), c(id_var, time_var, marker_var))
+    #     # Prioritize "y" as response variable if it exists
+    #     if ("y" %in% resp_candidates) {
+    #         resp_var <- "y"
+    #     } else if (length(resp_candidates) > 0) {
+    #         # Otherwise take the first non-key column
+    #         resp_var <- resp_candidates[1]
+    #     } else {
+    #         cli::cli_abort(c(
+    #             x = "Cannot determine response variable name for longitudinal data.",
+    #             i = "Ensure the prediction object includes metadata$response_var or a valid formulaLong with a response, or that the data contains a recognizable response column."
+    #         ))
+    #     }
+    # }
 
     # Conditioning time
     # - separates observed history from prediction horizon
@@ -504,54 +511,46 @@ plot.JoiNMeDynPred <- function(
     df_pred$segment <- "predict"
     df_pred$marker <- as.character(df_pred$marker)
 
-    # Prepare observed or fitted data for the left-of-time_start region
+    # Prepare the observed measurements independently of the posterior scale.
+    # Posterior expected values define fitted curves; they are not observations
+    # and therefore must never replace the measured responses in point layers.
     df_obs <- NULL
-    use_fitted <- scale_long %in% c("linpred", "epred")
-
-    if (isTRUE(show_data)) {
-        if (use_fitted) {
-            fit_df <- x$quantiles$longitudinal_fitted
-            if (!is.null(fit_df) && "scale" %in% names(fit_df)) {
-                fit_df <- fit_df[fit_df$id == id & fit_df$scale == scale_long, , drop = FALSE]
-                if (!is.null(marker) && "marker" %in% names(fit_df)) {
-                    fit_df <- fit_df[as.character(fit_df$marker) %in% marker, , drop = FALSE]
-                }
-                if (nrow(fit_df) > 0) {
-                    median_col <- .quantile_name_from_prob(0.5)
-                    if (!(median_col %in% names(fit_df))) median_col <- "mean"
-                    df_obs <- fit_df[, c("time", "marker", median_col), drop = FALSE]
-                    names(df_obs)[names(df_obs) == median_col] <- "value"
-                    df_obs$type <- ifelse(df_obs$time <= t_cond, "fitted", "fitted_future")
-                    df_obs$marker <- as.character(df_obs$marker)
-                }
-            }
-            if (is.null(df_obs) || nrow(df_obs) == 0) df_obs <- NULL
-        } else if (nrow(data_long_id) > 0) {
-            # Verify that required columns exist in the data
-            required_cols <- c(time_var, marker_var, resp_var)
-            missing_cols <- setdiff(required_cols, names(data_long_id))
-            if (length(missing_cols) > 0) {
-                cli::cli_warn(c(
-                    x = "Cannot plot observed data: missing columns: {paste(missing_cols, collapse = ', ')}.",
-                    i = "Check the prediction input data and column names."
-                ))
+    fitted_sample_source <- identical(x$metadata$source %||% "", "fit_samples")
+    if (isTRUE(show_data) && nrow(data_long_id) > 0) {
+        # Step 1: Verify the observed response, marker, and time variables.
+        required_cols <- c(time_var, marker_var, resp_var)
+        missing_cols <- setdiff(required_cols, names(data_long_id))
+        if (length(missing_cols) > 0) {
+            cli::cli_warn(c(
+                x = "Cannot plot observed data: missing columns: {paste(missing_cols, collapse = ', ')}.",
+                i = "Check the prediction input data and column names."
+            ))
+        } else {
+            # Step 2: Retain the measured responses exactly as supplied by the
+            # study data, including observations after a conditioning time.
+            df_obs <- data_long_id[, c(time_var, marker_var, resp_var), drop = FALSE]
+            names(df_obs) <- c("time", "marker", "value")
+            df_obs$type <- if (isTRUE(fitted_sample_source)) {
+                "observed"
             } else {
-                df_obs <- data_long_id[, c(time_var, marker_var, resp_var), drop = FALSE]
-                names(df_obs) <- c("time", "marker", "value")
-                df_obs$type <- ifelse(df_obs$time <= t_cond, "observed", "observed_future")
-                df_obs$marker <- as.character(df_obs$marker)
+                ifelse(df_obs$time <= t_cond, "observed", "observed_future")
             }
+            df_obs$marker <- as.character(df_obs$marker)
         }
     }
 
-    # Build prediction coverage from 0 to horizon
+    # Build prediction coverage from the fitted trajectory design to the horizon.
     t_horiz <- max(quant_df$time, na.rm = TRUE)
     if (!is.finite(t_horiz) && !is.null(df_obs)) {
         t_horiz <- max(df_obs$time, na.rm = TRUE)
     }
     if (!is.finite(t_horiz)) t_horiz <- t_cond
 
-    if (scale_long == "predict") {
+    if (isTRUE(fitted_sample_source)) {
+        # Direct fitted plots estimate the complete trajectory on the common
+        # evaluation grid; no dynamic-prediction conditioning split is required.
+        df_pred$segment <- "fitted"
+    } else if (scale_long == "predict") {
         df_pred <- df_pred[df_pred$time >= t_cond & df_pred$time <= t_horiz, , drop = FALSE]
         if (!is.null(df_obs)) df_obs <- df_obs[df_obs$time <= t_cond, , drop = FALSE]
     } else {
@@ -598,14 +597,15 @@ plot.JoiNMeDynPred <- function(
         for (level in sort(ci_levels, decreasing = TRUE)) {
             alpha_level <- prediction_style$alpha / length(ci_levels)
             p_names <- .quantile_names_from_ci(level)
-
             if (all(p_names %in% names(df_pred))) {
-                df_ribbon <- df_pred[, c("time", "marker", p_names), drop = FALSE]
+                df_ribbon <- as.data.frame(df_pred)[, c("time", "marker", p_names), drop = FALSE]
                 names(df_ribbon)[3:4] <- c("ymin", "ymax")
 
                 p <- p + ggplot2::geom_ribbon(
-                    ggplot2::aes(x = .data$time, ymin = .data$ymin, ymax = .data$ymax,
-                                 fill = .data$marker),
+                    ggplot2::aes(
+                        x = time, 
+                        ymin = ymin, ymax = ymax,
+                        fill = marker),
                     data = df_ribbon,
                     alpha = alpha_level,
                     color = NA
@@ -620,7 +620,7 @@ plot.JoiNMeDynPred <- function(
             q_cols <- .quantile_names_from_ci(level)
             for (qcol in q_cols) {
                 if (qcol %in% names(df_pred)) {
-                    df_line <- df_pred[, c("time", "marker", qcol), drop = FALSE]
+                    df_line <- as.data.frame(df_pred)[, c("time", "marker", qcol), drop = FALSE]
                     names(df_line)[3] <- "value"
                     p <- p + ggplot2::geom_line(
                         ggplot2::aes(x = .data$time, y = .data$value, color = .data$marker),
@@ -1145,7 +1145,7 @@ plot.JoiNMeDynPred <- function(
 }
 
 # ============================================================================
-# Diagnostic plots for JoiNMeFit
+# Plot method for JoiNMeFit
 # ============================================================================
 
 #' Plot diagnostics, fitted trajectories, and association curves for JoiNMe fits
@@ -1163,6 +1163,9 @@ plot.JoiNMeDynPred <- function(
 #' @param regex_pars Optional regular expression for parameter selection for
 #'   diagnostic plots.
 #' @param draws Optional number of posterior draws to subset for diagnostics.
+#'   For fitted-data plotting types (`"longitudinal"`, `"survival"`,
+#'   `"cumhaz"`), this also controls the number of fitted posterior draws
+#'   used to build plot summaries directly from the fitted object.
 #' @param seed Random seed for draw subsetting and fitted plotting.
 #' @param max_vars Maximum number of parameters for running diagnostics.
 #' @param mcmc_type Bayesplot geometry used when `type = "mcmc"`.
@@ -1180,35 +1183,41 @@ plot.JoiNMeDynPred <- function(
 #'   aggregation across the selected subjects. The heatmap is therefore an
 #'   alternative display for the longitudinal process rather than a separate
 #'   modelling target.
-#' @param condition Optional conditioning specification for fitted-data plots.
-#'   Supply either a named list for one condition or a data frame with one row
-#'   per condition, such as the output of [make_conditions()]. Each condition
-#'   row may contain baseline covariates from the longitudinal data, the event
-#'   data, or both. For ordinary fitted trajectories, multiple rows return a
-#'   named list of condition-specific plots unless a single plot type is
-#'   requested with `combined = TRUE`, in which case the condition-specific
-#'   panels are combined. For `longitudinal_style = "heatmap"`, multiple
-#'   condition rows are shown as separate facets.
-#' @param conditioning Conditioning-time convention when `time_start` is not
-#'   supplied. `"last"` uses each subject's last observed longitudinal time,
-#'   `"origin"` uses the first observed time, and `"auto"` chooses `"last"`
-#'   when longitudinal curves are requested and `"origin"` otherwise.
-#' @param time_start Optional conditioning time passed to fitted-data
-#'   predictions. Can be scalar numeric, named numeric vector, or an event-data
-#'   column name.
-#' @param times Optional time grid for fitted-data prediction.
-#' @param time_horizon Optional prediction horizon for fitted-data prediction.
-#' @param pred_control Named list passed to `predict.JoiNMeFit()` for fitted-data
-#'   plotting. By default this uses a modest draw count for plotting.
+#' @param longitudinal_times Optional numeric vector of times at which fitted
+#'   longitudinal trajectories are evaluated. Times are expressed on the
+#'   original study-time scale. When `NULL`, an evenly spaced sequence spanning
+#'   the selected subjects' observed follow-up is used.
+#' @param longitudinal_points Number of evenly spaced evaluation times used when
+#'   `longitudinal_times = NULL`. The default is 80.
+#' @details Fitted-data plotting from `JoiNMeFit` uses fitted posterior samples
+#'   and does not accept conditioning or future-prediction arguments
+#'   (`condition`, `conditioning`, `time_start`, `times`, `time_horizon`, or
+#'   `pred_control`). For conditioning-based trajectories, call [predict()] and
+#'   then plot the resulting `JoiNMeDynPred` object. At fitted trajectory times,
+#'   covariates other than time are held at their first observed value within
+#'   each selected subject-marker combination.
 #' @param threshold Posterior sign-certainty threshold for
 #'   `longitudinal_style = "heatmap"`. A tile is shown as significant when the
 #'   posterior probability of either a positive or a negative change, relative
 #'   to the earliest plotted time for that marker, is at least `1 - threshold`.
-#'   Tiles that do not meet that criterion are drawn transparently.
-#' @param smooth_trajectory,smooth_method,smooth_span,ci_levels,ci_type,
-#'   observed_first,facet_by,facet_scales,combined,show_data,
-#'   show_observed_line,observed_style,prediction_style,theme_fn,
-#'   palette_marker Passed to `plot.JoiNMeDynPred()` for fitted-data plots.
+#'   Tiles that do not meet that criterion remain visible at reduced opacity.
+#' @param smooth_trajectory Logical; add a secondary smooth of the posterior
+#'   median trajectory.
+#' @param smooth_method Smoothing method, either `"loess"` or `"spline"`.
+#' @param smooth_span Numeric span used by the loess smoother.
+#' @param ci_levels Numeric credible interval levels.
+#' @param ci_type Credible interval display: `"ribbon"`, `"line"`, or `"both"`.
+#' @param observed_first Logical; shade the observed-history region for dynamic
+#'   prediction plots.
+#' @param facet_by Faceting choice, either `"marker"` or `"none"`.
+#' @param facet_scales Scale rule passed to marker facets.
+#' @param combined Logical; combine requested panels when possible.
+#' @param show_data Logical; display measured longitudinal responses.
+#' @param show_observed_line Logical; connect measured responses within marker.
+#' @param observed_style Named list controlling measured-response appearance.
+#' @param prediction_style Named list controlling posterior trajectory appearance.
+#' @param theme_fn Function returning a ggplot2 theme.
+#' @param palette_marker Optional marker colour palette.
 #' @param association_options Named list of options for
 #'   `type = "association"`. Supported entries are
 #'   `association_term`, `association_grid`, `association_range`,
@@ -1230,19 +1239,15 @@ plot.JoiNMeDynPred <- function(
 #' @export
 plot.JoiNMeFit <- function(x,
                            type = c("rhat", "ess_bulk", "ess_tail", "mcse_mean", "mcse_sd", "running_mean", "running_quantile", "mcmc"),
-                           pars = NULL, regex_pars = NULL, draws = NULL, seed = 1, max_vars = 4,
+                           pars = NULL, regex_pars = NULL, draws = 400, seed = 1, max_vars = 4,
                            mcmc_type = c("intervals", "areas", "dens", "dens_overlay", "hist", "trace", "violin", "acf", "rhat", "neff"),
                            quantile_probs = c(0.1, 0.5, 0.9),
                            subject = NULL,
                            marker = NA,
                            scale = NULL,
                            longitudinal_style = c("curves", "heatmap"),
-                           condition = NULL,
-                           conditioning = c("auto", "last", "origin"),
-                           time_start = NULL,
-                           times = NULL,
-                           time_horizon = NULL,
-                           pred_control = list(n_samples = 100),
+                           longitudinal_times = NULL,
+                           longitudinal_points = 80L,
                            threshold = 0.05,
                            smooth_trajectory = TRUE,
                            smooth_method = c("loess", "spline"),
@@ -1286,6 +1291,12 @@ plot.JoiNMeFit <- function(x,
 
     if ("which" %in% names(dots)) {
         type <- dots$which
+    }
+    unsupported_arguments <- setdiff(names(dots), "which")
+    if (length(unsupported_arguments)) {
+        cli::cli_abort(
+            "unused argument{?s}: {paste(unsupported_arguments, collapse = ', ')}"
+        )
     }
 
     type <- tryCatch(match.arg(unique(as.character(type)), c(diagnostic_types, fitted_types, "mcmc"), several.ok = TRUE), error = function(e) {
@@ -1333,7 +1344,6 @@ plot.JoiNMeFit <- function(x,
     }
 
     longitudinal_style <- match.arg(longitudinal_style)
-    conditioning <- match.arg(conditioning)
     smooth_method <- match.arg(smooth_method)
     facet_by <- match.arg(facet_by)
     ci_type <- match.arg(ci_type)
@@ -1400,12 +1410,9 @@ plot.JoiNMeFit <- function(x,
                 marker = marker,
                 scale = scale,
                 longitudinal_style = longitudinal_style,
-                condition = condition,
-                conditioning = conditioning,
-                time_start = time_start,
-                times = times,
-                time_horizon = time_horizon,
-                pred_control = pred_control,
+                longitudinal_times = longitudinal_times,
+                longitudinal_points = longitudinal_points,
+                draws = draws,
                 threshold = threshold,
                 seed = seed,
                 smooth_trajectory = smooth_trajectory,
@@ -1432,12 +1439,7 @@ plot.JoiNMeFit <- function(x,
                 marker = marker,
                 scale = scale,
                 longitudinal_style = longitudinal_style,
-                condition = condition,
-                conditioning = conditioning,
-                time_start = time_start,
-                times = times,
-                time_horizon = time_horizon,
-                pred_control = pred_control,
+                draws = draws,
                 threshold = threshold,
                 seed = seed,
                 smooth_trajectory = smooth_trajectory,
@@ -1464,12 +1466,7 @@ plot.JoiNMeFit <- function(x,
                 marker = marker,
                 scale = scale,
                 longitudinal_style = longitudinal_style,
-                condition = condition,
-                conditioning = conditioning,
-                time_start = time_start,
-                times = times,
-                time_horizon = time_horizon,
-                pred_control = pred_control,
+                draws = draws,
                 threshold = threshold,
                 seed = seed,
                 smooth_trajectory = smooth_trajectory,
@@ -1520,12 +1517,9 @@ plot.JoiNMeFit <- function(x,
         marker = marker,
         scale = scale,
         longitudinal_style = longitudinal_style,
-        condition = condition,
-        conditioning = conditioning,
-        time_start = time_start,
-        times = times,
-        time_horizon = time_horizon,
-        pred_control = pred_control,
+        longitudinal_times = longitudinal_times,
+        longitudinal_points = longitudinal_points,
+        draws = draws,
         threshold = threshold,
         seed = seed,
         smooth_trajectory = smooth_trajectory,
@@ -1546,117 +1540,62 @@ plot.JoiNMeFit <- function(x,
     )
 }
 
-.normalize_JoiNMefit_plot_conditions <- function(condition) {
-    if (is.null(condition)) {
-        return(list(rows = list(NULL), labels = NULL))
-    }
-
-    if (inherits(condition, "data.frame")) {
-        condition_df <- condition
-    } else if (is.list(condition)) {
-        condition_df <- as.data.frame(condition, stringsAsFactors = FALSE)
-    } else {
-        cli::cli_abort(c(
-            x = "{.arg condition} must be NULL, a named list, or a data frame.",
-            i = "Use a one-row named list for one condition, or pass the result of {.fn make_conditions}."
-        ))
-    }
-
-    if (!nrow(condition_df)) {
-        cli::cli_abort(c(
-            x = "{.arg condition} must contain at least one row.",
-            i = "Provide one or more condition rows to define the plotted covariate profile."
-        ))
-    }
-
-    labels <- rownames(condition_df)
-    labels[is.na(labels) | !nzchar(labels)] <- paste("Condition", which(is.na(labels) | !nzchar(labels)))
-    if (is.null(labels)) {
-        labels <- paste("Condition", seq_len(nrow(condition_df)))
-    }
-
-    rows <- lapply(seq_len(nrow(condition_df)), function(i) {
-        row_i <- condition_df[i, , drop = FALSE]
-        keep <- vapply(row_i, function(col) !all(is.na(col)), logical(1))
-        as.list(row_i[, keep, drop = FALSE])
-    })
-
-    list(rows = rows, labels = labels)
-}
-
-.coerce_JoiNMefit_condition_value <- function(template, value, n) {
-    value <- value[[1L]]
-
-    if (is.factor(template)) {
-        return(factor(rep(as.character(value), n), levels = levels(template), ordered = is.ordered(template)))
-    }
-    if (inherits(template, "Date")) {
-        return(rep(as.Date(value), n))
-    }
-    if (inherits(template, "POSIXct")) {
-        tz <- attr(template, "tzone") %||% ""
-        return(rep(as.POSIXct(value, tz = tz), n))
-    }
-    if (is.integer(template)) {
-        return(as.integer(rep(value, n)))
-    }
-    if (is.numeric(template)) {
-        return(as.numeric(rep(value, n)))
-    }
-    if (is.logical(template)) {
-        return(as.logical(rep(value, n)))
-    }
-
-    rep(value, n)
-}
-
-.apply_JoiNMefit_plot_condition <- function(data_long, data_event, condition_row, protected_columns = character(0)) {
-    if (is.null(condition_row) || !length(condition_row)) {
-        return(list(longitudinal = data_long, event = data_event))
-    }
-
-    condition_names <- names(condition_row)
-    allowed_long <- setdiff(names(data_long), protected_columns)
-    allowed_event <- setdiff(names(data_event), protected_columns)
-    unknown <- setdiff(condition_names, union(allowed_long, allowed_event))
-    if (length(unknown) > 0L) {
-        cli::cli_abort(c(
-            x = "Unknown {.arg condition} column{?s}: {paste(unknown, collapse = ', ')}.",
-            i = "Condition columns must match baseline covariates in the longitudinal or event data."
-        ))
-    }
-
-    for (nm in condition_names) {
-        if (nm %in% allowed_long && nrow(data_long) > 0L) {
-            data_long[[nm]] <- .coerce_JoiNMefit_condition_value(data_long[[nm]], condition_row[[nm]], nrow(data_long))
-        }
-        if (nm %in% allowed_event && nrow(data_event) > 0L) {
-            data_event[[nm]] <- .coerce_JoiNMefit_condition_value(data_event[[nm]], condition_row[[nm]], nrow(data_event))
-        }
-    }
-
-    list(longitudinal = data_long, event = data_event)
-}
-
-.JoiNMefit_longitudinal_draw_scale <- function(draw_obj, scale) {
-    if (is.null(draw_obj)) {
+#' Select one longitudinal scale from a subject's posterior trajectories
+#'
+#' @param subject_draws Named posterior trajectory entry for one subject.
+#' @param prediction_scale Character scalar naming the longitudinal scale.
+#'
+#' @return A list containing a posterior draw matrix and its time-marker layout,
+#'   or `NULL` when the requested scale is unavailable.
+#' @keywords internal
+.JoiNMefit_longitudinal_draw_scale <- function(subject_draws, prediction_scale) {
+    if (is.null(subject_draws)) {
         return(NULL)
     }
-    if (!is.null(draw_obj$matrix) && !is.null(draw_obj$scale)) {
-        return(draw_obj)
+    if (!is.null(subject_draws$matrix) && !is.null(subject_draws$scale)) {
+        return(subject_draws)
     }
-    draw_obj[[scale]] %||% NULL
+    subject_draws[[prediction_scale]] %||% NULL
 }
 
-.JoiNMefit_longitudinal_heatmap_data <- function(pred, scale, threshold, marker = NULL) {
-    if (!is.numeric(threshold) || length(threshold) != 1L || !is.finite(threshold) || threshold <= 0 || threshold >= 1) {
+#' Summarise posterior longitudinal changes on a common time grid
+#'
+#' @param posterior_prediction A `JoiNMeDynPred`-like object containing
+#'   subject-specific posterior longitudinal trajectory draws.
+#' @param prediction_scale Character scalar naming the longitudinal scale to
+#'   summarise, usually `"epred"`.
+#' @param sign_threshold Posterior tail-probability threshold used to identify
+#'   changes whose direction has posterior probability at least
+#'   `1 - sign_threshold`.
+#' @param marker_levels Optional character vector restricting the marker-specific
+#'   summaries.
+#' @param prediction_times Optional numeric vector restricting the common
+#'   trajectory times included in the heatmap.
+#'
+#' @return A data frame with posterior mean change, directional posterior
+#'   probability, and display opacity for each marker-time combination.
+#' @keywords internal
+.JoiNMefit_longitudinal_heatmap_data <- function(posterior_prediction,
+                                                 prediction_scale,
+                                                 sign_threshold,
+                                                 marker_levels = NULL,
+                                                 prediction_times = NULL) {
+    # Step 1: Validate the posterior decision threshold and optional time design.
+    if (!is.numeric(sign_threshold) || length(sign_threshold) != 1L || !is.finite(sign_threshold) || sign_threshold <= 0 || sign_threshold >= 1) {
         cli::cli_abort(c(
             x = "{.arg threshold} must be a single number strictly between 0 and 1.",
             i = "A common choice is {.code threshold = 0.05} for a 95% posterior sign-certainty rule."
         ))
     }
+    if (!is.null(prediction_times)) {
+        prediction_times <- sort(unique(as.numeric(prediction_times)))
+        if (!length(prediction_times) || any(!is.finite(prediction_times))) {
+            cli::cli_abort("{.arg prediction_times} must contain finite numeric times.")
+        }
+    }
 
-    draws_long <- pred$draws$longitudinal
+    # Step 2: Retrieve the subject-specific posterior trajectories and marker map.
+    draws_long <- posterior_prediction$draws$longitudinal
     if (is.null(draws_long) || !length(draws_long)) {
         cli::cli_abort(c(
             x = "Longitudinal draw-level predictions are required for {.val longitudinal_heatmap}.",
@@ -1664,32 +1603,53 @@ plot.JoiNMeFit <- function(x,
         ))
     }
 
-    marker_var <- pred$metadata$marker_var %||% "marker"
-    marker_source <- pred$data$longitudinal[[marker_var]]
-    marker_levels <- if (is.factor(marker_source)) {
-        levels(marker_source)
-    } else {
-        sort(unique(as.character(stats::na.omit(marker_source))))
+    marker_var <- posterior_prediction$metadata$marker_var %||% "marker"
+    marker_source <- posterior_prediction$data$longitudinal[[marker_var]]
+    fitted_marker_levels <- posterior_prediction$metadata$marker_levels
+    if (is.null(fitted_marker_levels) || !length(fitted_marker_levels)) {
+        fitted_marker_levels <- if (is.factor(marker_source)) {
+            levels(marker_source)
+        } else {
+            sort(unique(as.character(stats::na.omit(marker_source))))
+        }
     }
+    fitted_marker_levels <- as.character(fitted_marker_levels)
 
-    reference_layout <- NULL
-    aggregated_matrix <- NULL
-    n_subjects <- 0L
+    # Step 3: Collect posterior matrices separately by marker. Subjects need not
+    # share an observed measurement schedule because their fitted trajectories
+    # have already been evaluated on the requested smooth time design.
+    posterior_by_marker <- list()
+    time_by_marker <- list()
 
     for (id in names(draws_long)) {
-        draw_scale <- .JoiNMefit_longitudinal_draw_scale(draws_long[[id]], scale)
+        draw_scale <- .JoiNMefit_longitudinal_draw_scale(draws_long[[id]], prediction_scale)
         if (is.null(draw_scale) || is.null(draw_scale$matrix)) {
             next
         }
 
+        marker_index_i <- as.integer(draw_scale$marker_idx)
+        if (anyNA(marker_index_i) || any(marker_index_i < 1L | marker_index_i > length(fitted_marker_levels))) {
+            cli::cli_abort(c(
+                x = "Posterior marker indices cannot be matched to the fitted marker levels.",
+                i = "Retain {.code metadata$marker_levels} when constructing a JoiNMeDynPred object."
+            ))
+        }
         layout_i <- data.frame(
             time = as.numeric(draw_scale$time),
-            marker = marker_levels[as.integer(draw_scale$marker_idx)],
+            marker = fitted_marker_levels[marker_index_i],
             stringsAsFactors = FALSE
         )
 
-        if (!is.null(marker)) {
-            keep_cols <- as.character(layout_i$marker) %in% marker
+        keep_cols <- rep(TRUE, nrow(layout_i))
+        if (!is.null(marker_levels)) {
+            keep_cols <- keep_cols & as.character(layout_i$marker) %in% marker_levels
+        }
+        if (!is.null(prediction_times)) {
+            time_keys <- formatC(layout_i$time, digits = 15, format = "fg", flag = "#")
+            requested_keys <- formatC(prediction_times, digits = 15, format = "fg", flag = "#")
+            keep_cols <- keep_cols & time_keys %in% requested_keys
+        }
+        if (!all(keep_cols)) {
             layout_i <- layout_i[keep_cols, , drop = FALSE]
             draw_scale$matrix <- draw_scale$matrix[, keep_cols, drop = FALSE]
         }
@@ -1698,53 +1658,58 @@ plot.JoiNMeFit <- function(x,
             next
         }
 
-        if (is.null(reference_layout)) {
-            reference_layout <- layout_i
-            aggregated_matrix <- draw_scale$matrix
-        } else {
-            same_marker <- identical(as.character(reference_layout$marker), as.character(layout_i$marker))
-            same_time <- isTRUE(all.equal(reference_layout$time, layout_i$time, tolerance = 1e-10))
-            if (!same_marker || !same_time) {
+        marker_indices <- split(seq_len(nrow(layout_i)), as.character(layout_i$marker))
+        for (marker_name in names(marker_indices)) {
+            marker_columns <- marker_indices[[marker_name]]
+            marker_columns <- marker_columns[order(layout_i$time[marker_columns])]
+            marker_times <- layout_i$time[marker_columns]
+            marker_matrix <- draw_scale$matrix[, marker_columns, drop = FALSE]
+
+            if (is.null(time_by_marker[[marker_name]])) {
+                time_by_marker[[marker_name]] <- marker_times
+            } else if (!isTRUE(all.equal(time_by_marker[[marker_name]], marker_times, tolerance = 1e-10))) {
                 cli::cli_abort(c(
-                    x = "All subjects must share the same time-marker prediction grid for {.val longitudinal_heatmap}.",
-                    i = "Supply a common {.arg times} grid or use subjects with compatible marker schedules."
+                    x = "Posterior trajectories for marker {.val {marker_name}} do not share the requested time design.",
+                    i = "Evaluate fitted trajectories on a common {.arg longitudinal_times} grid."
                 ))
             }
-            aggregated_matrix <- aggregated_matrix + draw_scale$matrix
+            posterior_by_marker[[marker_name]] <- c(
+                posterior_by_marker[[marker_name]],
+                list(marker_matrix)
+            )
         }
-        n_subjects <- n_subjects + 1L
     }
 
-    if (is.null(reference_layout) || is.null(aggregated_matrix) || n_subjects == 0L) {
+    if (!length(posterior_by_marker)) {
         cli::cli_abort(c(
             x = "No longitudinal predictions were available for the requested heatmap.",
             i = "Check the requested {.arg subject}, {.arg marker}, and {.arg scale} filters."
         ))
     }
 
-    aggregated_matrix <- aggregated_matrix / n_subjects
-    by_marker <- split(seq_len(nrow(reference_layout)), as.character(reference_layout$marker))
-
-    heatmap_df <- do.call(rbind, lapply(names(by_marker), function(marker_name) {
-        idx <- by_marker[[marker_name]]
-        idx <- idx[order(reference_layout$time[idx])]
-        baseline <- aggregated_matrix[, idx[1L], drop = FALSE]
-        change_matrix <- sweep(aggregated_matrix[, idx, drop = FALSE], 1L, baseline[, 1L], FUN = "-")
+    # Step 4: Average subject-specific expected trajectories within each posterior
+    # draw, then calculate change from the marker-specific initial time.
+    heatmap_df <- do.call(rbind, lapply(names(posterior_by_marker), function(marker_name) {
+        marker_matrices <- posterior_by_marker[[marker_name]]
+        posterior_mean_matrix <- Reduce(`+`, marker_matrices) / length(marker_matrices)
+        baseline <- posterior_mean_matrix[, 1L, drop = FALSE]
+        change_matrix <- sweep(posterior_mean_matrix, 1L, baseline[, 1L], FUN = "-")
         prob_positive <- colMeans(change_matrix > 0, na.rm = TRUE)
         prob_negative <- colMeans(change_matrix < 0, na.rm = TRUE)
         posterior_sign_prob <- pmax(prob_positive, prob_negative)
 
         data.frame(
-            time = reference_layout$time[idx],
+            time = time_by_marker[[marker_name]],
             marker = marker_name,
             change = colMeans(change_matrix, na.rm = TRUE),
             posterior_sign_prob = posterior_sign_prob,
-            significant = posterior_sign_prob >= (1 - threshold),
-            alpha = ifelse(posterior_sign_prob >= (1 - threshold), 1, 0),
+            significant = posterior_sign_prob >= (1 - sign_threshold),
+            alpha = ifelse(posterior_sign_prob >= (1 - sign_threshold), 1, 0.3),
             stringsAsFactors = FALSE
         )
     }))
 
+    # Step 5: Order marker rows by the largest absolute posterior mean change.
     marker_order <- data.frame(
         marker = names(split(heatmap_df$change, heatmap_df$marker)),
         order_value = vapply(split(abs(heatmap_df$change), heatmap_df$marker), max, numeric(1), na.rm = TRUE),
@@ -1756,39 +1721,68 @@ plot.JoiNMeFit <- function(x,
     heatmap_df
 }
 
-.plot_JoiNMefit_longitudinal_heatmap <- function(x, subject, marker, scale, condition, conditioning,
-                                                 time_start, times, time_horizon, pred_control,
-                                                 threshold, seed, ci_levels, theme_fn) {
-    scale_use <- .normalize_prediction_scales(scale %||% "epred")[[1L]]
-    condition_spec <- .normalize_JoiNMefit_plot_conditions(condition)
+#' Plot posterior longitudinal change as a marker-by-time heatmap
+#'
+#' @param fitted_model A fitted `JoiNMeFit` object.
+#' @param subject_ids Optional subject identifiers included in the posterior
+#'   trajectory average.
+#' @param marker_levels Optional marker levels included in the heatmap.
+#' @param prediction_scale Longitudinal posterior scale.
+#' @param posterior_draws Optional number of fitted MCMC draws.
+#' @param prediction_times Optional common evaluation times on the original
+#'   study-time scale.
+#' @param number_time_points Number of evenly spaced evaluation times used when
+#'   `prediction_times = NULL`.
+#' @param sign_threshold Posterior directional-probability threshold.
+#' @param random_seed Seed used to sample fitted MCMC draws.
+#' @param credible_levels Credible interval levels retained in the intermediate
+#'   trajectory object.
+#' @param plot_theme Function returning a ggplot2 theme.
+#'
+#' @return A `ggplot` heatmap.
+#' @keywords internal
+.plot_JoiNMefit_longitudinal_heatmap <- function(fitted_model,
+                                                 subject_ids,
+                                                 marker_levels,
+                                                 prediction_scale,
+                                                 posterior_draws,
+                                                 prediction_times,
+                                                 number_time_points,
+                                                 sign_threshold,
+                                                 random_seed,
+                                                 credible_levels,
+                                                 plot_theme) {
+    # Step 1: Select one posterior scale for the marker trajectories.
+    scale_use <- .normalize_prediction_scales(prediction_scale %||% "epred")[[1L]]
 
-    plot_data <- do.call(rbind, lapply(seq_along(condition_spec$rows), function(i) {
-        pred <- .build_JoiNMefit_plot_prediction(
-            x = x,
-            which = "longitudinal",
-            subject = subject,
-            scale = scale_use,
-            condition = condition_spec$rows[[i]],
-            conditioning = conditioning,
-            time_start = time_start,
-            times = times,
-            time_horizon = time_horizon,
-            pred_control = pred_control,
-            seed = seed,
-            ci_levels = ci_levels,
-            pred_type = "per_marker_id"
-        )
+    # Step 2: Evaluate subject-specific posterior trajectories on a shared,
+    # smooth time design using draws from the fitted joint model.
+    pred <- .build_JoiNMefit_fitted_plot_samples(
+        x = fitted_model,
+        which = "longitudinal",
+        subject = subject_ids,
+        scale = scale_use,
+        draws = posterior_draws,
+        seed = random_seed,
+        ci_levels = credible_levels,
+        longitudinal_times = prediction_times,
+        longitudinal_points = number_time_points,
+        longitudinal_markers = marker_levels
+    )
 
-        data_i <- .JoiNMefit_longitudinal_heatmap_data(
-            pred = pred,
-            scale = scale_use,
-            threshold = threshold,
-            marker = marker
-        )
-        data_i$condition_label <- condition_spec$labels[[i]] %||% "Observed data"
-        data_i
-    }))
+    # Step 3: Average trajectories across selected subjects within each MCMC
+    # draw and calculate marker-specific change from the first evaluation time.
+    plot_data <- .JoiNMefit_longitudinal_heatmap_data(
+        posterior_prediction = pred,
+        prediction_scale = scale_use,
+        sign_threshold = sign_threshold,
+        marker_levels = marker_levels,
+        prediction_times = prediction_times
+    )
+    plot_data$condition_label <- "Fitted posterior"
 
+    # Step 4: Map posterior mean change to colour and directional certainty to
+    # opacity, preserving the statistical distinction between size and evidence.
     p <- ggplot2::ggplot(
         plot_data,
         ggplot2::aes(x = .data$time, y = .data$marker, fill = .data$change, alpha = .data$alpha)
@@ -1806,9 +1800,9 @@ plot.JoiNMeFit <- function(x,
             x = "Time",
             y = "Marker",
             title = "Longitudinal mean change",
-            subtitle = "Change is measured relative to the earliest plotted time for each marker"
+            subtitle = "Change is relative to the earliest time; faint tiles do not meet the directional threshold"
         ) +
-        theme_fn()
+        plot_theme()
 
     if (length(unique(plot_data$condition_label)) > 1L) {
         p <- p + ggplot2::facet_wrap(ggplot2::vars(.data$condition_label), scales = "free_y")
@@ -1953,99 +1947,66 @@ plot.JoiNMeFit <- function(x,
         ggplot2::theme_minimal()
 }
 
-.plot_JoiNMefit_fitted <- function(x, type, subject, marker, scale, longitudinal_style, condition, conditioning, time_start, times, time_horizon,
-                                   pred_control, threshold, seed, smooth_trajectory, smooth_method, smooth_span,
+#' Plot fitted posterior processes from a JoiNMe model
+#'
+#' @param x A fitted `JoiNMeFit` object.
+#' @param type Character vector of fitted processes.
+#' @param subject Optional subject identifiers.
+#' @param marker Optional marker levels.
+#' @param scale Longitudinal posterior scale.
+#' @param longitudinal_style Either `"curves"` or `"heatmap"`.
+#' @param longitudinal_times Optional common longitudinal evaluation times.
+#' @param longitudinal_points Number of default longitudinal evaluation times.
+#' @param draws Number of fitted MCMC draws.
+#' @param threshold Posterior directional-probability threshold.
+#' @param seed MCMC draw-sampling seed.
+#' @param smooth_trajectory,smooth_method,smooth_span Smoothing controls for the
+#'   rendered posterior summaries.
+#' @param ci_levels,ci_type Credible interval controls.
+#' @param observed_first,facet_by,facet_scales,combined Plot arrangement controls.
+#' @param show_data,show_observed_line Controls for measured longitudinal data.
+#' @param observed_style,prediction_style Named graphical parameter lists.
+#' @param theme_fn A ggplot2 theme function.
+#' @param palette_marker Optional marker colour palette.
+#'
+#' @return A `ggplot`, combined plot, or named plot list.
+#' @keywords internal
+.plot_JoiNMefit_fitted <- function(x, type, subject, marker, scale, longitudinal_style,
+                                   longitudinal_times, longitudinal_points, draws,
+                                   threshold, seed, smooth_trajectory, smooth_method, smooth_span,
                                    ci_levels, ci_type, observed_first, facet_by, facet_scales, combined,
                                    show_data, show_observed_line, observed_style, prediction_style,
                                    theme_fn, palette_marker) {
+    # Fitted-data design: use posterior samples from the fitted model directly.
+    # No dynamic prediction call is used for JoiNMeFit longitudinal/survival/cumhaz.
     if (identical(longitudinal_style, "heatmap")) {
         return(.plot_JoiNMefit_longitudinal_heatmap(
-            x = x,
-            subject = subject,
-            marker = marker,
-            scale = scale,
-            condition = condition,
-            conditioning = conditioning,
-            time_start = time_start,
-            times = times,
-            time_horizon = time_horizon,
-            pred_control = pred_control,
-            threshold = threshold,
-            seed = seed,
-            ci_levels = ci_levels,
-            theme_fn = theme_fn
+            fitted_model = x,
+            subject_ids = subject,
+            marker_levels = marker,
+            prediction_scale = scale,
+            posterior_draws = draws,
+            prediction_times = longitudinal_times,
+            number_time_points = longitudinal_points,
+            sign_threshold = threshold,
+            random_seed = seed,
+            credible_levels = ci_levels,
+            plot_theme = theme_fn
         ))
     }
-
-    condition_spec <- .normalize_JoiNMefit_plot_conditions(condition)
     plot_types <- intersect(type, c("longitudinal", "survival", "cumhaz"))
 
-    if (length(condition_spec$rows) > 1L) {
-        plots <- lapply(seq_along(condition_spec$rows), function(i) {
-            pred <- .build_JoiNMefit_plot_prediction(
-                x = x,
-                which = type,
-                subject = subject,
-                scale = scale,
-                condition = condition_spec$rows[[i]],
-                conditioning = conditioning,
-                time_start = time_start,
-                times = times,
-                time_horizon = time_horizon,
-                pred_control = pred_control,
-                seed = seed,
-                ci_levels = ci_levels,
-                pred_type = "per_marker_id"
-            )
-
-            out_i <- plot(pred,
-                type = plot_types,
-                subject = subject,
-                marker = if (is.null(marker)) NA else marker,
-                scale = scale,
-                smooth_trajectory = smooth_trajectory,
-                smooth_method = smooth_method,
-                smooth_span = smooth_span,
-                ci_levels = ci_levels,
-                ci_type = ci_type,
-                observed_first = observed_first,
-                facet_by = facet_by,
-                facet_scales = facet_scales,
-                combined = combined,
-                show_data = show_data,
-                show_observed_line = show_observed_line,
-                observed_style = observed_style,
-                prediction_style = prediction_style,
-                theme_fn = theme_fn,
-                palette_marker = palette_marker)
-
-            if (inherits(out_i, "ggplot")) {
-                out_i <- out_i + ggplot2::labs(subtitle = condition_spec$labels[[i]])
-            }
-            out_i
-        })
-        names(plots) <- condition_spec$labels
-
-        if (isTRUE(combined) && length(plot_types) == 1L && all(vapply(plots, inherits, logical(1), what = "ggplot"))) {
-            return(.combine_plot_grid(plots, fallback = "input"))
-        }
-        return(plots)
-    }
-
-    pred <- .build_JoiNMefit_plot_prediction(
+    pred <- .build_JoiNMefit_fitted_plot_samples(
         x = x,
         which = type,
         subject = subject,
         scale = scale,
-        condition = condition_spec$rows[[1L]],
-        conditioning = conditioning,
-        time_start = time_start,
-        times = times,
-        time_horizon = time_horizon,
-        pred_control = pred_control,
+        draws = draws,
         seed = seed,
         ci_levels = ci_levels,
-        pred_type = "per_marker_id"
+        longitudinal_times = longitudinal_times,
+        longitudinal_points = longitudinal_points,
+        longitudinal_markers = marker
     )
 
     plot(pred,
@@ -2070,72 +2031,546 @@ plot.JoiNMeFit <- function(x,
          palette_marker = palette_marker)
 }
 
-.build_JoiNMefit_plot_prediction <- function(x, which, subject, scale, condition, conditioning, time_start, times,
-                                             time_horizon, pred_control, seed, ci_levels, pred_type = "per_marker_id") {
-    id_var <- .JoiNMefit_call_arg_chr(x$call, "id_var", "id")
-    time_var <- .JoiNMefit_call_arg_chr(x$call, "time_var", "time")
-    marker_var <- .JoiNMefit_call_arg_chr(x$call, "marker_var", "marker")
-    response_var <- tryCatch(all.vars(x$formulaLong)[1], error = function(e) NA_character_)
-    event_outcome_vars <- tryCatch(all.vars(x$formulaEvent[[2]]), error = function(e) character(0))
-
-    data_long <- x$dataLong
-    data_event <- x$dataEvent
-    if (!is.null(subject)) {
-        keep_ids <- as.character(subject)
-        data_long <- data_long[as.character(data_long[[id_var]]) %in% keep_ids, , drop = FALSE]
-        data_event <- data_event[as.character(data_event[[id_var]]) %in% keep_ids, , drop = FALSE]
+#' Construct a smooth longitudinal evaluation data set
+#'
+#' @param observed_longitudinal_data Observed longitudinal data for the selected
+#'   subjects.
+#' @param subject_variable Name of the subject identifier column.
+#' @param time_variable Name of the longitudinal time column.
+#' @param marker_variable Name of the marker column.
+#' @param fitted_marker_levels Character vector giving the fitted marker order.
+#' @param prediction_times Optional numeric evaluation times on the original
+#'   study-time scale.
+#' @param number_time_points Number of evenly spaced evaluation times when
+#'   `prediction_times = NULL`.
+#'
+#' @return A list containing `data`, the subject-marker evaluation rows, and
+#'   `times`, the common ordered time design.
+#' @keywords internal
+.JoiNMefit_longitudinal_evaluation_grid <- function(observed_longitudinal_data,
+                                                    subject_variable,
+                                                    time_variable,
+                                                    marker_variable,
+                                                    fitted_marker_levels,
+                                                    prediction_times = NULL,
+                                                    number_time_points = 80L) {
+    # Step 1: Define and validate the common time design on the observed scale.
+    if (is.null(prediction_times)) {
+        number_time_points <- as.integer(number_time_points)
+        if (length(number_time_points) != 1L || !is.finite(number_time_points) || number_time_points < 2L) {
+            cli::cli_abort("{.arg longitudinal_points} must be an integer greater than or equal to 2.")
+        }
+        observed_times <- as.numeric(observed_longitudinal_data[[time_variable]])
+        observed_range <- range(observed_times[is.finite(observed_times)])
+        prediction_times <- if (diff(observed_range) > 0) {
+            seq(observed_range[1L], observed_range[2L], length.out = number_time_points)
+        } else {
+            observed_range[1L]
+        }
+    } else {
+        prediction_times <- sort(unique(as.numeric(prediction_times)))
+        if (!length(prediction_times) || any(!is.finite(prediction_times))) {
+            cli::cli_abort("{.arg longitudinal_times} must contain finite numeric times.")
+        }
     }
 
-    data_long_plot <- data_long
-    data_event_plot <- data_event
-
-    protected_columns <- unique(stats::na.omit(c(id_var, time_var, marker_var, response_var, event_outcome_vars)))
-    conditioned_data <- .apply_JoiNMefit_plot_condition(
-        data_long = data_long,
-        data_event = data_event,
-        condition_row = condition,
-        protected_columns = protected_columns
+    # Step 2: Identify the observed subject-marker combinations. Posterior
+    # trajectories are evaluated only where a subject contributes that marker.
+    combination_key <- paste(
+        as.character(observed_longitudinal_data[[subject_variable]]),
+        as.character(observed_longitudinal_data[[marker_variable]]),
+        sep = "\r"
     )
-    data_long <- conditioned_data$longitudinal
-    data_event <- conditioned_data$event
+    combination_rows <- split(seq_len(nrow(observed_longitudinal_data)), combination_key)
 
-    time_start_use <- .resolve_JoiNMefit_plot_time_start(
-        data_long = data_long,
-        id_var = id_var,
-        time_var = time_var,
-        which = which,
-        conditioning = conditioning,
-        time_start = time_start
-    )
-
-    process <- c(
-        if (any(c("longitudinal", "longitudinal_heatmap") %in% which)) "longitudinal",
-        if (any(c("longitudinal", "longitudinal_heatmap") %in% which) || any(c("survival", "cumhaz") %in% which)) "event"
-    )
-    process <- unique(process)
-
-    scale_use <- if (any(c("longitudinal", "longitudinal_heatmap") %in% which)) .normalize_prediction_scales(scale %||% c("epred", "linpred", "predict")) else NULL
-    control_use <- utils::modifyList(list(n_samples = 100L), pred_control %||% list())
-
-    pred <- predict.JoiNMeFit(
-        object = x,
-        newdataLong = data_long,
-        newdataEvent = data_event,
-        process = process,
-        pred_type = pred_type,
-        scale = scale_use,
-        times = times,
-        time_start = time_start_use,
-        time_horizon = time_horizon,
-        ci_levels = ci_levels,
-        control = control_use,
-        seed = seed
+    # Step 3: Hold non-time covariates at their first observed value within each
+    # subject-marker combination and vary only study time over the smooth design.
+    evaluation_rows <- lapply(combination_rows, function(row_indices) {
+        row_indices <- row_indices[order(as.numeric(observed_longitudinal_data[[time_variable]][row_indices]))]
+        template <- observed_longitudinal_data[row_indices[1L], , drop = FALSE]
+        trajectory_rows <- template[rep(1L, length(prediction_times)), , drop = FALSE]
+        trajectory_rows[[time_variable]] <- prediction_times
+        trajectory_rows
+    })
+    evaluation_data <- do.call(rbind, evaluation_rows)
+    rownames(evaluation_data) <- NULL
+    evaluation_data[[marker_variable]] <- factor(
+        as.character(evaluation_data[[marker_variable]]),
+        levels = fitted_marker_levels
     )
 
-    pred$data$longitudinal <- data_long_plot
-    pred$data$event <- data_event_plot
-    pred$metadata$plot_condition <- condition
-    pred
+    # Step 4: Order rows by subject, marker, and time so every posterior draw
+    # has an explicit and reproducible marker-trajectory layout.
+    evaluation_data <- evaluation_data[order(
+        evaluation_data$id_int,
+        evaluation_data$marker_int,
+        as.numeric(evaluation_data[[time_variable]])
+    ), , drop = FALSE]
+    rownames(evaluation_data) <- NULL
+
+    list(data = evaluation_data, times = prediction_times)
+}
+
+#' Build longitudinal design matrices at new evaluation times
+#'
+#' @param fitted_model A fitted `JoiNMeFit` object.
+#' @param longitudinal_evaluation_data Subject-marker rows at the desired
+#'   trajectory times, expressed on the original study-time scale.
+#' @param time_variable Name of the longitudinal time column.
+#' @param marker_variable Name of the marker column.
+#'
+#' @return A named list containing fixed, subject, marker, and subject-by-marker
+#'   design matrices evaluated on the fitted model's scaled time axis.
+#' @keywords internal
+.JoiNMefit_longitudinal_design_matrices <- function(fitted_model,
+                                                    longitudinal_evaluation_data,
+                                                    time_variable,
+                                                    marker_variable) {
+    stan_data <- fitted_model$stan_data
+
+    # Step 1: Reproduce the fitted time transformation before evaluating model
+    # matrices, thereby retaining the parameterisation used by the MCMC draws.
+    time_scale <- as.numeric(fitted_model$tmax %||% fitted_model$config$tmax %||% stan_data$tmax %||% 1)
+    if (length(time_scale) != 1L || !is.finite(time_scale) || time_scale <= 0) {
+        cli::cli_abort("The fitted longitudinal time scale is unavailable or invalid.")
+    }
+    scaled_data <- longitudinal_evaluation_data
+    scaled_data[[time_variable]] <- as.numeric(scaled_data[[time_variable]]) / time_scale
+
+    # Step 2: Recover the stored model-matrix blueprints. For older fitted
+    # objects, reconstruct the same fixed and random-effect formula components.
+    blueprints <- stan_data$design_blueprints %||% list()
+    if (.is_model_matrix_blueprint(blueprints$fixed)) {
+        fixed_design <- blueprints$fixed
+        subject_designs <- blueprints$id %||% list()
+        marker_designs <- blueprints$marker %||% list()
+        subject_marker_designs <- blueprints$idm %||% list()
+    } else {
+        expanded_formula <- reformulas::expandDoubleVerts(fitted_model$formulaLong)
+        random_terms <- reformulas::findbars(expanded_formula)
+        fixed_formula <- reformulas::nobars(expanded_formula)
+        fixed_design <- stats::update(fixed_formula, . ~ .)
+        fixed_design[[2L]] <- NULL
+        grouping_names <- vapply(random_terms, function(term) .group_name_from_expr(term[[3L]]), character(1))
+        subject_designs <- .bar_terms_to_rhs_list(random_terms[which(grouping_names == .JoiNMefit_call_arg_chr(fitted_model$call, "id_var", "id"))])
+        nested_terms <- .extract_nested_marker_terms(
+            fitted_model$formulaLong,
+            marker_variable,
+            .JoiNMefit_call_arg_chr(fitted_model$call, "id_var", "id")
+        )
+        marker_designs <- nested_terms$mk_rhs_list
+        subject_marker_designs <- nested_terms$idm_rhs_list
+    }
+
+    # Step 3: Evaluate each design block at the common trajectory times.
+    fixed_matrix <- .mm(fixed_design, scaled_data)
+    subject_matrix <- if (length(subject_designs)) {
+        do.call(cbind, lapply(subject_designs, function(design) .mm(design, scaled_data)))
+    } else {
+        matrix(0, nrow(scaled_data), as.integer(stan_data$R_id %||% 0L))
+    }
+    marker_matrix <- if (length(marker_designs)) {
+        do.call(cbind, lapply(marker_designs, function(design) .mm(design, scaled_data)))
+    } else {
+        matrix(0, nrow(scaled_data), as.integer(stan_data$R_mk %||% 0L))
+    }
+    subject_marker_matrix <- if (length(subject_marker_designs)) {
+        do.call(cbind, lapply(subject_marker_designs, function(design) .mm(design, scaled_data)))
+    } else {
+        matrix(0, nrow(scaled_data), as.integer(stan_data$Q_idm %||% 0L))
+    }
+
+    # Step 4: Verify that each design block conforms to the fitted coefficient
+    # dimensions before combining it with posterior parameter draws.
+    expected_columns <- c(
+        fixed = as.integer(stan_data$P %||% 0L),
+        subject = as.integer(stan_data$R_id %||% 0L),
+        marker = as.integer(stan_data$R_mk %||% 0L),
+        subject_marker = as.integer(stan_data$Q_idm %||% 0L)
+    )
+    design_matrices <- list(
+        fixed = fixed_matrix,
+        subject = subject_matrix,
+        marker = marker_matrix,
+        subject_marker = subject_marker_matrix
+    )
+    observed_columns <- vapply(design_matrices, ncol, integer(1))
+    if (!identical(unname(observed_columns), unname(expected_columns))) {
+        cli::cli_abort(c(
+            x = "The longitudinal trajectory design does not match the fitted coefficient dimensions.",
+            i = "Refit the model to retain model-matrix blueprints for smooth fitted trajectories."
+        ))
+    }
+
+    design_matrices
+}
+
+#' Draw fitted longitudinal trajectories and event summaries for plotting
+#'
+#' @param x A fitted `JoiNMeFit` object.
+#' @param which Character vector of fitted processes to retain.
+#' @param subject Optional subject identifiers.
+#' @param scale Requested longitudinal scale.
+#' @param draws Number of fitted MCMC draws.
+#' @param seed Seed used to sample fitted MCMC draws.
+#' @param ci_levels Credible interval levels.
+#' @param longitudinal_times Optional common longitudinal evaluation times.
+#' @param longitudinal_points Number of default longitudinal evaluation times.
+#' @param longitudinal_markers Optional marker levels.
+#'
+#' @return A `JoiNMeDynPred` object containing posterior trajectory draws,
+#'   summaries, and the original observed data.
+#' @keywords internal
+.build_JoiNMefit_fitted_plot_samples <- function(x, which, subject, scale, draws, seed, ci_levels,
+                                                 longitudinal_times = NULL,
+                                                 longitudinal_points = 80L,
+                                                 longitudinal_markers = NULL) {
+        sd <- x$stan_data
+        fit <- x$fit
+        id_var <- .JoiNMefit_call_arg_chr(x$call, "id_var", "id")
+        time_var <- .JoiNMefit_call_arg_chr(x$call, "time_var", "time")
+        marker_var <- .JoiNMefit_call_arg_chr(x$call, "marker_var", "marker")
+        y_var <- tryCatch(all.vars(x$formulaLong)[1], error = function(e) "y")
+        n_id <- as.integer(sd$n_id %||% 0L)
+        n_draws <- as.integer(draws %||% x$config$draws_default %||% 100L)
+        if (!is.finite(n_draws) || n_draws < 1L) n_draws <- 100L
+        requested_processes <- intersect(as.character(which), c("longitudinal", "survival", "cumhaz"))
+        if (!length(requested_processes)) {
+            cli::cli_abort("No supported fitted process was requested for plotting.")
+        }
+        include_longitudinal <- "longitudinal" %in% requested_processes
+        include_event_process <- any(requested_processes %in% c("survival", "cumhaz"))
+
+        id_labels <- .JoiNMe_id_labels(x, n_id)
+        marker_levels <- as.character(sd$marker_levels %||% levels(x$dataLong[[marker_var]]) %||% sort(unique(as.character(x$dataLong[[marker_var]]))))
+        if (length(marker_levels) == 0L) marker_levels <- as.character(seq_len(as.integer(sd$D %||% 0L)))
+
+        dL <- x$dataLong
+        dE <- x$dataEvent
+        if (!is.null(subject)) {
+            keep_ids <- as.character(subject)
+            dL <- dL[as.character(dL[[id_var]]) %in% keep_ids, , drop = FALSE]
+            dE <- dE[as.character(dE[[id_var]]) %in% keep_ids, , drop = FALSE]
+        }
+
+        id_index_map <- stats::setNames(seq_len(n_id), id_labels)
+        .prepare_fit_long <- function(dat) {
+            out <- dat
+            out[[marker_var]] <- factor(out[[marker_var]], levels = marker_levels)
+            out$id_int <- as.integer(id_index_map[as.character(out[[id_var]])])
+            out$marker_int <- as.integer(out[[marker_var]])
+
+            keep_long <- !is.na(out$id_int) & !is.na(out$marker_int) & is.finite(as.numeric(out[[time_var]]))
+            if (y_var %in% names(out)) {
+                y_col <- out[[y_var]]
+                if (is.numeric(y_col) || is.integer(y_col)) {
+                    keep_long <- keep_long & is.finite(as.numeric(y_col))
+                } else {
+                    keep_long <- keep_long & !is.na(y_col)
+                }
+            }
+            out <- out[keep_long, , drop = FALSE]
+            if (nrow(out) > 0L) {
+                out <- out[order(out$id_int, out$marker_int, out[[time_var]]), , drop = FALSE]
+                rownames(out) <- NULL
+            }
+            out
+        }
+
+        dL_fit <- .prepare_fit_long(dL)
+
+        # Step 1: Restrict the trajectory estimand to the requested fitted
+        # markers while retaining the unmodified observations for plot points.
+        if (!is.null(longitudinal_markers)) {
+            dL_fit <- dL_fit[as.character(dL_fit[[marker_var]]) %in% longitudinal_markers, , drop = FALSE]
+        }
+
+        if (nrow(dL_fit) == 0L) {
+            cli::cli_abort("No longitudinal rows available for fitted plotting.")
+        }
+
+        # Step 2: Construct a common smooth time design for every observed
+        # subject-marker combination. This removes dependence on irregular
+        # measurement schedules when estimating posterior trajectories.
+        longitudinal_grid <- .JoiNMefit_longitudinal_evaluation_grid(
+            observed_longitudinal_data = dL_fit,
+            subject_variable = id_var,
+            time_variable = time_var,
+            marker_variable = marker_var,
+            fitted_marker_levels = marker_levels,
+            prediction_times = longitudinal_times,
+            number_time_points = longitudinal_points
+        )
+        dL_trajectory <- longitudinal_grid$data
+
+        # Step 3: Evaluate the fitted fixed- and random-effect design matrices at
+        # the smooth trajectory times on the model's original parameterisation.
+        trajectory_design <- .JoiNMefit_longitudinal_design_matrices(
+            fitted_model = x,
+            longitudinal_evaluation_data = dL_trajectory,
+            time_variable = time_var,
+            marker_variable = marker_var
+        )
+
+        scale_req <- .normalize_prediction_scales(scale %||% c("epred", "linpred"))
+        if ("predict" %in% scale_req) {
+            cli::cli_warn(c(
+                x = "Scale {.val predict} is not available for direct fitted plotting.",
+                i = "Using {.val epred} and/or {.val linpred} from fitted samples."
+            ))
+            scale_req <- setdiff(scale_req, "predict")
+        }
+        if (length(scale_req) == 0L) scale_req <- "epred"
+
+        get_mat <- function(vars) {
+            vars <- vars[vars %in% (tryCatch(posterior::variables(.get_draws_obj(fit)), error = function(e) character(0)))]
+            if (length(vars) == 0L) return(matrix(0, n_draws, 0))
+            .get_draws_matrix(fit, variables = vars, draws = n_draws, seed = seed)
+        }
+
+        # Step 4: Prefer the effective fixed effects used with the scaled-time
+        # design matrices. Older fits may lack stored transformed parameters, in
+        # which case reconstruct the same time scaling from the sampled effects.
+        beta_scaled_vars <- paste0("beta_scaled[", seq_len(sd$P %||% 0L), "]")
+        beta_vars <- paste0("beta[", seq_len(sd$P %||% 0L), "]")
+        beta_draw <- get_mat(beta_scaled_vars)
+        if (ncol(beta_draw) != as.integer(sd$P %||% 0L)) {
+            beta_draw <- get_mat(beta_vars)
+            time_coefficient_indices <- as.integer(sd$idx_time_beta %||% integer(0))
+            time_coefficient_indices <- time_coefficient_indices[
+                time_coefficient_indices >= 1L & time_coefficient_indices <= ncol(beta_draw)
+            ]
+            if (length(time_coefficient_indices)) {
+                fitted_time_scale <- as.numeric(x$tmax %||% x$config$tmax %||% sd$tmax %||% 1)
+                beta_draw[, time_coefficient_indices] <- beta_draw[, time_coefficient_indices, drop = FALSE] * fitted_time_scale
+            }
+        }
+        n_draw_eff <- nrow(beta_draw)
+        if (n_draw_eff == 0L) cli::cli_abort("Could not extract fitted posterior draws for longitudinal plotting.")
+
+        # Step 5: Combine the smooth design with sampled MCMC coefficients to
+        # obtain subject- and marker-specific posterior linear predictors.
+        X_obs <- trajectory_design$fixed
+        Z_id <- trajectory_design$subject
+        Z_mk <- trajectory_design$marker
+        Z_idm <- trajectory_design$subject_marker
+        id_int <- as.integer(dL_trajectory$id_int)
+        marker_int <- as.integer(dL_trajectory$marker_int)
+        flat_id_marker <- (id_int - 1L) * as.integer(sd$D) + marker_int
+
+        eta_mat <- beta_draw %*% t(X_obs)
+
+        if (isTRUE((sd$R_id %||% 0L) > 0L)) {
+            for (r in seq_len(sd$R_id)) {
+                u_r <- get_mat(paste0("u_id[", seq_len(n_id), ",", r, "]"))
+                if (ncol(u_r) == n_id) {
+                    eta_mat <- eta_mat + u_r[, id_int, drop = FALSE] * matrix(rep(Z_id[, r], each = n_draw_eff), nrow = n_draw_eff)
+                }
+            }
+        }
+
+        if (isTRUE((sd$R_mk %||% 0L) > 0L)) {
+            for (r in seq_len(sd$R_mk)) {
+                v_r <- get_mat(paste0("v_marker[", seq_len(sd$D), ",", r, "]"))
+                if (ncol(v_r) == sd$D) {
+                    eta_mat <- eta_mat + v_r[, marker_int, drop = FALSE] * matrix(rep(Z_mk[, r], each = n_draw_eff), nrow = n_draw_eff)
+                }
+            }
+        }
+
+        if (isTRUE((sd$Q_idm %||% 0L) > 0L)) {
+            for (q in seq_len(sd$Q_idm)) {
+                w_q_vars <- as.vector(outer(seq_len(n_id), seq_len(sd$D), function(i, d) paste0("w_idm[", i, ",", d, ",", q, "]")))
+                w_q <- get_mat(w_q_vars)
+                if (ncol(w_q) == n_id * sd$D) {
+                    eta_mat <- eta_mat + w_q[, flat_id_marker, drop = FALSE] * matrix(rep(Z_idm[, q], each = n_draw_eff), nrow = n_draw_eff)
+                }
+            }
+        }
+
+        # Step 6: Transform posterior linear predictors to expected response
+        # values using each marker's fitted inverse-link function.
+        epred_mat <- eta_mat
+        if ("epred" %in% scale_req) {
+            epred_mat <- matrix(NA_real_, nrow = n_draw_eff, ncol = ncol(eta_mat))
+            for (d in seq_len(sd$D)) {
+                idx_d <- which(marker_int == d)
+                if (length(idx_d) == 0L) next
+                link_d <- as.integer(sd$link_long[d] %||% 1L)
+                eta_d <- eta_mat[, idx_d, drop = FALSE]
+                if (link_d == 1L) {
+                    epred_mat[, idx_d] <- eta_d
+                } else if (link_d == 2L || link_d == 5L) {
+                    epred_mat[, idx_d] <- exp(eta_d)
+                } else if (link_d == 3L) {
+                    epred_mat[, idx_d] <- stats::plogis(eta_d)
+                } else if (link_d == 4L) {
+                    epred_mat[, idx_d] <- stats::pnorm(eta_d)
+                } else {
+                    n_ops <- as.integer(sd$inv_link_n_ops[d] %||% 0L)
+                    n_const <- as.integer(sd$inv_link_n_const[d] %||% 0L)
+                    bytecode <- if (n_ops > 0L) as.integer(sd$inv_link_ops[d, seq_len(n_ops)]) else integer(0)
+                    const_data <- if (n_const > 0L) as.numeric(sd$inv_link_const[d, seq_len(n_const)]) else numeric(0)
+                    for (j in seq_along(idx_d)) {
+                        epred_mat[, idx_d[j]] <- eval_bytecode_vector(eta_d[, j], bytecode = bytecode, const_data = const_data)
+                    }
+                }
+            }
+        }
+
+        # Step 7: Summarise each subject-marker trajectory across fitted MCMC
+        # draws while retaining the full matrices for heatmap probabilities.
+        probs <- .quantile_probs_from_ci_plot(ci_levels)
+        long_quant <- list()
+        long_pred <- list()
+        long_fit_quant <- list()
+        long_draws <- list()
+
+        id_keep <- sort(unique(id_int))
+        for (i_int in id_keep) {
+            id_label <- id_labels[i_int]
+            idx_i <- which(id_int == i_int)
+            times_i <- as.numeric(dL_trajectory[[time_var]][idx_i])
+            marker_i <- as.integer(marker_int[idx_i])
+
+            draw_entry <- list()
+            if ("linpred" %in% scale_req) {
+                mat_i <- eta_mat[, idx_i, drop = FALSE]
+                q_i <- .compute_quantiles_long(mat_i, times_i, marker_i, marker_levels, id_label, probs = probs)
+                q_i$scale <- "linpred"
+                long_quant[[length(long_quant) + 1L]] <- q_i
+                p_i <- q_i[, c("id", "time", "marker", "mean"), drop = FALSE]
+                p_i$scale <- "linpred"
+                long_pred[[length(long_pred) + 1L]] <- p_i
+                long_fit_quant[[length(long_fit_quant) + 1L]] <- q_i
+                draw_entry$linpred <- list(matrix = mat_i, time = times_i, marker_idx = marker_i, scale = "linpred")
+            }
+            if ("epred" %in% scale_req) {
+                mat_i <- epred_mat[, idx_i, drop = FALSE]
+                q_i <- .compute_quantiles_long(mat_i, times_i, marker_i, marker_levels, id_label, probs = probs)
+                q_i$scale <- "epred"
+                long_quant[[length(long_quant) + 1L]] <- q_i
+                p_i <- q_i[, c("id", "time", "marker", "mean"), drop = FALSE]
+                p_i$scale <- "epred"
+                long_pred[[length(long_pred) + 1L]] <- p_i
+                long_fit_quant[[length(long_fit_quant) + 1L]] <- q_i
+                draw_entry$epred <- list(matrix = mat_i, time = times_i, marker_idx = marker_i, scale = "epred")
+            }
+            long_draws[[as.character(id_label)]] <- draw_entry
+        }
+
+        # Step 8: Retain the existing fitted event-time summaries for combined
+        # longitudinal, survival, and cumulative-hazard displays.
+        if (isTRUE(include_event_process)) {
+            event_vars <- .resolve_event_model_vars(x$formulaEvent, x$dataEvent, context = "plot.JoiNMeFit()")
+            event_id_all <- as.character(x$dataEvent[[id_var]])
+            t_end_by_id <- tapply(as.numeric(event_vars$event_stop), event_id_all, max, na.rm = TRUE)
+            surv_draw <- get_mat(paste0("surv_prob_event[", seq_len(n_id), "]"))
+            cumhaz_draw <- get_mat(paste0("cumhaz_event[", seq_len(n_id), "]"))
+        } else {
+            t_end_by_id <- numeric(0)
+            surv_draw <- matrix(0, nrow = n_draw_eff, ncol = 0L)
+            cumhaz_draw <- matrix(0, nrow = n_draw_eff, ncol = 0L)
+        }
+        if (ncol(surv_draw) == 0L && ncol(cumhaz_draw) > 0L) {
+            surv_draw <- exp(-cumhaz_draw)
+        }
+        if (ncol(cumhaz_draw) == 0L && ncol(surv_draw) > 0L) {
+            cumhaz_draw <- -log(pmax(surv_draw, 1e-12))
+        }
+
+        surv_quant <- list()
+        surv_pred <- list()
+        cumhaz_quant <- list()
+        cumhaz_pred <- list()
+        surv_draws <- list()
+        cumhaz_draws <- list()
+
+        for (i_int in id_keep) {
+            id_label <- id_labels[i_int]
+            id_key <- as.character(id_label)
+            t_end <- if (id_key %in% names(t_end_by_id)) {
+                as.numeric(t_end_by_id[[id_key]])
+            } else {
+                NA_real_
+            }
+            if (!is.finite(t_end) || t_end <= 0) next
+            if (ncol(surv_draw) >= i_int) {
+                s_end <- as.numeric(pmin(pmax(surv_draw[, i_int], 0), 1))
+                h_end <- -log(pmax(s_end, 1e-12))
+                n_grid <- max(25L, min(100L, as.integer(nrow(dL_fit[dL_fit$id_int == i_int, , drop = FALSE]) * 3L)))
+                s_time <- seq(0, t_end, length.out = n_grid)
+                h_frac <- matrix(rep(s_time / t_end, each = nrow(surv_draw)), nrow = nrow(surv_draw))
+                s_mat <- exp(-h_frac * matrix(rep(h_end, times = n_grid), nrow = nrow(surv_draw)))
+                q_s <- .compute_quantiles_surv(s_mat, s_time, id_label, probs = probs)
+                surv_quant[[length(surv_quant) + 1L]] <- q_s
+                surv_pred[[length(surv_pred) + 1L]] <- q_s[, c("id", "time", "mean"), drop = FALSE]
+                surv_draws[[as.character(id_label)]] <- list(matrix = s_mat, time = s_time)
+            }
+            if (ncol(cumhaz_draw) >= i_int) {
+                h_end <- as.numeric(pmax(cumhaz_draw[, i_int], 0))
+                n_grid <- max(25L, min(100L, as.integer(nrow(dL_fit[dL_fit$id_int == i_int, , drop = FALSE]) * 3L)))
+                h_time <- seq(0, t_end, length.out = n_grid)
+                h_frac <- matrix(rep(h_time / t_end, each = nrow(cumhaz_draw)), nrow = nrow(cumhaz_draw))
+                h_mat <- h_frac * matrix(rep(h_end, times = n_grid), nrow = nrow(cumhaz_draw))
+                q_h <- .compute_quantiles_surv(h_mat, h_time, id_label, probs = probs)
+                cumhaz_quant[[length(cumhaz_quant) + 1L]] <- q_h
+                cumhaz_pred[[length(cumhaz_pred) + 1L]] <- q_h[, c("id", "time", "mean"), drop = FALSE]
+                cumhaz_draws[[as.character(id_label)]] <- list(matrix = h_mat, time = h_time)
+            }
+        }
+
+        # Step 9: Assemble posterior summaries together with the original
+        # observed data, keeping their statistical roles explicitly separate.
+        out <- list(
+            predictions = list(
+                longitudinal = if (include_longitudinal && length(long_pred) > 0L) do.call(rbind, long_pred) else NULL,
+                longitudinal_fitted = if (include_longitudinal && length(long_pred) > 0L) do.call(rbind, long_pred) else NULL,
+                survival = if ("survival" %in% requested_processes && length(surv_pred) > 0L) do.call(rbind, surv_pred) else NULL,
+                cumhaz = if ("cumhaz" %in% requested_processes && length(cumhaz_pred) > 0L) do.call(rbind, cumhaz_pred) else NULL
+            ),
+            quantiles = list(
+                longitudinal = if (include_longitudinal && length(long_quant) > 0L) do.call(rbind, long_quant) else NULL,
+                longitudinal_fitted = if (include_longitudinal && length(long_fit_quant) > 0L) do.call(rbind, long_fit_quant) else NULL,
+                survival = if ("survival" %in% requested_processes && length(surv_quant) > 0L) do.call(rbind, surv_quant) else NULL,
+                cumhaz = if ("cumhaz" %in% requested_processes && length(cumhaz_quant) > 0L) do.call(rbind, cumhaz_quant) else NULL
+            ),
+            draws = list(
+                longitudinal = if (include_longitudinal) long_draws else NULL,
+                longitudinal_fitted = if (include_longitudinal) long_draws else NULL,
+                survival = if ("survival" %in% requested_processes) surv_draws else NULL,
+                cumhaz = if ("cumhaz" %in% requested_processes) cumhaz_draws else NULL
+            ),
+            data = list(
+                longitudinal = dL,
+                event = dE
+            ),
+            metadata = list(
+                id_var = id_var,
+                marker_var = marker_var,
+                marker_levels = marker_levels,
+                time_var = time_var,
+                response_var = y_var,
+                scales = scale_req,
+                scale = if ("epred" %in% scale_req) "epred" else scale_req[1],
+                conditioning_time = 0,
+                conditioning_time_by_id = stats::setNames(rep(0, length(id_keep)), id_labels[id_keep]),
+                ci_levels = ci_levels,
+                source = "fit_samples"
+            )
+        )
+        # Step 10: Return the same prediction class used by posterior prediction
+        # so every downstream plotting and summary method receives one contract.
+        JoiNMeDynPred$new(
+            predictions = out$predictions,
+            quantiles = out$quantiles,
+            draws = out$draws,
+            data = out$data,
+            metadata = out$metadata,
+            call = x$call,
+            tmax = as.numeric(x$tmax %||% x$config$tmax %||% sd$tmax %||% 1),
+            n_samples = n_draw_eff
+        )
 }
 
 .JoiNMefit_call_arg_chr <- function(call_obj, arg, default = NULL) {
@@ -2144,23 +2579,6 @@ plot.JoiNMeFit <- function(x,
     if (is.character(expr)) return(expr[[1]])
     txt <- trimws(paste(deparse(expr), collapse = ""))
     if (identical(txt, "") || identical(txt, "NULL")) default else txt
-}
-
-.resolve_JoiNMefit_plot_time_start <- function(data_long, id_var, time_var, which, conditioning, time_start) {
-    if (!is.null(time_start)) return(time_start)
-    if (!nrow(data_long)) return(NULL)
-
-    conditioning <- match.arg(conditioning, c("auto", "last", "origin"))
-    if (identical(conditioning, "auto")) {
-        conditioning <- if ("longitudinal" %in% which) "last" else "origin"
-    }
-
-    split_time <- split(as.numeric(data_long[[time_var]]), as.character(data_long[[id_var]]))
-    reducer <- if (identical(conditioning, "last")) max else min
-    stats::setNames(
-        vapply(split_time, function(tt) reducer(tt, na.rm = TRUE), numeric(1)),
-        names(split_time)
-    )
 }
 
 .plot_JoiNMefit_association <- function(x, association_term = NULL, marker = NULL, association_grid = NULL, association_range = NULL, association_points = 200,
@@ -3368,12 +3786,9 @@ plot.JoiNMeFit <- function(x,
     }
 
     P <- as.integer(stan_data$P %||% ncol(stan_data$X_obs))
-    beta_vars <- paste0("beta_eff_in_likelihood[", seq_len(P), "]")
+    beta_vars <- paste0("beta[", seq_len(P), "]")
     if (!all(beta_vars %in% var_names)) {
         beta_vars <- paste0("beta_scaled[", seq_len(P), "]")
-    }
-    if (!all(beta_vars %in% var_names)) {
-        beta_vars <- paste0("beta[", seq_len(P), "]")
     }
     beta_mean <- mean_of_vars(beta_vars, default = 0)
 
@@ -3523,7 +3938,7 @@ plot.JoiNMeFit <- function(x,
         idx_time_idm <- as.integer(stan_data$idx_time_idm %||% integer(0))
         idx_time_idm <- idx_time_idm[is.finite(idx_time_idm) & idx_time_idm >= 1L & idx_time_idm <= length(marker_id_row_scale)]
         if (length(idx_time_idm) > 0L) {
-            marker_id_row_scale[idx_time_idm] <- as.numeric(stan_data$tmax_internal %||% 1)
+            marker_id_row_scale[idx_time_idm] <- as.numeric(stan_data$tmax %||% 1)
         }
         li_terms <- lapply(seq_len(n_id), function(i) {
             if (nrow(vcov_map) == 0L) {
@@ -3579,12 +3994,12 @@ plot.JoiNMeFit <- function(x,
         return(function(x, iota_intercept = numeric(0), iota_slope = numeric(0)) {
             eval_bytecode_vector(
                 x = x,
-                bytecode = bc$bytecode %||% bc$opcodes,
+                bytecode = bc$bytecode,
                 const_data = bc$const_data %||% numeric(0),
                 iota_intercepts = iota_intercept,
                 iota_slopes = iota_slope,
-                op_iota_intercept_idx = bc$op_iota_intercept_idx %||% integer(length(bc$bytecode %||% bc$opcodes %||% integer(0))),
-                op_iota_slope_idx = bc$op_iota_slope_idx %||% integer(length(bc$bytecode %||% bc$opcodes %||% integer(0)))
+                op_iota_intercept_idx = bc$op_iota_intercept_idx %||% integer(length(bc$bytecode %||% integer(0))),
+                op_iota_slope_idx = bc$op_iota_slope_idx %||% integer(length(bc$bytecode %||% integer(0)))
             )
         })
     }

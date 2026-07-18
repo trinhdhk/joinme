@@ -1,22 +1,22 @@
 /**
- * @file JoiNMe_fit_threading.stan
+ * @file joinme_fit_threading.stan
  * @brief Threaded implementation of the Joint Mixed-Effects Model using reduce_sum.
  *
  * @details
- * This is the thread-capable JoiNMe fitting program used for both serial and
+ * This is the thread-capable joinme fitting program used for both serial and
  * parallel execution. It uses `reduce_sum` to parallelize the likelihood
  * computation over subjects when more than one thread is requested.
  *
  * It uses the shared likelihood function `partial_joinme` so the same kernel can
  * run with one thread or many threads without changing the target density.
  *
- * @see JoiNMe::JoiNMe
+ * @see joinme::joinme
  */
 
 functions {
   #include helper/functions/eta_fd.stanfunctions
   
-  #include helper/functions/eta_corr_varonly_weighted_const.stanfunctions
+  #include helper/functions/eta_chol_corr.stanfunctions
   #include helper/functions/eta_vcov_weighted_const.stanfunctions
   
   #include helper/functions/cumhaz.stanfunctions
@@ -29,11 +29,11 @@ functions {
   
   #include helper/functions/composite_transform.stanfunctions
   
-  #include helper/functions/JoiNMe_fit_partial.stanfunctions
+  #include helper/functions/joinme_fit_partial.stanfunctions
 }
 
 data {
-  #include helper/data/JoiNMe_fit_common.stan
+  #include helper/data/joinme_fit_common.stan
   array[n_id] int<lower=1, upper=N> id_start;
   array[n_id] int<lower=1, upper=N> id_end;
   int<lower=1> grainsize;
@@ -49,7 +49,7 @@ transformed data {
 }
 
 parameters {
-  #include helper/parameters/JoiNMe_fit_common.stan
+  #include helper/parameters/joinme_fit_common.stan
 }
 
 transformed parameters {
@@ -69,6 +69,9 @@ model {
     grainsize,
     /* Longitudinal observation layout */
     id,
+    event_id,
+    event_start_idx,
+    event_end_idx,
     marker,
     y_real,
     y_int,
@@ -189,8 +192,10 @@ model {
     Bs_event_c,
     Bs_gk_c,
     /* Event times + integration controls */
+    S_entry,
     S_event,
     d_event,
+    event_censor_type,
     subject_weights,
     K_event,
     event_type,

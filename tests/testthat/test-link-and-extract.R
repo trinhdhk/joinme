@@ -152,7 +152,7 @@ test_that("extract.JoiNMeFit returns draw matrices by friendly names", {
 
   ex_eff <- extract(fit, what = "likelihood_scale", keep_chains = FALSE)
   expect_true(is.matrix(ex_eff$draws))
-  expect_true(any(grepl("^beta_eff: time$", colnames(ex_eff$draws))))
+  expect_true(any(grepl("^beta_scaled: time$", colnames(ex_eff$draws))))
   expect_true(any(grepl("^id_sd_eff: time$", colnames(ex_eff$draws))))
   expect_true(any(grepl("^id_marker_row_scale_eff: time$", colnames(ex_eff$draws))))
 })
@@ -187,6 +187,41 @@ test_that("extract.JoiNMeFit assoc prefers effective vcov coefficients", {
   expect_equal(colnames(ex_assoc$draws), "vcov[1]")
   expect_equal(as.numeric(ex_assoc$draws[, 1]), c(0.4, 0.5, 0.6))
   expect_equal(as.character(ex_assoc$term_map$variable), "alpha_vcov_eff[1]")
+})
+
+test_that("extract.JoiNMeFit fixef prefers internal coefficients on original-time scale", {
+  draws_obj <- posterior::as_draws_matrix(stats::setNames(
+    data.frame(
+      beta_intercept = c(1.0, 1.0, 1.0),
+      beta_time_raw = c(0.5, 0.5, 0.5),
+      beta_scaled_intercept = c(1.0, 1.0, 1.0),
+      beta_scaled_time = c(2.0, 2.0, 2.0),
+      check.names = FALSE
+    ),
+    c("beta[1]", "beta[2]", "beta_scaled[1]", "beta_scaled[2]")
+  ))
+
+  fit_obj <- structure(list(
+    fit = structure(list(), class = "mock_fit"),
+    stan_data = list(P = 2L, x_cols = c("(Intercept)", "time")),
+    config = list()
+  ), class = "JoiNMeFit")
+
+  testthat::local_mocked_bindings(
+    .get_draws_obj = function(fit, variables = NULL, draws = NULL, seed = 1, keep_chains = FALSE) {
+      if (is.null(variables)) return(draws_obj)
+      posterior::subset_draws(draws_obj, variable = variables)
+    },
+    .package = "joinme"
+  )
+
+  ex_fixef <- extract(fit_obj, what = "fixef", keep_chains = FALSE)
+  expect_equal(colnames(ex_fixef$draws), c("(Intercept)", "time"))
+  expect_equal(as.numeric(ex_fixef$draws[, "time"]), c(0.5, 0.5, 0.5))
+  expect_equal(
+    as.character(ex_fixef$term_map$variable),
+    c("beta[1]", "beta[2]")
+  )
 })
 
 test_that("summary reports survival_process baseline covariates when present", {

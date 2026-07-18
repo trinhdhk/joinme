@@ -11,6 +11,7 @@ sim <- simulate_joinme(
   times_obs = seq(0, 6, length.out = 10),
   assoc = c("cv_total", "corr"),
   marker_weights = c(1, -0.5, 2),
+  fixed_marker_weights = TRUE,
   beta_long = c('(Intercept)' = 0.5, time = 0.3, x1 = -0.2),
   beta_event = c(x2 = 0.4),
   assoc_coefs = list(cv_total = 0.35, corr = c(0.1)),

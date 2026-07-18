@@ -1,5 +1,5 @@
 ---
-title: "simulate_joinme Cookbook"
+title: "simulate_JoiNMe Cookbook"
 output-dir: ../docs/tutorials
 format:
   html:
@@ -43,6 +43,7 @@ It is organised by common simulation goals:
 - selecting association channels (`assoc`, `formulaAssoc`, `assoc_coefs`),
 - configuring random effects (`re_params`),
 - controlling marker-by-id covariance regression (`formulaVCov` + `re_params$id_marker_cov`),
+- matching fitted marker-weight shrinkage (`fixed_marker_weights`, `shrinkage`),
 - defining distributional regressions (`formulaDist`) with family-scoped coefficients (`dist_coefs`),
 - generating event-level covariates (`covariate_formulas`),
 - checking outputs and truth objects.
@@ -75,6 +76,11 @@ Returned object:
 - `sim$helpers`: helper functions (e.g., hazard and association component probes),
 - `sim$tmax`: scaling horizon.
 
+For recovery work, `sim$truth$baseline_hazard` records the resolved baseline
+type, parameters, formula, and coefficients. A constant rate of `0.1`, for
+example, is also exposed as the fitted log-hazard coefficient `log(0.1)` in
+`sim$truth$stan_fit$bs_gamma_c`.
+
 # Minimal baseline recipe
 
 ```{r}
@@ -93,6 +99,100 @@ sim <- simulate_joinme(
 str(sim$dataLong)
 str(sim$dataEvent)
 names(sim$truth)
+```
+
+## Match marker-weight generation to the fitted prior
+
+Estimated marker weights use the same additive hierarchy in simulation and
+Stan. The default is a zero base plus standardized Student-$t_6$ latents:
+
+```{r}
+sim_weights <- simulate_joinme(
+  n_id = 50,
+  families = rep("student_t", 3),
+  assoc = "cv_total",
+  fixed_marker_weights = FALSE,
+  shrinkage = 0L,
+  seed = 14
+)
+
+sim_weights$truth$marker_weights_base
+sim_weights$truth$marker_weights_latent
+sim_weights$truth$marker_weights       # effective weights used in the hazard
+```
+
+Pass the same switch to fitting:
+
+```{r eval=FALSE}
+fit_weights <- joinme(
+  formulaLong = sim_weights$truth$formulaLong,
+  dataLong = sim_weights$dataLong,
+  formulaEvent = sim_weights$truth$formulaEvent,
+  dataEvent = sim_weights$dataEvent,
+  assoc = "cv_total",
+  fixed_marker_weights = FALSE,
+  shrinkage = 0L
+)
+```
+
+The complete mapping is `0 = Student-t(6, 0, 1)`,
+`1 = double_exponential(0, 1)`, and `2 = normal(0, 1)`. If you instead want
+known fixed weights, supply them and set `fixed_marker_weights = TRUE`; then the
+latent truth is exactly zero.
+
+## Left truncation and interval-split event rows
+
+`simulate_joinme()` can emit counting-process event data for
+`Surv(time_start, time_stop, event)` workflows.
+
+```{r}
+sim_split <- simulate_joinme(
+  n_id = 30,
+  formulaEvent = survival::Surv(time_start, time_stop, event) ~ x1 + x2,
+  left_truncation_max = 1.0,
+  seed = 2
+)
+
+head(sim_split$dataEvent)
+```
+
+Use the same split `formulaEvent` when fitting:
+
+```{r eval=FALSE}
+fit_split <- joinme(
+  formulaLong = y ~ 1 + time + x1 + (1 + time || id) + (0 + x1 + (1 + time || id) || marker),
+  dataLong = sim_split$dataLong,
+  formulaEvent = survival::Surv(time_start, time_stop, event) ~ x1 + x2,
+  dataEvent = sim_split$dataEvent,
+  assoc = c("cv_total")
+)
+```
+
+## Time-varying covariates via `time_varyring(fun, n_step)`
+
+Stepwise event-side covariates can now be declared directly in
+`covariate_formulas`.
+
+- If `n_step` has length 1, every subject gets that number of periods.
+- If `n_step` has length 2, each subject draws its period count uniformly from
+  `min(n_step):max(n_step)`.
+
+When a time-varying covariate is present, `simulate_joinme()` emits split
+counting-process rows automatically.
+
+```{r}
+sim_tv <- simulate_joinme(
+  n_id = 25,
+  formulaEvent = survival::Surv(time_start, time_stop, event) ~ x + x2,
+  covariate_formulas = list(
+    x ~ time_varyring(rnorm, c(3, 6), mean = 0, sd = 1),
+    x2 ~ rnorm(n_id)
+  ),
+  left_truncation_max = 0.5,
+  seed = 22
+)
+
+head(sim_tv$dataEvent)
 ```
 
 # From simulation to reporting-scale posterior summaries
@@ -252,7 +352,6 @@ sim <- simulate_joinme(
     cv_total = 0.4,
     cs_mean = -0.2,
     corr = c(0.15, -0.10, 0.05)
-  ),
   seed = 2
 )
 ```
@@ -660,7 +759,7 @@ names(sim$truth)
 - **`id_marker_cov` length mismatch**: check `Q_idm` and required element count `M`.
 - **family-scoped `dist_coefs` ignored**: verify family names are canonical (`gaussian`, `student_t`, `skew_normal`, ...).
 - **transform errors**: for functional transforms, use supported function names (`power`, not `pow`).
-- **parallel differences**: keep `seed` fixed; `simulate_joinme` uses deterministic worker seeding.
+- **parallel differences**: keep `seed` fixed; `simulate_JoiNMe` uses deterministic worker seeding.
 
 # Mapping to `joinme()`
 
