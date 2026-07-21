@@ -3,7 +3,7 @@
 #' @description
 #' Builds posterior summaries for the longitudinal process, survival process,
 #' association terms, and optional covariance blocks. For survival, the summary
-#' now includes a dedicated `survival_process` report whenever the event model
+#' reports `survival_process` when the event model
 #' contains non-intercept covariates beyond association features.
 #'
 #' @param object A JoiNMe fit object.
@@ -13,15 +13,10 @@
 #' @param include_corr Logical; include covariance summaries.
 #' @param ... Unused.
 #'
-#' @return A `summary_JoiNMeFit` object containing tables such as `fixef`,
-#'   `baseline_hazard` (when applicable), `survival_process` (when applicable),
-#'   `assoc`, covariance
-#'   summaries (`id`, `marker`), dedicated `id:marker` covariance-parameter
-#'   summaries (latent + covariance-regression blocks when `Q_idm > 0`), and diagnostics.
+#' @return A `summary_JoiNMeFit` object 
 #' @export
 summary.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
                            include_corr = TRUE, ...) {
-  assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
 
   fit <- object$fit
   sd <- object$stan_data
@@ -213,7 +208,6 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
 
   # Distributional parameter summaries (family-aware, marker-labeled)
   #
-  # Reporting rules:
   # - Include only parameters required by each marker family.
   # - Replace numeric marker indices with marker names in term labels.
   s_d <- .extract_fit_summary(object, what = "distributional", draws = draws, seed = seed, digits = digits)
@@ -558,178 +552,26 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
   summary_obj
 }
 
-#' Summarise renamed posterior draws
-#'
-#' @param draws_obj Posterior draw matrix or array with renamed variables.
-#' @param digits Number of decimal places used for posterior summaries.
-#'
-#' @return A summary table with the common JoiNMe schema.
-#' @keywords internal
-#' @noRd
-.summarise_named_draws <- function(draws_obj, digits = 3) {
-  draw_array <- .make_named_draw_array(draws_obj)
-  if (is.null(draw_array) || !length(dim(draw_array)) || dim(draw_array)[3] == 0L) {
-    return(NULL)
-  }
-  term_labels <- dimnames(draw_array)[[3]] %||% paste0("term_", seq_len(dim(draw_array)[3]))
-  .assoc_summary_from_draw_array(draw_array, term_labels = term_labels, digits = digits)
-}
-
-#' Round summary tables using the standard JoiNMe summary schema
-#'
-#' @description
-#' Applies the same rounding rules used throughout JoiNMe summaries so new
-#' posterior reports remain directly comparable to [summary.JoiNMeFit()].
-#'
-#' The rounded columns are the inferential columns that users typically inspect
-#' first: posterior mean, posterior standard deviation, interval bounds, and
-#' convergence diagnostics. Columns not listed in the schema are left unchanged.
-#'
-#' @param tbl A data frame built from posterior draws.
-#' @param digits Number of decimal places used for posterior location and
-#'   interval summaries.
-#'
-#' @return The same data frame with rounded summary columns.
-#' @keywords internal
-#' @noRd
-.round_summary_table <- function(tbl, digits = 3) {
-  if (is.null(tbl) || !is.data.frame(tbl) || nrow(tbl) == 0L) {
-    return(tbl)
-  }
-
-  rounded <- tbl
-  for (col_name in intersect(c("Estimate", "Est.Error", "Q2.5", "Q97.5"), names(rounded))) {
-    rounded[[col_name]] <- round(rounded[[col_name]], digits)
-  }
-  if ("Rhat" %in% names(rounded)) {
-    rounded$Rhat <- round(rounded$Rhat, 3)
-  }
-  rounded
-}
-
-#' Convert renamed draws into a chains-aware array
-#'
-#' @param x Posterior draws returned by [extract()] or [draws()].
-#'
-#' @return A three-dimensional array with dimensions iteration x chain x term.
-#' @keywords internal
-#' @noRd
-.make_named_draw_array <- function(x) {
-  if (is.null(x)) {
-    return(NULL)
-  }
-  if (length(dim(x)) == 3L) {
-    return(x)
-  }
-  if (is.matrix(x)) {
-    return(array(
-      x,
-      dim = c(nrow(x), 1L, ncol(x)),
-      dimnames = list(
-        iteration = rownames(x) %||% as.character(seq_len(nrow(x))),
-        chain = "1",
-        variable = colnames(x) %||% as.character(seq_len(ncol(x)))
-      )
-    ))
-  }
-  NULL
-}
-
-#' Summarise extracted draws for one JoiNMeFit component
-#'
-#' @param object A `JoiNMeFit` object.
-#' @param what Component selector passed to [extract.JoiNMeFit()].
-#' @param draws Optional number of posterior draws to keep.
-#' @param seed Integer seed used when subsetting draws.
-#' @param digits Number of decimal places used for posterior summaries.
-#' @param term Optional term filter passed through to [extract.JoiNMeFit()].
-#'
-#' @return A posterior summary table, or `NULL` when no draws match.
-#' @keywords internal
-#' @noRd
-.extract_fit_summary <- function(object, what, draws = NULL, seed = 1, digits = 3, term = NULL) {
-  ext <- tryCatch(
-    extract.JoiNMeFit(object, what = what, term = term, draws = draws, seed = seed, keep_chains = TRUE),
-    error = function(e) NULL
-  )
-  if (is.null(ext) || is.null(ext$draws)) {
-    return(NULL)
-  }
-  .summarise_named_draws(ext$draws, digits = digits)
-}
-
-#' Convert integer covariance indices into model-term labels
-#'
-#' @description
-#' The low-level covariance extractors return matrix coordinates as integer row
-#' and column positions. For console summaries, those positions are harder to
-#' interpret than the corresponding random-effect terms. This helper replaces the
-#' raw indices with term labels recovered from the same model matrix basis.
-#'
-#' @param tbl Covariance summary table containing `row` and `col` columns.
-#' @param term_labels Character vector of basis labels.
-#'
-#' @return The same data frame with labelled `row` and `col` columns.
-#' @keywords internal
-#' @noRd
-.label_covariance_summary_table <- function(tbl, term_labels) {
-  if (is.null(tbl) || !is.data.frame(tbl) || nrow(tbl) == 0L) {
-    return(tbl)
-  }
-  if (!all(c("row", "col") %in% names(tbl))) {
-    return(tbl)
-  }
-
-  term_labels <- as.character(term_labels %||% character(0))
-  if (!length(term_labels)) {
-    return(tbl)
-  }
-
-  out <- tbl
-  row_index <- suppressWarnings(as.integer(out$row))
-  col_index <- suppressWarnings(as.integer(out$col))
-  row_default <- as.character(out$row)
-  col_default <- as.character(out$col)
-
-  valid_row <- !is.na(row_index) & row_index >= 1L & row_index <= length(term_labels)
-  valid_col <- !is.na(col_index) & col_index >= 1L & col_index <= length(term_labels)
-
-  row_default[valid_row] <- term_labels[row_index[valid_row]]
-  col_default[valid_col] <- term_labels[col_index[valid_col]]
-
-  out$row <- row_default
-  out$col <- col_default
-  out
-}
-
-#' Posterior summary alias for JoiNMe objects
-#'
-#' @description
-#' Provides a user-facing alias to [summary()] so posterior summaries can be
-#' requested with terminology that emphasizes Bayesian output.
-#'
-#' @param object A JoiNMe object.
-#' @param ... Additional arguments forwarded to [summary()].
-#'
-#' @return The same object that [summary()] would return for the supplied class.
 #' @importFrom brms posterior_summary
+#' @rdname summary.JoiNMeFit
 #' @export
 posterior_summary.JoiNMeFit <- function(object, ...) {
   summary(object, ...)
 }
 
-#' @rdname posterior_summary.JoiNMeFit
+#' @rdname summary.JoiNMeDynPred
+#' @importFrom brms posterior_summary
 #' @export
 posterior_summary.JoiNMeDynPred <- function(object, ...) {
   summary(object, ...)
 }
 
-#' Summarise dynamic prediction outputs
+#' Summary of JoiNMe dynamic prediction
 #'
 #' @description
-#' Summarises a `JoiNMeDynPred` object with detailed subject-level prediction
-#' summaries and diagnostics.
+#' Summarises a `JoiNMeDynPred` object
 #'
+#' @details
 #' The summary includes:
 #' - an overview table of row/subject counts by process,
 #' - median survival time per subject (draw-wise crossing of `S(t)=0.5`,
@@ -747,12 +589,7 @@ posterior_summary.JoiNMeDynPred <- function(object, ...) {
 #' @method summary JoiNMeDynPred
 #' @export
 summary.JoiNMeDynPred <- function(object, ...) {
-    if (!inherits(object, "JoiNMeDynPred")) {
-        cli::cli_abort(c(
-            x = "Object must be a {.cls JoiNMeDynPred} prediction.",
-            i = "Call predict() on a JoiNMeFit object first."
-        ))
-    }
+    
     cached <- object$cache_get("summary")
     if (!is.null(cached)) return(cached)
 

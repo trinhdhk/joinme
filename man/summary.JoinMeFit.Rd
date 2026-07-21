@@ -2,9 +2,12 @@
 % Please edit documentation in R/summary.R
 \name{summary.JoiNMeFit}
 \alias{summary.JoiNMeFit}
+\alias{posterior_summary.JoiNMeFit}
 \title{Summary of a JoiNMe object}
 \usage{
 \method{summary}{JoiNMeFit}(object, draws = NULL, seed = 1, digits = 3, include_corr = TRUE, ...)
+
+\method{posterior_summary}{JoiNMeFit}(object, ...)
 }
 \arguments{
 \item{object}{A JoiNMe fit object.}
@@ -20,15 +23,11 @@
 \item{...}{Unused.}
 }
 \value{
-A \code{summary_JoiNMeFit} object containing tables such as \code{fixef},
-\code{baseline_hazard} (when applicable), \code{survival_process} (when applicable),
-\code{assoc}, covariance
-summaries (\code{id}, \code{marker}), dedicated \code{id:marker} covariance-parameter
-summaries (latent + covariance-regression blocks when \code{Q_idm > 0}), and diagnostics.
+A \code{summary_JoiNMeFit} object
 }
 \description{
 Builds posterior summaries for the longitudinal process, survival process,
 association terms, and optional covariance blocks. For survival, the summary
-now includes a dedicated \code{survival_process} report whenever the event model
+reports \code{survival_process} when the event model
 contains non-intercept covariates beyond association features.
 }

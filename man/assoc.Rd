@@ -23,9 +23,9 @@ posterior_assoc(object, ...)
 
 \item{digits}{Number of digits used when \code{summary = TRUE}.}
 
-\item{summary}{Logical. If \code{TRUE}, return posterior summaries with the same
-inferential columns as \code{\link[=summary.JoiNMeFit]{summary.JoiNMeFit()}}. If \code{FALSE}, return raw MCMC
-sample matrices.}
+\item{summary}{Logical.
+If \code{TRUE}, return posterior summaries.
+If \code{FALSE}, return raw MCMC sample matrices.}
 }
 \value{
 A named list with class \code{PosteriorAssoc}. Each list element contains

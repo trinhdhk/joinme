@@ -17,9 +17,9 @@
 #' @param draws Optional number of posterior draws to retain.
 #' @param seed Random seed used when subsetting posterior draws.
 #' @param digits Number of digits used when `summary = TRUE`.
-#' @param summary Logical. If `TRUE`, return posterior summaries with the same
-#'   inferential columns as [summary.JoiNMeFit()]. If `FALSE`, return raw MCMC
-#'   sample matrices.
+#' @param summary Logical. 
+#' If `TRUE`, return posterior summaries. 
+#' If `FALSE`, return raw MCMC sample matrices.
 #' @param ... Unused.
 #'
 #' @return A named list with class `PosteriorAssoc`. Each list element contains
@@ -167,7 +167,7 @@ assoc.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary 
 
   if (!length(out)) {
     cli::cli_abort(c(
-      x = "No association effects are available in this fitted object.",
+      x = "No association effect is available in this model.",
       i = "Fit a model with association terms such as {.val cv_total}, {.val cv_mean}, {.val corr}, or {.val vcov}."
     ))
   }
@@ -335,7 +335,7 @@ print.PosteriorAssoc <- function(x, ...) {
   .round_summary_table(sum_df, digits = digits)
 }
 
-#' Build readable labels for covariance-style association components
+#' Build labels for covariance-style association components
 #'
 #' @description
 #' Converts the internal lower-triangular indexing used for covariance-style

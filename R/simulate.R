@@ -16,14 +16,15 @@
 #' @keywords internal
 NULL
 
-# File overview:
-# - Simulate longitudinal + survival data consistent with Stan semantics.
-# - Provide helper utilities for hazards and root finding.
-
-#' Stable softplus
-#' @keywords internal
-#' @noRd
-.softplus <- function(x) {
+#' Softplus function
+#' @description Numerically stable implementation of softplus transformation
+#' 
+#' @details
+#' \eqn{\operatorname{softplus}(x) = \log(1+exp(x))}
+#' 
+#' @param x Numeric input
+#' @export
+softplus <- function(x) {
   ifelse(x > 0, x + log1p(exp(-x)), log1p(exp(x)))
 }
 
@@ -391,10 +392,10 @@ simulate_joinme_joint_student_t_cvtotal <- function(
   list(dataLong = dataLong, dataEvent = dataEvent, truth = truth, helpers = helpers, tmax = tmax)
 }
 
-#' Simulate joint model data with formula-driven multistructure support
-#'
+#' Simulate joint model data
+#' 
 #' @description
-#' Generalised simulator for `JoiNMe` that mirrors the fitting syntax as closely as
+#' Simulator for `JoiNMe` that mirrors the fitting syntax as closely as
 #' possible. The simulator supports:
 #' - multivariate outcomes via marker-level families,
 #' - multi-structure random effects from `formulaLong` (id, marker, marker-by-id),
@@ -964,12 +965,10 @@ simulate_joinme <- function(
     vapply(as.numeric(x), .sim_eval_bytecode_scalar, numeric(1), bytecode = code, const_data = constants)
   }
 
-  #' @keywords internal
   #' @param x Vector of inputs to process.
   #' @param fun Function to apply.
   #' @param ... Additional arguments passed to fun.
   #' @return List of results.
-  #' @noRd
   .sim_parallel_lapply <- function(x, fun, ...) {
     # Parallel map with mirai; falls back to serial when mirai is disabled.
     # Each job sets a deterministic seed derived from the main seed.
@@ -1399,7 +1398,6 @@ simulate_joinme <- function(
   #' @param x Numeric vector on link scale.
   #' @param inv_link_bc Parsed inverse-link bytecode.
   #' @return Numeric vector on response scale.
-  #' @noRd
   .sim_apply_inv_link_bc <- function(x, inv_link_bc) {
     # Apply a parsed inverse-link bytecode using the shared interpreter.
     .sim_eval_bytecode_vector(
@@ -1410,7 +1408,6 @@ simulate_joinme <- function(
   }
 
   #' @keywords internal
-  #' @noRd
   #' @param families Family specification input (vector or list).
   #' @param D Number of markers.
   #' @return List with family codes, link names, and inverse-link bytecode per marker.
