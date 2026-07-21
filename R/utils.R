@@ -69,6 +69,7 @@ suppressPackageStartupMessages({
 #'   `event_start`, `event_stop`, `event_time`, `event_status`,
 #'   `d_event_exact`, `d_event_any`, `event_censor_type`, and `surv_type`.
 #' @keywords internal
+#' @noRd
 .resolve_event_model_vars <- function(formulaEvent, dataEvent, context = "JoiNMe") {
   if (!inherits(formulaEvent, "formula") || length(formulaEvent) < 3) {
     cli::cli_abort(c(
@@ -236,6 +237,7 @@ suppressPackageStartupMessages({
 #'
 #' @return Named list with `event_start_idx` and `event_end_idx` arrays.
 #' @keywords internal
+#' @noRd
 .build_event_interval_index <- function(id_int, n_id, context = "JoiNMe") {
   if (length(id_int) == 0L) {
     cli::cli_abort(c(
@@ -296,6 +298,7 @@ suppressPackageStartupMessages({
 #'
 #' @return Named list with `formulaVCov`, `K_cov`, and `Xcov`.
 #' @keywords internal
+#' @noRd
 .build_vcov_design <- function(formulaVCov,
                                dataEvent,
                                time_var,
@@ -343,6 +346,7 @@ suppressPackageStartupMessages({
 #'
 #' @return Named list with `d_event`, `event_type`, and `K_event`.
 #' @keywords internal
+#' @noRd
 .derive_event_outcomes <- function(status_raw, context = "JoiNMe") {
   n <- length(status_raw)
 
@@ -440,6 +444,7 @@ gk_quadrature <- function(nodes = 15L) {
 }
 
 #' @keywords internal
+#' @noRd
 .gk_nodes <- function(rule) {
   rule <- as.integer(rule)
   if (!rule %in% c(7L, 15L, 31L, 41L, 51L, 61L)) {
@@ -773,7 +778,7 @@ gk_quadrature <- function(nodes = 15L) {
 #' Detect stored model-matrix blueprint objects
 #' @keywords internal
 .is_model_matrix_blueprint <- function(x) {
-  is.list(x) && inherits(x, "JoiNMe_mm_blueprint") && !is.null(x$terms)
+  is.list(x) && inherits(x, "JoiNMe_mm") && !is.null(x$terms)
 }
 
 #' Build a reusable model-matrix blueprint
@@ -805,7 +810,7 @@ gk_quadrature <- function(nodes = 15L) {
       assign = attr(X, "assign") %||% integer(0),
       columns = colnames(X) %||% character(0)
     ),
-    class = "JoiNMe_mm_blueprint"
+    class = "JoiNMe_mm"
   )
 }
 
@@ -921,11 +926,16 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' @keywords internal
 .canonical_dist_param <- function(param_raw) {
+  # Step 1: normalise spelling before matching a distributional parameter.
   param <- tolower(trimws(as.character(param_raw)))
+
+  # Step 2: retain the established aliases for the skew-normal shape parameter.
   if (param == "skew") param <- "alpha"
   if (param %in% c("alpha_skew", "skew_alpha")) param <- "alpha"
-  if (param %in% c("phi_beta", "beta_phi", "precision")) param <- "phi_beta"
-  if (param %in% c("tau", "tau_sde", "skew_sde")) param <- "tau_sde"
+
+  # Step 3: keep kappa and tau explicit. Unlike the alpha aliases above, these
+  # names identify distinct statistical roles and are deliberately not inferred
+  # from generic labels such as "precision" or family-specific legacy labels.
   param
 }
 
@@ -965,10 +975,10 @@ gk_quadrature <- function(nodes = 15L) {
   }
 
   param <- .canonical_dist_param(cap[2])
-  if (!param %in% c("sigma", "nu", "phi", "alpha", "phi_beta", "tau_sde")) {
+  if (!param %in% c("sigma", "nu", "phi", "alpha", "kappa", "tau")) {
     cli::cli_abort(c(
       x = "Unknown distributional parameter: {.val {cap[2]}}.",
-      i = "Allowed parameters: sigma, nu, phi, alpha (or alpha_skew/skew), phi_beta, tau_sde."
+      i = "Allowed parameters: sigma, nu, phi, alpha (or alpha_skew/skew), kappa, tau."
     ))
   }
 
@@ -1082,7 +1092,7 @@ gk_quadrature <- function(nodes = 15L) {
     if (length(bad_param_families) > 0) {
       cli::cli_abort(c(
         x = "Distributional parameter {.val {param_name}} is not used by family/families: {.val {paste(bad_param_families, collapse = ', ')}}.",
-        i = "Use supported combinations only (e.g., nu for student_t, phi for negbin2, phi_beta for beta)."
+        i = "Use supported combinations only (e.g., nu for student_t, phi for negbin2, kappa for beta)."
       ))
     }
   }
@@ -1247,7 +1257,7 @@ gk_quadrature <- function(nodes = 15L) {
     if (any(grepl("\\|", deparse(rhs_expr)))) {
       cli::cli_abort(c(
         x = "Nested random effects are not supported in {.arg formulaDist}.",
-        i = "Use flat terms like (1 + t | id) + (1 | region)."
+        i = "Use flat terms like (1 | id) + (1 | marker)."
       ))
     }
 
@@ -2262,7 +2272,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Materialize CmdStanR fit data in memory
 #' @keywords internal
-.materialize_cmdstanr_fit <- function(fit) {
+.import_cmdstanr_fit <- function(fit) {
   if (!.is_cmdstanr_fit(fit)) {
     return(fit)
   }
@@ -2480,12 +2490,12 @@ gk_quadrature <- function(nodes = 15L) {
   sd$Z_alpha <- make_num_array(sd$Z_alpha, c(sd$n_re_alpha %||% 0L, N, sd$K_alpha_max %||% 0L))
   sd$J_alpha <- make_int_array(sd$J_alpha, c(sd$n_re_alpha %||% 0L, N))
   sd$re_weight_alpha <- make_num_array(sd$re_weight_alpha, c(sd$n_re_alpha %||% 0L, sd$G_alpha_max %||% 0L))
-  sd$Z_phi_beta <- make_num_array(sd$Z_phi_beta, c(sd$n_re_phi_beta %||% 0L, N, sd$K_phi_beta_max %||% 0L))
-  sd$J_phi_beta <- make_int_array(sd$J_phi_beta, c(sd$n_re_phi_beta %||% 0L, N))
-  sd$re_weight_phi_beta <- make_num_array(sd$re_weight_phi_beta, c(sd$n_re_phi_beta %||% 0L, sd$G_phi_beta_max %||% 0L))
-  sd$Z_tau_sde <- make_num_array(sd$Z_tau_sde, c(sd$n_re_tau_sde %||% 0L, N, sd$K_tau_sde_max %||% 0L))
-  sd$J_tau_sde <- make_int_array(sd$J_tau_sde, c(sd$n_re_tau_sde %||% 0L, N))
-  sd$re_weight_tau_sde <- make_num_array(sd$re_weight_tau_sde, c(sd$n_re_tau_sde %||% 0L, sd$G_tau_sde_max %||% 0L))
+  sd$Z_kappa <- make_num_array(sd$Z_kappa, c(sd$n_re_kappa %||% 0L, N, sd$K_kappa_max %||% 0L))
+  sd$J_kappa <- make_int_array(sd$J_kappa, c(sd$n_re_kappa %||% 0L, N))
+  sd$re_weight_kappa <- make_num_array(sd$re_weight_kappa, c(sd$n_re_kappa %||% 0L, sd$G_kappa_max %||% 0L))
+  sd$Z_tau <- make_num_array(sd$Z_tau, c(sd$n_re_tau %||% 0L, N, sd$K_tau_max %||% 0L))
+  sd$J_tau <- make_int_array(sd$J_tau, c(sd$n_re_tau %||% 0L, N))
+  sd$re_weight_tau <- make_num_array(sd$re_weight_tau, c(sd$n_re_tau %||% 0L, sd$G_tau_max %||% 0L))
   sd
 }
 

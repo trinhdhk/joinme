@@ -14,26 +14,19 @@
  */
 
 functions {
-  #include helper/functions/eta_fd.stanfunctions
-  
+  #include helper/functions/eta_fd.stanfunctions 
   #include helper/functions/eta_chol_corr.stanfunctions
   #include helper/functions/eta_vcov_weighted_const.stanfunctions
-  
   #include helper/functions/cumhaz.stanfunctions
-
-  #include helper/functions/bytecode_transform.stanfunctions
-
-  #include helper/functions/link_functions.stanfunctions
-  
+  #include helper/functions/functional_transform.stanfunctions
+  #include helper/functions/link_functions.stanfunctions 
   #include helper/functions/basis_functions.stanfunctions
-  
-  #include helper/functions/composite_transform.stanfunctions
-  
+  #include helper/functions/composite_transform.stanfunctions 
   #include helper/functions/joinme_fit_partial.stanfunctions
 }
 
 data {
-  #include helper/data/joinme_fit_common.stan
+  #include helper/data/fit_data.stan
   array[n_id] int<lower=1, upper=N> id_start;
   array[n_id] int<lower=1, upper=N> id_end;
   int<lower=1> grainsize;
@@ -92,13 +85,13 @@ model {
     marker_to_phi_family,
     n_family_alpha,
     marker_to_alpha_family,
-    n_family_phi_beta,
-    marker_to_phi_beta_family,
-    n_family_tau_sde,
-    marker_to_tau_sde_family,
-    flag_resid_dim,
-    use_tau_sde_fixed,
-    tau_sde_fixed,
+    n_family_kappa,
+    marker_to_kappa_family,
+    n_family_tau,
+    marker_to_tau_family,
+    // flag_resid_dim,
+    use_tau_fixed,
+    tau_fixed,
     X_obs,
     Z_id_obs,
     Z_mk_obs,
@@ -115,17 +108,17 @@ model {
     X_phi,
     P_alpha,
     X_alpha,
-    P_phi_beta,
-    X_phi_beta,
-    P_tau_sde,
-    X_tau_sde,
+    P_kappa,
+    X_kappa,
+    P_tau,
+    X_tau,
     /* Distributional regression coefficients */
     beta_sigma,
     beta_nu,
     beta_phi,
     beta_alpha,
-    beta_phi_beta,
-    beta_tau_sde,
+    beta_kappa,
+    beta_tau,
     /* Distributional random effects (by submodel) */
     n_re_sigma,
     K_sigma,
@@ -155,20 +148,20 @@ model {
     J_alpha,
     tau_alpha,
     z_alpha,
-    n_re_phi_beta,
-    K_phi_beta,
-    K_phi_beta_max,
-    Z_phi_beta,
-    J_phi_beta,
-    tau_phi_beta,
-    z_phi_beta,
-    n_re_tau_sde,
-    K_tau_sde,
-    K_tau_sde_max,
-    Z_tau_sde,
-    J_tau_sde,
-    tau_tau_sde,
-    z_tau_sde,
+    n_re_kappa,
+    K_kappa,
+    K_kappa_max,
+    Z_kappa,
+    J_kappa,
+    tau_kappa,
+    z_kappa,
+    n_re_tau,
+    K_tau,
+    K_tau_max,
+    Z_tau,
+    J_tau,
+    tau_tau,
+    z_tau,
     /* Realized random effects + longitudinal distributional parameters */
     u_id,
     v_marker,
@@ -178,8 +171,8 @@ model {
     nu_family,
     phi_family,
     alpha_family,
-    phi_beta_family,
-    tau_sde_family,
+    kappa_family,
+    tau_family,
     K_ord,
     cutpoints_ord,
     /* Hazard covariates */

@@ -1,5 +1,5 @@
 test_that("ranef/vcov.JoiNMeDynPred require id-dependent marker covariance", {
-  pred_ok <- JoiNMe::JoiNMeDynPred$new(
+  pred_ok <- joinme::JoiNMeDynPred$new(
     predictions = list(),
     quantiles = list(),
     draws = list(
@@ -32,7 +32,7 @@ test_that("ranef/vcov.JoiNMeDynPred require id-dependent marker covariance", {
   expect_true(is.data.frame(vc_ok$formulaLong$marker_by_id))
   expect_true(all(c("id", "row", "col", "Estimate") %in% names(vc_ok$formulaLong$marker_by_id)))
 
-  pred_bad <- JoiNMe::JoiNMeDynPred$new(
+  pred_bad <- joinme::JoiNMeDynPred$new(
     predictions = list(),
     quantiles = list(),
     draws = list(random_effects_marker_id = list()),
@@ -51,8 +51,8 @@ test_that("marker_corr_depends_on_id follows fitted Q_idm", {
   fit_like_with_qidm <- list(stan_data = list(Q_idm = 2L))
   fit_like_without_qidm <- list(stan_data = list(Q_idm = 0L))
 
-  expect_true(JoiNMe:::.marker_corr_depends_on_id(fit_like_with_qidm))
-  expect_false(JoiNMe:::.marker_corr_depends_on_id(fit_like_without_qidm))
+  expect_true(joinme:::.marker_corr_depends_on_id(fit_like_with_qidm))
+  expect_false(joinme:::.marker_corr_depends_on_id(fit_like_without_qidm))
 })
 
 test_that("vcov.JoiNMeDynPred works when Q_idm > 0 without formulaVCov terms", {
@@ -226,14 +226,14 @@ test_that("diagnosis.JoiNMeFit exposes summary and parameter diagnostics from su
     .package = "joinme"
   )
 
-  fit <- JoiNMe::JoiNMeFit$new(
+  fit <- joinme::JoiNMeFit$new(
     fit = NULL,
     stan_data = list(),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
     formulaVCov = NULL,
     config = list(family_long = "gaussian"),
-    call = quote(JoiNMe::joinme(formulaLong = y ~ 1 + time)),
+    call = quote(joinme::joinme(formulaLong = y ~ 1 + time)),
     tmax = 2,
     dataLong = data.frame(id = 1, time = 0, marker = "m1", y = 1),
     dataEvent = data.frame(id = 1, time = 1, event = 1)
@@ -256,7 +256,7 @@ test_that("concordance.JoiNMeFit reports the concordance engine pair count", {
       expect_equal(length(times[[1]]), 50L)
       expect_equal(unname(times[[1]][1]), 1)
       expect_equal(unname(utils::tail(times[[1]], 1)), 2)
-      JoiNMe::JoiNMeDynPred$new(
+      joinme::JoiNMeDynPred$new(
         predictions = list(
           survival = data.frame(
             id = c(1, 2),
@@ -286,14 +286,14 @@ test_that("concordance.JoiNMeFit reports the concordance engine pair count", {
     .package = "survival"
   )
 
-  fit <- JoiNMe::JoiNMeFit$new(
+  fit <- joinme::JoiNMeFit$new(
     fit = NULL,
     stan_data = list(),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
     formulaVCov = NULL,
     config = list(transforms = list(), transforms_spec = list()),
-    call = quote(JoiNMe::joinme(formulaLong = y ~ 1 + time)),
+    call = quote(joinme::joinme(formulaLong = y ~ 1 + time)),
     tmax = 2,
     dataLong = data.frame(id = c(1, 1, 2, 2), time = c(0, 1, 0, 1), marker = "m1", y = c(1, 2, 1.5, 2.5)),
     dataEvent = data.frame(id = c(1, 2), time = c(1.5, 3), event = c(1L, 0L))
@@ -318,7 +318,7 @@ test_that("concordance.JoiNMeFit also reports pair counts with split marker weig
     predict.JoiNMeFit = function(object, newdataLong, newdataEvent, process, times, time_start,
                                  control, seed, ...) {
       expect_equal(length(times[[1]]), 50L)
-      JoiNMe::JoiNMeDynPred$new(
+      joinme::JoiNMeDynPred$new(
         predictions = list(
           survival = data.frame(
             id = c(1, 2),
@@ -348,14 +348,14 @@ test_that("concordance.JoiNMeFit also reports pair counts with split marker weig
     .package = "survival"
   )
 
-  fit <- JoiNMe::JoiNMeFit$new(
+  fit <- joinme::JoiNMeFit$new(
     fit = NULL,
     stan_data = list(shared_marker_weights = 0L),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
     formulaVCov = NULL,
     config = list(transforms = list(), transforms_spec = list()),
-    call = quote(JoiNMe::joinme(formulaLong = y ~ 1 + time, shared_marker_weights = FALSE)),
+    call = quote(joinme::joinme(formulaLong = y ~ 1 + time, shared_marker_weights = FALSE)),
     tmax = 2,
     dataLong = data.frame(id = c(1, 1, 2, 2), time = c(0, 1, 0, 1), marker = c("m1", "m2", "m1", "m2"), y = c(1, 2, 1.5, 2.5)),
     dataEvent = data.frame(id = c(1, 2), time = c(1.5, 3), event = c(1L, 0L))

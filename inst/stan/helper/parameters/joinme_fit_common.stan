@@ -34,8 +34,8 @@
   vector[P_nu] beta_nu;                  // nu regression coefficients
   vector[P_phi] beta_phi;                // phi regression coefficients
   vector[P_alpha] beta_alpha;            // alpha regression coefficients
-  vector[P_phi_beta] beta_phi_beta;      // phi_beta regression coefficients
-  vector[P_tau_sde] beta_tau_sde;        // tau_sde regression coefficients
+  vector[P_kappa] beta_kappa;      // kappa regression coefficients
+  vector[P_tau] beta_tau;        // tau regression coefficients
   array[n_re_sigma] vector<lower=0>[K_sigma_max] tau_sigma; // sigma RE SDs
   array[n_re_sigma] matrix[G_sigma_max, K_sigma_max] z_sigma; // sigma RE latents
   array[n_re_nu] vector<lower=0>[K_nu_max] tau_nu; // nu RE SDs
@@ -44,16 +44,16 @@
   array[n_re_phi] matrix[G_phi_max, K_phi_max] z_phi;  // phi RE latents
   array[n_re_alpha] vector<lower=0>[K_alpha_max] tau_alpha; // alpha RE SDs
   array[n_re_alpha] matrix[G_alpha_max, K_alpha_max] z_alpha; // alpha RE latents
-  array[n_re_phi_beta] vector<lower=0>[K_phi_beta_max] tau_phi_beta; // phi_beta RE SDs
-  array[n_re_phi_beta] matrix[G_phi_beta_max, K_phi_beta_max] z_phi_beta; // phi_beta RE latents
-  array[n_re_tau_sde] vector<lower=0>[K_tau_sde_max] tau_tau_sde; // tau_sde RE SDs
-  array[n_re_tau_sde] matrix[G_tau_sde_max, K_tau_sde_max] z_tau_sde; // tau_sde RE latents
+  array[n_re_kappa] vector<lower=0>[K_kappa_max] tau_kappa; // kappa RE SDs
+  array[n_re_kappa] matrix[G_kappa_max, K_kappa_max] z_kappa; // kappa RE latents
+  array[n_re_tau] vector<lower=0>[K_tau_max] tau_tau; // tau RE SDs
+  array[n_re_tau] matrix[G_tau_max, K_tau_max] z_tau; // tau RE latents
   vector<lower=0>[n_family_sigma] sigma_family;        // shared sigma by family
   vector<lower=2>[n_family_nu] nu_family;              // shared nu by family
   vector<lower=0>[n_family_phi] phi_family;            // shared phi by family
   vector[n_family_alpha] alpha_family;                 // shared alpha by family
-  vector<lower=0>[n_family_phi_beta] phi_beta_family;  // shared phi_beta by family
-  vector<lower=0, upper=1>[n_family_tau_sde] tau_sde_family; // shared tau_sde by family
+  vector<lower=0>[n_family_kappa] kappa_family;  // shared kappa by family
+  vector<lower=0, upper=1>[n_family_tau] tau_family; // shared tau by family
 
   /* Ordinal cutpoints (shared across ordinal markers) */
   ordered[K_ord - 1] cutpoints_ord;     // cumulative-logit cutpoints
@@ -65,8 +65,8 @@
   real z_alpha_cs_mean;               // latent for mean CS association
   real z_alpha_cv_marker;              // latent for marker CV association
   real z_alpha_cs_marker;              // latent for marker CS association
-  vector[M_corr] alpha_corr;          // corr association coefficient latents (scaled by s_corr below)
-  vector[M_vcov] alpha_vcov;          // vcov association coefficient latents (scaled by s_vcov below)
+  vector[M_corr] z_alpha_corr;        // standardized corr association coefficient latents
+  vector[M_vcov] z_alpha_vcov;        // standardized vcov association coefficient latents
 
   /* marker-weight perturbations (global across ids) */
   vector[D * estimate_marker_weights * use_marker_weight_assoc * n_marker_weight_sets] z_marker_weights; // latent signed perturbations for shared or term-specific weight structures

@@ -9,10 +9,14 @@
   vector[Q_idm] marker_id_row_scale_eff = row_scale_idm;
   
   /**
-  * @brief Association coefficients actually used for totals.
+  * @brief Association coefficients actually used in the event hazard.
    */
-  real alpha_cv_total_eff = a_cv_total;
-  real alpha_cs_total_eff = a_cs_total;
+  real alpha_cv_total = a_cv_total;
+  real alpha_cs_total = a_cs_total;
+  real alpha_cv_mean = a_cv_mean;
+  real alpha_cs_mean = a_cs_mean;
+  vector[M_corr] alpha_corr = a_corr;
+  vector[M_vcov] alpha_vcov = a_vcov;
   vector[estimate_iota_intercept_cv] iota_intercept_cv = iota_intercept_cv_eff;
   vector[estimate_iota_slope_cv] iota_slope_cv = iota_slope_cv_eff;
   vector[estimate_iota_intercept_cs] iota_intercept_cs = iota_intercept_cs_eff;
@@ -190,34 +194,46 @@
                  ? exp(fmin(eta_sigma, 20))
                  : sigma_family[marker_to_sigma_family[d]];
       // sig: residual scale for skew Laplace
-      real eta_tau = 0; // linear predictor for tau_sde
-      if (P_tau_sde > 0) eta_tau += dot_product(X_tau_sde[n], beta_tau_sde);
-      if (n_re_tau_sde > 0) {
-        for (j in 1 : n_re_tau_sde) {
-          vector[K_tau_sde[j]] b = (to_vector(z_tau_sde[j][J_tau_sde[j, n], 1:K_tau_sde[j]])
-                                    .* tau_tau_sde[j][1:K_tau_sde[j]]);
-          // b: random-effect coefficients for tau_sde term j
-          eta_tau += dot_product(Z_tau_sde[j][n, 1:K_tau_sde[j]], b);
+      real eta_tau = 0; // linear predictor for tau
+      if (P_tau > 0) eta_tau += dot_product(X_tau[n], beta_tau);
+      if (n_re_tau > 0) {
+        for (j in 1 : n_re_tau) {
+          vector[K_tau[j]] b = (to_vector(z_tau[j][J_tau[j, n], 1:K_tau[j]])
+                                    .* tau_tau[j][1:K_tau[j]]);
+          // b: random-effect coefficients for tau term j
+          eta_tau += dot_product(Z_tau[j][n, 1:K_tau[j]], b);
         }
       }
-      real tau_sde = (P_tau_sde > 0 || n_re_tau_sde > 0) ? inv_logit(eta_tau) : tau_sde_family[marker_to_tau_sde_family[d]];
-      // tau_sde: skewness parameter in (0,1)
-      log_lik_long[n] = skew_double_exponential_lpdf(y_real[n] | mu_long, sig, tau_sde);
+      // Step 1: preserve a fixed quantile/asymmetry parameter in pointwise
+      // likelihood quantities exactly as it is preserved in the model block.
+      // Step 2: otherwise evaluate the fitted regression or family-level value.
+      real tau = use_tau_fixed == 1
+                 ? tau_fixed
+                 : ((P_tau > 0 || n_re_tau > 0)
+                    ? inv_logit(eta_tau)
+                    : tau_family[marker_to_tau_family[d]]);
+      // tau: skewness parameter in (0,1)
+      log_lik_long[n] = skew_double_exponential_lpdf(y_real[n] | mu_long, sig, tau);
     } else if (family_long[d] == 10) {
-      real eta_phi_beta = 0; // linear predictor for log phi_beta
-      if (P_phi_beta > 0) eta_phi_beta += dot_product(X_phi_beta[n], beta_phi_beta);
-      if (n_re_phi_beta > 0) {
-        for (j in 1 : n_re_phi_beta) {
-          vector[K_phi_beta[j]] b = (to_vector(z_phi_beta[j][J_phi_beta[j, n], 1:K_phi_beta[j]])
-                                     .* tau_phi_beta[j][1:K_phi_beta[j]]);
-          // b: random-effect coefficients for phi_beta term j
-          eta_phi_beta += dot_product(Z_phi_beta[j][n, 1:K_phi_beta[j]], b);
+      real eta_kappa = 0; // linear predictor for log kappa
+      if (P_kappa > 0) eta_kappa += dot_product(X_kappa[n], beta_kappa);
+      if (n_re_kappa > 0) {
+        for (j in 1 : n_re_kappa) {
+          vector[K_kappa[j]] b = (to_vector(z_kappa[j][J_kappa[j, n], 1:K_kappa[j]])
+                                     .* tau_kappa[j][1:K_kappa[j]]);
+          // b: random-effect coefficients for kappa term j
+          eta_kappa += dot_product(Z_kappa[j][n, 1:K_kappa[j]], b);
         }
       }
-      real phi_beta = (P_phi_beta > 0 || n_re_phi_beta > 0) ? exp(eta_phi_beta) : phi_beta_family[marker_to_phi_beta_family[d]];
-      real mu = mu_long; // beta mean on (0,1)
-      real shape1 = phi_beta; // beta shape1
-      real shape2 = (1 - mu) * phi_beta; // beta shape2
+      real kappa = (P_kappa > 0 || n_re_kappa > 0) ? exp(eta_kappa) : kappa_family[marker_to_kappa_family[d]];
+      // Step 1: keep the response-scale mean strictly inside its mathematical
+      // support, matching the fitted likelihood calculation.
+      real mu = fmin(fmax(mu_long, 1e-12), 1 - 1e-12);
+
+      // Step 2: construct both Beta shapes from the same mean/sample-size
+      // parameterisation used for estimation and posterior prediction.
+      real shape1 = fmax(mu * kappa, 1e-6);
+      real shape2 = fmax((1 - mu) * kappa, 1e-6);
       log_lik_long[n] = beta_lpdf(y_real[n] | shape1, shape2);
     } else {
       log_lik_long[n] = ordered_logistic_lpmf(y_int[n] | eta_long, cutpoints_ord);

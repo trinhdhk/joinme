@@ -79,7 +79,7 @@ test_that("single-thread and multi-thread threaded Stan paths stay aligned", {
 
   if (inherits(fit_thread$fit, "CmdStanMCMC")) {
     mod_thread <- tryCatch(fit_thread$fit$cmdstan_model(), error = function(e) NULL)
-    threads_enabled <- tryCatch(JoiNMe:::.cmdstan_threads_enabled(mod_thread), error = function(e) FALSE)
+    threads_enabled <- tryCatch(joinme:::.cmdstan_threads_enabled(mod_thread), error = function(e) FALSE)
     if (!isTRUE(threads_enabled)) {
       skip("CmdStan model not compiled with threads; skipping threading equivalence checks.")
     }

@@ -41,8 +41,8 @@
   beta_nu ~ student_t(6, 0, 1);
   beta_phi ~ student_t(6, 0, 1);
   beta_alpha ~ student_t(6, 0, 1);
-  beta_phi_beta ~ student_t(6, 0, 1);
-  beta_tau_sde ~ student_t(6, 0, 1);
+  beta_kappa ~ student_t(6, 0, 1);
+  beta_tau ~ student_t(6, 0, 1);
   /* Distributional random-effect scales + latent draws */
   for (j in 1 : n_re_sigma) { // sigma RE terms
     tau_sigma[j][1:K_sigma[j]] ~ exponential(1);
@@ -64,15 +64,15 @@
     for (g in 1 : G_alpha[j])
       target += re_weight_alpha[j][g] * std_normal_lpdf(to_vector(z_alpha[j][g, 1:K_alpha[j]]));
   }
-  for (j in 1 : n_re_phi_beta) { // phi_beta RE terms
-    tau_phi_beta[j][1:K_phi_beta[j]] ~ exponential(1);
-    for (g in 1 : G_phi_beta[j])
-      target += re_weight_phi_beta[j][g] * std_normal_lpdf(to_vector(z_phi_beta[j][g, 1:K_phi_beta[j]]));
+  for (j in 1 : n_re_kappa) { // kappa RE terms
+    tau_kappa[j][1:K_kappa[j]] ~ exponential(1);
+    for (g in 1 : G_kappa[j])
+      target += re_weight_kappa[j][g] * std_normal_lpdf(to_vector(z_kappa[j][g, 1:K_kappa[j]]));
   }
-  for (j in 1 : n_re_tau_sde) { // tau_sde RE terms
-    tau_tau_sde[j][1:K_tau_sde[j]] ~ exponential(1);
-    for (g in 1 : G_tau_sde[j])
-      target += re_weight_tau_sde[j][g] * std_normal_lpdf(to_vector(z_tau_sde[j][g, 1:K_tau_sde[j]]));
+  for (j in 1 : n_re_tau) { // tau RE terms
+    tau_tau[j][1:K_tau[j]] ~ exponential(1);
+    for (g in 1 : G_tau[j])
+      target += re_weight_tau[j][g] * std_normal_lpdf(to_vector(z_tau[j][g, 1:K_tau[j]]));
   }
   
   /* ID-level random effects (tau_u is ORIGINAL scale; internal scaling in transformed parameters) */
@@ -137,8 +137,8 @@
   nu_family ~ gamma(2, 1);
   phi_family ~ exponential(1);
   alpha_family ~ normal(0, 2);
-  phi_beta_family ~ exponential(1);
-  tau_sde_family ~ beta(2, 2);
+  kappa_family ~ exponential(1);
+  tau_family ~ beta(2, 2);
   cutpoints_ord ~ normal(0, 2);
   
   /* Association priors */
@@ -150,7 +150,7 @@
   sd_alpha_cv_marker ~ exponential(1);
   sd_alpha_cs_marker ~ exponential(1);
   // s_corr / s_vcov are global half-normal scales for covariance-style
-  // association coefficients. alpha_corr / alpha_vcov are standardized
+  // association coefficients. z_alpha_corr / z_alpha_vcov are standardized
   // coefficient latents, and the effective hazard coefficients are defined in
   // transformed parameters as s_* times those latents.
   s_corr ~ exponential(1);
@@ -159,8 +159,8 @@
   
   /* Shrinkage family switch for corr weights */
   if (shrinkage == 1) {
-    alpha_corr ~ double_exponential(0, 1);
-    alpha_vcov ~ double_exponential(0, 1);
+    z_alpha_corr ~ double_exponential(0, 1);
+    z_alpha_vcov ~ double_exponential(0, 1);
     z_alpha_cv_total ~ double_exponential(0, 1);
     z_alpha_cs_total ~ double_exponential(0, 1);
     z_alpha_cv_mean ~ double_exponential(0, 1);
@@ -201,8 +201,8 @@
     if (estimate_iota_intercept_cs_marker > 0) z_iota_intercept_cs_marker ~ std_normal();
     if (estimate_iota_slope_cs_marker > 0) z_iota_slope_cs_marker ~ std_normal();
   } else if (shrinkage == 2) {
-    alpha_corr ~ std_normal();
-    alpha_vcov ~ std_normal();
+    z_alpha_corr ~ std_normal();
+    z_alpha_vcov ~ std_normal();
     z_alpha_cv_total ~ std_normal();
     z_alpha_cs_total ~ std_normal();
     z_alpha_cv_mean ~ std_normal();
@@ -243,8 +243,8 @@
     if (estimate_iota_intercept_cs_marker > 0) z_iota_intercept_cs_marker ~ std_normal();
     if (estimate_iota_slope_cs_marker > 0) z_iota_slope_cs_marker ~ std_normal();
   } else {
-    alpha_corr ~ student_t(6, 0, 1);
-    alpha_vcov ~ student_t(6, 0, 1);
+    z_alpha_corr ~ student_t(6, 0, 1);
+    z_alpha_vcov ~ student_t(6, 0, 1);
     z_alpha_cv_total ~ student_t(6, 0, 1);
     z_alpha_cs_total ~ student_t(6, 0, 1);
     z_alpha_cv_mean ~ student_t(6, 0, 1);

@@ -430,6 +430,7 @@ verify_bytecode <- function(bytecode, const_data) {
 #'
 #' @return Numeric scalar result.
 #' @keywords internal
+#' @noRd
 eval_bytecode_scalar <- function(
   x,
   bytecode = NULL,
@@ -553,6 +554,7 @@ eval_bytecode_scalar <- function(
 #'
 #' @return Numeric vector result.
 #' @keywords internal
+#' @noRd
 eval_bytecode_vector <- function(
   x,
   bytecode = NULL,
@@ -587,6 +589,7 @@ eval_bytecode_vector <- function(
 #' @param const_data Numeric constant vector.
 #' @return List with normalised `bytecode` and `const_data`.
 #' @keywords internal
+#' @noRd
 .normalize_bytecode_program <- function(
   bytecode = NULL,
   const_data = numeric(),

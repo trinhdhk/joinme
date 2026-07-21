@@ -167,9 +167,83 @@ stan_files <- list.files(
     recursive = FALSE
 )
 
+# ---- CmdStanR precompile (if available) -----------------------------------
+compile_cmdstan <- identical(
+    Sys.getenv("JOINME_COMPILE_CMDSTANR", unset = "0"),
+    "1"
+)
+
+cache_dir <- tools::R_user_dir("joinme", "cache")
+if (!dir.exists(cache_dir)) {
+    dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
+}
+
+if (quiet_require("cmdstanr")) {
+    ver <- tryCatch(
+        cmdstanr::cmdstan_version(error_on_NA = FALSE),
+        error = function(e) NA
+    )
+    if (!is.na(ver)) {
+        for (sf in stan_files) {
+            cpp_options <- list(stan_threads = TRUE)
+
+            key <- stan_cache_key(sf, cpp_options = cpp_options)
+            model_base_name <- paste0(
+                tools::file_path_sans_ext(basename(sf)),
+                "-",
+                key
+            )
+            exe_file <- cached_exe_path(
+                cache_dir = cache_dir,
+                model_base_name = model_base_name
+            )
+
+            if (compile_cmdstan || file.exists(exe_file)) {
+                if (sf == stan_files[[1]]) {
+                    quack("- Cleaning Stan cache directory before recompilation...")
+                    
+                    if (file.exists(exe_file)) {
+                        quack(
+                            ' - Found pre-existing CmdStanR model executable; updating to new version...'
+                        )
+                    } else {
+                        quack("- Precompiling Stan models with CmdStanR...")
+                    }
+                    clean_cache_dir(cache_dir)
+                }
+                cmdstanr::cmdstan_model(
+                    stan_file = sf,
+                    exe_file = exe_file,
+                    compile = TRUE,
+                    cpp_options = cpp_options,
+                    include_paths = dirname(sf),
+                    dir = cache_dir,
+                    force_recompile = FALSE
+                )
+            } else {
+                if (sf == stan_files[[1]]) {
+                    quack(
+                        " -- Skipping CmdStanR precompile. If you want to force compiling in CmdStanR, set JOINME_COMPILE_CMDSTANR = 1; "
+                    )
+                }
+            }
+
+            # if (!is.na(ver)) {
+            #     cat(
+            #         paste0('.METADATA$cmdstan_version <- "', ver, '"\n'),
+            #         file = 'R/zzz.R',
+            #         append = TRUE
+            #     )
+            # }else if (!compile_cmdstan && quiet_require("cmdstanr")) {
+        }
+    }
+} else {
+    quack(
+        " -- CmdStanR detected but CmdStan not installed; skipping CmdStanR precompile."
+    )
+}
+
 # ---- RStan precompile --------------------------------------------
-orig_zzz <- readLines("R/zzz.R", warn = FALSE)
-on.exit(writeLines(orig_zzz, con = "R/zzz.R"), add = TRUE)
 
 quack("- Precompiling Stan models with Rstan...")
 try_safely(quote({
@@ -192,74 +266,5 @@ try_safely(quote({
     #     rstan::stan_model(file = sf, save_dso = FALSE, verbose = FALSE)
     # }))
 }))
-
-
-# ---- CmdStanR precompile (if available) -----------------------------------
-compile_cmdstan <- identical(
-    Sys.getenv("JOINME_COMPILE_CMDSTANR", unset = "0"),
-    "1"
-)
-if (compile_cmdstan && quiet_require("cmdstanr")) {
-    cache_dir <- tools::R_user_dir("joinme", "cache")
-    if (!dir.exists(cache_dir)) {
-        dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
-    }
-
-    if (quiet_require("cmdstanr")) {
-        ver <- tryCatch(
-            cmdstanr::cmdstan_version(error_on_NA = FALSE),
-            error = function(e) NA
-        )
-        if (!is.na(ver)) {
-            quack("- Cleaning Stan cache directory before recompilation...")
-            clean_cache_dir(cache_dir)
-
-            quack("- Precompiling Stan models with CmdStanR...")
-            for (sf in stan_files) {
-                cpp_options <- list(stan_threads = TRUE)
-
-                key <- stan_cache_key(sf, cpp_options = cpp_options)
-                model_base_name <- paste0(
-                    tools::file_path_sans_ext(basename(sf)),
-                    "-",
-                    key
-                )
-                exe_file <- cached_exe_path(
-                    cache_dir = cache_dir,
-                    model_base_name = model_base_name
-                )
-
-                cmdstanr::cmdstan_model(
-                    stan_file = sf,
-                    exe_file = exe_file,
-                    compile = TRUE,
-                    cpp_options = cpp_options,
-                    include_paths = dirname(sf),
-                    dir = cache_dir,
-                    force_recompile = FALSE
-                )
-                ver <- cmdstanr::cmdstan_version(error_on_NA = FALSE)
-        # if (!is.na(ver)) {
-        #     cat(
-        #         paste0('.METADATA$cmdstan_version <- "', ver, '"\n'),
-        #         file = 'R/zzz.R',
-        #         append = TRUE
-        #     )
-        # }
-            }
-        } else {
-            quack(
-                " -- CmdStanR detected but CmdStan not installed; skipping CmdStanR precompile."
-            )
-        }
-    } else {
-        quack(" -- CmdStanR not available; skipping CmdStanR precompile.")
-    }
-} else if (!compile_cmdstan && quiet_require("cmdstanr")) {
-    quack(
-        " -- Skipping CmdStanR precompile. If you want to force compiling in CmdStanR, set JOINME_COMPILE_CMDSTANR = 1; "
-    )
-}
-
 
 quit(save = "no", status = 0)

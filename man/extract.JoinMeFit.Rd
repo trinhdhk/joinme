@@ -69,3 +69,6 @@ In short, use \code{extract()} when you need component-aware extraction and use
 \code{\link[=draws]{draws()}} when you need one renamed posterior object for general downstream
 analysis.
 }
+\seealso{
+\code{\link[=draws]{draws()}} for a higher-level interface that returns a single \code{posterior}
+}

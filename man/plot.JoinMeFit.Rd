@@ -164,8 +164,10 @@ Plot diagnostics, fitted trajectories, and association curves for JoiNMe fits
 Fitted-data plotting from \code{JoiNMeFit} uses fitted posterior samples
 and does not accept conditioning or future-prediction arguments
 (\code{condition}, \code{conditioning}, \code{time_start}, \code{times}, \code{time_horizon}, or
-\code{pred_control}). For conditioning-based trajectories, call \code{\link[=predict]{predict()}} and
-then plot the resulting \code{JoiNMeDynPred} object. At fitted trajectory times,
-covariates other than time are held at their first observed value within
-each selected subject-marker combination.
+\code{pred_control}). For population-level covariate profiles, call
+\code{\link[=conditional_effects.JoiNMeFit]{conditional_effects.JoiNMeFit()}}. For subject-specific forecasts
+conditional on observed marker history, call \code{\link[=predict]{predict()}} and then plot the
+resulting \code{JoiNMeDynPred} object. At fitted trajectory times, covariates
+other than time are held at their first observed value within each selected
+subject-marker combination.
 }

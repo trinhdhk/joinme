@@ -32,6 +32,7 @@ NULL
 #' @param shrinkage Integer family code: 0 Student-t(6), 1 Laplace, 2 Normal.
 #' @return Numeric vector of standardized draws.
 #' @keywords internal
+#' @noRd
 .sim_draw_standard_shrinkage <- function(n, shrinkage) {
   n <- as.integer(n)
   if (n <= 0L) return(numeric(0))
@@ -422,7 +423,7 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   The default `~ 1` is supported and gives an intercept-only covariance regression.
 #' @param formulaDist Optional distributional regression formulas (same role as in `joinme()`).
 #'   Supported LHS parameters are `sigma`, `nu`, `phi`, `alpha` (aliases:
-#'   `alpha_skew`, `skew`), `phi_beta`, and `tau_sde`.
+#'   `alpha_skew`, `skew`), `kappa`, and `tau`.
 #'
 #'   Family-scoped syntax is supported with square brackets:
 #'   `param[family=<name>] ~ ...`, for example
@@ -557,7 +558,7 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   terms in `formulaEvent` RHS.
 #'   If NULL, coefficients are randomly generated.
 #' @param dist_coefs Distributional fixed-effect coefficients for `formulaDist`
-#'   parameters (`sigma`, `nu`, `phi`, `alpha`, `phi_beta`, `tau_sde`).
+#'   parameters (`sigma`, `nu`, `phi`, `alpha`, `kappa`, `tau`).
 #'
 #'   For each parameter, coefficients can be:
 #'   - an unnamed numeric vector (matched by column order),
@@ -620,7 +621,13 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'     distributional parameter,
 #'   - `re_params$dist[[param]]$terms[[j]]` optionally sets term-specific
 #'     controls (same `sd`/`corr` fields as above).
-#' @param family_params Family-specific simulation parameters.
+#' @param family_params Family-specific constants used when the corresponding
+#'   parameter has no distributional regression. In particular, specify the
+#'   Beta mean/sample-size model with \code{beta = list(kappa = ...)} and the
+#'   skew double exponential model with
+#'   \code{skew_double_exponential = list(sigma = ..., tau = ...)}.
+#'   \code{kappa} must be positive. \code{tau} must lie in \eqn{(0,1)}, with
+#'   \eqn{0.5} giving the symmetric double exponential distribution.
 #' @param h0 Optional baseline hazard function `h0(t)`
 #'   If supplied, it takes precedence over `baseline_hazard`/`formulaBasehaz`.
 #' @param baseline_hazard Optional baseline hazard specification. Supported forms:
@@ -654,6 +661,9 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   distinguishes base, latent, and effective values. Baseline-hazard truth is
 #'   stored in `truth$baseline_hazard`; when a log-linear representation exists,
 #'   its resolved coefficients are also in `truth$stan_fit$bs_gamma_c`.
+#'   Hazard-scale association coefficients are stored as `alpha_cv_total`,
+#'   `alpha_cs_total`, `alpha_cv_mean`, `alpha_cs_mean`, `alpha_corr`, and
+#'   `alpha_vcov`, matching the fitted posterior output names.
 #'
 #' @examples
 #' \dontrun{
@@ -744,8 +754,8 @@ simulate_joinme <- function(
     negbin2 = list(phi = 2),
     skew_normal = list(sigma = 1.0, alpha = 0),
     double_exponential = list(sigma = 1.0),
-    skew_double_exponential = list(sigma = 1.0, tau_sde = 0.5),
-    beta = list(phi_beta = 10),
+    skew_double_exponential = list(sigma = 1.0, tau = 0.5),
+    beta = list(kappa = 10),
     cumulative_logit = list(cutpoints = c(-1, 1))
   ),
   h0 = NULL,
@@ -3215,8 +3225,8 @@ simulate_joinme <- function(
   nu_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "nu", 4.0), numeric(1))
   phi_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "phi", 2.0), numeric(1))
   alpha_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "alpha", 0.0), numeric(1))
-  phi_beta_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "phi_beta", 10.0), numeric(1))
-  tau_sde_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "tau_sde", 0.5), numeric(1))
+  kappa_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "kappa", 10.0), numeric(1))
+  tau_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "tau", 0.5), numeric(1))
   trials_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "trials", 10L), numeric(1))
 
   dist_formulas <- .normalize_formula_dist(formulaDist)
@@ -3270,8 +3280,8 @@ simulate_joinme <- function(
     if (param_name == "nu") nu_vec <- 2 + exp(eta_param)
     if (param_name == "phi") phi_vec <- exp(eta_param)
     if (param_name == "alpha") alpha_vec <- eta_param
-    if (param_name == "phi_beta") phi_beta_vec <- exp(eta_param)
-    if (param_name == "tau_sde") tau_sde_vec <- stats::plogis(eta_param)
+    if (param_name == "kappa") kappa_vec <- exp(eta_param)
+    if (param_name == "tau") tau_vec <- stats::plogis(eta_param)
   }
 
   # ---- Step: draw outcomes by marker-specific family
@@ -3293,8 +3303,8 @@ simulate_joinme <- function(
         sigma = sigma_vec[r],
         nu = nu_vec[r],
         phi = phi_vec[r],
-        phi_beta = phi_beta_vec[r],
-        tau_sde = tau_sde_vec[r],
+        kappa = kappa_vec[r],
+        tau = tau_vec[r],
         trials = as.integer(round(trials_vec[r])),
         skew = alpha_vec[r]
       )
@@ -3311,8 +3321,8 @@ simulate_joinme <- function(
   nu_vec <- nu_vec[ord_long]
   phi_vec <- phi_vec[ord_long]
   alpha_vec <- alpha_vec[ord_long]
-  phi_beta_vec <- phi_beta_vec[ord_long]
-  tau_sde_vec <- tau_sde_vec[ord_long]
+  kappa_vec <- kappa_vec[ord_long]
+  tau_vec <- tau_vec[ord_long]
   trials_vec <- trials_vec[ord_long]
   rownames(dataLong) <- NULL
 
@@ -3328,8 +3338,8 @@ simulate_joinme <- function(
     alpha = alpha_vec,
     alpha_skew = alpha_vec,
     skew = alpha_vec,
-    phi_beta = phi_beta_vec,
-    tau_sde = tau_sde_vec,
+    kappa = kappa_vec,
+    tau = tau_vec,
     trials = as.integer(round(trials_vec)),
     stringsAsFactors = FALSE
   )
@@ -3344,8 +3354,8 @@ simulate_joinme <- function(
     alpha = alpha_vec,
     alpha_skew = alpha_vec,
     skew = alpha_vec,
-    phi_beta = phi_beta_vec,
-    tau_sde = tau_sde_vec,
+    kappa = kappa_vec,
+    tau = tau_vec,
     trials = as.integer(round(trials_vec)),
     coef = dist_coef_effective,
     eta = dist_eta_effective,
@@ -3399,8 +3409,8 @@ simulate_joinme <- function(
   nu_family_truth <- .sim_family_param_truth("nu", 4.0)
   phi_family_truth <- .sim_family_param_truth("phi", 2.0)
   alpha_family_truth <- .sim_family_param_truth("alpha", 0.0)
-  phi_beta_family_truth <- .sim_family_param_truth("phi_beta", 10.0)
-  tau_sde_family_truth <- .sim_family_param_truth("tau_sde", 0.5)
+  kappa_family_truth <- .sim_family_param_truth("kappa", 10.0)
+  tau_family_truth <- .sim_family_param_truth("tau", 0.5)
   trials_family_truth <- if (any(family_names_present == "binomial")) {
     vals <- c(binomial = .sim_get_family_param("binomial", "trials", 10L))
     as.numeric(setNames(vals, names(vals)))
@@ -3417,8 +3427,8 @@ simulate_joinme <- function(
   marker_to_nu_family <- setNames(match(family_names, names(nu_family_truth), nomatch = 0L), marker_levels)
   marker_to_phi_family <- setNames(match(family_names, names(phi_family_truth), nomatch = 0L), marker_levels)
   marker_to_alpha_family <- setNames(match(family_names, names(alpha_family_truth), nomatch = 0L), marker_levels)
-  marker_to_phi_beta_family <- setNames(match(family_names, names(phi_beta_family_truth), nomatch = 0L), marker_levels)
-  marker_to_tau_sde_family <- setNames(match(family_names, names(tau_sde_family_truth), nomatch = 0L), marker_levels)
+  marker_to_kappa_family <- setNames(match(family_names, names(kappa_family_truth), nomatch = 0L), marker_levels)
+  marker_to_tau_family <- setNames(match(family_names, names(tau_family_truth), nomatch = 0L), marker_levels)
 
   stan_fit_truth <- list(
     beta = beta_long,
@@ -3447,26 +3457,28 @@ simulate_joinme <- function(
     Corr_v = re_marker_effective$corr,
     Sigma_v = re_marker_effective$cov,
     marker_id_row_scale_eff = marker_id_row_scale_eff,
-    alpha_cv_total_eff = unname(assoc_coef_scalar[["cv_total"]] %||% NA_real_),
-    alpha_cs_total_eff = unname(assoc_coef_scalar[["cs_total"]] %||% NA_real_),
-    alpha_cv_marker_eff = unname(assoc_coef_scalar[["cv_marker"]] %||% NA_real_),
-    alpha_cs_marker_eff = unname(assoc_coef_scalar[["cs_marker"]] %||% NA_real_),
-    alpha_corr_eff = assoc_coef_corr,
-    alpha_vcov_eff = assoc_coef_vcov,
+    alpha_cv_total = unname(assoc_coef_scalar[["cv_total"]] %||% NA_real_),
+    alpha_cs_total = unname(assoc_coef_scalar[["cs_total"]] %||% NA_real_),
+    alpha_cv_mean = unname(assoc_coef_scalar[["cv_mean"]] %||% NA_real_),
+    alpha_cs_mean = unname(assoc_coef_scalar[["cs_mean"]] %||% NA_real_),
+    alpha_cv_marker = unname(assoc_coef_scalar[["cv_marker"]] %||% NA_real_),
+    alpha_cs_marker = unname(assoc_coef_scalar[["cs_marker"]] %||% NA_real_),
+    alpha_corr = assoc_coef_corr,
+    alpha_vcov = assoc_coef_vcov,
     sigma_family = sigma_family_truth,
     nu_family = nu_family_truth,
     phi_family = phi_family_truth,
     alpha_family = alpha_family_truth,
-    phi_beta_family = phi_beta_family_truth,
-    tau_sde_family = tau_sde_family_truth,
+    kappa_family = kappa_family_truth,
+    tau_family = tau_family_truth,
     trials_family = trials_family_truth,
     cutpoints_ord = cutpoints_ord_truth,
     marker_to_sigma_family = marker_to_sigma_family,
     marker_to_nu_family = marker_to_nu_family,
     marker_to_phi_family = marker_to_phi_family,
     marker_to_alpha_family = marker_to_alpha_family,
-    marker_to_phi_beta_family = marker_to_phi_beta_family,
-    marker_to_tau_sde_family = marker_to_tau_sde_family
+    marker_to_kappa_family = marker_to_kappa_family,
+    marker_to_tau_family = marker_to_tau_family
   )
 
   family_truth <- list(
@@ -3478,8 +3490,8 @@ simulate_joinme <- function(
       marker_to_nu_family = unname(marker_to_nu_family),
       marker_to_phi_family = unname(marker_to_phi_family),
       marker_to_alpha_family = unname(marker_to_alpha_family),
-      marker_to_phi_beta_family = unname(marker_to_phi_beta_family),
-      marker_to_tau_sde_family = unname(marker_to_tau_sde_family),
+      marker_to_kappa_family = unname(marker_to_kappa_family),
+      marker_to_tau_family = unname(marker_to_tau_family),
       stringsAsFactors = FALSE
     ),
     shared = stan_fit_truth[c(
@@ -3487,8 +3499,8 @@ simulate_joinme <- function(
       "nu_family",
       "phi_family",
       "alpha_family",
-      "phi_beta_family",
-      "tau_sde_family",
+      "kappa_family",
+      "tau_family",
       "trials_family",
       "cutpoints_ord"
     )],
@@ -3499,6 +3511,11 @@ simulate_joinme <- function(
     beta_long = beta_long,
     beta_event = beta_event,
     alpha_cv_total = if ("cv_total" %in% names(assoc_coef_vec)) assoc_coef_vec[["cv_total"]] else NA_real_,
+    alpha_cs_total = if ("cs_total" %in% names(assoc_coef_vec)) assoc_coef_vec[["cs_total"]] else NA_real_,
+    alpha_cv_mean = if ("cv_mean" %in% names(assoc_coef_vec)) assoc_coef_vec[["cv_mean"]] else NA_real_,
+    alpha_cs_mean = if ("cs_mean" %in% names(assoc_coef_vec)) assoc_coef_vec[["cs_mean"]] else NA_real_,
+    alpha_corr = assoc_coef_corr,
+    alpha_vcov = assoc_coef_vcov,
     assoc = assoc,
     assoc_coefs = assoc_coef_vec,
     # `marker_weights` remains the convenient public truth alias and denotes
@@ -3645,8 +3662,9 @@ simulate_joinme <- function(
         }
       }
       out$time_start <- as.numeric(int_start)
-      out$time_stop <- as.numeric(int_stop)
-      out[[event_time_var]] <- as.numeric(int_stop)
+      # Ensure that time_stop is always strictly greater than time_start to avoid zero-length intervals
+      out$time_stop <- pmax(as.numeric(int_stop), out$time_start + 1e-9)
+      out[[event_time_var]] <- pmax(as.numeric(int_stop), out$time_start + 1e-9)
       out[[event_var]] <- as.integer(int_status)
       out
     })
@@ -3661,7 +3679,11 @@ simulate_joinme <- function(
       }
     }
     dataEvent_public$time_start <- as.numeric(entry_time_by_id)
-    dataEvent_public$time_stop <- as.numeric(dataEvent_public[[event_time_var]])
+    # Ensure that time_stop is always strictly greater than time_start to avoid zero-length intervals
+    dataEvent_public$time_stop <- 
+      pmax(
+        as.numeric(dataEvent_public[[event_time_var]]), 
+        dataEvent_public$time_start + 1e-9)
   }
 
   list(

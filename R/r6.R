@@ -1,5 +1,5 @@
 #' @name JoiNMe_r6_classes
-#' @aliases JoiNMeFit JoiNMeFit JoiNMeDynPred PredJoiNMeFit SummaryJoiNMeFit SummaryJoiNMeDynPred
+#' @aliases JoiNMeFit JoiNMeFit JoiNMeDynPred SummaryJoiNMeFit SummaryJoiNMeDynPred
 #' @title JoiNMe R6 Classes
 #'
 #' @importFrom R6 R6Class
@@ -9,7 +9,7 @@
 #'
 #' `JoiNMeFit` is the canonical exported fit class. `JoiNMeFit` remains as a
 #' compatibility alias.
-#' 
+#'
 #' **JoiNMeFit**: holds fitted model, Stan data, and formulas.
 #' Public fields: fit, stan_data, formulaLong, formulaEvent, formulaVCov, config, call, tmax,
 #' dataLong, dataEvent.
@@ -28,7 +28,7 @@
 #' Methods: initialize.
 #'
 #' @keywords internal
-#' @export JoiNMeFit JoiNMeFit JoiNMeDynPred PredJoiNMeFit SummaryJoiNMeFit SummaryJoiNMeDynPred
+#' @export JoiNMeFit JoiNMeFit JoiNMeDynPred SummaryJoiNMeFit SummaryJoiNMeDynPred
 NULL
 
 
@@ -46,7 +46,18 @@ JoiNMeFit <- R6::R6Class(
     tmax = NULL,
     dataLong = NULL,
     dataEvent = NULL,
-    initialize = function(fit, stan_data, formulaLong, formulaEvent, formulaVCov, config, call, tmax, dataLong, dataEvent) {
+    initialize = function(
+      fit,
+      stan_data,
+      formulaLong,
+      formulaEvent,
+      formulaVCov,
+      config,
+      call,
+      tmax,
+      dataLong,
+      dataEvent
+    ) {
       # Store core fit objects and metadata for downstream methods
       self$fit <- fit
       self$stan_data <- stan_data
@@ -69,6 +80,28 @@ JoiNMeFit <- R6::R6Class(
     },
     cache_clear = function() {
       private$cache <- list()
+      invisible(self)
+    },
+    print = function(...) {
+      .cli_summary_heading("Joint mixed effects model summary", level = 1L)
+      if (!is.null(self$call)) {
+        cat("Call:\n")
+        print(self$call)
+      }
+      family <- self$stan_data$family_names %||%
+        .family_code_to_name(self$config$family_long)
+      if (!is.null(family)) {
+        fml <-
+          if (length(unique(family)) == 1) {
+            family[1]
+          } else if (length(family) > 5) {
+            paste(paste(head(family, 5), collapse = ", "), "...")
+          } else {
+            paste(family, collapse = ", ")
+          }
+        cat("Family: ", fml, "\n", sep = "")
+      }
+      cli::cli_bullets("Use {.code summary()} for parameter summaries.\n")
       invisible(self)
     }
   ),
@@ -94,7 +127,16 @@ JoiNMeDynPred <- R6::R6Class(
     call = NULL,
     tmax = NULL,
     n_samples = NULL,
-    initialize = function(predictions, quantiles, draws, data, metadata, call, tmax, n_samples) {
+    initialize = function(
+      predictions,
+      quantiles,
+      draws,
+      data,
+      metadata,
+      call,
+      tmax,
+      n_samples
+    ) {
       # Store prediction outputs and metadata for plotting/summaries
       self$predictions <- predictions
       self$quantiles <- quantiles
@@ -104,7 +146,7 @@ JoiNMeDynPred <- R6::R6Class(
       self$call <- call
       self$tmax <- tmax
       self$n_samples <- n_samples
-      class(self) <- unique(c("PredJoiNMeFit", "JoiNMeDynPred", class(self)))
+      class(self) <- unique(c("JoiNMeDynPred", class(self)))
     },
     cache_get = function(key) {
       private$cache[[key]]
@@ -135,7 +177,11 @@ SummaryJoiNMeFit <- R6::R6Class(
       self$tables <- tables
       self$diagnostics <- diagnostics
       self$metadata <- metadata
-      class(self) <- unique(c("summary_JoiNMeFit", "summary_JoiNMeFit", class(self)))
+      class(self) <- unique(c(
+        "summary_JoiNMeFit",
+        "summary_JoiNMeFit",
+        class(self)
+      ))
     }
   )
 )
@@ -150,13 +196,11 @@ SummaryJoiNMeDynPred <- R6::R6Class(
       # Store prediction summary tables
       self$tables <- tables
       self$metadata <- metadata
-      class(self) <- unique(c("summary_PredJoiNMeFit", "summary_JoiNMeDynPred", class(self)))
+      class(self) <- unique(c(
+        # "summary_PredJoiNMeFit",
+        "summary_JoiNMeDynPred",
+        class(self)
+      ))
     }
   )
 )
-
-#' @export
-JoiNMeFit <- JoiNMeFit
-
-#' @export
-PredJoiNMeFit <- JoiNMeDynPred

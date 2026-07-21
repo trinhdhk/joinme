@@ -71,9 +71,9 @@ posterior workflows. It is designed for tasks such as \code{posterior}
 summarisation, \code{bayesplot} visualisation, regex-based variable selection, and
 any workflow that expects a standard draws object.
 
-For fitted joint models, known Stan variables are relabelled using the same
-formula-aware term maps that drive \code{\link[=extract]{extract()}} and the summary methods. For
-dynamic prediction objects, stored draw blocks are flattened into a single
+For fitted \code{JoiNMe} models, known Stan variables are relabelled from raw fit object
+to friendly parameter names.
+For dynamic prediction objects, stored draw blocks are flattened into a single
 draws object with explicit id, scale, marker, and time labels.
 
 Fitted-object draw arrays are cached inside the underlying R6 container after
@@ -84,9 +84,10 @@ Use \code{draws()} when you want:
 \itemize{
 \item one posterior object containing renamed variables,
 \item \code{posterior::subset_draws()} and regex-style variable filtering,
-\item \code{bayesplot} integration via \code{\link[=mcmc_plot]{mcmc_plot()}},
+\item \code{bayesplot} directly, similar to \code{\link[=mcmc_plot]{mcmc_plot()}},
 \item a standard draws array/matrix/data frame rather than a component-specific
 extraction payload.
+\item \code{as.array} is a shorthand for \code{draws(format = "draws_array")}.
 }
 
 Use \code{\link[=extract]{extract()}} instead when you want:

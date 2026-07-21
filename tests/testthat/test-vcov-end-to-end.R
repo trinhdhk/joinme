@@ -51,8 +51,8 @@ test_that("vcov association fits and predicts end-to-end", {
 
   fit_assoc <- extract(fit, what = "assoc", keep_chains = FALSE)
   expect_true(any(grepl("^vcov\\[", colnames(fit_assoc$draws))))
-  expect_true(any(grepl("^alpha_vcov_eff\\[", fit_assoc$term_map$variable)))
-  expect_false(any(grepl("^alpha_vcov\\[", fit_assoc$term_map$variable)))
+  expect_true(any(grepl("^alpha_vcov\\[", fit_assoc$term_map$variable)))
+  expect_false(any(grepl("^z_alpha_vcov\\[", fit_assoc$term_map$variable)))
 
   ndL <- sim$dataLong[sim$dataLong$id == 1, , drop = FALSE]
   ndE <- sim$dataEvent[sim$dataEvent$id == 1, , drop = FALSE]

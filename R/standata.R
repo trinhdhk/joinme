@@ -1,20 +1,9 @@
-#' Build Stan data for JoiNMe (time-internal scaling)
+#' Prepare standata for Joint Nested Mixed-effects (JoiNMe) model.
 #'
 #' @importFrom stats predict setNames
 #'
 #' @description
-#' Standata builder for the JoiNMe joint model (multivariate longitudinal + survival).
-#'
-#' This function follows the notebook `joinme_standata()` design, with these updates:
-#'
-#' 1. Time is still scaled in the design matrices by tmax for numerical stability.
-#' 2. The Stan program internally rescales time-related coefficients using `tmax` and
-#'    index vectors indicating which columns correspond to time.
-#' 3. Therefore, this builder computes and supplies:
-#'    - n_time_beta, idx_time_beta
-#'    - n_time_uid,  idx_time_uid
-#'    - n_time_vmk,  idx_time_vmk
-#'    - n_time_idm,  idx_time_idm
+#' This function process the input from `fit` to prepare standata for Joint Nested Mixed-effects (JoiNMe) model.
 #'
 #' @details
 #' This builder performs three key steps:
@@ -59,8 +48,15 @@
 #'   `corr` and `vcov` are requested, `vcov` is kept and `corr` is ignored with a
 #'   warning. The default `~ 1` is valid and yields an intercept-only covariance
 #'   regression with no subject-level slope columns.
-#' @param formulaDist Optional list of formulas for distributional regression. Two
-#'   forms are supported:
+#' @param formulaDist Optional list of formulas for distributional regression.
+#'   Supported parameters are \code{sigma}, \code{nu}, \code{phi},
+#'   \code{alpha}, \code{kappa}, and \code{tau}. Here \code{nu} is reserved
+#'   for Student-t degrees of freedom; \code{kappa} is the positive Beta
+#'   sample-size parameter defining shapes \eqn{\mu\kappa} and
+#'   \eqn{(1-\mu)\kappa}; and \code{tau} is the skew-double-exponential
+#'   quantile/asymmetry parameter in \eqn{(0,1)}.
+#'
+#'   Three forms are supported:
 #'   1. Named list with RHS-only formulas, e.g. `list(sigma = ~ 1 + time)`.
 #'   2. Unnamed list with LHS parameter names, e.g. `list(sigma ~ 1 + time)`.
 #'   Random-effects terms with `|` are supported; nested random-effects formulas are not.
@@ -123,7 +119,10 @@
 #'   Only the node count is passed to Stan; GK nodes/weights are fixed in Stan.
 #' @param vcov_diag_link Link for the subject-specific standard deviation regression:
 #'   "softplus" or "exp".
-#' @param tau_sde_fixed Optional fixed tau for skew-double-exponential (0 < tau < 1).
+#' @param tau_fixed Optional fixed quantile/asymmetry parameter for the skew
+#'   double exponential family. It must lie strictly between zero and one; the
+#'   value \eqn{0.5} gives the symmetric double exponential distribution. It
+#'   cannot be combined with a \code{tau} distributional regression.
 #' @param seed Optional random seed for deterministic components of standata.
 #' @export
 # File overview:
@@ -152,7 +151,7 @@ joinme_standata <- function(
   marker_weights = NULL,
   fixed_marker_weights = FALSE,
   shared_marker_weights = TRUE,
-  flag_resid_dim = 0L,
+  # flag_resid_dim = 0L,
   basehaz = c("bs", "ns", "formula"),
   basehaz_n_knots = 5L,
   basehaz_knots = NULL,
@@ -161,7 +160,7 @@ joinme_standata <- function(
   tau_spline = 0.4,
   quadrature_nodes = NULL,
   vcov_diag_link = c("softplus", "exp"),
-  tau_sde_fixed = NULL,
+  tau_fixed = NULL,
   seed = NULL
 ) {
   assertthat::assert_that(is.data.frame(dataLong), msg = "dataLong must be a data.frame")
@@ -495,8 +494,8 @@ joinme_standata <- function(
   # Family-level distributional parameter indexing.
   #
   # Goal:
-  # - for each distributional parameter (sigma, nu, phi, alpha, phi_beta,
-  #   tau_sde), build one shared parameter per unique family that requires it,
+  # - for each distributional parameter (sigma, nu, phi, alpha, kappa,
+  #   tau), build one shared parameter per unique family that requires it,
   # - map each marker to its family-level parameter index,
   # - use index 0 for markers/families that do not use that parameter.
   .build_family_param_index <- function(param_name) {
@@ -528,38 +527,49 @@ joinme_standata <- function(
   fam_nu <- .build_family_param_index("nu")
   fam_phi <- .build_family_param_index("phi")
   fam_alpha <- .build_family_param_index("alpha")
-  fam_phi_beta <- .build_family_param_index("phi_beta")
-  fam_tau_sde <- .build_family_param_index("tau_sde")
+  fam_kappa <- .build_family_param_index("kappa")
+  fam_tau <- .build_family_param_index("tau")
 
   vcov_diag_link_code <- if (vcov_diag_link == "exp") 1L else 0L
 
-  use_tau_sde_fixed <- 0L
-  tau_sde_fixed_value <- 0.5
-  if (!is.null(tau_sde_fixed)) {
-    if (!is.numeric(tau_sde_fixed) || length(tau_sde_fixed) != 1 || !is.finite(tau_sde_fixed)) {
+  use_tau_fixed <- 0L
+  tau_fixed_value <- 0.5
+  if (!is.null(tau_fixed)) {
+    if (!is.numeric(tau_fixed) || length(tau_fixed) != 1 || !is.finite(tau_fixed)) {
       cli::cli_abort(c(
-        x = "{.arg tau_sde_fixed} must be a single finite numeric value.",
+        x = "{.arg tau_fixed} must be a single finite numeric value.",
         i = "Provide a number strictly between 0 and 1."
       ))
     }
-    tau_sde_fixed_value <- as.numeric(tau_sde_fixed)
-    if (tau_sde_fixed_value <= 0 || tau_sde_fixed_value >= 1) {
+    tau_fixed_value <- as.numeric(tau_fixed)
+    if (tau_fixed_value <= 0 || tau_fixed_value >= 1) {
       cli::cli_abort(c(
-        x = "{.arg tau_sde_fixed} must be between 0 and 1.",
+        x = "{.arg tau_fixed} must be between 0 and 1.",
         i = "Provide a number strictly between 0 and 1."
       ))
     }
     if (any(family_codes == 9L)) {
-      use_tau_sde_fixed <- 1L
+      use_tau_fixed <- 1L
     } else {
       cli::cli_warn(c(
-        x = "{.arg tau_sde_fixed} is ignored because no skew_double_exponential family is present.",
-        i = "Remove {.arg tau_sde_fixed} or include the skew_double_exponential family."
+        x = "{.arg tau_fixed} is ignored because no skew_double_exponential family is present.",
+        i = "Remove {.arg tau_fixed} or include the skew_double_exponential family."
       ))
     }
   }
   
   dist_formulas <- .normalize_formula_dist(formulaDist)
+
+  # A fixed tau and a tau regression describe competing quantile/asymmetry
+  # models. Require exactly one specification so the posterior never contains
+  # regression coefficients that are disconnected from the likelihood.
+  if (use_tau_fixed == 1L && !is.null(dist_formulas$tau)) {
+    cli::cli_abort(c(
+      x = "Specify either {.arg tau_fixed} or a {.code tau ~ ...} distributional regression, not both.",
+      i = "Remove {.arg tau_fixed} to estimate tau, or remove the tau formula to keep it fixed."
+    ))
+  }
+
   family_names_present <- vapply(family_codes, .family_code_to_name, character(1))
   .validate_dist_formula_scopes(dist_formulas, family_names_present)
   allowed_dist <- unique(unlist(lapply(family_codes, .family_distrib_params)))
@@ -604,15 +614,15 @@ joinme_standata <- function(
   dist_nu <- .build_dist_matrix(dist_formulas$nu, dl, family_by_row = family_by_row)
   dist_phi <- .build_dist_matrix(dist_formulas$phi, dl, family_by_row = family_by_row)
   dist_alpha <- .build_dist_matrix(dist_formulas$alpha, dl, family_by_row = family_by_row)
-  dist_phi_beta <- .build_dist_matrix(dist_formulas$phi_beta, dl, family_by_row = family_by_row)
-  dist_tau_sde <- .build_dist_matrix(dist_formulas$tau_sde, dl, family_by_row = family_by_row)
+  dist_kappa <- .build_dist_matrix(dist_formulas$kappa, dl, family_by_row = family_by_row)
+  dist_tau <- .build_dist_matrix(dist_formulas$tau, dl, family_by_row = family_by_row)
 
   re_sigma <- .pad_re_terms(.build_dist_re_terms(dist_formulas$sigma, dl), nrow(dl))
   re_nu <- .pad_re_terms(.build_dist_re_terms(dist_formulas$nu, dl), nrow(dl))
   re_phi <- .pad_re_terms(.build_dist_re_terms(dist_formulas$phi, dl), nrow(dl))
   re_alpha <- .pad_re_terms(.build_dist_re_terms(dist_formulas$alpha, dl), nrow(dl))
-  re_phi_beta <- .pad_re_terms(.build_dist_re_terms(dist_formulas$phi_beta, dl), nrow(dl))
-  re_tau_sde <- .pad_re_terms(.build_dist_re_terms(dist_formulas$tau_sde, dl), nrow(dl))
+  re_kappa <- .pad_re_terms(.build_dist_re_terms(dist_formulas$kappa, dl), nrow(dl))
+  re_tau <- .pad_re_terms(.build_dist_re_terms(dist_formulas$tau, dl), nrow(dl))
 
   fixed_blueprint <- .make_model_matrix_blueprint(
     fixed_rhs,
@@ -950,10 +960,10 @@ joinme_standata <- function(
     marker_to_phi_family = fam_phi$marker_to,
     n_family_alpha = fam_alpha$n,
     marker_to_alpha_family = fam_alpha$marker_to,
-    n_family_phi_beta = fam_phi_beta$n,
-    marker_to_phi_beta_family = fam_phi_beta$marker_to,
-    n_family_tau_sde = fam_tau_sde$n,
-    marker_to_tau_sde_family = fam_tau_sde$marker_to,
+    n_family_kappa = fam_kappa$n,
+    marker_to_kappa_family = fam_kappa$marker_to,
+    n_family_tau = fam_tau$n,
+    marker_to_tau_family = fam_tau$marker_to,
     P = as.integer(P),
     X_obs = X_obs,
     R_id = as.integer(R_id),
@@ -966,7 +976,7 @@ joinme_standata <- function(
     Z_idm_obs = Z_idm_obs,
     re_weight_idm = as.numeric(re_weight_idm),
     re_weight_L = as.numeric(re_weight_L),
-    flag_resid_dim = as.integer(flag_resid_dim),
+    # flag_resid_dim = as.integer(flag_resid_dim),
     indep_id_re = as.integer(indep_flags$indep_id_re),
     indep_marker_re = as.integer(indep_flags$indep_marker_re),
     indep_marker_byid_latent_re = as.integer(1L), # keep as in your Page; extend if needed
@@ -975,8 +985,8 @@ joinme_standata <- function(
     M_vcov_tf = as.integer(M_vcov_tf),
     allow_marker_crosscorr = as.integer(allow_marker_crosscorr),
     vcov_diag_link = as.integer(vcov_diag_link_code),
-    use_tau_sde_fixed = as.integer(use_tau_sde_fixed),
-    tau_sde_fixed = as.numeric(tau_sde_fixed_value),
+    use_tau_fixed = as.integer(use_tau_fixed),
+    tau_fixed = as.numeric(tau_fixed_value),
     p_w = as.integer(p_w),
     W = W,
     K_cov = as.integer(K_cov),
@@ -1037,26 +1047,26 @@ joinme_standata <- function(
     Z_alpha = re_alpha$Z,
     J_alpha = re_alpha$J_mat,
     re_weight_alpha = re_alpha$W,
-    P_phi_beta = as.integer(dist_phi_beta$P),
-    X_phi_beta = dist_phi_beta$X,
-    n_re_phi_beta = as.integer(re_phi_beta$n_re),
-    K_phi_beta = as.array(as.integer(re_phi_beta$K)),
-    G_phi_beta = as.array(as.integer(re_phi_beta$G)),
-    K_phi_beta_max = as.integer(re_phi_beta$K_max),
-    G_phi_beta_max = as.integer(re_phi_beta$G_max),
-    Z_phi_beta = re_phi_beta$Z,
-    J_phi_beta = re_phi_beta$J_mat,
-    re_weight_phi_beta = re_phi_beta$W,
-    P_tau_sde = as.integer(dist_tau_sde$P),
-    X_tau_sde = dist_tau_sde$X,
-    n_re_tau_sde = as.integer(re_tau_sde$n_re),
-    K_tau_sde = as.array(as.integer(re_tau_sde$K)),
-    G_tau_sde = as.array(as.integer(re_tau_sde$G)),
-    K_tau_sde_max = as.integer(re_tau_sde$K_max),
-    G_tau_sde_max = as.integer(re_tau_sde$G_max),
-    Z_tau_sde = re_tau_sde$Z,
-    J_tau_sde = re_tau_sde$J_mat,
-    re_weight_tau_sde = re_tau_sde$W,
+    P_kappa = as.integer(dist_kappa$P),
+    X_kappa = dist_kappa$X,
+    n_re_kappa = as.integer(re_kappa$n_re),
+    K_kappa = as.array(as.integer(re_kappa$K)),
+    G_kappa = as.array(as.integer(re_kappa$G)),
+    K_kappa_max = as.integer(re_kappa$K_max),
+    G_kappa_max = as.integer(re_kappa$G_max),
+    Z_kappa = re_kappa$Z,
+    J_kappa = re_kappa$J_mat,
+    re_weight_kappa = re_kappa$W,
+    P_tau = as.integer(dist_tau$P),
+    X_tau = dist_tau$X,
+    n_re_tau = as.integer(re_tau$n_re),
+    K_tau = as.array(as.integer(re_tau$K)),
+    G_tau = as.array(as.integer(re_tau$G)),
+    K_tau_max = as.integer(re_tau$K_max),
+    G_tau_max = as.integer(re_tau$G_max),
+    Z_tau = re_tau$Z,
+    J_tau = re_tau$J_mat,
+    re_weight_tau = re_tau$W,
     K_ord = as.integer(K_ord),
 
     # Mean association designs
@@ -1160,10 +1170,10 @@ joinme_standata <- function(
     family_phi_names = fam_phi$family_names,
     family_alpha_codes = fam_alpha$family_codes,
     family_alpha_names = fam_alpha$family_names,
-    family_phi_beta_codes = fam_phi_beta$family_codes,
-    family_phi_beta_names = fam_phi_beta$family_names,
-    family_tau_sde_codes = fam_tau_sde$family_codes,
-    family_tau_sde_names = fam_tau_sde$family_names,
+    family_kappa_codes = fam_kappa$family_codes,
+    family_kappa_names = fam_kappa$family_names,
+    family_tau_codes = fam_tau$family_codes,
+    family_tau_names = fam_tau$family_names,
     tf_compositions = NULL,
     basehaz = basehaz,
     basehaz_n_knots = basehaz_n_knots,
@@ -1175,16 +1185,16 @@ joinme_standata <- function(
       nu = dist_nu$cols,
       phi = dist_phi$cols,
       alpha = dist_alpha$cols,
-      phi_beta = dist_phi_beta$cols,
-      tau_sde = dist_tau_sde$cols
+      kappa = dist_kappa$cols,
+      tau = dist_tau$cols
     ),
     dist_re_terms = list(
       sigma = re_sigma$terms,
       nu = re_nu$terms,
       phi = re_phi$terms,
       alpha = re_alpha$terms,
-      phi_beta = re_phi_beta$terms,
-      tau_sde = re_tau_sde$terms
+      kappa = re_kappa$terms,
+      tau = re_tau$terms
     ),
     dist_formulas = dist_formulas
   )

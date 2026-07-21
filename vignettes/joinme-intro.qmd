@@ -275,9 +275,31 @@ The heatmap is an alternative to the usual separated marker curves. It orders
 markers by the magnitude of posterior mean change and makes tiles transparent
 when the posterior sign certainty does not exceed `1 - threshold`.
 
-`plot(fit, ...)` uses fitted posterior samples directly. For conditioning at
-named baseline profiles, call `predict(fit, ..., condition = make_conditions(...))`
-and then plot the resulting `JoiNMeDynPred` object.
+`plot(fit, ...)` uses fitted posterior samples directly and has no conditioning
+argument. Conditional covariate profiles are evaluated with
+`conditional_effects()`, while `predict()` remains reserved for dynamic
+subject-specific forecasts given observed longitudinal history.
+
+```{r intro-conditional-effects, eval=FALSE}
+profiles <- make_conditions(sim$dataEvent, vars = "x1")
+
+effects_data <- conditional_effects(
+  fit,
+  effects = list(longitudinal = "time", event = "x1"),
+  conditions = profiles,
+  process = c("longitudinal", "event"),
+  longitudinal_estimand = "population",
+  plot = FALSE
+)
+
+plot(effects_data, ask = FALSE)
+```
+
+For the longitudinal process, set `longitudinal_estimand = "marker"` to add
+the fitted marker-level deviation, or use `"marginal_marker"` to average
+marker-specific predictions within each posterior draw. This latter estimand
+applies each marker's inverse link before averaging, so it represents the
+average expected marker response rather than the response of an average marker.
 
 ### Step 8: Diagnostics and extraction helpers
 

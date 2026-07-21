@@ -1,5 +1,5 @@
 ---
-title: "A Scientifically Rigorous Workflow for Joint Modelling"
+title: "A Example Workflow for Joint Modelling"
 output-dir: ../docs/articles
 format:
   html:
@@ -215,8 +215,8 @@ control <- list(
   iter_sampling = 200,  # Typically 1000+
   parallel_chains = 1,
   adapt_delta = 0.90,   # Increase if divergences occur
-  max_treedepth = 12,
-  force_recompile = (engine == "cmdstanr")
+  max_treedepth = 12
+  # force_recompile = (engine == "cmdstanr")
 )
 if (engine == "cmdstanr") control$init <- 0
 
@@ -259,7 +259,7 @@ draws_obj <- draws(fit, format = "draws_array")
 
 draws_sub <- posterior::subset_draws(
   draws_obj,
-  variable = c("^\\(Intercept\\)$", "^time$", "^event", "^alpha_"),
+  variable = c("^\\(Intercept\\)$", "^time$", "^event", "^cv_total"),
   regex = TRUE
 )
 
@@ -276,17 +276,7 @@ Visual inspection of traceplots helps identify mixing issues or stuck chains.
 
 ```{r trace}
 # Plot traces for the association parameter using the helper API
-mcmc_plot(fit, variable = "alpha_cv_marker", type = "trace")
-```
-
-# Posterior Predictive Checks (PPC)
-
-A key step in validation is checking if the model can reproduce the observed data patterns.
-
-```{r ppc, eval=FALSE}
-# posterior_predict draws from the fitted model for PPC
-# y_rep <- posterior_predict(fit, ndraws = 100)
-# bayesplot::ppc_dens_overlay(dataLong$y, y_rep)
+mcmc_plot(fit, variable = "cv_total", type = "trace")
 ```
 
 # Dynamic Prediction
@@ -336,7 +326,6 @@ preds <- tryCatch(
   }
 )
 
-# The result is a JoiNMeDynPred / PredJoiNMeFit object
 if (!is.null(preds)) {
   inherits(preds, "JoiNMeDynPred")
   head(preds$predictions$survival)
@@ -367,10 +356,10 @@ as the tables returned by `summary(fit)`. The `draws()` and `mcmc_plot()`
 helpers make that possible without directly handling raw Stan variables.
 
 ```{r posterior-reporting}
-renamed_draws <- draws(fit, variables = c("time", "alpha_cv_total"), format = "draws_df")
+renamed_draws <- draws(fit, variables = c("time", "cv_total"), format = "draws_df")
 head(renamed_draws)
 
-mcmc_plot(fit, variable = c("time", "alpha_cv_total"), type = "intervals")
+mcmc_plot(fit, variable = c("time", "cv_total"), type = "intervals")
 ```
 
 The plotting wrappers expose the same fitted and predicted views as the main
@@ -401,36 +390,50 @@ plot(
 )
 ```
 
-`plot(fit, ...)` uses fitted posterior samples directly (no conditioning).
-When you want displays at named baseline profiles, build conditions with
-`make_conditions()` and pass them through `predict()`, then plot the returned
-`JoiNMeDynPred` object:
+`plot(fit, ...)` uses fitted posterior samples directly and does not accept a
+conditioning argument. Named covariate profiles belong to the conditional-
+effects estimand. Build those profiles with `make_conditions()` and pass them
+to `conditional_effects()`:
 
 ```{r predict-conditions, eval=FALSE}
-cond <- make_conditions(dataEvent, vars = c("x1", "x2"))
+profiles <- make_conditions(dataEvent, vars = c("x1", "x2"))
 
-pred_cond <- predict(
+effects_data <- conditional_effects(
   fit,
-  condition = cond,
+  effects = list(
+    longitudinal = "time",
+    event = c("x1", "x2")
+  ),
+  conditions = profiles,
   process = c("longitudinal", "event"),
-  scale = "epred"
+  longitudinal_estimand = "population",
+  plot = FALSE
 )
 
-plot(
-  pred_cond,
-  type = c("longitudinal", "survival"),
-  scale = "epred",
-  combined = TRUE
+plot(effects_data, ask = FALSE)
+```
+
+The longitudinal calculation has three estimands. `"population"` uses only the
+fixed-effect contribution. `"marker"` adds the fitted marker-level deviation
+while still excluding subject and marker-by-subject deviations.
+`"marginal_marker"` calculates each selected marker response first and averages
+those responses within every posterior draw. The last ordering is important for
+nonlinear links: it estimates the average expected response rather than the
+expected response at an average marker effect. The `markers` argument restricts
+the marker-specific panels or the equally weighted set entering that average.
+
+```{r predict-conditions-marker-average, eval=FALSE}
+average_marker_effect <- conditional_effects(
+  fit,
+  effects = "time",
+  process = "longitudinal",
+  longitudinal_estimand = "marginal_marker",
+  markers = c("m1", "m2"),
+  plot = FALSE
 )
 ```
 
-# Conclusion
-
-By following this workflow:
-1.  **Simulate** (or explore) to understand data properties.
-2.  **Fit** with explicit priors and robust settings.
-3.  **Diagnose** convergence thoroughly using $\hat{R}$ and traceplots.
-4.  **Validate** using posterior predictive checks.
-5.  **Predict** to demonstrate clinical utility.
-
-You ensure that your joint modelling analysis is scientifically sound and robust against common pitfalls in Bayesian inference.
+The event tables contain the covariate-specific relative hazard
+`exp(W * gamma)`, holding the baseline hazard and longitudinal association
+contribution fixed. Subject-specific forecasts given an observed marker history
+remain the role of `predict()`.

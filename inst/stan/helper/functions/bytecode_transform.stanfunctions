@@ -1,9 +1,0 @@
-/**
- * @file bytecode_transform.stanfunctions
- * @brief Compatibility include for functional bytecode transforms.
- *
- * @details This file exists as a lightweight include point for models
- * that reference a legacy "bytecode" transform interface. It simply
- * includes the functional bytecode interpreter implementation.
- */
-#include helper/functions/functional_transform.stanfunctions

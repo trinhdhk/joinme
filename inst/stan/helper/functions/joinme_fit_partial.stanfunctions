@@ -140,13 +140,13 @@
  * @param marker_to_phi_family Mapping from marker to phi-family index.
  * @param n_family_alpha Number of alpha-family parameter groups.
  * @param marker_to_alpha_family Mapping from marker to alpha-family index.
- * @param n_family_phi_beta Number of phi-beta-family parameter groups.
- * @param marker_to_phi_beta_family Mapping from marker to phi-beta-family index.
- * @param n_family_tau_sde Number of tau-SDE-family parameter groups.
- * @param marker_to_tau_sde_family Mapping from marker to tau-SDE-family index.
+ * @param n_family_kappa Number of Beta-kappa family parameter groups.
+ * @param marker_to_kappa_family Mapping from marker to Beta-kappa family index.
+ * @param n_family_tau Number of skew-double-exponential tau-family parameter groups.
+ * @param marker_to_tau_family Mapping from marker to tau-family index.
  * @param flag_resid_dim Integer flag for residual dimension options.
- * @param use_tau_sde_fixed Integer flag to use fixed tau for SDE.
- * @param tau_sde_fixed Fixed tau value for SDE (0 < tau < 1).
+ * @param use_tau_fixed Integer flag to use fixed tau for SDE.
+ * @param tau_fixed Fixed tau value for SDE (0 < tau < 1).
  * @param X_obs Fixed effects design matrix for longitudinal part.
  * @param Z_id_obs Random effects design matrix (subject-level).
  * @param Z_mk_obs Random effects design matrix (marker-level).
@@ -162,16 +162,16 @@
  * @param X_phi Design matrix for phi regression.
  * @param P_alpha Number of coefficients for alpha regression.
  * @param X_alpha Design matrix for alpha regression.
- * @param P_phi_beta Number of coefficients for phi_beta regression.
- * @param X_phi_beta Design matrix for phi_beta regression.
- * @param P_tau_sde Number of coefficients for tau_sde regression.
- * @param X_tau_sde Design matrix for tau_sde regression.
+ * @param P_kappa Number of coefficients for kappa regression.
+ * @param X_kappa Design matrix for kappa regression.
+ * @param P_tau Number of coefficients for tau regression.
+ * @param X_tau Design matrix for tau regression.
  * @param beta_sigma Coefficients for sigma regression.
  * @param beta_nu Coefficients for nu regression.
  * @param beta_phi Coefficients for phi regression.
  * @param beta_alpha Coefficients for alpha regression.
- * @param beta_phi_beta Coefficients for phi_beta regression.
- * @param beta_tau_sde Coefficients for tau_sde regression.
+ * @param beta_kappa Coefficients for kappa regression.
+ * @param beta_tau Coefficients for tau regression.
  * @param n_re_sigma Number of random effects for sigma.
  * @param K_sigma Random effect dimensions for sigma.
  * @param K_sigma_max Max random effect dimension for sigma.
@@ -200,20 +200,20 @@
  * @param J_alpha Random effect grouping indices for alpha.
  * @param tau_alpha Random effect scales for alpha.
  * @param z_alpha Standard normal draws for alpha random effects.
- * @param n_re_phi_beta Number of random effects for phi_beta.
- * @param K_phi_beta Random effect dimensions for phi_beta.
- * @param K_phi_beta_max Max random effect dimension for phi_beta.
- * @param Z_phi_beta Random effect design matrices for phi_beta.
- * @param J_phi_beta Random effect grouping indices for phi_beta.
- * @param tau_phi_beta Random effect scales for phi_beta.
- * @param z_phi_beta Standard normal draws for phi_beta random effects.
- * @param n_re_tau_sde Number of random effects for tau_sde.
- * @param K_tau_sde Random effect dimensions for tau_sde.
- * @param K_tau_sde_max Max random effect dimension for tau_sde.
- * @param Z_tau_sde Random effect design matrices for tau_sde.
- * @param J_tau_sde Random effect grouping indices for tau_sde.
- * @param tau_tau_sde Random effect scales for tau_sde.
- * @param z_tau_sde Standard normal draws for tau_sde random effects.
+ * @param n_re_kappa Number of random effects for kappa.
+ * @param K_kappa Random effect dimensions for kappa.
+ * @param K_kappa_max Max random effect dimension for kappa.
+ * @param Z_kappa Random effect design matrices for kappa.
+ * @param J_kappa Random effect grouping indices for kappa.
+ * @param tau_kappa Random effect scales for kappa.
+ * @param z_kappa Standard normal draws for kappa random effects.
+ * @param n_re_tau Number of random effects for tau.
+ * @param K_tau Random effect dimensions for tau.
+ * @param K_tau_max Max random effect dimension for tau.
+ * @param Z_tau Random effect design matrices for tau.
+ * @param J_tau Random effect grouping indices for tau.
+ * @param tau_tau Random effect scales for tau.
+ * @param z_tau Standard normal draws for tau random effects.
  * @param u_id Random effects (subject-level).
  * @param v_marker Random effects (marker-level).
  * @param w_idm Random effects (scaled subject-marker).
@@ -222,8 +222,8 @@
  * @param nu_family Family-level degrees of freedom.
  * @param phi_family Family-level dispersion parameters.
  * @param alpha_family Family-level skewness parameters.
- * @param phi_beta_family Family-level beta precision parameters.
- * @param tau_sde_family Family-level skew-double-exponential asymmetry parameters.
+ * @param kappa_family Family-level Beta sample-size parameters.
+ * @param tau_family Family-level skew-double-exponential asymmetry parameters.
  * @param K_ord Number of ordinal categories.
  * @param cutpoints_ord Cutpoints for ordinal models.
  * @param p_w Number of survival covariates.
@@ -352,13 +352,13 @@ real partial_joinme(
     array[] int marker_to_phi_family,
     int n_family_alpha,
     array[] int marker_to_alpha_family,
-    int n_family_phi_beta,
-    array[] int marker_to_phi_beta_family,
-    int n_family_tau_sde,
-    array[] int marker_to_tau_sde_family,
-    int flag_resid_dim,
-    int use_tau_sde_fixed,
-    real tau_sde_fixed,
+    int n_family_kappa,
+    array[] int marker_to_kappa_family,
+    int n_family_tau,
+    array[] int marker_to_tau_family,
+    // int flag_resid_dim,
+    int use_tau_fixed,
+    real tau_fixed,
     matrix X_obs,
     matrix Z_id_obs,
     matrix Z_mk_obs,
@@ -374,16 +374,16 @@ real partial_joinme(
     matrix X_phi,
     int P_alpha,
     matrix X_alpha,
-    int P_phi_beta,
-    matrix X_phi_beta,
-    int P_tau_sde,
-    matrix X_tau_sde,
+    int P_kappa,
+    matrix X_kappa,
+    int P_tau,
+    matrix X_tau,
     vector beta_sigma,
     vector beta_nu,
     vector beta_phi,
     vector beta_alpha,
-    vector beta_phi_beta,
-    vector beta_tau_sde,
+    vector beta_kappa,
+    vector beta_tau,
     int n_re_sigma,
     array[] int K_sigma,
     int K_sigma_max,
@@ -412,20 +412,20 @@ real partial_joinme(
     array[,] int J_alpha,
     array[] vector tau_alpha,
     array[] matrix z_alpha,
-    int n_re_phi_beta,
-    array[] int K_phi_beta,
-    int K_phi_beta_max,
-    array[] matrix Z_phi_beta,
-    array[,] int J_phi_beta,
-    array[] vector tau_phi_beta,
-    array[] matrix z_phi_beta,
-    int n_re_tau_sde,
-    array[] int K_tau_sde,
-    int K_tau_sde_max,
-    array[] matrix Z_tau_sde,
-    array[,] int J_tau_sde,
-    array[] vector tau_tau_sde,
-    array[] matrix z_tau_sde,
+    int n_re_kappa,
+    array[] int K_kappa,
+    int K_kappa_max,
+    array[] matrix Z_kappa,
+    array[,] int J_kappa,
+    array[] vector tau_kappa,
+    array[] matrix z_kappa,
+    int n_re_tau,
+    array[] int K_tau,
+    int K_tau_max,
+    array[] matrix Z_tau,
+    array[,] int J_tau,
+    array[] vector tau_tau,
+    array[] matrix z_tau,
     array[] vector u_id,
     array[] vector v_marker,
     array[,] vector w_idm,
@@ -434,8 +434,8 @@ real partial_joinme(
     vector nu_family,
     vector phi_family,
     vector alpha_family,
-    vector phi_beta_family,
-    vector tau_sde_family,
+    vector kappa_family,
+    vector tau_family,
     int K_ord,
     vector cutpoints_ord,
     int p_w,
@@ -823,51 +823,51 @@ real partial_joinme(
         
         // Compute tau (asymmetry parameter, constrained to (0,1) via logit link)
         // tau = logit^-1(eta_tau) ensures 0 < tau < 1
-        real tau_sde;
-        if (use_tau_sde_fixed == 1) {
-          tau_sde = tau_sde_fixed;
+        real tau;
+        if (use_tau_fixed == 1) {
+          tau = tau_fixed;
         } else {
-          real eta_tau = 0; // tau_sde linear predictor
-          if (P_tau_sde > 0) eta_tau += dot_product(X_tau_sde[n], beta_tau_sde);
-          if (n_re_tau_sde > 0) {
-            for (j in 1 : n_re_tau_sde) {
-              vector[K_tau_sde[j]] b = (to_vector(z_tau_sde[j][J_tau_sde[j, n], 1:K_tau_sde[j]]) .* tau_tau_sde[j][1:K_tau_sde[j]]);
-              // b: tau_sde random-effect coefficients for term j
-              eta_tau += dot_product(Z_tau_sde[j][n, 1:K_tau_sde[j]], b);
+          real eta_tau = 0; // tau linear predictor
+          if (P_tau > 0) eta_tau += dot_product(X_tau[n], beta_tau);
+          if (n_re_tau > 0) {
+            for (j in 1 : n_re_tau) {
+              vector[K_tau[j]] b = (to_vector(z_tau[j][J_tau[j, n], 1:K_tau[j]]) .* tau_tau[j][1:K_tau[j]]);
+              // b: tau random-effect coefficients for term j
+              eta_tau += dot_product(Z_tau[j][n, 1:K_tau[j]], b);
             }
           }
-          tau_sde = (P_tau_sde > 0 || n_re_tau_sde > 0) ? inv_logit(eta_tau) : tau_sde_family[marker_to_tau_sde_family[d]];
+          tau = (P_tau > 0 || n_re_tau > 0) ? inv_logit(eta_tau) : tau_family[marker_to_tau_family[d]];
         }
-        // tau_sde: asymmetry parameter in (0,1)
+        // tau: asymmetry parameter in (0,1)
         
-        lp_i += skew_double_exponential_lpdf(y_real[n] | mu_long, sig, tau_sde);
+        lp_i += skew_double_exponential_lpdf(y_real[n] | mu_long, sig, tau);
         
       // FAMILY 10: BETA REGRESSION
-      // p(y | eta, phi) = Beta(y | a, b), where y in (0, 1)
+      // p(y | eta, kappa) = Beta(y | a, b), where y in (0, 1)
       // Mean: mu = logit^-1(eta) in (0,1)
-      // Precision: phi > 0 (larger phi -> lower variance)
-      // Parameterisation: a = mu * phi, b = (1 - mu) * phi
-      // Variance: Var(y) = mu * (1 - mu) / (phi + 1)
+      // Sample size: kappa > 0 (larger kappa -> lower variance)
+      // Parameterisation: a = mu * kappa, b = (1 - mu) * kappa
+      // Variance: Var(y) = mu * (1 - mu) / (kappa + 1)
       } else if (family_long[d] == 10) {
-        // Compute phi (precision parameter)
-        real eta_phi_beta = 0; // log-phi_beta linear predictor
-        if (P_phi_beta > 0) eta_phi_beta += dot_product(X_phi_beta[n], beta_phi_beta);
-        if (n_re_phi_beta > 0) {
-          for (j in 1 : n_re_phi_beta) {
-            vector[K_phi_beta[j]] b = (to_vector(z_phi_beta[j][J_phi_beta[j, n], 1:K_phi_beta[j]]) .* tau_phi_beta[j][1:K_phi_beta[j]]);
-            // b: phi_beta random-effect coefficients for term j
-            eta_phi_beta += dot_product(Z_phi_beta[j][n, 1:K_phi_beta[j]], b);
+        // Compute the positive Beta sample-size parameter.
+        real eta_kappa = 0; // log-kappa linear predictor
+        if (P_kappa > 0) eta_kappa += dot_product(X_kappa[n], beta_kappa);
+        if (n_re_kappa > 0) {
+          for (j in 1 : n_re_kappa) {
+            vector[K_kappa[j]] b = (to_vector(z_kappa[j][J_kappa[j, n], 1:K_kappa[j]]) .* tau_kappa[j][1:K_kappa[j]]);
+            // b: kappa random-effect coefficients for term j
+            eta_kappa += dot_product(Z_kappa[j][n, 1:K_kappa[j]], b);
           }
         }
-        real phi_beta = (P_phi_beta > 0 || n_re_phi_beta > 0) ? exp(eta_phi_beta) : phi_beta_family[marker_to_phi_beta_family[d]];
-        // phi_beta: precision
+        real kappa = (P_kappa > 0 || n_re_kappa > 0) ? exp(eta_kappa) : kappa_family[marker_to_kappa_family[d]];
+        // kappa: sample-size parameter
         
         // Convert eta to mean mu in (0,1) using configured inverse link.
         real mu = fmin(fmax(mu_long, 1e-12), 1 - 1e-12); // beta mean
         
         // Compute Beta shape parameters with floor to avoid numerical issues
-        real shape1 = fmax(mu * phi_beta, 1e-6); // beta shape1
-        real shape2 = fmax((1 - mu) * phi_beta, 1e-6); // beta shape2
+        real shape1 = fmax(mu * kappa, 1e-6); // beta shape1
+        real shape2 = fmax((1 - mu) * kappa, 1e-6); // beta shape2
         
         lp_i += beta_lpdf(y_real[n] | shape1, shape2);
         

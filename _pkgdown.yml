@@ -17,55 +17,14 @@ home:
 articles:
 - title: Get started
   contents:
-  - JoiNMe-intro
-  - JoiNMe-demo
+  - joinme-intro
+  - joinme-demo
 - title: Modelling
   contents:
-  - JoiNMe-workflow
-  - JoiNMe-associations
-  - JoiNMe-model
-  - JoiNMe-theory
-reference:
-- title: Core modelling
+  - joinme-workflow
+  - joinme-associations
+  - joinme-model
+  - joinme-theory
+- title: Other
   contents:
-  - JoiNMe-package
-  - joinme
-  - joinme_standata
-  - build_standata_transforms
-  - simulate_joinme
-  - update.JoiNMeFit
-  - print.JoiNMeFit
-  - summary.JoiNMeFit
-  - print.summary_JoiNMeFit
-- title: Prediction
-  contents:
-  - predict.JoiNMeFit
-  - posterior_epred.JoiNMeFit
-  - posterior_linpred.JoiNMeFit
-  - posterior_predict.JoiNMeFit
-  - plot.JoiNMeDynPred
-- title: Model diagnosis and performance
-  contents:
-  - loo.JoiNMeFit
-  - waic.JoiNMeFit
-  - elpd.JoiNMeFit
-  - pp_check.JoiNMeFit
-  - concordance.JoiNMeFit
-  - log_lik.JoiNMeFit
-- title: Utilities
-  contents:
-  - fixef.JoiNMeFit
-  - ranef.JoiNMeFit
-- title: Transforms
-  contents:
-  - parse_transform_expr
-  - example_transform_spec
-  - penalised_ispline_transform
-- title: Misc
-  contents:
-  - bayes_factor
-  - family_utils
-  - weibull_h0
-  - precompile_cmdstanr_models
-  - simulate_joinme_joint_student_t_cvtotal
-  - run_joinme_example
+  - simulate-joinme-cookbook

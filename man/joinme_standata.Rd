@@ -2,7 +2,7 @@
 % Please edit documentation in R/standata.R
 \name{joinme_standata}
 \alias{joinme_standata}
-\title{Build Stan data for JoiNMe (time-internal scaling)}
+\title{Prepare standata for Joint Nested Mixed-effects (JoiNMe) model.}
 \usage{
 joinme_standata(
   formulaLong,
@@ -27,7 +27,6 @@ joinme_standata(
   marker_weights = NULL,
   fixed_marker_weights = FALSE,
   shared_marker_weights = TRUE,
-  flag_resid_dim = 0L,
   basehaz = c("bs", "ns", "formula"),
   basehaz_n_knots = 5L,
   basehaz_knots = NULL,
@@ -36,7 +35,7 @@ joinme_standata(
   tau_spline = 0.4,
   quadrature_nodes = NULL,
   vcov_diag_link = c("softplus", "exp"),
-  tau_sde_fixed = NULL,
+  tau_fixed = NULL,
   seed = NULL
 )
 }
@@ -79,8 +78,15 @@ entries together with the subject-specific standard deviations. If both
 warning. The default \code{~ 1} is valid and yields an intercept-only covariance
 regression with no subject-level slope columns.}
 
-\item{formulaDist}{Optional list of formulas for distributional regression. Two
-forms are supported:
+\item{formulaDist}{Optional list of formulas for distributional regression.
+Supported parameters are \code{sigma}, \code{nu}, \code{phi},
+\code{alpha}, \code{kappa}, and \code{tau}. Here \code{nu} is reserved
+for Student-t degrees of freedom; \code{kappa} is the positive Beta
+sample-size parameter defining shapes \eqn{\mu\kappa} and
+\eqn{(1-\mu)\kappa}; and \code{tau} is the skew-double-exponential
+quantile/asymmetry parameter in \eqn{(0,1)}.
+
+Three forms are supported:
 \enumerate{
 \item Named list with RHS-only formulas, e.g. \code{list(sigma = ~ 1 + time)}.
 \item Unnamed list with LHS parameter names, e.g. \code{list(sigma ~ 1 + time)}.
@@ -150,8 +156,6 @@ marker-based association terms share one marker-weight structure. If FALSE,
 each active weighted marker-based association term gets its own marker-weight
 structure.}
 
-\item{flag_resid_dim}{Integer flag to include residual dimension checks.}
-
 \item{basehaz}{Baseline hazard basis type: "bs", "ns", or "formula".}
 
 \item{basehaz_n_knots}{Number of internal knots for spline baseline hazards.}
@@ -171,26 +175,17 @@ Only the node count is passed to Stan; GK nodes/weights are fixed in Stan.}
 \item{vcov_diag_link}{Link for the subject-specific standard deviation regression:
 "softplus" or "exp".}
 
-\item{tau_sde_fixed}{Optional fixed tau for skew-double-exponential (0 < tau < 1).}
+\item{tau_fixed}{Optional fixed quantile/asymmetry parameter for the skew
+double exponential family. It must lie strictly between zero and one; the
+value \eqn{0.5} gives the symmetric double exponential distribution. It
+cannot be combined with a \code{tau} distributional regression.}
 
 \item{seed}{Optional random seed for deterministic components of standata.}
+
+\item{flag_resid_dim}{Integer flag to include residual dimension checks.}
 }
 \description{
-Standata builder for the JoiNMe joint model (multivariate longitudinal + survival).
-
-This function follows the notebook \code{joinme_standata()} design, with these updates:
-\enumerate{
-\item Time is still scaled in the design matrices by tmax for numerical stability.
-\item The Stan program internally rescales time-related coefficients using \code{tmax} and
-index vectors indicating which columns correspond to time.
-\item Therefore, this builder computes and supplies:
-\itemize{
-\item n_time_beta, idx_time_beta
-\item n_time_uid,  idx_time_uid
-\item n_time_vmk,  idx_time_vmk
-\item n_time_idm,  idx_time_idm
-}
-}
+This function process the input from \code{fit} to prepare standata for Joint Nested Mixed-effects (JoiNMe) model.
 }
 \details{
 This builder performs three key steps:

@@ -4,7 +4,7 @@
 #' S3 generic to extract component-specific posterior payloads from
 #' `JoiNMeFit` and `JoiNMeDynPred` objects.
 #'
-#' Compared with [draws()], `extract()` is the lower-level, more structured
+#' Compared with [draws()], `extract()` provides lower-level
 #' interface. It works component by component and returns the metadata needed to
 #' understand how a requested summary term maps back to the stored Stan
 #' variables or prediction draw blocks.
@@ -16,13 +16,14 @@
 #'
 #' @param object A supported JoiNMe object.
 #' @param ... Additional method-specific arguments.
+#' @seealso [draws()]
 #' @export
 extract <- function(object, ...) {
   UseMethod("extract")
 }
 
 #' @keywords internal
-.JoiNMe_fixed_effect_var_map <- function(sd, all_vars) {
+.fixed_effect_var_map <- function(sd, all_vars) {
   p <- as.integer(sd$P %||% 0L)
   if (p <= 0L) {
     return(data.frame(term = character(0), variable = character(0), stringsAsFactors = FALSE))
@@ -69,9 +70,18 @@ extract <- function(object, ...) {
 #'
 #' @return A data frame with columns `term` and `variable`.
 #' @keywords internal
-.JoiNMefit_component_term_map <- function(object,
-                                          what = c("fixef", "gamma_w", "assoc", "distributional", "distributional_regression", "likelihood_scale", "raw"),
-                                          all_vars = NULL) {
+#' @noRd
+.fit_component_term_map <- function(
+  object,
+  what = c(
+    "fixef", 
+    "gamma_w",
+    "assoc",
+    "distributional",
+    "distributional_regression",
+    "likelihood_scale",
+    "raw"),
+  all_vars = NULL) {
   what <- match.arg(what)
 
   fit <- object$fit
@@ -84,7 +94,7 @@ extract <- function(object, ...) {
   map <- data.frame(term = character(0), variable = character(0), stringsAsFactors = FALSE)
 
   if (what == "fixef") {
-    map <- .JoiNMe_fixed_effect_var_map(sd = sd, all_vars = all_vars)
+    map <- .fixed_effect_var_map(sd = sd, all_vars = all_vars)
   } else if (what == "gamma_w") {
     g_vars <- paste0("gamma_w[", seq_len(sd$p_w %||% 0L), "]")
     g_vars <- g_vars[g_vars %in% all_vars]
@@ -115,14 +125,8 @@ extract <- function(object, ...) {
       map <- data.frame(term = as.character(g_terms), variable = as.character(g_vars), stringsAsFactors = FALSE)
     }
   } else if (what == "assoc") {
-    corr_assoc_vars <- grep("^alpha_corr_eff\\[", all_vars, value = TRUE)
-    if (length(corr_assoc_vars) == 0L) {
-      corr_assoc_vars <- grep("^alpha_corr\\[", all_vars, value = TRUE)
-    }
-    vcov_assoc_vars <- grep("^alpha_vcov_eff\\[", all_vars, value = TRUE)
-    if (length(vcov_assoc_vars) == 0L) {
-      vcov_assoc_vars <- grep("^alpha_vcov\\[", all_vars, value = TRUE)
-    }
+    corr_assoc_vars <- grep("^alpha_corr\\[", all_vars, value = TRUE)
+    vcov_assoc_vars <- grep("^alpha_vcov\\[", all_vars, value = TRUE)
     assoc_vars <- c(
       if (isTRUE(sd$assoc_cv_total == 1)) "alpha_cv_total",
       if (isTRUE(sd$assoc_cv_mean == 1)) "alpha_cv_mean",
@@ -145,7 +149,6 @@ extract <- function(object, ...) {
     )
     assoc_terms <- assoc_map[assoc_vars]
     assoc_terms[is.na(assoc_terms)] <- sub("^alpha_", "", assoc_vars[is.na(assoc_terms)])
-    assoc_terms <- sub("_eff\\[", "[", assoc_terms, perl = TRUE)
 
     map <- data.frame(term = as.character(assoc_terms), variable = as.character(assoc_vars), stringsAsFactors = FALSE)
 
@@ -159,10 +162,6 @@ extract <- function(object, ...) {
     for (term_key in weight_term_keys) {
       mw_vars <- paste0(.marker_weight_var_prefix(term_key, effective = TRUE), "[", seq_len(sd$D %||% 0L), "]")
       mw_vars <- mw_vars[mw_vars %in% all_vars]
-      if (length(mw_vars) == 0L && shared_weights) {
-        mw_vars <- paste0("marker_weights_eff[", seq_len(sd$D %||% 0L), "]")
-        mw_vars <- mw_vars[mw_vars %in% all_vars]
-      }
       if (length(mw_vars) == 0L) next
       this_marker_terms <- marker_terms
       if (length(this_marker_terms) != length(mw_vars)) this_marker_terms <- paste0("marker_", seq_along(mw_vars))
@@ -193,8 +192,8 @@ extract <- function(object, ...) {
       nu = list(prefix = "beta_nu", cols = dist_cols$nu %||% character(0)),
       phi = list(prefix = "beta_phi", cols = dist_cols$phi %||% character(0)),
       alpha = list(prefix = "beta_alpha", cols = dist_cols$alpha %||% character(0)),
-      phi_beta = list(prefix = "beta_phi_beta", cols = dist_cols$phi_beta %||% character(0)),
-      tau_sde = list(prefix = "beta_tau_sde", cols = dist_cols$tau_sde %||% character(0))
+      kappa = list(prefix = "beta_kappa", cols = dist_cols$kappa %||% character(0)),
+      tau = list(prefix = "beta_tau", cols = dist_cols$tau %||% character(0))
     )
 
     map_rows <- list()
@@ -316,6 +315,7 @@ extract <- function(object, ...) {
 #'   - `term_map`: data.frame mapping `term` to Stan `variable`
 #'   - `support`: for `what = "association_plot"`, cached model-implied raw
 #'     support ranges used by association plotting.
+#' @seealso [draws()] for a higher-level interface that returns a single `posterior`
 #' @export
 extract.JoiNMeFit <- function(object,
                               what = c("fixef", "gamma_w", "basehaz", "baseline_hazard", "assoc", "association_plot", "distributional", "distributional_regression", "likelihood_scale", "raw"),
@@ -448,7 +448,7 @@ extract.JoiNMeFit <- function(object,
   }
 
   all_vars <- tryCatch(posterior::variables(.get_draws_obj(fit)), error = function(e) character(0))
-  map <- .JoiNMefit_component_term_map(object, what = what, all_vars = all_vars)
+  map <- .fit_component_term_map(object, what = what, all_vars = all_vars)
 
   if (!is.null(variable)) {
     map <- map[map$variable %in% variable, , drop = FALSE]
@@ -557,11 +557,19 @@ extract.JoiNMeFit <- function(object,
 #'   - `draws`: numeric matrix or list of matrices
 #'   - `meta`: extraction metadata
 #' @export
-extract.JoiNMeDynPred <- function(object,
-                                  what = c("longitudinal", "longitudinal_fitted", "survival", "cumhaz", "random_effects_id", "random_effects_marker_id"),
-                                  id = NULL,
-                                  scale = NULL,
-                                  ...) {
+extract.JoiNMeDynPred <- function(
+  object,
+  what = c(
+    "longitudinal",
+    "longitudinal_fitted",
+    "survival",
+    "cumhaz",
+    "random_effects_id",
+    "random_effects_marker_id"
+  ),
+  id = NULL,
+  scale = NULL,
+  ...) {
   what <- match.arg(what)
   dd <- object$draws[[what]]
   if (is.null(dd) || length(dd) == 0) {

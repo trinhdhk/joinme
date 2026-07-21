@@ -18,7 +18,7 @@ functions {
   #include helper/functions/eta_chol_corr.stanfunctions
   #include helper/functions/eta_vcov_weighted_const.stanfunctions
   #include helper/functions/cumhaz.stanfunctions
-  #include helper/functions/bytecode_transform.stanfunctions
+  #include helper/functions/functional_transform.stanfunctions
   #include helper/functions/link_functions.stanfunctions
   #include helper/functions/basis_functions.stanfunctions
   #include helper/functions/composite_transform.stanfunctions
@@ -27,7 +27,7 @@ functions {
 }
 
 data {
-  #include helper/data/joinme_dynpred_common.stan
+  #include helper/data/dynpred_data.stan
   int<lower=1> grainsize;
 
   int flag_indep_id_re;
@@ -86,10 +86,10 @@ model {
     X_phi_obs,
     P_alpha,
     X_alpha_obs,
-    P_phi_beta,
-    X_phi_beta_obs,
-    P_tau_sde,
-    X_tau_sde_obs,
+    P_kappa,
+    X_kappa_obs,
+    P_tau,
+    X_tau_obs,
     /* Covariance regression inputs */
     n_cov_vcov,
     vec_cov_vcov,
@@ -126,14 +126,14 @@ model {
     marker_to_phi_family,
     n_family_alpha,
     marker_to_alpha_family,
-    n_family_phi_beta,
-    marker_to_phi_beta_family,
-    n_family_tau_sde,
-    marker_to_tau_sde_family,
-    flag_resid_dim,
+    n_family_kappa,
+    marker_to_kappa_family,
+    n_family_tau,
+    marker_to_tau_family,
+    // flag_resid_dim,
     vcov_diag_link,
-    use_tau_sde_fixed,
-    tau_sde_fixed,
+    use_tau_fixed,
+    tau_fixed,
     num_unique_cov_entries,
     idx_row_cov,
     idx_col_cov,
@@ -143,8 +143,8 @@ model {
     beta_nu,
     beta_phi,
     beta_alpha,
-    beta_phi_beta,
-    beta_tau_sde,
+    beta_kappa,
+    beta_tau,
     /* Draw-specific random effect scales/correlations */
     tau_id,
     Lcorr_id,
@@ -164,8 +164,8 @@ model {
     nu_family,
     phi_family,
     alpha_family,
-    phi_beta_family,
-    tau_sde_family,
+    kappa_family,
+    tau_family,
     /* Draw-specific association weights */
     coeff_assoc_cv_total,
     coeff_assoc_cs_total,

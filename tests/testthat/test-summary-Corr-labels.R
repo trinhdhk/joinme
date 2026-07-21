@@ -134,7 +134,7 @@ test_that("transform formula summaries expand corr and vcov by component", {
     vcov = list(type = "ispline", knots = c(-1, 0, 1), coeff = c(0, 0.5, 1, 1.2), degree = 2)
   )
 
-  out <- JoiNMe:::.transform_formulas_from_specs(
+  out <- joinme:::.transform_formulas_from_specs(
     tf,
     sd = list(Q_idm = 2L, indep_idmarker_cov = 0L)
   )
@@ -146,7 +146,7 @@ test_that("transform formula summaries expand corr and vcov by component", {
 test_that("transform formula summaries expose fit-only affine shift placeholders", {
   tf <- joinme_tf(cv_total = ~ SoftMax(x, intercept = TRUE, slope = TRUE))
 
-  out <- JoiNMe:::.transform_formulas_from_specs(tf, sd = list(Q_idm = 0L, indep_idmarker_cov = 0L))
+  out <- joinme:::.transform_formulas_from_specs(tf, sd = list(Q_idm = 0L, indep_idmarker_cov = 0L))
 
   expect_identical(out$term, "cv_total")
   expect_match(out$formula, "iota_1", fixed = TRUE)
@@ -167,7 +167,7 @@ test_that("transform parameter summaries omit fixed monotone spline endpoints", 
     stringsAsFactors = FALSE
   )
 
-  out <- JoiNMe:::.omit_fixed_transform_endpoint_rows(
+  out <- joinme:::.omit_fixed_transform_endpoint_rows(
     tbl,
     channel = "vcov",
     spec = list(n = 7L),
@@ -177,7 +177,7 @@ test_that("transform parameter summaries omit fixed monotone spline endpoints", 
   expect_false(any(out$term %in% c("coeff_1", "coeff_7")))
   expect_identical(out$term, paste0("coeff_", 2:6))
 
-  kept <- JoiNMe:::.omit_fixed_transform_endpoint_rows(
+  kept <- joinme:::.omit_fixed_transform_endpoint_rows(
     tbl,
     channel = "vcov",
     spec = list(n = 7L),

@@ -59,15 +59,15 @@ test_that("summary reports family-aware distributional parameters with marker la
     nu_term <- paste0("nu_marker[", mk, "]")
     phi_term <- paste0("phi_nb_marker[", mk, "]")
     alpha_term <- paste0("alpha_skew_marker[", mk, "]")
-    phi_beta_term <- paste0("phi_beta_marker[", mk, "]")
-    tau_sde_term <- paste0("tau_sde_marker[", mk, "]")
+    kappa_term <- paste0("kappa_marker[", mk, "]")
+    tau_term <- paste0("tau_marker[", mk, "]")
 
     if ("sigma" %in% req) expected_terms <- c(expected_terms, sigma_term) else forbidden_terms <- c(forbidden_terms, sigma_term)
     if ("nu" %in% req) expected_terms <- c(expected_terms, nu_term) else forbidden_terms <- c(forbidden_terms, nu_term)
     if ("phi" %in% req) expected_terms <- c(expected_terms, phi_term) else forbidden_terms <- c(forbidden_terms, phi_term)
     if ("alpha" %in% req) expected_terms <- c(expected_terms, alpha_term) else forbidden_terms <- c(forbidden_terms, alpha_term)
-    if ("phi_beta" %in% req) expected_terms <- c(expected_terms, phi_beta_term) else forbidden_terms <- c(forbidden_terms, phi_beta_term)
-    if ("tau_sde" %in% req) expected_terms <- c(expected_terms, tau_sde_term) else forbidden_terms <- c(forbidden_terms, tau_sde_term)
+    if ("kappa" %in% req) expected_terms <- c(expected_terms, kappa_term) else forbidden_terms <- c(forbidden_terms, kappa_term)
+    if ("tau" %in% req) expected_terms <- c(expected_terms, tau_term) else forbidden_terms <- c(forbidden_terms, tau_term)
   }
 
   if (length(expected_terms) > 0) {

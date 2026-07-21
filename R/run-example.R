@@ -1,7 +1,7 @@
 #' Example runner for JoiNMe
 #'
 #' @description
-#' Runs a small end-to-end workflow: simulate data, build standata, fit the model,
+#' Runs a small workflow: simulate data, build standata, fit the model,
 #' and return both the fit and simulated data. This is intended as a quick smoke
 #' test or reproducible demo with fixed settings.
 #'

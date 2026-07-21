@@ -15,7 +15,7 @@ extract(object, ...)
 S3 generic to extract component-specific posterior payloads from
 \code{JoiNMeFit} and \code{JoiNMeDynPred} objects.
 
-Compared with \code{\link[=draws]{draws()}}, \code{extract()} is the lower-level, more structured
+Compared with \code{\link[=draws]{draws()}}, \code{extract()} provides lower-level
 interface. It works component by component and returns the metadata needed to
 understand how a requested summary term maps back to the stored Stan
 variables or prediction draw blocks.
@@ -24,4 +24,7 @@ Use \code{extract()} when you need a specific model component, the corresponding
 \code{term_map}, or a specialised payload such as \code{what = "association_plot"}.
 Use \code{\link[=draws]{draws()}} when you want a single posterior object ready for \code{posterior}
 or \code{bayesplot} workflows.
+}
+\seealso{
+\code{\link[=draws]{draws()}}
 }

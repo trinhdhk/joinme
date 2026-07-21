@@ -8,7 +8,7 @@ test_that("JoiNMe fits with ispline assoc", {
   if (!has_cmd && !has_rstan) skip("No Stan backend available")
 
   set.seed(123)
-  sim <- JoiNMe::simulate_joinme(
+  sim <- joinme::simulate_joinme(
     n_id = 20,
     families = c("gaussian", "gaussian"),
     n_obs_per_marker_per_id = 4,
@@ -32,7 +32,7 @@ test_that("JoiNMe fits with ispline assoc", {
   if (engine == "cmdstanr") control$init <- 0
 
   fit <- tryCatch(
-    JoiNMe::joinme(
+    joinme::joinme(
       dataLong = sim$dataLong,
       dataEvent = sim$dataEvent,
       formulaLong = y ~ time + (1 + time || id) + (1 || marker),

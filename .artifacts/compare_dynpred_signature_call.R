@@ -1,5 +1,5 @@
-sig_lines <- readLines('inst/stan/helper/functions/JoiNMe_dynpred_partial.stanfunctions')
-call_lines <- readLines('inst/stan/JoiNMe_dynpred_threading.stan')
+sig_lines <- readLines('inst/stan/helper/functions/joinme_dynpred_partial.stanfunctions')
+call_lines <- readLines('inst/stan/joinme_dynpred_threading.stan')
 
 sig_start <- grep('^real partial_draw\(', sig_lines)
 sig_end <- sig_start + which(sig_lines[sig_start:length(sig_lines)] == ') {')[1] - 1

@@ -44,21 +44,13 @@ including **data simulation**, **model fitting**, **diagnostic interpretation**,
 **dynamic prediction**, **plotting**, and **threaded computation**. Each block is
 designed to be reproducible and to illustrate a specific modelling choice.
 
-The examples use the current user-facing posterior interface:
-
-- `draws()` for renamed posterior extraction,
-- `mcmc_plot()` for bayesplot-backed MCMC displays,
-- explicit plot wrappers such as `longitudinal_plot()` and `survival_plot()`,
-- compatibility class aliases `JoiNMeFit` and `PredJoiNMeFit` in addition to
-  `JoiNMeFit` and `JoiNMeDynPred`.
-
 For the methodological background, see the theory vignette in [joinme-theory.html](joinme-theory.html).
 
 This demo covers mixed families (including double_exponential, skew_double_exponential,
 beta, and cumulative_logit) and competing-risk survival via event type columns.
 
 For skew_double_exponential, you can fix the quantile parameter with
-`control = list(tau_sde_fixed = 0.2)` to model a specific quantile. If no
+`control = list(tau_fixed = 0.2)` to model a specific quantile. If no
 skew_double_exponential family is present, the control is ignored with a warning.
 
 ```{r seed}
@@ -584,9 +576,12 @@ transforms <- joinme_tf(
 
 ## Optional: distributional regression
 
-If a marker family supports additional parameters (for example, Student-$t$
-scale or degrees of freedom, negative binomial dispersion), you can model these
-via `formulaDist`. Example (heteroscedastic scale):
+If a marker family supports additional parameters, you can model these via
+`formulaDist`. `nu` denotes Student-$t$ degrees of freedom, `kappa` denotes the
+positive Beta sample size (with shapes $\mu\kappa$ and
+$(1-\mu)\kappa$), and `tau` denotes the skew-double-exponential
+quantile/asymmetry parameter. For example, the following model allows a
+heteroscedastic longitudinal scale:
 
 ```{r scenario-b-dist}
 #| eval: false

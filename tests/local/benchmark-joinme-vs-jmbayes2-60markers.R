@@ -158,7 +158,7 @@ infer_survival_terms <- function(sim) {
   }
 
   formula_event <- sim$true_params$formulaEvent %||% sim$truth$formulaEvent
-  event_cols <- colnames(JoiNMe:::.mm_event(formula_event, sim$dataEvent))
+  event_cols <- colnames(joinme:::.mm_event(formula_event, sim$dataEvent))
   as.character(event_cols %||% character(0))
 }
 
@@ -190,7 +190,7 @@ build_truth_survival <- function(sim) {
   )
 }
 
-build_JoiNMe_assoc_draws <- function(fit_JoiNMe, marker_levels) {
+build_assoc_draws <- function(fit_JoiNMe, marker_levels) {
   assoc_draws <- posterior_assoc(fit_JoiNMe, summary = FALSE)
   n_markers <- length(marker_levels)
 
@@ -312,7 +312,7 @@ names(JoiNMe_surv_est)[names(JoiNMe_surv_est) == "Estimate"] <- "estimate"
 JoiNMe_surv_cmp <- merge(truth_survival, JoiNMe_surv_est, by = "term", all.x = TRUE)
 JoiNMe_surv_cmp$error <- JoiNMe_surv_cmp$estimate - JoiNMe_surv_cmp$truth
 
-JoiNMe_assoc_draws <- build_JoiNMe_assoc_draws(fit_JoiNMe, marker_levels)
+JoiNMe_assoc_draws <- build_assoc_draws(fit_JoiNMe, marker_levels)
 JoiNMe_assoc_est <- data.frame(
   marker = colnames(JoiNMe_assoc_draws),
   estimate = colMeans(JoiNMe_assoc_draws),

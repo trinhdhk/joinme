@@ -458,7 +458,7 @@ test_that("summary reports intercept-only baseline hazard with intercept adjuste
       vars_keep <- intersect(variables, posterior::variables(draws_obj))
       posterior::as_draws_array(posterior::subset_draws(draws_obj, variable = vars_keep))
     },
-    .JoiNMe_sampler_diagnostics = function(fit) NULL,
+    .joinme_sampler_diagnostics = function(fit) NULL,
     .package = "joinme"
   )
 

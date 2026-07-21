@@ -12,7 +12,7 @@ test_that(".scale_draw_dependent_time_terms scales time-indexed draw components"
     idx_time_idm = c(1L)
   )
 
-  out <- JoiNMe:::.scale_draw_dependent_time_terms(draws, stan_data, tmax = 10)
+  out <- joinme:::.scale_draw_dependent_time_terms(draws, stan_data, tmax = 10)
 
   expect_equal(out$beta_fixed[, 1], draws$beta_fixed[, 1])
   expect_equal(out$beta_fixed[, 2], draws$beta_fixed[, 2] * 10)
@@ -40,7 +40,7 @@ test_that(".scale_draw_dependent_time_terms is no-op for tmax ~ 1", {
     idx_time_idm = c(2L)
   )
 
-  out <- JoiNMe:::.scale_draw_dependent_time_terms(draws, stan_data, tmax = 1)
+  out <- joinme:::.scale_draw_dependent_time_terms(draws, stan_data, tmax = 1)
 
   expect_equal(out$beta_fixed, draws$beta_fixed)
   expect_equal(out$tau_id, draws$tau_id)

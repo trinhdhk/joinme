@@ -81,10 +81,10 @@
  * @param X_phi_obs Design matrix for phi regression.
  * @param P_alpha Number of coefficients for alpha regression.
  * @param X_alpha_obs Design matrix for alpha regression.
- * @param P_phi_beta Number of coefficients for phi_beta regression.
- * @param X_phi_beta_obs Design matrix for phi_beta regression.
- * @param P_tau_sde Number of coefficients for tau_sde regression.
- * @param X_tau_sde_obs Design matrix for tau_sde regression.
+ * @param P_kappa Number of coefficients for kappa regression.
+ * @param X_kappa_obs Design matrix for kappa regression.
+ * @param P_tau Number of coefficients for tau regression.
+ * @param X_tau_obs Design matrix for tau regression.
  * @param n_cov_vcov Number of covariates for variance-covariance regression.
  * @param vec_cov_vcov Vector of covariates for variance-covariance regression.
  * @param n_cov_hazard Number of covariates for hazard baseline.
@@ -118,14 +118,14 @@
  * @param marker_to_phi_family Mapping from marker to phi-family index.
  * @param n_family_alpha Number of alpha-family parameter groups.
  * @param marker_to_alpha_family Mapping from marker to alpha-family index.
- * @param n_family_phi_beta Number of phi-beta-family parameter groups.
- * @param marker_to_phi_beta_family Mapping from marker to phi-beta-family index.
- * @param n_family_tau_sde Number of tau-SDE-family parameter groups.
- * @param marker_to_tau_sde_family Mapping from marker to tau-SDE-family index.
+ * @param n_family_kappa Number of Beta-kappa family parameter groups.
+ * @param marker_to_kappa_family Mapping from marker to Beta-kappa family index.
+ * @param n_family_tau Number of skew-double-exponential tau-family parameter groups.
+ * @param marker_to_tau_family Mapping from marker to tau-family index.
  * @param flag_resid_dim Flag for residual dimension handling.
  * @param vcov_diag_link Link flag for covariance-regression diagonal (0 softplus, 1 exp).
- * @param use_tau_sde_fixed Flag to use fixed tau for SDE.
- * @param tau_sde_fixed Fixed tau value for SDE (0 < tau < 1).
+ * @param use_tau_fixed Flag to use fixed tau for SDE.
+ * @param tau_fixed Fixed tau value for SDE (0 < tau < 1).
  * @param num_unique_cov_entries Number of unique entries in covariance regression.
  * @param idx_row_cov Row indices for covariance regression.
  * @param idx_col_cov Column indices for covariance regression.
@@ -134,8 +134,8 @@
  * @param beta_nu Array of nu regression coefficients (per draw).
  * @param beta_phi Array of phi regression coefficients (per draw).
  * @param beta_alpha Array of alpha regression coefficients (per draw).
- * @param beta_phi_beta Array of phi_beta regression coefficients (per draw).
- * @param beta_tau_sde Array of tau_sde regression coefficients (per draw).
+ * @param beta_kappa Array of kappa regression coefficients (per draw).
+ * @param beta_tau Array of tau regression coefficients (per draw).
  * @param tau_id Array of ID random effect scales (per draw).
  * @param Lcorr_id Array of ID random effect Cholesky correlations (per draw).
  * @param tau_marker Array of marker random effect scales (per draw).
@@ -151,8 +151,8 @@
  * @param nu_family Array of family-level degrees of freedom (per draw).
  * @param phi_family Array of family-level dispersion parameters (per draw).
  * @param alpha_family Array of family-level skewness parameters (per draw).
- * @param phi_beta_family Array of family-level beta precision parameters (per draw).
- * @param tau_sde_family Array of family-level skew-double-exponential asymmetry parameters (per draw).
+ * @param kappa_family Array of family-level Beta sample-size parameters (per draw).
+ * @param tau_family Array of family-level skew-double-exponential asymmetry parameters (per draw).
  * @param coeff_assoc_cv_total Array of association coefficients for Total Current Value (per draw).
  * @param coeff_assoc_cs_total Array of association coefficients for Total Current Slope (per draw).
  * @param coeff_assoc_cv_mean Array of association coefficients for Mean Current Value (per draw).
@@ -260,10 +260,10 @@ real partial_draw(
     matrix X_phi_obs,
     int P_alpha,
     matrix X_alpha_obs,
-    int P_phi_beta,
-    matrix X_phi_beta_obs,
-    int P_tau_sde,
-    matrix X_tau_sde_obs,
+    int P_kappa,
+    matrix X_kappa_obs,
+    int P_tau,
+    matrix X_tau_obs,
     int n_cov_vcov,
     vector vec_cov_vcov,
     int n_cov_hazard,
@@ -297,14 +297,14 @@ real partial_draw(
     array[] int marker_to_phi_family,
     int n_family_alpha,
     array[] int marker_to_alpha_family,
-    int n_family_phi_beta,
-    array[] int marker_to_phi_beta_family,
-    int n_family_tau_sde,
-    array[] int marker_to_tau_sde_family,
-    int flag_resid_dim,
+    int n_family_kappa,
+    array[] int marker_to_kappa_family,
+    int n_family_tau,
+    array[] int marker_to_tau_family,
+    // int flag_resid_dim,
     int vcov_diag_link,
-    int use_tau_sde_fixed,
-    real tau_sde_fixed,
+    int use_tau_fixed,
+    real tau_fixed,
     int num_unique_cov_entries,
     array[] int idx_row_cov,
     array[] int idx_col_cov,
@@ -313,8 +313,8 @@ real partial_draw(
     array[] vector beta_nu,
     array[] vector beta_phi,
     array[] vector beta_alpha,
-    array[] vector beta_phi_beta,
-    array[] vector beta_tau_sde,
+    array[] vector beta_kappa,
+    array[] vector beta_tau,
     array[] vector tau_id,
     array[] matrix Lcorr_id,
     array[] vector tau_marker,
@@ -330,8 +330,8 @@ real partial_draw(
     array[] vector nu_family,
     array[] vector phi_family,
     array[] vector alpha_family,
-    array[] vector phi_beta_family,
-    array[] vector tau_sde_family,
+    array[] vector kappa_family,
+    array[] vector tau_family,
     array[] real coeff_assoc_cv_total,
     array[] real coeff_assoc_cs_total,
     array[] real coeff_assoc_cv_mean,
@@ -651,19 +651,19 @@ real partial_draw(
       // tau constrained to (0,1) via logit link if regression used
       } else if (family_long[d] == 9) {
         real sig = (P_sigma > 0) ? exp(fmin(dot_product(X_sigma_obs[n], beta_sigma[k]), 20)) : sigma_family[k][marker_to_sigma_family[d]];
-        real tau_sde = use_tau_sde_fixed == 1
-          ? tau_sde_fixed
-          : ((P_tau_sde > 0) ? inv_logit(dot_product(X_tau_sde_obs[n], beta_tau_sde[k])) : tau_sde_family[k][marker_to_tau_sde_family[d]]);
-        // sig: residual scale, tau_sde: skewness in (0,1)
-        lp += skew_double_exponential_lpdf(y_real[n] | mu, sig, tau_sde);
+        real tau = use_tau_fixed == 1
+          ? tau_fixed
+          : ((P_tau > 0) ? inv_logit(dot_product(X_tau_obs[n], beta_tau[k])) : tau_family[k][marker_to_tau_family[d]]);
+        // sig: residual scale, tau: skewness in (0,1)
+        lp += skew_double_exponential_lpdf(y_real[n] | mu, sig, tau);
       // FAMILY 10: Beta regression
       // mu = inv_logit(eta), phi = precision
       } else if (family_long[d] == 10) {
-        real phi_beta = (P_phi_beta > 0) ? exp(dot_product(X_phi_beta_obs[n], beta_phi_beta[k])) : phi_beta_family[k][marker_to_phi_beta_family[d]];
+        real kappa = (P_kappa > 0) ? exp(dot_product(X_kappa_obs[n], beta_kappa[k])) : kappa_family[k][marker_to_kappa_family[d]];
         real mu_beta = fmin(fmax(mu, 1e-12), 1 - 1e-12);
-        // mu: beta mean, phi_beta: precision
-        real shape1 = fmax(mu_beta * phi_beta, 1e-6);
-        real shape2 = fmax((1 - mu_beta) * phi_beta, 1e-6);
+        // mu: Beta mean, kappa: positive sample-size parameter
+        real shape1 = fmax(mu_beta * kappa, 1e-6);
+        real shape2 = fmax((1 - mu_beta) * kappa, 1e-6);
         // shape1/shape2: beta shapes
         lp += beta_lpdf(y_real[n] | shape1, shape2);
       } else {

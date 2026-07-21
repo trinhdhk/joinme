@@ -9,9 +9,9 @@
 #' summarisation, `bayesplot` visualisation, regex-based variable selection, and
 #' any workflow that expects a standard draws object.
 #'
-#' For fitted joint models, known Stan variables are relabelled using the same
-#' formula-aware term maps that drive [extract()] and the summary methods. For
-#' dynamic prediction objects, stored draw blocks are flattened into a single
+#' For fitted `JoiNMe` models, known Stan variables are relabelled from raw fit object
+#' to friendly parameter names. 
+#' For dynamic prediction objects, stored draw blocks are flattened into a single
 #' draws object with explicit id, scale, marker, and time labels.
 #'
 #' Fitted-object draw arrays are cached inside the underlying R6 container after
@@ -21,9 +21,10 @@
 #' Use `draws()` when you want:
 #' - one posterior object containing renamed variables,
 #' - `posterior::subset_draws()` and regex-style variable filtering,
-#' - `bayesplot` integration via [mcmc_plot()],
+#' - `bayesplot` directly, similar to [mcmc_plot()],
 #' - a standard draws array/matrix/data frame rather than a component-specific
 #'   extraction payload.
+#' - `as.array` is a shorthand for `draws(format = "draws_array")`.
 #'
 #' Use [extract()] instead when you want:
 #' - one model component at a time (`"fixef"`, `"assoc"`, `"gamma_w"`, `"basehaz"`, etc.),
@@ -55,10 +56,11 @@ draws <- function(object, ...) {
 }
 
 #' @keywords internal
-.JoiNMefit_all_term_map <- function(object, all_vars) {
+#' @noRd
+.fit_term_map <- function(object, all_vars) {
   mapped <- lapply(
     c("fixef", "gamma_w", "assoc", "distributional", "distributional_regression", "likelihood_scale"),
-    function(what) .JoiNMefit_component_term_map(object, what = what, all_vars = all_vars)
+    function(what) .fit_component_term_map(object, what = what, all_vars = all_vars)
   )
   mapped <- Filter(function(x) is.data.frame(x) && nrow(x) > 0L, mapped)
   if (length(mapped) == 0L) {
@@ -70,7 +72,7 @@ draws <- function(object, ...) {
   leftover <- setdiff(all_vars, map$variable)
   p <- as.integer(object$stan_data$P %||% 0L)
   if (p > 0L) {
-    fixed_map <- .JoiNMe_fixed_effect_var_map(sd = object$stan_data, all_vars = all_vars)
+    fixed_map <- .fixed_effect_var_map(sd = object$stan_data, all_vars = all_vars)
     chosen_fixed <- as.character(fixed_map$variable)
     if (length(chosen_fixed) > 0L) {
       beta_raw <- paste0("beta[", seq_len(p), "]")
@@ -89,7 +91,8 @@ draws <- function(object, ...) {
 }
 
 #' @keywords internal
-.rename_JoiNMe_draw_variables <- function(all_vars, map) {
+#' @noRd
+.rename_draw_variables <- function(all_vars, map) {
   renamed <- all_vars
   if (is.null(map) || !nrow(map)) {
     return(make.unique(as.character(renamed)))
@@ -101,7 +104,8 @@ draws <- function(object, ...) {
 }
 
 #' @keywords internal
-.subset_JoiNMe_draws <- function(draws_obj, variables = NULL, regex = FALSE, draws = NULL, seed = 1) {
+#' @noRd
+.subset_draws <- function(draws_obj, variables = NULL, regex = FALSE, draws = NULL, seed = 1) {
   out <- draws_obj
   if (!is.null(variables)) {
     out <- posterior::subset_draws(out, variable = variables, regex = regex)
@@ -123,7 +127,7 @@ draws <- function(object, ...) {
 }
 
 #' @keywords internal
-.format_JoiNMe_draws <- function(draws_obj, format = c("draws_array", "draws_matrix", "draws_df")) {
+.format_draws <- function(draws_obj, format = c("draws_array", "draws_matrix", "draws_df")) {
   format <- match.arg(format)
   switch(
     format,
@@ -134,7 +138,8 @@ draws <- function(object, ...) {
 }
 
 #' @keywords internal
-.JoiNMefit_cached_draws_array <- function(object) {
+#' @noRd
+.fit_cached_draws_array <- function(object) {
   cache_key <- "renamed_draws_array"
   cached <- object$cache_get(cache_key)
   if (!is.null(cached)) {
@@ -143,15 +148,15 @@ draws <- function(object, ...) {
 
   draw_array <- posterior::as_draws_array(.get_draws_obj(object$fit, keep_chains = TRUE))
   all_vars <- posterior::variables(draw_array)
-  term_map <- .JoiNMefit_all_term_map(object, all_vars = all_vars)
-  dimnames(draw_array)[[3]] <- .rename_JoiNMe_draw_variables(all_vars, term_map)
+  term_map <- .fit_term_map(object, all_vars = all_vars)
+  dimnames(draw_array)[[3]] <- .rename_draw_variables(all_vars, term_map)
 
   object$cache_set(cache_key, draw_array)
   draw_array
 }
 
 #' @keywords internal
-.flatten_JoiNMedynpred_regular_block <- function(object, what) {
+.flatten_dynpred_regular_block <- function(object, what) {
   ext <- tryCatch(extract.JoiNMeDynPred(object, what = what), error = function(e) NULL)
   if (is.null(ext) || is.null(ext$draws) || !length(ext$draws)) {
     return(NULL)
@@ -175,7 +180,8 @@ draws <- function(object, ...) {
 }
 
 #' @keywords internal
-.flatten_JoiNMedynpred_random_effects_id <- function(object) {
+#' @noRd
+.flatten_dynpred_random_effects_id <- function(object) {
   dd <- object$draws$random_effects_id
   if (is.null(dd) || !length(dd)) {
     return(NULL)
@@ -199,7 +205,8 @@ draws <- function(object, ...) {
 }
 
 #' @keywords internal
-.flatten_JoiNMedynpred_random_effects_marker_id <- function(object) {
+#' @noRd
+.flatten_dynpred_random_effects_marker_id <- function(object) {
   dd <- object$draws$random_effects_marker_id
   if (is.null(dd) || !length(dd)) {
     return(NULL)
@@ -246,7 +253,7 @@ draws <- function(object, ...) {
 }
 
 #' @keywords internal
-.JoiNMedynpred_cached_draws_array <- function(object) {
+.dynpred_cached_draws_array <- function(object) {
   cache_key <- "flattened_draws_array"
   cached <- object$cache_get(cache_key)
   if (!is.null(cached)) {
@@ -254,12 +261,12 @@ draws <- function(object, ...) {
   }
 
   blocks <- Filter(Negate(is.null), list(
-    .flatten_JoiNMedynpred_regular_block(object, "longitudinal"),
-    .flatten_JoiNMedynpred_regular_block(object, "longitudinal_fitted"),
-    .flatten_JoiNMedynpred_regular_block(object, "survival"),
-    .flatten_JoiNMedynpred_regular_block(object, "cumhaz"),
-    .flatten_JoiNMedynpred_random_effects_id(object),
-    .flatten_JoiNMedynpred_random_effects_marker_id(object)
+    .flatten_dynpred_regular_block(object, "longitudinal"),
+    .flatten_dynpred_regular_block(object, "longitudinal_fitted"),
+    .flatten_dynpred_regular_block(object, "survival"),
+    .flatten_dynpred_regular_block(object, "cumhaz"),
+    .flatten_dynpred_random_effects_id(object),
+    .flatten_dynpred_random_effects_marker_id(object)
   ))
   if (!length(blocks)) {
     cli::cli_abort(c(
@@ -311,13 +318,13 @@ draws.JoiNMeFit <- function(object, variables = NULL, regex = FALSE, draws = NUL
       keep_chains = TRUE
     )
     arr <- ext$draws
-    arr <- .subset_JoiNMe_draws(arr, variables = variables, regex = regex, draws = NULL, seed = seed)
-    return(.format_JoiNMe_draws(arr, format = format))
+    arr <- .subset_draws(arr, variables = variables, regex = regex, draws = NULL, seed = seed)
+    return(.format_draws(arr, format = format))
   }
 
-  draw_array <- .JoiNMefit_cached_draws_array(object)
-  draw_array <- .subset_JoiNMe_draws(draw_array, variables = variables, regex = regex, draws = draws, seed = seed)
-  .format_JoiNMe_draws(draw_array, format = format)
+  draw_array <- .fit_cached_draws_array(object)
+  draw_array <- .subset_draws(draw_array, variables = variables, regex = regex, draws = draws, seed = seed)
+  .format_draws(draw_array, format = format)
 }
 
 #' @rdname draws
@@ -325,9 +332,9 @@ draws.JoiNMeFit <- function(object, variables = NULL, regex = FALSE, draws = NUL
 draws.JoiNMeDynPred <- function(object, variables = NULL, regex = FALSE, draws = NULL, seed = 1,
                                 format = c("draws_array", "draws_matrix", "draws_df"), ...) {
   assertthat::assert_that(inherits(object, "JoiNMeDynPred"), msg = "Object must be a JoiNMeDynPred instance.")
-  draw_array <- .JoiNMedynpred_cached_draws_array(object)
-  draw_array <- .subset_JoiNMe_draws(draw_array, variables = variables, regex = regex, draws = draws, seed = seed)
-  .format_JoiNMe_draws(draw_array, format = format)
+  draw_array <- .dynpred_cached_draws_array(object)
+  draw_array <- .subset_draws(draw_array, variables = variables, regex = regex, draws = draws, seed = seed)
+  .format_draws(draw_array, format = format)
 }
 
 #' @rdname draws

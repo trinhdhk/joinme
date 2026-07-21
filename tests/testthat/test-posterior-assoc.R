@@ -74,7 +74,7 @@ test_that("posterior_summary is an alias of summary for JoiNMeFit", {
       }
       posterior::subset_draws(draws_obj, variable = variables)
     },
-    .JoiNMe_sampler_diagnostics = function(fit) list(),
+    .joinme_sampler_diagnostics = function(fit) list(),
     .package = "joinme"
   )
 
@@ -98,7 +98,7 @@ test_that("assoc propagates weighted association strength into marker-specific e
     dimnames = list(
       iteration = c("1", "2"),
       chain = c("1", "2"),
-      variable = c("alpha_cv_total_eff", "marker_weights_eff[1]", "marker_weights_eff[2]")
+      variable = c("alpha_cv_total", "marker_weights_eff_cv_total[1]", "marker_weights_eff_cv_total[2]")
     )
   ))
 
@@ -179,10 +179,10 @@ test_that("assoc uses different marker-weight structures for different weighted 
       iteration = c("1", "2"),
       chain = c("1", "2"),
       variable = c(
-        "alpha_cv_total_eff",
+        "alpha_cv_total",
         "marker_weights_eff_cv_total[1]",
         "marker_weights_eff_cv_total[2]",
-        "alpha_cs_total_eff",
+        "alpha_cs_total",
         "marker_weights_eff_cs_total[1]",
         "marker_weights_eff_cs_total[2]"
       )
@@ -271,7 +271,7 @@ test_that("summary labels covariance rows and columns with model terms", {
       }
       posterior::subset_draws(draws_obj, variable = variables)
     },
-    .JoiNMe_sampler_diagnostics = function(fit) list(),
+    .joinme_sampler_diagnostics = function(fit) list(),
     vcov.JoiNMeFit = function(object, what = NULL, draws = NULL, ...) {
       if (identical(what, "id")) {
         return(data.frame(
@@ -325,7 +325,7 @@ test_that("assoc expands corr and vcov displays with explicit row and col labels
     dimnames = list(
       iteration = c("1", "2"),
       chain = c("1", "2"),
-      variable = c("alpha_corr_eff[1]", "alpha_vcov_eff[1]", "alpha_vcov_eff[2]", "alpha_vcov_eff[3]")
+      variable = c("alpha_corr[1]", "alpha_vcov[1]", "alpha_vcov[2]", "alpha_vcov[3]")
     )
   ))
 

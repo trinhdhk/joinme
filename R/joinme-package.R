@@ -13,7 +13,8 @@
 #' @import Rcpp
 #' @importFrom RcppParallel RcppParallelLibs
 #' @importFrom rstan sampling
-#' @importFrom rstantools rstan_config
+#' @importFrom rstantools rstan_config log_lik posterior_linpred posterior_epred posterior_predict
+#' @importFrom brms conditional_effects posterior_summary
 #' @useDynLib joinme, .registration = TRUE
 #'
 #' @references

@@ -1,10 +1,11 @@
-#' @name JoiNMe_diagnosis
+#' @name joinme_diagnosis
 #' @title Model Diagnosis
 #'
 #' @description
 #' Posterior predictive checks and information criteria.
 #'
 #' @keywords internal
+#' @noRd
 NULL
 
 # File overview:
@@ -42,6 +43,7 @@ diagnosis <- function(object, ...) {
 }
 
 #' @keywords internal
+#' @noRd
 .diagnosis_parameter_label <- function(df) {
 	label <- rep("", nrow(df))
 	if ("term" %in% names(df)) {
@@ -76,6 +78,7 @@ diagnosis <- function(object, ...) {
 }
 
 #' @keywords internal
+#' @noRd
 .diagnosis_parameter_table_from_tables <- function(tables) {
 	metric_cols <- c("Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail")
 	drop_cols <- c(metric_cols, "Hazard.Ratio", "HR.Q2.5", "HR.Q97.5")
@@ -418,7 +421,7 @@ pp_check.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, 
 	y_var <- pred$metadata$response_var %||% .resolve_response_var(
 		formulaLong = object$formulaLong,
 		dataLong = newdataLong,
-		context = "JoiNMe_diagnosis()"
+		context = "joinme_diagnosis()"
 	)
 
 	out_list <- list()
@@ -460,6 +463,7 @@ pp_check.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, 
 }
 
 #' @keywords internal
+#' @noRd
 .resolve_train_data <- function(object, newdataLong, newdataEvent, purpose = "analysis") {
 	if (is.null(newdataLong) && is.null(newdataEvent)) {
 		if (!is.null(object$dataLong) && !is.null(object$dataEvent)) {
@@ -826,6 +830,7 @@ stan_mcse.JoiNMeFit <- function(object, pars = NULL, regex_pars = NULL, draws = 
 }
 
 #' @keywords internal
+#' @noRd
 
 .diag_summary_df <- function(draws_obj, metric, vars) {
 	metric_df <- suppressWarnings(tryCatch(
@@ -853,6 +858,7 @@ stan_mcse.JoiNMeFit <- function(object, pars = NULL, regex_pars = NULL, draws = 
 }
 
 #' @keywords internal
+#' @noRd
 .filter_diag_vars <- function(vars, pars = NULL, regex_pars = NULL) {
 	if (!is.null(pars)) {
 		vars <- intersect(vars, pars)

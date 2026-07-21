@@ -4,7 +4,6 @@
 \alias{JoiNMe_r6_classes}
 \alias{JoiNMeFit}
 \alias{JoiNMeDynPred}
-\alias{PredJoiNMeFit}
 \alias{SummaryJoiNMeFit}
 \alias{SummaryJoiNMeDynPred}
 \title{JoiNMe R6 Classes}

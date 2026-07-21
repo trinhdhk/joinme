@@ -103,10 +103,6 @@ fitted and predicted objects:
 - `ranef(pred)` and `vcov(pred)` expose marker-by-id predicted random effects
   and covariance only when marker covariance is subject-dependent.
 
-The fitted and predicted objects now use `JoiNMeFit` and `JoiNMeDynPred` as
-their primary class labels, while preserving `JoiNMeFit` and `PredJoiNMeFit`
-as compatibility aliases for S3 dispatch stability.
-
 For plotting, the package now provides both umbrella `plot()` methods and
 explicit helper entry points:
 
@@ -134,8 +130,21 @@ This lets users encode distinct variance structures, e.g.:
 - `sigma[family=gaussian] ~ 1 + x1`
 
 The same syntax is supported for `nu`, `phi`, `alpha` (or `alpha_skew`),
-`phi_beta`, and `tau_sde` when those parameters are relevant for the target
-family.
+`kappa`, and `tau` when those parameters are relevant for the target
+family. The names distinguish parameters with different statistical roles:
+`nu` is reserved for Student-$t$ degrees of freedom; `kappa` is the positive
+Beta sample size; and `tau` is the skew-double-exponential quantile/asymmetry
+parameter. In the Beta mean/sample-size parameterisation,
+
+$$
+a_{ij} = \mu_{ij}\kappa_{ij}, \qquad
+b_{ij} = (1-\mu_{ij})\kappa_{ij},
+$$
+
+so that $E(Y_{ij})=\mu_{ij}$ and
+$\operatorname{Var}(Y_{ij})=\mu_{ij}(1-\mu_{ij})/(\kappa_{ij}+1)$.
+The model applies a log link to a `kappa` regression and a logit link to a
+`tau` regression, thereby preserving their respective parameter spaces.
 
 ## The Survival Submodel with Competing Risks
 
@@ -303,6 +312,13 @@ When either summary is active, the algorithm is:
 4. Reuse the resulting time-constant scalar in both the exact event hazard and
   the numerical cumulative-hazard integration.
 
+Posterior association outputs use one hazard-scale naming scheme throughout:
+`alpha_cv_total`, `alpha_cs_total`, `alpha_cv_mean`, `alpha_cs_mean`,
+`alpha_corr[...]`, and `alpha_vcov[...]`. Standardized correlation and
+covariance latents are internal quantities named `z_alpha_corr[...]` and
+`z_alpha_vcov[...]`; they are not substituted for the hazard coefficients in
+summaries, prediction, or plotting.
+
 This last step matters. If the exact event term and the integrated hazard use
 different active association channels, posterior recovery of the association
 coefficient becomes systematically biased even when simulation and fitting are
@@ -353,6 +369,64 @@ sent directly to `draws()`, `summary()`, `diagnosis()`, and the explicit helper
 plot functions without first reconstructing raw Stan variable names.
 
 Under competing risks, this procedure yields the **overall event-free survival** probability.
+
+## Longitudinal and Event Conditional Effects
+
+Conditional effects address a different scientific question from dynamic
+prediction. They vary one predictor, or a pair of predictors, while fixing all
+remaining covariates at declared profile values. JoiNMe exposes this calculation
+through `conditional_effects()` with an explicit `process` argument because a
+joint model contains both longitudinal and event processes.
+
+For the longitudinal process, let $g_d^{-1}$ denote the inverse link for marker
+$d$. The population estimand excludes all random-effect contributions,
+
+$$
+\mu_{d,\mathrm{pop}}^{(m)}(x) =
+g_d^{-1}\!\left\{X(x)\beta^{(m)}\right\}.
+$$
+
+The marker-specific estimand retains the fitted marker deviation but excludes
+subject and marker-by-subject deviations,
+
+$$
+\mu_{d,\mathrm{marker}}^{(m)}(x) =
+g_d^{-1}\!\left\{X(x)\beta^{(m)} + Z_{\mathrm{mk}}(x)v_d^{(m)}\right\}.
+$$
+
+Finally, the marker-marginal estimand averages the selected marker-specific
+responses within posterior draw $m$,
+
+$$
+\bar{\mu}_{\mathrm{marker}}^{(m)}(x) =
+\frac{1}{|\mathcal{D}|}\sum_{d \in \mathcal{D}}
+\mu_{d,\mathrm{marker}}^{(m)}(x).
+$$
+
+This is the average effect over markers, not the effect obtained by averaging
+marker deviations before applying a nonlinear inverse link. Posterior centres
+and intervals are calculated only after this finite marginalisation. On the
+linear-predictor scale, the same draw-wise averaging is applied without the
+inverse-link transformation.
+
+For the event process, the reported quantity is the direct
+proportional-hazards component
+
+$$
+\exp\{W_i\gamma_w\},
+$$
+
+or its logarithm. The baseline hazard and longitudinal association contribution
+are held fixed, so contrasts isolate the event-covariate effect rather than
+being mistaken for subject-specific survival probabilities.
+
+Condition tables are produced by the same `make_conditions()` convention used
+by brms. Returned tables also use the brms columns `estimate__`, `se__`,
+`lower__`, `upper__`, and `cond__`, allowing the established brms conditional-
+effects plotting method to render the results. Setting `plot = FALSE` exposes
+these process-specific data tables for reporting or custom graphics. The
+`longitudinal_estimand__` column records which longitudinal quantity each table
+represents.
 
 # Conclusion
 

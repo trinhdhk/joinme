@@ -19,6 +19,7 @@
 #'
 #' @return Character scalar giving the canonical transform type.
 #' @keywords internal
+#' @noRd
 .canonicalise_transform_type <- function(type) {
   type <- as.character(type %||% "identity")[1]
   if (identical(type, "ispline_penalized")) {
@@ -49,6 +50,7 @@
 #'
 #' @return Logical scalar.
 #' @keywords internal
+#' @noRd
 .transform_uses_expit_input <- function(spec_or_type) {
   type <- if (is.list(spec_or_type)) spec_or_type$type %||% "identity" else spec_or_type
   .canonicalise_transform_type(type) %in% c("ispline_expit", "ispline_expit_penalised")
@@ -68,6 +70,7 @@
 #'
 #' @return Logical scalar.
 #' @keywords internal
+#' @noRd
 .is_ispline_transform_type <- function(spec_or_type) {
   type <- if (is.list(spec_or_type)) spec_or_type$type %||% "identity" else spec_or_type
   .canonicalise_transform_type(type) %in% c(
@@ -113,6 +116,7 @@
 #'
 #' @return Numeric vector identical to `values` after validation.
 #' @keywords internal
+#' @noRd
 .validate_expit_domain_values <- function(values, arg_name) {
   values <- as.numeric(values)
   if (!length(values)) {
@@ -146,6 +150,7 @@
 #'
 #' @return Integer direction code: `1L` for increasing, `-1L` for decreasing.
 #' @keywords internal
+#' @noRd
 .resolve_monotone_direction <- function(direction = NULL, default = "increasing") {
   direction <- direction %||% default
   if (is.numeric(direction) && length(direction) == 1L && is.finite(direction)) {
@@ -178,6 +183,7 @@
 #'
 #' @return Integer direction code: `1L` for increasing, `-1L` for decreasing.
 #' @keywords internal
+#' @noRd
 .infer_monotone_direction <- function(x, y) {
   ord <- order(x)
   x <- as.numeric(x)[ord]
@@ -204,6 +210,7 @@
 #'
 #' @return Character scalar.
 #' @keywords internal
+#' @noRd
 .monotone_direction_label <- function(direction) {
   if (.resolve_monotone_direction(direction, default = 1L) < 0L) {
     "decreasing"
@@ -498,6 +505,7 @@ build_standata_transforms <- function(
 #' @return TRUE if valid; stops with error message if invalid
 #'
 #' @keywords internal
+#' @noRd
 validate_transforms <- function(standata) {
   term_map <- list(
     cv = list(mode_suffix = "cv_tot", short_suffix = "cv"),
@@ -562,7 +570,8 @@ validate_transforms <- function(standata) {
 
 #' Example: Build Transform Specification from Formula String
 #'
-#' Helper function to construct user-friendly transform specifications
+#' Dummy function to print help this help page.
+#' See `build_standata_transforms()` for details on how to construct a transform
 #' for the association term.
 #'
 #' @export
@@ -635,7 +644,7 @@ validate_transforms <- function(standata) {
 #' )
 #' standata_tf <- build_standata_transforms(transforms)
 example_transform_spec <- function() {
-  cat("See docstring for examples\n")
+  help('example_transform_spec')
 }
 
 #' Penalised Monotone I-spline Transform Spec
@@ -699,6 +708,7 @@ penalised_ispline_transform <- function(
 }
 
 #' @keywords internal
+#' @noRd
 #' @rdname penalised_ispline_transform
 #' @export
 # American alias for `penalised_ispline_transform()`.
@@ -723,6 +733,7 @@ penalized_ispline_transform <- function(...) {
 #' @return A canonicalised transform spec list suitable for
 #'   `build_standata_transforms()`.
 #' @keywords internal
+#' @noRd
 .make_stan_penalised_ispline_transform <- function(spec) {
   degree <- as.integer(spec$degree %||% 3L)
   if (degree < 1L) {
@@ -816,6 +827,7 @@ penalized_ispline_transform <- function(...) {
 #'
 #' @return A canonicalised fixed I-spline transform spec list.
 #' @keywords internal
+#' @noRd
 .make_penalised_ispline_transform <- function(spec) {
   # Validate and coerce input pairs for monotone spline fitting
   if (is.null(spec$x) || is.null(spec$y)) {

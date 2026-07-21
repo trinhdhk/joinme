@@ -149,7 +149,6 @@
   vector[D] marker_weights_eff_cs_total = marker_weights_cs_total;
   vector[D] marker_weights_eff_cv_marker = marker_weights_cv_marker;
   vector[D] marker_weights_eff_cs_marker = marker_weights_cs_marker;
-  vector[D] marker_weights_eff = rep_vector(1.0, D); // legacy shared alias for backward-compatible extraction when relevant
   {
     if (estimate_marker_weights == 1 && use_marker_weight_assoc == 1) {
       for (s in 1:n_marker_weight_sets) {
@@ -170,18 +169,6 @@
     }
     if (assoc_cs_marker == 1 && marker_weight_set_cs_marker > 0) {
       marker_weights_eff_cs_marker = marker_weights_cs_marker + to_vector(z_marker_weight_sets[marker_weight_set_cs_marker]);
-    }
-
-    if (shared_marker_weights == 1) {
-      if (assoc_cv_total == 1) {
-        marker_weights_eff = marker_weights_eff_cv_total;
-      } else if (assoc_cs_total == 1) {
-        marker_weights_eff = marker_weights_eff_cs_total;
-      } else if (assoc_cv_marker == 1) {
-        marker_weights_eff = marker_weights_eff_cv_marker;
-      } else if (assoc_cs_marker == 1) {
-        marker_weights_eff = marker_weights_eff_cs_marker;
-      }
     }
   }
 
@@ -320,44 +307,44 @@
   //   structure, only the first active weighted term is constrained positive;
   // - when weighted marker-based association terms use separate weight
   //   structures, every active weighted term is constrained positive.
-  real z_alpha_cv_total_eff = z_alpha_cv_total;
-  real z_alpha_cs_total_eff = z_alpha_cs_total;
-  real z_alpha_cv_marker_eff = z_alpha_cv_marker;
-  real z_alpha_cs_marker_eff = z_alpha_cs_marker;
+  real z_alpha_cv_total_constrained = z_alpha_cv_total;
+  real z_alpha_cs_total_constrained = z_alpha_cs_total;
+  real z_alpha_cv_marker_constrained = z_alpha_cv_marker;
+  real z_alpha_cs_marker_constrained = z_alpha_cs_marker;
 
   if ((assoc_cv_total + assoc_cs_total + assoc_cv_marker + assoc_cs_marker) > 0) {
     if (shared_marker_weights == 1) {
       if (assoc_cv_total == 1) {
-        z_alpha_cv_total_eff = abs(z_alpha_cv_total);
+        z_alpha_cv_total_constrained = abs(z_alpha_cv_total);
       } else if (assoc_cs_total == 1) {
-        z_alpha_cs_total_eff = abs(z_alpha_cs_total);
+        z_alpha_cs_total_constrained = abs(z_alpha_cs_total);
       } else if (assoc_cv_marker == 1) {
-        z_alpha_cv_marker_eff = abs(z_alpha_cv_marker);
+        z_alpha_cv_marker_constrained = abs(z_alpha_cv_marker);
       } else if (assoc_cs_marker == 1) {
-        z_alpha_cs_marker_eff = abs(z_alpha_cs_marker);
+        z_alpha_cs_marker_constrained = abs(z_alpha_cs_marker);
       }
     } else {
-      if (assoc_cv_total == 1) z_alpha_cv_total_eff = abs(z_alpha_cv_total);
-      if (assoc_cs_total == 1) z_alpha_cs_total_eff = abs(z_alpha_cs_total);
-      if (assoc_cv_marker == 1) z_alpha_cv_marker_eff = abs(z_alpha_cv_marker);
-      if (assoc_cs_marker == 1) z_alpha_cs_marker_eff = abs(z_alpha_cs_marker);
+      if (assoc_cv_total == 1) z_alpha_cv_total_constrained = abs(z_alpha_cv_total);
+      if (assoc_cs_total == 1) z_alpha_cs_total_constrained = abs(z_alpha_cs_total);
+      if (assoc_cv_marker == 1) z_alpha_cv_marker_constrained = abs(z_alpha_cv_marker);
+      if (assoc_cs_marker == 1) z_alpha_cs_marker_constrained = abs(z_alpha_cs_marker);
     }
   }
 
-  real alpha_cv_total = z_alpha_cv_total_eff * sd_alpha_cv_total;
-  real alpha_cs_total = z_alpha_cs_total_eff * sd_alpha_cs_total;
-  real alpha_cv_mean = z_alpha_cv_mean * sd_alpha_cv_mean;
-  real alpha_cs_mean = z_alpha_cs_mean * sd_alpha_cs_mean;
-  real alpha_cv_marker = z_alpha_cv_marker_eff * sd_alpha_cv_marker;
-  real alpha_cs_marker = z_alpha_cs_marker_eff * sd_alpha_cs_marker;
-  vector[M_corr] alpha_corr_eff = s_corr * alpha_corr; // effective corr coefficients on the model scale
-  vector[M_vcov] alpha_vcov_eff = s_vcov * alpha_vcov; // effective vcov coefficients on the model scale
+  real alpha_cv_total_scaled = z_alpha_cv_total_constrained * sd_alpha_cv_total;
+  real alpha_cs_total_scaled = z_alpha_cs_total_constrained * sd_alpha_cs_total;
+  real alpha_cv_mean_scaled = z_alpha_cv_mean * sd_alpha_cv_mean;
+  real alpha_cs_mean_scaled = z_alpha_cs_mean * sd_alpha_cs_mean;
+  real alpha_cv_marker = z_alpha_cv_marker_constrained * sd_alpha_cv_marker;
+  real alpha_cs_marker = z_alpha_cs_marker_constrained * sd_alpha_cs_marker;
+  vector[M_corr] alpha_corr_scaled = s_corr * z_alpha_corr;
+  vector[M_vcov] alpha_vcov_scaled = s_vcov * z_alpha_vcov;
 
-  real a_cv_total = assoc_cv_total * alpha_cv_total; // total CV coefficient
-  real a_cs_total = assoc_cs_total * alpha_cs_total; // total CS coefficient
-  real a_cv_mean = assoc_cv_mean * alpha_cv_mean;    // mean CV coefficient
+  real a_cv_total = assoc_cv_total * alpha_cv_total_scaled; // total CV coefficient
+  real a_cs_total = assoc_cs_total * alpha_cs_total_scaled; // total CS coefficient
+  real a_cv_mean = assoc_cv_mean * alpha_cv_mean_scaled;    // mean CV coefficient
   real a_cv_marker = assoc_cv_marker * alpha_cv_marker; // marker CV coefficient
-  real a_cs_mean = assoc_cs_mean * alpha_cs_mean;    // mean CS coefficient
+  real a_cs_mean = assoc_cs_mean * alpha_cs_mean_scaled;    // mean CS coefficient
   real a_cs_marker = assoc_cs_marker * alpha_cs_marker; // marker CS coefficient
-  vector[M_corr] a_corr = assoc_corr * alpha_corr_eff; // corr correlation coefficients actually used in the hazard
-  vector[M_vcov] a_vcov = assoc_vcov * alpha_vcov_eff; // vcov association coefficients actually used in the hazard
+  vector[M_corr] a_corr = assoc_corr * alpha_corr_scaled; // corr coefficients used in the hazard
+  vector[M_vcov] a_vcov = assoc_vcov * alpha_vcov_scaled; // vcov coefficients used in the hazard

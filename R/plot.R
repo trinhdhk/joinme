@@ -1192,10 +1192,12 @@ plot.JoiNMeDynPred <- function(
 #' @details Fitted-data plotting from `JoiNMeFit` uses fitted posterior samples
 #'   and does not accept conditioning or future-prediction arguments
 #'   (`condition`, `conditioning`, `time_start`, `times`, `time_horizon`, or
-#'   `pred_control`). For conditioning-based trajectories, call [predict()] and
-#'   then plot the resulting `JoiNMeDynPred` object. At fitted trajectory times,
-#'   covariates other than time are held at their first observed value within
-#'   each selected subject-marker combination.
+#'   `pred_control`). For population-level covariate profiles, call
+#'   [conditional_effects.JoiNMeFit()]. For subject-specific forecasts
+#'   conditional on observed marker history, call [predict()] and then plot the
+#'   resulting `JoiNMeDynPred` object. At fitted trajectory times, covariates
+#'   other than time are held at their first observed value within each selected
+#'   subject-marker combination.
 #' @param threshold Posterior sign-certainty threshold for
 #'   `longitudinal_style = "heatmap"`. A tile is shown as significant when the
 #'   posterior probability of either a positive or a negative change, relative
@@ -1548,6 +1550,7 @@ plot.JoiNMeFit <- function(x,
 #' @return A list containing a posterior draw matrix and its time-marker layout,
 #'   or `NULL` when the requested scale is unavailable.
 #' @keywords internal
+#' @noRd
 .JoiNMefit_longitudinal_draw_scale <- function(subject_draws, prediction_scale) {
     if (is.null(subject_draws)) {
         return(NULL)
@@ -1575,6 +1578,7 @@ plot.JoiNMeFit <- function(x,
 #' @return A data frame with posterior mean change, directional posterior
 #'   probability, and display opacity for each marker-time combination.
 #' @keywords internal
+#' @noRd
 .JoiNMefit_longitudinal_heatmap_data <- function(posterior_prediction,
                                                  prediction_scale,
                                                  sign_threshold,
@@ -1741,6 +1745,7 @@ plot.JoiNMeFit <- function(x,
 #'
 #' @return A `ggplot` heatmap.
 #' @keywords internal
+#' @noRd
 .plot_JoiNMefit_longitudinal_heatmap <- function(fitted_model,
                                                  subject_ids,
                                                  marker_levels,
@@ -1971,6 +1976,7 @@ plot.JoiNMeFit <- function(x,
 #'
 #' @return A `ggplot`, combined plot, or named plot list.
 #' @keywords internal
+#' @noRd
 .plot_JoiNMefit_fitted <- function(x, type, subject, marker, scale, longitudinal_style,
                                    longitudinal_times, longitudinal_points, draws,
                                    threshold, seed, smooth_trajectory, smooth_method, smooth_span,
@@ -2122,6 +2128,7 @@ plot.JoiNMeFit <- function(x,
 #' @return A named list containing fixed, subject, marker, and subject-by-marker
 #'   design matrices evaluated on the fitted model's scaled time axis.
 #' @keywords internal
+#' @noRd
 .JoiNMefit_longitudinal_design_matrices <- function(fitted_model,
                                                     longitudinal_evaluation_data,
                                                     time_variable,
@@ -2221,6 +2228,7 @@ plot.JoiNMeFit <- function(x,
 #' @return A `JoiNMeDynPred` object containing posterior trajectory draws,
 #'   summaries, and the original observed data.
 #' @keywords internal
+#' @noRd
 .build_JoiNMefit_fitted_plot_samples <- function(x, which, subject, scale, draws, seed, ci_levels,
                                                  longitudinal_times = NULL,
                                                  longitudinal_points = 80L,
@@ -2241,7 +2249,7 @@ plot.JoiNMeFit <- function(x,
         include_longitudinal <- "longitudinal" %in% requested_processes
         include_event_process <- any(requested_processes %in% c("survival", "cumhaz"))
 
-        id_labels <- .JoiNMe_id_labels(x, n_id)
+        id_labels <- .id_labels(x, n_id)
         marker_levels <- as.character(sd$marker_levels %||% levels(x$dataLong[[marker_var]]) %||% sort(unique(as.character(x$dataLong[[marker_var]]))))
         if (length(marker_levels) == 0L) marker_levels <- as.character(seq_len(as.integer(sd$D %||% 0L)))
 
@@ -3161,39 +3169,14 @@ plot.JoiNMeFit <- function(x,
         }
     }
 
-    # Otherwise try the effective-weight parameter names first.
+    # Otherwise use the term-specific effective-weight parameter names.
     eff_names <- paste0(.marker_weight_var_prefix(term_key, effective = TRUE), "[", seq_len(n_markers), "]")
     dmat <- tryCatch(
         .get_draws_matrix(x$fit, variables = eff_names, draws = n_draws, seed = seed),
         error = function(e) NULL
     )
-    if ((is.null(dmat) || !all(eff_names %in% colnames(dmat))) && isTRUE(as.integer(sd$shared_marker_weights %||% 1L) == 1L)) {
-        eff_names <- paste0("marker_weights_eff[", seq_len(n_markers), "]")
-        dmat <- tryCatch(
-            .get_draws_matrix(x$fit, variables = eff_names, draws = n_draws, seed = seed),
-            error = function(e) NULL
-        )
-    }
     if (!is.null(dmat) && all(eff_names %in% colnames(dmat))) {
         return(as.matrix(dmat[, eff_names, drop = FALSE]))
-    }
-
-    # Fall back to the pre-effective base-weight parameterization if that is all
-    # that is available in the stored fit object.
-    base_names <- paste0(.marker_weight_var_prefix(term_key, effective = FALSE), "[", seq_len(n_markers), "]")
-    dmat <- tryCatch(
-        .get_draws_matrix(x$fit, variables = base_names, draws = n_draws, seed = seed),
-        error = function(e) NULL
-    )
-    if ((is.null(dmat) || !all(base_names %in% colnames(dmat))) && isTRUE(as.integer(sd$shared_marker_weights %||% 1L) == 1L)) {
-        base_names <- paste0("marker_weights[", seq_len(n_markers), "]")
-        dmat <- tryCatch(
-            .get_draws_matrix(x$fit, variables = base_names, draws = n_draws, seed = seed),
-            error = function(e) NULL
-        )
-    }
-    if (!is.null(dmat) && all(base_names %in% colnames(dmat))) {
-        return(as.matrix(dmat[, base_names, drop = FALSE]))
     }
 
     # If no posterior draws are available, degrade gracefully to the standata
@@ -3317,7 +3300,7 @@ plot.JoiNMeFit <- function(x,
     # Functional and pwlin transforms can be evaluated once on the grid because
     # they do not depend on draw-specific spline coefficients.
     if (identical(tf_type, "functional")) {
-        tf_fun <- .JoiNMe_make_assoc_transform(tf_spec, term_key)
+        tf_fun <- .make_assoc_transform(tf_spec, term_key)
         iota_draws <- .transform_iota_draws(
             x = x,
             term_key = term_key,
@@ -3345,7 +3328,7 @@ plot.JoiNMeFit <- function(x,
     }
 
     if (identical(tf_type, "pwlin")) {
-        tf_fun <- .JoiNMe_make_assoc_transform(tf_spec, term_key)
+        tf_fun <- .make_assoc_transform(tf_spec, term_key)
         vals <- as.numeric(tf_fun(x_grid))
         return(matrix(rep(vals, each = n_draws), nrow = n_draws))
     }
@@ -3358,7 +3341,7 @@ plot.JoiNMeFit <- function(x,
 
     # The final fallback keeps plotting resilient to future transform types that
     # can still be represented by a deterministic pointwise transform function.
-    tf_fun <- .JoiNMe_make_assoc_transform(tf_spec, term_key)
+    tf_fun <- .make_assoc_transform(tf_spec, term_key)
     vals <- as.numeric(tf_fun(x_grid))
     matrix(rep(vals, each = n_draws), nrow = n_draws)
 }
@@ -3552,7 +3535,6 @@ plot.JoiNMeFit <- function(x,
             if (grepl("^(corr|vcov)\\[\\d+\\]$", term)) {
                 target_var_candidates <- unique(c(
                     target_var_candidates,
-                    paste0("alpha_", sub("\\[", "_eff[", term)),
                     paste0("alpha_", term)
                 ))
             }
@@ -3642,16 +3624,13 @@ plot.JoiNMeFit <- function(x,
     )
     for (term_key in active_terms) {
         if (term_key %in% c("corr", "vcov")) {
-            corr_vars <- grep(paste0("^alpha_", term_key, "_eff\\["), posterior::variables(.get_draws_obj(fit)), value = TRUE)
-            if (!length(corr_vars)) {
-                corr_vars <- grep(paste0("^alpha_", term_key, "\\["), posterior::variables(.get_draws_obj(fit)), value = TRUE)
-            }
+            corr_vars <- grep(paste0("^alpha_", term_key, "\\["), posterior::variables(.get_draws_obj(fit)), value = TRUE)
             if (length(corr_vars)) {
                 data$coeff_draws[[term_key]] <- .get_draws_matrix(fit, variables = corr_vars, seed = seed)[, corr_vars, drop = FALSE]
                 data$term_map <- rbind(
                     data$term_map,
                     data.frame(
-                        term = sub("_eff\\[", "[", sub("^alpha_", "", corr_vars), perl = TRUE),
+                        term = sub("^alpha_", "", corr_vars),
                         variable = corr_vars,
                         stringsAsFactors = FALSE
                     )
@@ -3755,10 +3734,6 @@ plot.JoiNMeFit <- function(x,
             for (term_key in weight_terms) {
                 eff_names <- paste0(.marker_weight_var_prefix(term_key, effective = TRUE), "[", seq_len(n_markers), "]")
                 dmat <- tryCatch(.get_draws_matrix(fit, variables = eff_names, seed = seed), error = function(e) NULL)
-                if ((is.null(dmat) || !all(eff_names %in% colnames(dmat))) && isTRUE(as.integer(stan_data$shared_marker_weights %||% 1L) == 1L)) {
-                    eff_names <- paste0("marker_weights_eff[", seq_len(n_markers), "]")
-                    dmat <- tryCatch(.get_draws_matrix(fit, variables = eff_names, seed = seed), error = function(e) NULL)
-                }
                 if (!is.null(dmat) && all(eff_names %in% colnames(dmat))) {
                     data$marker_weight_draws[[term_key]] <- as.matrix(dmat[, eff_names, drop = FALSE])
                 }
@@ -3982,7 +3957,7 @@ plot.JoiNMeFit <- function(x,
     do.call(rbind, out)
 }
 
-.JoiNMe_make_assoc_transform <- function(spec, term_name) {
+.make_assoc_transform <- function(spec, term_name) {
     if (is.null(spec) || is.null(spec$type) || identical(spec$type, "identity")) {
         return(function(x) x)
     }

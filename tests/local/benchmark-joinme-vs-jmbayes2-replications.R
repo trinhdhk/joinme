@@ -305,8 +305,8 @@ draw_array_slice <- function(draw_array, index = 1L) {
 build_joinme_assoc_coef_draws <- function(fit_joinme, marker_levels, draws = NULL, seed = 1) {
   fit <- fit_joinme$fit
   all_vars <- tryCatch(posterior::variables(joinme:::.get_draws_obj(fit)), error = function(e) character(0))
-  cv_mean_var <- joinme:::.first_available_draw_var(all_vars, c("alpha_cv_mean_eff", "alpha_cv_mean"))
-  cv_marker_var <- joinme:::.first_available_draw_var(all_vars, c("alpha_cv_marker_eff", "alpha_cv_marker"))
+  cv_mean_var <- if ("alpha_cv_mean" %in% all_vars) "alpha_cv_mean" else NULL
+  cv_marker_var <- if ("alpha_cv_marker" %in% all_vars) "alpha_cv_marker" else NULL
 
   cv_mean_arr <- if (!is.null(cv_mean_var)) {
     joinme:::.get_draws_array(fit, variables = cv_mean_var, draws = draws, seed = seed)
@@ -369,8 +369,8 @@ build_joinme_assoc_coef_draws <- function(fit_joinme, marker_levels, draws = NUL
 build_joinme_assoc_coef_array <- function(fit_joinme, marker_levels, draws = NULL, seed = 1) {
   fit <- fit_joinme$fit
   all_vars <- tryCatch(posterior::variables(joinme:::.get_draws_obj(fit)), error = function(e) character(0))
-  cv_mean_var <- joinme:::.first_available_draw_var(all_vars, c("alpha_cv_mean_eff", "alpha_cv_mean"))
-  cv_marker_var <- joinme:::.first_available_draw_var(all_vars, c("alpha_cv_marker_eff", "alpha_cv_marker"))
+  cv_mean_var <- if ("alpha_cv_mean" %in% all_vars) "alpha_cv_mean" else NULL
+  cv_marker_var <- if ("alpha_cv_marker" %in% all_vars) "alpha_cv_marker" else NULL
 
   cv_mean_arr <- if (!is.null(cv_mean_var)) {
     joinme:::.get_draws_array(fit, variables = cv_mean_var, draws = draws, seed = seed)

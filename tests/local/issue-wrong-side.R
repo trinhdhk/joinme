@@ -107,23 +107,23 @@ fit <- joinme(
 draw_vars <- c(
   paste0("alpha_L[", seq_len(sd_check$M_vcov_tf), "]"),
   paste0("lambda_L[", seq_len(sd_check$M_vcov_tf), "]"),
-  paste0("alpha_vcov_eff[", seq_len(sd_check$M_vcov_tf), "]"),
   paste0("alpha_vcov[", seq_len(sd_check$M_vcov_tf), "]"),
+  paste0("z_alpha_vcov[", seq_len(sd_check$M_vcov_tf), "]"),
   "s_vcov"
 )
 
-draws <- JoiNMe:::.get_draws_matrix(
+draws <- joinme:::.get_draws_matrix(
   fit$fit,
   variables = draw_vars,
   seed = seed
 )
 
-draws_df <- posterior::as_draws_df(JoiNMe:::.get_draws_obj(fit$fit))
+draws_df <- posterior::as_draws_df(joinme:::.get_draws_obj(fit$fit))
 tracked_vars <- c(
   paste0("alpha_L[", seq_len(sd_check$M_vcov_tf), "]"),
   paste0("lambda_L[", seq_len(sd_check$M_vcov_tf), "]"),
-  paste0("alpha_vcov_eff[", seq_len(sd_check$M_vcov_tf), "]"),
   paste0("alpha_vcov[", seq_len(sd_check$M_vcov_tf), "]"),
+  paste0("z_alpha_vcov[", seq_len(sd_check$M_vcov_tf), "]"),
   "s_vcov"
 )
 
@@ -158,12 +158,12 @@ truth_map <- c(
   stats::setNames(sim$truth$id_marker_cov_effective$lambda, paste0("lambda_L[", seq_len(sd_check$M_vcov_tf), "]")),
   sim$truth$assoc_coefs[paste0("vcov[", seq_len(sd_check$M_vcov_tf), "]")]
 )
-names(truth_map)[grepl("^vcov\\[", names(truth_map))] <- paste0("alpha_vcov_eff[", seq_len(sd_check$M_vcov_tf), "]")
+names(truth_map)[grepl("^vcov\\[", names(truth_map))] <- paste0("alpha_vcov[", seq_len(sd_check$M_vcov_tf), "]")
 truth_map[["s_vcov"]] <- NA_real_
 
 raw_assoc_truth <- data.frame(
-  parameter = paste0("alpha_vcov[", seq_len(sd_check$M_vcov_tf), "]"),
-  note = "raw latent; compare alpha_vcov_eff to hazard-scale truth",
+  parameter = paste0("z_alpha_vcov[", seq_len(sd_check$M_vcov_tf), "]"),
+  note = "standardized latent; compare alpha_vcov to hazard-scale truth",
   row.names = NULL,
   check.names = FALSE
 )
@@ -196,7 +196,7 @@ chain_summary <- stats::aggregate(chain_tbl[, tracked_vars, drop = FALSE], by = 
 
 cat("== Recovery summary ==\n")
 print(recovery_tbl, row.names = FALSE, digits = 4)
-cat("\nNote: alpha_vcov_eff[...] is the hazard-scale association; alpha_vcov[...] is the raw latent before multiplying by s_vcov.\n")
+cat("\nNote: alpha_vcov[...] is the hazard-scale association; z_alpha_vcov[...] is the standardized latent before multiplying by s_vcov.\n")
 cat("\n== Chain means ==\n")
 print(chain_summary, row.names = FALSE, digits = 4)
 cat("\n== Prior reference (current Stan priors) ==\n")

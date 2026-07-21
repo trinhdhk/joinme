@@ -9,7 +9,7 @@ test_that("JoiNMe supports expit-based penalised spline transforms end to end", 
   if (!has_cmd && !has_rstan) skip("No Stan backend available")
 
   expit_grid <- stats::plogis(seq(-4, 4, length.out = 32))
-  sim_tf <- JoiNMe::joinme_tf(
+  sim_tf <- joinme::joinme_tf(
     vcov = list(
       type = "ispline_expit_penalised",
       x = expit_grid,
@@ -19,7 +19,7 @@ test_that("JoiNMe supports expit-based penalised spline transforms end to end", 
       lambda = 1
     )
   )
-  fit_tf <- JoiNMe::joinme_tf(
+  fit_tf <- joinme::joinme_tf(
     vcov = list(
       type = "ispline_expit_penalised",
       x = seq(0,1, length.out = 8),
@@ -30,7 +30,7 @@ test_that("JoiNMe supports expit-based penalised spline transforms end to end", 
   )
 
   set.seed(2401)
-  sim <- JoiNMe::simulate_joinme(
+  sim <- joinme::simulate_joinme(
     formulaLong = y ~ 1 + time + (1 + time | id) + (0 + (1 + time | id) | marker),
     formulaEvent = survival::Surv(time, event) ~ 1,
     families = c("gaussian", "gaussian", "gaussian"),
@@ -64,7 +64,7 @@ test_that("JoiNMe supports expit-based penalised spline transforms end to end", 
  
   fit2 <- tryCatch(
     suppressWarnings(
-      JoiNMe::joinme(
+      joinme::joinme(
         formulaLong = y ~ 1 + time + (1 + time | id) + (0 + (1 + time | id) | marker),
         formulaEvent = survival::Surv(time, event) ~ 1,
         dataLong = sim$dataLong,

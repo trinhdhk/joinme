@@ -1,14 +1,12 @@
-#' Fit JoiNMe model via cmdstanr or rstan
+#' Fit Joint Nested Mixed-effects (JoiNMe) model via cmdstanr or rstan
 #'
 #' @importFrom stats setNames
 #' @importFrom utils modifyList
 #'
 #' @description
-#' Fits the JoiNMe Stan model using cmdstanr (default) or rstan. The engine can be
-#' set globally via options(stan_preferred_engine = "cmdstanr"|"rstan") or via
+#' Fits the Joint Nested Mixed-effects (JoiNMe) Stan model using cmdstanr (default) or rstan.
+#' The engine can be set globally via options(stan_preferred_engine = "cmdstanr"|"rstan") or via
 #' control$engine.
-#' following the notebook, and supports association transformations and time-internal
-#' scaling metadata.
 #'
 #' @details
 #' Transformations are provided through a single `transforms` argument.
@@ -44,7 +42,7 @@
 #' support ranges). This keeps association plotting usable after serialization
 #' without needing the full transient CmdStan CSV outputs.
 #'
-#' For CmdStanR fits, `joinme()` also eagerly materializes the CSV-backed fit
+#' For CmdStanR fits, `joinme()` also eagerly imports the CSV-backed fit
 #' contents in memory before returning. This mirrors the loading step used by
 #' `cmdstanr::save_object()` so later `saveRDS()` calls do not rely on the
 #' original CmdStan CSV files remaining on disk.
@@ -59,26 +57,14 @@
 #' factor and applies subject-level likelihood weighting for the longitudinal and
 #' survival contributions. Weight columns must be finite and strictly positive.
 #'
-#' Association coefficients are denoted with the `alpha_` prefix to match joint-model
-#' conventions and to avoid confusion with the linear predictor eta used throughout
-#' the longitudinal and survival submodels. Total, marker, and mean associations use
-#' a positive non-centred parameterisation: `alpha = z_alpha * sd_alpha`, which
-#' stabilizes sampling while preserving the intended sign structure via marker weights.
-#'
-#' The typical workflow is:
-#' 1. Prepare `dataLong` and `dataEvent` with aligned ids and time scales.
-#' 2. Specify `formulaLong` and `formulaEvent` to define the longitudinal and survival submodels.
-#' 3. Choose `assoc` components and optional `transforms` for association terms.
-#' 4. Fit with `control` to manage sampling, threading, and reproducibility.
-#' 5. Validate convergence (R-hat, ESS, divergences), then predict.
-#'
-#' Example:
+#' Transformation for supported association terms
+#' can be fed to `joinme()` in a named list. For example
 #' `list(cv_total = list(type = "functional", expr = ~ log1p(x)),
 #'      cs_total = list(type = "identity"),
 #'      corr = list(type = "pwlin", x = c(-2, 0, 2), y = c(0.2, 1, 0.2)),
 #'      vcov = list(type = "identity"))`
 #'
-#' Transformation parameterisation cheat sheet:
+#' Transformation parameterisation:
 #' - Omitted term, `NULL`, or `list(type = "identity")`:
 #'   identity transform (default).
 #' - `list(type = "functional", expr = ~ log1p(x))`:
@@ -86,7 +72,7 @@
 #' - `list(type = "ispline", knots = c(-1, 0, 1), coeff = c(0, 0.3, 0.8, 1.1, 1.3), degree = 3)`:
 #'   monotone I-spline; `knots` and `coeff` are required, `degree` defaults to `3`.
 #' - `list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), y = exp(seq(-2, 2, length.out = 50)), n_knots = 6, degree = 3, lambda = 1)`:
-#'   penalised monotone I-spline in legacy plug-in mode; defaults are
+#'   penalised monotone I-spline. This is intended for simulation but it works here too, off-labelly; defaults are
 #'   `n_knots = 6`, `degree = 3`, `lambda = 1` when those values are omitted.
 #' - `list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), n_knots = 6, degree = 3, lambda = 1)`:
 #'   penalised monotone I-spline with Stan-estimated coefficients; if `knots`
@@ -94,14 +80,17 @@
 #' - `list(type = "ispline_expit", knots = c(0.05, 0.5, 0.95), coeff = c(0, 0.25, 0.8, 1.0, 1.1), degree = 3)`:
 #'   monotone I-spline evaluated on `plogis(x)`; explicit `knots` are specified
 #'   on the expit scale because the spline basis itself lives on that bounded
-#'   `expit(x)` domain.
+#'   `expit(x)` domain. This maybe useful for numerical stability
+#'   but highly experimental and may be useful
+#'   to put for knots at the each (near 0 and 1) if users is concerned
+#'   about the curve at the tails.
 #' - `list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), y = seq(0.02, 0.98, length.out = 50)^0.8, n_knots = 6, degree = 3, lambda = 1)`:
-#'   penalised monotone I-spline on `plogis(x)` in legacy plug-in mode.
+#'   penalised monotone I-spline on `plogis(x)`. This is intended for simulation but it works here too, off-labelly.
 #' - `list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), n_knots = 6, degree = 3, lambda = 1)`:
 #'   penalised monotone I-spline on `plogis(x)` with Stan-estimated coefficients.
 #' - `list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))`:
-#'   piecewise-linear transform; both `x` and `y` are required and there are no
-#'   additional defaults.
+#'   piecewise-linear transform; both `x` and `y` are required.
+#'   This is intended for simulation but it works here too, off-labelly.
 #'
 #' For monotone spline transforms:
 #' - `type = "ispline"`: provide `knots` and `coeff` directly (plus optional
@@ -125,13 +114,20 @@
 #'   values are `"increasing"` and `"decreasing"`. When `y` is supplied, the
 #'   plug-in fit infers the direction from the training pairs if you omit it.
 #'   When `y` is omitted and Stan estimates the spline directly, the default
-#'   remains `"increasing"` for backward compatibility.
+#'   remains `"increasing"`.
 #' - `type = "ispline_expit"` / `"ispline_expit_penalised"`:
 #'   same semantics as the I-spline variants above, except the spline basis is
 #'   built on `plogis(x)`. This keeps the spline input on the bounded interval
 #'   $(0, 1)$ and is often more numerically stable when the raw association
-#'   feature spans a wide range. Explicit `knots` and training `x` values must
-#'   be specified on that expit scale.
+#'   feature spans a wide range. My experiments showed that this may help with
+#'   a workaround for the Boundary knots but may cause considerable suppress at
+#'   the tails if mis-specificied. Again, this may not affect the predictive value
+#'   at much because the tail of the association term is often scarced. However,
+#'   if you think the distribution of the latent association term is heavy-tailed,
+#'   you may want to put more knots at the tails (e.g knots = c(0.001, 0.01, 0.5, 0.99, 0.999))
+#'   to fight the impact of the `plogis()` transformation. In the future, a
+#'   normalisation of the latent association term may be added to the model; may be
+#'   dividing by sqrt of the second moment.
 #'
 #' Additional arguments are forwarded to `joinme_standata()` (e.g., `assoc`,
 #' `basehaz`, `basehaz_degree`, `n_knots`, `time_var`, and `shrinkage`). Use
@@ -168,12 +164,14 @@
 #'   default `~ 1` remains a supported intercept-only covariance regression.
 #' @param formulaDist Optional list of formulas for distributional regression.
 #'   Supported LHS parameters are:
-#'   - `sigma`
-#'   - `nu`
-#'   - `phi`
-#'   - `alpha` (aliases: `alpha_skew`, `skew`)
-#'   - `phi_beta`
-#'   - `tau_sde`
+#'   - `sigma` (scale parameter)
+#'   - `nu`    (degrees of freedom for Student-t)
+#'   - `phi`   (precision for Negative Binomial 2)
+#'   - `alpha` (skewness parameter)
+#'   - `kappa` (positive sample-size parameter for the Beta distribution, with
+#'     shapes \eqn{\mu\kappa} and \eqn{(1-\mu)\kappa})
+#'   - `tau` (quantile/asymmetry parameter in \eqn{(0,1)} for the skew double
+#'     exponential distribution)
 #'
 #'   Three input styles are supported:
 #'   1. Named list with RHS-only formulas, e.g. `list(sigma = ~ 1 + time)`.
@@ -209,7 +207,9 @@
 #'     integration. Allowed values are exactly 7/15/31/41/51/61. Only the node
 #'     count is passed to Stan; GK nodes/weights are fixed in the Stan code.
 #'   - vcov_diag_link: "softplus" or "exp" for covariance regression diagonals.
-#'   - tau_sde_fixed: optional fixed tau in (0,1) for skew-double-exponential.
+#'   - `tau_fixed`: optional fixed `tau` in \eqn{(0,1)} for the skew double
+#'     exponential distribution. It cannot be combined with a \code{tau}
+#'     distributional regression.
 #' @param draws Optional number of posterior draws used for summaries (not sampling).
 #' @param families Marker-specific family specification (optional).
 #'   Can be a character vector of family names aligned to marker order, or a
@@ -220,8 +220,8 @@
 #'   supported. Fit-time functional transforms may also request a free affine
 #'   shift through `intercept = TRUE` and/or `slope = TRUE`, for example
 #'   `joinme_tf(cv_total = ~ expit(x, intercept = TRUE, slope = TRUE))`, which
-#'   is fitted as `expit(iota_1 + iota_2 * x)`. This fit-only affine shift is
-#'   not mirrored by `simulate_joinme()`.
+#'   is fitted as `expit(iota_1 + iota_2 * x)`. See details.
+#'
 #' @param priors Prior declaration. Prefer `joinme_priors(...)`; raw named lists
 #'   with components `beta`, `alpha`, `iota`, and `lkj` remain supported.
 #' @param fixed_marker_weights Logical; if TRUE, marker weights are fixed at the
@@ -233,6 +233,8 @@
 #'   weighted marker-based association term gets its own marker-weight structure.
 #'   When `marker_weights` is a named list, use names `cv_total`, `cs_total`,
 #'   `cv_marker`, and `cs_marker`.
+#' @param basehaz An object of class `joinme_basehaz` created by `joinme_basehaz()`.
+#' This controls the baseline hazard parameterisation and spline basis. See `?joinme_basehaz` for details.
 #' @param ... Additional args passed to joinme_standata().
 #'
 #' @examples
@@ -243,8 +245,8 @@
 #'   nu[family=student_t] ~ 1,
 #'   alpha[family=skew_normal] ~ 1 + x1,
 #'   phi[family=negbin2] ~ 1,
-#'   phi_beta[family=beta] ~ 1,
-#'   tau_sde[family=skew_double_exponential] ~ 1
+#'   kappa[family=beta] ~ 1,
+#'   tau[family=skew_double_exponential] ~ 1
 #' )
 #' }
 #'
@@ -267,6 +269,8 @@ joinme <- function(
   priors = joinme_priors(),
   fixed_marker_weights = FALSE,
   shared_marker_weights = TRUE,
+  basehaz = joinme_basehaz(),
+  seed = NULL,
   ...
 ) {
   if (!is.list(control)) {
@@ -288,14 +292,21 @@ joinme <- function(
   # Workflow: build standata -> resolve threading -> choose engine -> fit -> wrap
   # - sd: prepared Stan data list with all dimensions and transforms
   vcov_diag_link <- control$vcov_diag_link %||% "softplus"
-  tau_sde_fixed <- control$tau_sde_fixed %||% NULL
+  tau_fixed <- control$tau_fixed %||% NULL
   quadrature_nodes <- control$quadrature_nodes %||% NULL
   formulaVCov <- .resolve_vcov_formula(
     formulaVCov = formulaVCov,
     default = ~ 1,
     context = "joinme()"
   )
-  sd <- joinme_standata(
+  assertthat::assert_that(
+    inherits(basehaz, "joinme_basehaz"),
+    msg = "{.arg basehaz} must be a {.cls joinme_basehaz} object, created by {.fn joinme_basehaz()}."
+  )
+
+  arg_list <- list(...)
+  arg_list <- arg_list[names(arg_list) %in% names(formals(joinme_standata))]
+  arg_list <- modifyList(arg_list, list(
     formulaLong = formulaLong,
     dataLong = dataLong,
     formulaEvent = formulaEvent,
@@ -312,9 +323,15 @@ joinme <- function(
     shared_marker_weights = shared_marker_weights,
     quadrature_nodes = quadrature_nodes,
     vcov_diag_link = vcov_diag_link,
-    tau_sde_fixed = tau_sde_fixed,
-    ...
-  )
+    tau_fixed = tau_fixed,
+    basehaz = basehaz$type,
+    basehaz_n_knots = basehaz$n_knots,
+    basehaz_knots = basehaz$knots,
+    basehaz_degree = basehaz$degree,
+    basehaz_formula = basehaz$formula,
+    seed = seed
+  ))
+  sd <- do.call(joinme_standata, arg_list)
 
   # Threading: honor explicit control overrides, fall back to mc.cores or 1
   threads_per_chain <- control$threads_per_chain %||% control$threads %||% control$mc.cores %||% 1L
@@ -524,7 +541,7 @@ joinme <- function(
     allowed <- names(formals(mod$sample))
     args <- args[names(args) %in% allowed]
     fit <- do.call(mod$sample, args)
-    fit <- .materialize_cmdstanr_fit(fit)
+    fit <- .import_cmdstanr_fit(fit)
   } else {
     control_list <- list()
     if (!is.null(args$adapt_delta)) control_list$adapt_delta <- args$adapt_delta
@@ -608,8 +625,8 @@ joinme <- function(
     surv_type = sd$surv_type,
     event_censor_types_present = sd$event_censor_types_present,
     vcov_diag_link = sd$vcov_diag_link,
-    use_tau_sde_fixed = sd$use_tau_sde_fixed,
-    tau_sde_fixed = sd$tau_sde_fixed
+    use_tau_fixed = sd$use_tau_fixed,
+    tau_fixed = sd$tau_fixed
   )
   cfg$engine <- engine
 

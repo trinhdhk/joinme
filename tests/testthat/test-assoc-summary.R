@@ -36,7 +36,7 @@ test_that("summary reports only active association components", {
   )
 
   assoc_tbl <- summary(fit)$tables$assoc
-  expect_true(any(assoc_tbl$term == "cv_total (+)"))
+  expect_true(any(assoc_tbl$term == "cv_total"))
   expect_false(any(assoc_tbl$term %in% c("cv_mean", "cv_marker", "cs_total", "cs_mean", "cs_marker")))
 })
 
@@ -81,7 +81,7 @@ test_that("summary hides marker weights when marker-weighted assoc terms are ina
   expect_false(any(grepl("^weight:", assoc_tbl$term)))
 })
 
-test_that("summary prefers effective vcov association coefficients", {
+test_that("summary uses canonical hazard-scale vcov association coefficients", {
   draws_obj <- posterior::as_draws_matrix(stats::setNames(
     data.frame(
       beta = c(0, 0, 0),
@@ -89,7 +89,7 @@ test_that("summary prefers effective vcov association coefficients", {
       eff = c(0.4, 0.5, 0.6),
       check.names = FALSE
     ),
-    c("beta[1]", "alpha_vcov[1]", "alpha_vcov_eff[1]")
+    c("beta[1]", "z_alpha_vcov[1]", "alpha_vcov[1]")
   ))
 
   fit_obj <- structure(list(
@@ -123,7 +123,7 @@ test_that("summary prefers effective vcov association coefficients", {
       if (is.null(variables)) return(draws_obj)
       posterior::subset_draws(draws_obj, variable = variables)
     },
-    .JoiNMe_sampler_diagnostics = function(fit) list(),
+    .joinme_sampler_diagnostics = function(fit) list(),
     .package = "joinme"
   )
 
@@ -132,7 +132,7 @@ test_that("summary prefers effective vcov association coefficients", {
   expect_equal(assoc_tbl$Estimate, 0.5)
 })
 
-test_that("summary labels constrained weighted association terms and term-specific marker weights", {
+test_that("summary labels weighted association terms and term-specific marker weights", {
   draws_obj <- posterior::as_draws_array(array(
     c(
       rep(0.5, 4),
@@ -190,13 +190,13 @@ test_that("summary labels constrained weighted association terms and term-specif
       if (is.null(variables)) return(draws_obj)
       posterior::subset_draws(draws_obj, variable = variables)
     },
-    .JoiNMe_sampler_diagnostics = function(fit) list(),
+    .joinme_sampler_diagnostics = function(fit) list(),
     .package = "joinme"
   )
 
   assoc_tbl <- summary(fit_obj, include_corr = FALSE)$tables$assoc
-  expect_true(any(assoc_tbl$term == "cv_total (+)"))
-  expect_true(any(assoc_tbl$term == "cs_total (+)"))
+  expect_true(any(assoc_tbl$term == "cv_total"))
+  expect_true(any(assoc_tbl$term == "cs_total"))
   expect_true(any(grepl("^weight\\[cv_total\\]: m1$", assoc_tbl$term)))
   expect_true(any(grepl("^weight\\[cs_total\\]: m1$", assoc_tbl$term)))
   expect_true(any(grepl("^weight\\[cs_total\\]: m2$", assoc_tbl$term)))

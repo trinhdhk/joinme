@@ -1,16 +1,16 @@
 test_that("normalize_formula_dist parses family-scoped syntax", {
-  spec <- JoiNMe:::.normalize_formula_dist(list(
+  spec <- joinme:::.normalize_formula_dist(list(
     sigma[family = student] ~ 1 + time,
     sigma[family = normal] ~ 1 + x1,
     alpha_skew[family = skew_normal] ~ 1,
-    phi_beta ~ 1
+    kappa ~ 1
   ))
 
-  expect_true(JoiNMe:::.is_dist_scope(spec$sigma))
+  expect_true(joinme:::.is_dist_scope(spec$sigma))
   expect_setequal(names(spec$sigma$by_family), c("student_t", "gaussian"))
   expect_true(inherits(spec$sigma$by_family$student_t, "formula"))
   expect_true(inherits(spec$alpha$by_family$skew_normal, "formula"))
-  expect_true(inherits(spec$phi_beta$default, "formula"))
+  expect_true(inherits(spec$kappa$default, "formula"))
 })
 
 

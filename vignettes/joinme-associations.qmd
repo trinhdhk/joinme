@@ -161,8 +161,8 @@ For covariance-style channels (`corr`, `vcov`):
   model matrices rather than raw numeric indices,
 - printed posterior association output groups `corr` and `vcov` terms in a
   matrix-like layout,
-- the reported coefficient names correspond to the effective hazard-scale
-  quantities used by the model.
+- the reported coefficient names are the canonical hazard-scale quantities used
+  by the model.
 
 This means the public posterior summaries, plotting labels, and the fitted
 hazard contribution now use the same user-facing covariance component names.
@@ -170,8 +170,11 @@ hazard contribution now use the same user-facing covariance component names.
 ## Renamed posterior draws for association terms
 
 Association terms can now be extracted directly on the reporting scale with
-`draws()`. This avoids having to translate between raw Stan variables such as
-`alpha_corr_eff[...]` and the user-facing labels printed by `summary()`.
+`draws()`. The canonical posterior variables are `alpha_cv_total`,
+`alpha_cs_total`, `alpha_cv_mean`, `alpha_cs_mean`, `alpha_corr[...]`, and
+`alpha_vcov[...]`. Each is the coefficient actually used in the event hazard,
+which is also the scale reported by `summary()` and used by prediction and
+plotting methods.
 
 ```{r association-renamed-draws, eval=FALSE}
 # All association terms with reporting-friendly names
@@ -188,6 +191,43 @@ For practical reporting, the recommended order is:
 2. `draws(fit, variables = "^alpha_", regex = TRUE)` for downstream posterior work,
 3. `association_plot(fit)` for fitted transform-and-hazard displays,
 4. `mcmc_plot(fit, variable = ...)` when you need chain-level MCMC displays.
+
+## Conditional effects in the two joint-model processes
+
+Conditional effects are distinct from subject-specific dynamic prediction.
+`conditional_effects()` varies named predictors while holding other predictors
+at explicit profile values and can return the longitudinal process, the event
+process, or both. The longitudinal estimand is the population-level expected
+marker response by default. Set `longitudinal_estimand = "marker"` to retain
+the fitted marker-level deviation, or `"marginal_marker"` to average the
+marker-specific predictions within each posterior draw. Because marker
+averaging occurs after each inverse-link transformation, it targets an average
+expected response rather than an expected response at an average marker effect.
+The event estimand is the direct relative-hazard component `exp(W * gamma)`;
+the baseline hazard and longitudinal association contribution are held fixed
+when making event-covariate comparisons.
+
+```{r association-conditional-effects, eval=FALSE}
+profiles <- make_conditions(fit$dataEvent, vars = "treatment")
+
+ce <- conditional_effects(
+  fit,
+  effects = list(
+    longitudinal = "time:treatment",
+    event = "treatment"
+  ),
+  conditions = profiles,
+  process = c("longitudinal", "event"),
+  longitudinal_estimand = "marker",
+  plot = FALSE
+)
+
+# The nested tables use the same estimate__, se__, lower__, upper__, and cond__
+# columns as brms conditional effects.
+head(ce$longitudinal[[1]])
+head(ce$event[[1]])
+plot(ce, ask = FALSE)
+```
 
 # Association coefficients and naming
 

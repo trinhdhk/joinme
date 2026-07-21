@@ -1,4 +1,4 @@
-test_that(".materialize_cmdstanr_fit eagerly loads cmdstanr-backed contents", {
+test_that(".import_cmdstanr_fit eagerly loads cmdstanr-backed contents", {
   calls <- character(0)
 
   fake_fit <- structure(list(
@@ -20,14 +20,14 @@ test_that(".materialize_cmdstanr_fit eagerly loads cmdstanr-backed contents", {
     }
   ), class = "CmdStanMCMC")
 
-  out <- JoiNMe:::.materialize_cmdstanr_fit(fake_fit)
+  out <- joinme:::.import_cmdstanr_fit(fake_fit)
 
   expect_identical(out, fake_fit)
   expect_equal(calls, c("draws", "sampler_diagnostics", "init", "profiles"))
 })
 
-test_that(".materialize_cmdstanr_fit leaves non-cmdstan fits unchanged", {
+test_that(".import_cmdstanr_fit leaves non-cmdstan fits unchanged", {
   fit_like <- list(a = 1)
-  out <- JoiNMe:::.materialize_cmdstanr_fit(fit_like)
+  out <- joinme:::.import_cmdstanr_fit(fit_like)
   expect_identical(out, fit_like)
 })

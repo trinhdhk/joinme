@@ -102,6 +102,12 @@ NULL
 #' \item{draws}{A list containing raw posterior draws (`longitudinal`, `longitudinal_fitted`, `survival`, `cumhaz`) and reconstructed subject-level random effects (`random_effects_id`, `random_effects_marker_id`, including marker-by-id covariance draws when id-dependent covariance is active).}
 #'
 #' @details
+#' `predict.JoiNMeFit()` does not accept a `condition` argument. It estimates
+#' subject-specific future trajectories and survival conditional on the
+#' longitudinal histories supplied in `newdataLong`. Use
+#' [conditional_effects.JoiNMeFit()] with [make_conditions()] when the target is
+#' a population-level comparison across named covariate profiles.
+#'
 #' The function uses a Bayesian approach in two draw layers:
 #' 1.  Extract posterior parameter draws from the fitted object (`n_samples`).
 #' 2.  Re-index those draws to the dynpred draw count (`control$n_pred_draws`),
@@ -613,7 +619,7 @@ predict.JoiNMeFit <- function(object,
                 allowed <- names(formals(mod$sample))
                 sample_args <- sample_args[names(sample_args) %in% allowed]
                 fit_pred <- do.call(mod$sample, sample_args)
-                pred_diag <- .JoiNMe_sampler_diagnostics(fit_pred)
+                pred_diag <- .joinme_sampler_diagnostics(fit_pred)
                 if (is.na(pred_diag$draws) || pred_diag$draws < 1) {
                     retry_args <- sample_args
                     retry_args$init <- 0.25
@@ -622,7 +628,7 @@ predict.JoiNMeFit <- function(object,
                         i = "Retrying with narrower random init range ({.code init = 0.=25})."
                     ))
                     fit_pred <- suppressWarnings(do.call(mod$sample, retry_args))
-                    pred_diag <- .JoiNMe_sampler_diagnostics(fit_pred)
+                    pred_diag <- .joinme_sampler_diagnostics(fit_pred)
                 }
             } else {
                 control_list <- list()
@@ -648,7 +654,7 @@ predict.JoiNMeFit <- function(object,
                 # There is a known issue with rstan::sampling() where it can emit warnings about
                 # Rhat NA. Cannot do anything about it.
                 fit_pred <- suppressWarnings(do.call(rstan::sampling, rstan_args))
-                pred_diag <- .JoiNMe_sampler_diagnostics(fit_pred)
+                pred_diag <- .joinme_sampler_diagnostics(fit_pred)
             }
             # browser()
             pred_sampler_diag_list[[as.character(id)]] <- pred_diag
@@ -1511,16 +1517,9 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
     marker_weight_draws_by_term <- setNames(vector("list", length(.weighted_assoc_term_keys())), .weighted_assoc_term_keys())
     for (term_key in .weighted_assoc_term_keys()) {
         eff_names <- paste0(.marker_weight_var_prefix(term_key, effective = TRUE), "[", 1:sd$D, "]")
-        base_names <- paste0(.marker_weight_var_prefix(term_key, effective = FALSE), "[", 1:sd$D, "]")
 
         if (all(eff_names %in% colnames(dmat))) {
             marker_weight_draws_by_term[[term_key]] <- get_mat(eff_names)
-        } else if (all(base_names %in% colnames(dmat))) {
-            marker_weight_draws_by_term[[term_key]] <- get_mat(base_names)
-        } else if (isTRUE(as.integer(sd$shared_marker_weights %||% 1L) == 1L) && all(paste0("marker_weights_eff[", 1:sd$D, "]") %in% colnames(dmat))) {
-            marker_weight_draws_by_term[[term_key]] <- get_mat(paste0("marker_weights_eff[", 1:sd$D, "]"))
-        } else if (isTRUE(as.integer(sd$shared_marker_weights %||% 1L) == 1L) && all(paste0("marker_weights[", 1:sd$D, "]") %in% colnames(dmat))) {
-            marker_weight_draws_by_term[[term_key]] <- get_mat(paste0("marker_weights[", 1:sd$D, "]"))
         } else {
             base_by_term <- sd$marker_weights_by_term %||% list()
             base_weights <- as.numeric(base_by_term[[term_key]] %||% sd$marker_weights %||% rep(1, sd$D))
@@ -1534,8 +1533,8 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
     n_family_nu <- as.integer(sd$n_family_nu %||% sd$D)
     n_family_phi <- as.integer(sd$n_family_phi %||% sd$D)
     n_family_alpha <- as.integer(sd$n_family_alpha %||% sd$D)
-    n_family_phi_beta <- as.integer(sd$n_family_phi_beta %||% sd$D)
-    n_family_tau_sde <- as.integer(sd$n_family_tau_sde %||% sd$D)
+    n_family_kappa <- as.integer(sd$n_family_kappa %||% sd$D)
+    n_family_tau <- as.integer(sd$n_family_tau %||% sd$D)
 
     sigma_family <- if (n_family_sigma > 0 && paste0("sigma_family[1]") %in% colnames(dmat)) {
         get_mat(paste0("sigma_family[", 1:n_family_sigma, "]"))
@@ -1567,27 +1566,24 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
     } else {
         matrix(0, n, n_family_alpha)
     }
-    phi_beta_family <- if (n_family_phi_beta > 0 && paste0("phi_beta_family[1]") %in% colnames(dmat)) {
-        get_mat(paste0("phi_beta_family[", 1:n_family_phi_beta, "]"))
-    } else if (sd$D > 0 && n_family_phi_beta == sd$D && "phi_beta_marker[1]" %in% colnames(dmat)) {
-        get_mat(paste0("phi_beta_marker[", 1:sd$D, "]"))
+    kappa_family <- if (n_family_kappa > 0 && paste0("kappa_family[1]") %in% colnames(dmat)) {
+        get_mat(paste0("kappa_family[", 1:n_family_kappa, "]"))
+    } else if (sd$D > 0 && n_family_kappa == sd$D && "kappa_marker[1]" %in% colnames(dmat)) {
+        get_mat(paste0("kappa_marker[", 1:sd$D, "]"))
     } else {
-        matrix(0, n, n_family_phi_beta)
+        matrix(0, n, n_family_kappa)
     }
-    tau_sde_family <- if (n_family_tau_sde > 0 && paste0("tau_sde_family[1]") %in% colnames(dmat)) {
-        get_mat(paste0("tau_sde_family[", 1:n_family_tau_sde, "]"))
-    } else if (sd$D > 0 && n_family_tau_sde == sd$D && "tau_sde_marker[1]" %in% colnames(dmat)) {
-        get_mat(paste0("tau_sde_marker[", 1:sd$D, "]"))
+    tau_family <- if (n_family_tau > 0 && paste0("tau_family[1]") %in% colnames(dmat)) {
+        get_mat(paste0("tau_family[", 1:n_family_tau, "]"))
+    } else if (sd$D > 0 && n_family_tau == sd$D && "tau_marker[1]" %in% colnames(dmat)) {
+        get_mat(paste0("tau_marker[", 1:sd$D, "]"))
     } else {
-        matrix(0, n, n_family_tau_sde)
+        matrix(0, n, n_family_tau)
     }
 
-    corr_coef_vars <- grep("^alpha_corr_eff\\[", colnames(dmat), value = TRUE)
-    if (length(corr_coef_vars) == 0) {
-        corr_coef_vars <- grep("^alpha_corr\\[", colnames(dmat), value = TRUE)
-    }
+    corr_coef_vars <- grep("^alpha_corr\\[", colnames(dmat), value = TRUE)
     if (length(corr_coef_vars) > 0) {
-        corr_idx <- suppressWarnings(as.integer(sub("^alpha_corr(?:_eff)?\\[(\\d+)\\]$", "\\1", corr_coef_vars)))
+        corr_idx <- suppressWarnings(as.integer(sub("^alpha_corr\\[(\\d+)\\]$", "\\1", corr_coef_vars)))
         corr_coef_vars <- corr_coef_vars[order(corr_idx)]
     }
     corr_coef_raw <- if (length(corr_coef_vars) > 0) get_mat(corr_coef_vars) else matrix(0, n, 0)
@@ -1601,12 +1597,9 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         matrix(0, n, 0)
     }
 
-    vcov_coef_vars <- grep("^alpha_vcov_eff\\[", colnames(dmat), value = TRUE)
-    if (length(vcov_coef_vars) == 0) {
-        vcov_coef_vars <- grep("^alpha_vcov\\[", colnames(dmat), value = TRUE)
-    }
+    vcov_coef_vars <- grep("^alpha_vcov\\[", colnames(dmat), value = TRUE)
     if (length(vcov_coef_vars) > 0) {
-        vcov_idx <- suppressWarnings(as.integer(sub("^alpha_vcov(?:_eff)?\\[(\\d+)\\]$", "\\1", vcov_coef_vars)))
+        vcov_idx <- suppressWarnings(as.integer(sub("^alpha_vcov\\[(\\d+)\\]$", "\\1", vcov_coef_vars)))
         vcov_coef_vars <- vcov_coef_vars[order(vcov_idx)]
     }
     vcov_coef_raw <- if (length(vcov_coef_vars) > 0) get_mat(vcov_coef_vars) else matrix(0, n, 0)
@@ -1650,13 +1643,13 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         } else {
             matrix(0, n, 0)
         },
-        beta_phi_beta = if (!is.null(sd$P_phi_beta) && sd$P_phi_beta > 0 && "beta_phi_beta[1]" %in% colnames(dmat)) {
-            get_mat(paste0("beta_phi_beta[", 1:sd$P_phi_beta, "]"))
+        beta_kappa = if (!is.null(sd$P_kappa) && sd$P_kappa > 0 && "beta_kappa[1]" %in% colnames(dmat)) {
+            get_mat(paste0("beta_kappa[", 1:sd$P_kappa, "]"))
         } else {
             matrix(0, n, 0)
         },
-        beta_tau_sde = if (!is.null(sd$P_tau_sde) && sd$P_tau_sde > 0 && "beta_tau_sde[1]" %in% colnames(dmat)) {
-            get_mat(paste0("beta_tau_sde[", 1:sd$P_tau_sde, "]"))
+        beta_tau = if (!is.null(sd$P_tau) && sd$P_tau > 0 && "beta_tau[1]" %in% colnames(dmat)) {
+            get_mat(paste0("beta_tau[", 1:sd$P_tau, "]"))
         } else {
             matrix(0, n, 0)
         },
@@ -1670,8 +1663,8 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         nu_family = nu_family,
         phi_family = phi_family,
         alpha_family = alpha_family,
-        phi_beta_family = phi_beta_family,
-        tau_sde_family = tau_sde_family,
+        kappa_family = kappa_family,
+        tau_family = tau_family,
         coeff_assoc_cv_total = get_col("alpha_cv_total"),
         coeff_assoc_cs_total = get_col("alpha_cs_total"),
         coeff_assoc_cv_mean = get_col("alpha_cv_mean"),
@@ -1778,8 +1771,8 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
     dist_nu_obs <- .build_dist_matrix(dist_formulas$nu, dL, family_by_row = family_by_row_obs)
     dist_phi_obs <- .build_dist_matrix(dist_formulas$phi, dL, family_by_row = family_by_row_obs)
     dist_alpha_obs <- .build_dist_matrix(dist_formulas$alpha, dL, family_by_row = family_by_row_obs)
-    dist_phi_beta_obs <- .build_dist_matrix(dist_formulas$phi_beta, dL, family_by_row = family_by_row_obs)
-    dist_tau_sde_obs <- .build_dist_matrix(dist_formulas$tau_sde, dL, family_by_row = family_by_row_obs)
+    dist_kappa_obs <- .build_dist_matrix(dist_formulas$kappa, dL, family_by_row = family_by_row_obs)
+    dist_tau_obs <- .build_dist_matrix(dist_formulas$tau, dL, family_by_row = family_by_row_obs)
 
     vec_cov_hazard <- .mm_event(forms$formulaEvent, dE)
 
@@ -1908,8 +1901,8 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         dist_nu_pred <- .build_dist_matrix(dist_formulas$nu, dl_pred_scaled, family_by_row = family_by_row_pred)
         dist_phi_pred <- .build_dist_matrix(dist_formulas$phi, dl_pred_scaled, family_by_row = family_by_row_pred)
         dist_alpha_pred <- .build_dist_matrix(dist_formulas$alpha, dl_pred_scaled, family_by_row = family_by_row_pred)
-        dist_phi_beta_pred <- .build_dist_matrix(dist_formulas$phi_beta, dl_pred_scaled, family_by_row = family_by_row_pred)
-        dist_tau_sde_pred <- .build_dist_matrix(dist_formulas$tau_sde, dl_pred_scaled, family_by_row = family_by_row_pred)
+        dist_kappa_pred <- .build_dist_matrix(dist_formulas$kappa, dl_pred_scaled, family_by_row = family_by_row_pred)
+        dist_tau_pred <- .build_dist_matrix(dist_formulas$tau, dl_pred_scaled, family_by_row = family_by_row_pred)
     } else {
         mat_fixed_pred <- matrix(0, 0, sd$P)
         mat_id_pred <- matrix(0, 0, sd$R_id)
@@ -1921,8 +1914,8 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         dist_nu_pred <- list(P = dist_nu_obs$P, X = matrix(0.0, 0, dist_nu_obs$P), cols = dist_nu_obs$cols)
         dist_phi_pred <- list(P = dist_phi_obs$P, X = matrix(0.0, 0, dist_phi_obs$P), cols = dist_phi_obs$cols)
         dist_alpha_pred <- list(P = dist_alpha_obs$P, X = matrix(0.0, 0, dist_alpha_obs$P), cols = dist_alpha_obs$cols)
-        dist_phi_beta_pred <- list(P = dist_phi_beta_obs$P, X = matrix(0.0, 0, dist_phi_beta_obs$P), cols = dist_phi_beta_obs$cols)
-        dist_tau_sde_pred <- list(P = dist_tau_sde_obs$P, X = matrix(0.0, 0, dist_tau_sde_obs$P), cols = dist_tau_sde_obs$cols)
+        dist_kappa_pred <- list(P = dist_kappa_obs$P, X = matrix(0.0, 0, dist_kappa_obs$P), cols = dist_kappa_obs$cols)
+        dist_tau_pred <- list(P = dist_tau_obs$P, X = matrix(0.0, 0, dist_tau_obs$P), cols = dist_tau_obs$cols)
     }
 
     n_times_surv <- length(t_surv_grid)
@@ -2069,15 +2062,15 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
     n_family_nu_out <- as.integer(sd$n_family_nu %||% ncol(draws_list$nu_family))
     n_family_phi_out <- as.integer(sd$n_family_phi %||% ncol(draws_list$phi_family))
     n_family_alpha_out <- as.integer(sd$n_family_alpha %||% ncol(draws_list$alpha_family))
-    n_family_phi_beta_out <- as.integer(sd$n_family_phi_beta %||% ncol(draws_list$phi_beta_family))
-    n_family_tau_sde_out <- as.integer(sd$n_family_tau_sde %||% ncol(draws_list$tau_sde_family))
+    n_family_kappa_out <- as.integer(sd$n_family_kappa %||% ncol(draws_list$kappa_family))
+    n_family_tau_out <- as.integer(sd$n_family_tau %||% ncol(draws_list$tau_family))
 
     marker_to_sigma_family_out <- .default_marker_family_map(sd$marker_to_sigma_family, n_family_sigma_out)
     marker_to_nu_family_out <- .default_marker_family_map(sd$marker_to_nu_family, n_family_nu_out)
     marker_to_phi_family_out <- .default_marker_family_map(sd$marker_to_phi_family, n_family_phi_out)
     marker_to_alpha_family_out <- .default_marker_family_map(sd$marker_to_alpha_family, n_family_alpha_out)
-    marker_to_phi_beta_family_out <- .default_marker_family_map(sd$marker_to_phi_beta_family, n_family_phi_beta_out)
-    marker_to_tau_sde_family_out <- .default_marker_family_map(sd$marker_to_tau_sde_family, n_family_tau_sde_out)
+    marker_to_kappa_family_out <- .default_marker_family_map(sd$marker_to_kappa_family, n_family_kappa_out)
+    marker_to_tau_family_out <- .default_marker_family_map(sd$marker_to_tau_family, n_family_tau_out)
     # browser()
     out <- list(
         n_draws = n_draws,
@@ -2116,12 +2109,12 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         P_alpha = as.integer(dist_alpha_obs$P),
         X_alpha_obs = dist_alpha_obs$X,
         X_alpha_pred = dist_alpha_pred$X,
-        P_phi_beta = as.integer(dist_phi_beta_obs$P),
-        X_phi_beta_obs = dist_phi_beta_obs$X,
-        X_phi_beta_pred = dist_phi_beta_pred$X,
-        P_tau_sde = as.integer(dist_tau_sde_obs$P),
-        X_tau_sde_obs = dist_tau_sde_obs$X,
-        X_tau_sde_pred = dist_tau_sde_pred$X,
+        P_kappa = as.integer(dist_kappa_obs$P),
+        X_kappa_obs = dist_kappa_obs$X,
+        X_kappa_pred = dist_kappa_pred$X,
+        P_tau = as.integer(dist_tau_obs$P),
+        X_tau_obs = dist_tau_obs$X,
+        X_tau_pred = dist_tau_pred$X,
         n_obs_pred = n_obs_pred, idx_marker_pred = as.array(as.integer(idx_marker_pred)),
         mat_fixed_pred = mat_fixed_pred, mat_id_pred = mat_id_pred, mat_marker_pred = mat_marker_pred, mat_marker_id_pred = mat_marker_id_pred,
         trials_pred = as.array(as.integer(trials_pred)),
@@ -2141,14 +2134,14 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         beta_nu = draws_list$beta_nu,
         beta_phi = draws_list$beta_phi,
         beta_alpha = draws_list$beta_alpha,
-        beta_phi_beta = draws_list$beta_phi_beta,
-        beta_tau_sde = draws_list$beta_tau_sde,
+        beta_kappa = draws_list$beta_kappa,
+        beta_tau = draws_list$beta_tau,
         sigma_family = draws_list$sigma_family,
         nu_family = draws_list$nu_family,
         phi_family = draws_list$phi_family,
         alpha_family = draws_list$alpha_family,
-        phi_beta_family = draws_list$phi_beta_family,
-        tau_sde_family = draws_list$tau_sde_family,
+        kappa_family = draws_list$kappa_family,
+        tau_family = draws_list$tau_family,
         family_long = sd$family_long,
         link_long = sd$link_long,
         max_inv_link_ops = sd$max_inv_link_ops,
@@ -2165,14 +2158,14 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         marker_to_phi_family = marker_to_phi_family_out,
         n_family_alpha = n_family_alpha_out,
         marker_to_alpha_family = marker_to_alpha_family_out,
-        n_family_phi_beta = n_family_phi_beta_out,
-        marker_to_phi_beta_family = marker_to_phi_beta_family_out,
-        n_family_tau_sde = n_family_tau_sde_out,
-        marker_to_tau_sde_family = marker_to_tau_sde_family_out,
-        flag_resid_dim = sd$flag_resid_dim,
+        n_family_kappa = n_family_kappa_out,
+        marker_to_kappa_family = marker_to_kappa_family_out,
+        n_family_tau = n_family_tau_out,
+        marker_to_tau_family = marker_to_tau_family_out,
+        # flag_resid_dim = sd$flag_resid_dim,
         vcov_diag_link = sd$vcov_diag_link,
-        use_tau_sde_fixed = sd$use_tau_sde_fixed,
-        tau_sde_fixed = sd$tau_sde_fixed,
+        use_tau_fixed = sd$use_tau_fixed,
+        tau_fixed = sd$tau_fixed,
         coeff_assoc_cv_total = draws_list$coeff_assoc_cv_total, coeff_assoc_cs_total = draws_list$coeff_assoc_cs_total,
         coeff_assoc_cv_mean = draws_list$coeff_assoc_cv_mean, coeff_assoc_cs_mean = draws_list$coeff_assoc_cs_mean,
         coeff_assoc_cv_marker = draws_list$coeff_assoc_cv_marker, coeff_assoc_cs_marker = draws_list$coeff_assoc_cs_marker,
@@ -2590,361 +2583,6 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
     # prediction-time marker covariance varies by subject through L_i.
     # This is the primary availability condition for ranef/corr extraction.
     TRUE
-}
-
-#' Summarise dynamic prediction outputs
-#'
-#' @description
-#' Summarises a `JoiNMeDynPred` object with detailed subject-level prediction
-#' summaries and diagnostics.
-#'
-#' The summary includes:
-#' - an overview table of row/subject counts by process,
-#' - median survival time per subject (draw-wise crossing of `S(t)=0.5`,
-#'   summarised with estimate, uncertainty, and diagnostics),
-#' - predicted id-level random effects per subject (estimate, uncertainty,
-#'   interval, and diagnostics),
-#' - predicted marker-by-id random effects and covariance per subject when
-#'   marker covariance depends on id,
-#' - a compact diagnostics table counting potential convergence/ESS issues.
-#'
-#' @param object A `JoiNMeDynPred` object produced by [predict].
-#' @param ... Unused.
-#'
-#' @return A `summary_JoiNMeDynPred` object containing tabular summaries.
-#' @method summary JoiNMeDynPred
-#' @export
-summary.JoiNMeDynPred <- function(object, ...) {
-    if (!inherits(object, "JoiNMeDynPred")) {
-        cli::cli_abort(c(
-            x = "Object must be a {.cls JoiNMeDynPred} prediction.",
-            i = "Call predict() on a JoiNMeFit object first."
-        ))
-    }
-    cached <- object$cache_get("summary")
-    if (!is.null(cached)) return(cached)
-
-    n_long_rows <- if (!is.null(object$predictions$longitudinal)) nrow(object$predictions$longitudinal) else 0
-    n_surv_rows <- if (!is.null(object$predictions$survival)) nrow(object$predictions$survival) else 0
-    n_cumhaz_rows <- if (!is.null(object$predictions$cumhaz)) nrow(object$predictions$cumhaz) else 0
-    n_long_subjects <- if (!is.null(object$predictions$longitudinal)) length(unique(object$predictions$longitudinal$id)) else 0
-    n_surv_subjects <- if (!is.null(object$predictions$survival)) length(unique(object$predictions$survival$id)) else 0
-    n_cumhaz_subjects <- if (!is.null(object$predictions$cumhaz)) length(unique(object$predictions$cumhaz$id)) else 0
-
-    overview_table <- data.frame(
-        metric = c(
-            "longitudinal_rows",
-            "longitudinal_subjects",
-            "survival_rows",
-            "survival_subjects",
-            "cumhaz_rows",
-            "cumhaz_subjects",
-            "prediction_scale",
-            "posterior_draws"
-        ),
-        value = c(
-            n_long_rows,
-            n_long_subjects,
-            n_surv_rows,
-            n_surv_subjects,
-            n_cumhaz_rows,
-            n_cumhaz_subjects,
-            if (!is.null(object$metadata$scales)) paste(object$metadata$scales, collapse = ",") else object$metadata$scale %||% NA_character_,
-            object$n_samples %||% object$metadata$n_samples %||% NA_real_
-        ),
-        stringsAsFactors = FALSE
-    )
-
-    median_survival_table <- NULL
-    if (!is.null(object$draws$survival) && length(object$draws$survival) > 0) {
-        median_survival_rows <- lapply(names(object$draws$survival), function(subject_id) {
-            subject_survival <- object$draws$survival[[subject_id]]
-            draw_median_times <- .median_survival_time_by_draw(
-                survival_draw_matrix = subject_survival$matrix,
-                time_grid = subject_survival$time,
-                threshold = 0.5
-            )
-            draw_summary <- .summarize_draw_vector_with_diagnostics(draw_median_times)
-            cbind(
-                id = subject_id,
-                term = "median_survival_time",
-                n_reached = sum(is.finite(draw_median_times)),
-                n_total = length(draw_median_times),
-                draw_summary,
-                stringsAsFactors = FALSE
-            )
-        })
-        median_survival_table <- do.call(rbind, median_survival_rows)
-    }
-
-    random_effects_id_table <- NULL
-    if (!is.null(object$draws$random_effects_id) && length(object$draws$random_effects_id) > 0) {
-        random_effect_rows <- lapply(names(object$draws$random_effects_id), function(subject_id) {
-            subject_effects <- object$draws$random_effects_id[[subject_id]]
-            u_id_matrix <- subject_effects$matrix
-            u_id_terms <- subject_effects$terms %||% paste0("u_id[", seq_len(ncol(u_id_matrix)), "]")
-
-            per_term <- lapply(seq_len(ncol(u_id_matrix)), function(term_index) {
-                draw_summary <- .summarize_draw_vector_with_diagnostics(u_id_matrix[, term_index])
-                cbind(
-                    id = subject_id,
-                    term = u_id_terms[term_index],
-                    draw_summary,
-                    stringsAsFactors = FALSE
-                )
-            })
-            do.call(rbind, per_term)
-        })
-        random_effects_id_table <- do.call(rbind, random_effect_rows)
-    }
-
-    marker_corr_depends_on_id <- isTRUE(object$metadata$marker_corr_depends_on_id)
-    any_re_indep <- any(as.integer(c(
-        object$metadata$indep_id_re %||% 0L,
-        object$metadata$indep_marker_re %||% 0L,
-        object$metadata$indep_idmarker_cov %||% 0L
-    )) == 1L)
-
-    random_effects_marker_id_table <- NULL
-    if (marker_corr_depends_on_id && !is.null(object$draws$random_effects_marker_id) && length(object$draws$random_effects_marker_id) > 0) {
-        marker_id_rows <- lapply(names(object$draws$random_effects_marker_id), function(subject_id) {
-            subject_effects <- object$draws$random_effects_marker_id[[subject_id]]
-            w_idm_matrix <- subject_effects$matrix
-            if (is.null(w_idm_matrix) || ncol(w_idm_matrix) == 0) return(NULL)
-
-            marker_terms <- colnames(w_idm_matrix)
-            if (is.null(marker_terms)) {
-                marker_terms <- paste0("marker_id[", seq_len(ncol(w_idm_matrix)), "]")
-            }
-
-            per_term <- lapply(seq_len(ncol(w_idm_matrix)), function(term_index) {
-                draw_summary <- .summarize_draw_vector_with_diagnostics(w_idm_matrix[, term_index])
-                term_label <- as.character(marker_terms[term_index])
-                marker_label <- if (grepl("::", term_label, fixed = TRUE)) {
-                    sub("::.*$", "", term_label)
-                } else {
-                    NA_character_
-                }
-                basis_term <- if (grepl("::", term_label, fixed = TRUE)) {
-                    sub("^.*::", "", term_label)
-                } else {
-                    term_label
-                }
-                cbind(
-                    id = subject_id,
-                    marker = marker_label,
-                    term = basis_term,
-                    draw_summary,
-                    stringsAsFactors = FALSE
-                )
-            })
-            do.call(rbind, per_term)
-        })
-        marker_id_rows <- Filter(Negate(is.null), marker_id_rows)
-        if (length(marker_id_rows) > 0) {
-            random_effects_marker_id_table <- do.call(rbind, marker_id_rows)
-        }
-    }
-
-    corr_marker_id_table <- NULL
-    if (marker_corr_depends_on_id && !is.null(object$draws$random_effects_marker_id) && length(object$draws$random_effects_marker_id) > 0) {
-        corr_rows <- lapply(names(object$draws$random_effects_marker_id), function(subject_id) {
-            subject_effects <- object$draws$random_effects_marker_id[[subject_id]]
-            corr_draws <- subject_effects$corr
-            if (is.null(corr_draws) || length(dim(corr_draws)) != 3) return(NULL)
-
-            terms <- as.character(subject_effects$terms %||% paste0("w_idm[", seq_len(dim(corr_draws)[2]), "]"))
-            q_dim <- dim(corr_draws)[2]
-
-            per_cell <- lapply(seq_len(q_dim), function(r_idx) {
-                lapply(seq_len(q_dim), function(c_idx) {
-                    draw_summary <- .summarize_draw_vector_with_diagnostics(corr_draws[, r_idx, c_idx])
-                    cbind(
-                        id = subject_id,
-                        row = terms[r_idx],
-                        col = terms[c_idx],
-                        draw_summary,
-                        stringsAsFactors = FALSE
-                    )
-                })
-            })
-            do.call(rbind, unlist(per_cell, recursive = FALSE))
-        })
-        corr_rows <- Filter(Negate(is.null), corr_rows)
-        if (length(corr_rows) > 0) {
-            corr_marker_id_table <- do.call(rbind, corr_rows)
-            if (isTRUE(any_re_indep)) {
-                corr_marker_id_table <- corr_marker_id_table[corr_marker_id_table$row == corr_marker_id_table$col, , drop = FALSE]
-            }
-        }
-    }
-
-    diagnostics_table <- NULL
-    bind_rows_safe <- function(...) {
-        row_list <- Filter(Negate(is.null), list(...))
-        if (length(row_list) == 0) return(NULL)
-        all_columns <- unique(unlist(lapply(row_list, names), use.names = FALSE))
-        row_list <- lapply(row_list, function(df) {
-            missing_columns <- setdiff(all_columns, names(df))
-            if (length(missing_columns) > 0) {
-                for (column_name in missing_columns) df[[column_name]] <- NA
-            }
-            df[, all_columns, drop = FALSE]
-        })
-        do.call(rbind, row_list)
-    }
-    diagnostics_source <- bind_rows_safe(
-        if (!is.null(random_effects_id_table)) transform(random_effects_id_table, section = "random_effects_id") else NULL,
-        if (!is.null(random_effects_marker_id_table)) transform(random_effects_marker_id_table, section = "random_effects_marker_id") else NULL,
-        if (!is.null(median_survival_table)) transform(median_survival_table, section = "median_survival_time") else NULL
-    )
-    term_diag <- .term_diagnostics_from_tables(diagnostics_source)
-    sampler_diag <- object$metadata$sampler_diagnostics %||% list()
-
-    diagnostics_table <- .build_common_diagnostics_table(
-        draws = as.numeric(object$n_samples %||% object$metadata$n_samples %||% NA_real_),
-        divergences = as.numeric(sampler_diag$divergences %||% 0),
-        treedepth_hits = as.numeric(sampler_diag$treedepth_hits %||% 0),
-        ebfmi_min = as.numeric(sampler_diag$ebfmi_min %||% NA_real_),
-        max_rhat = as.numeric(term_diag$max_rhat %||% sampler_diag$max_rhat %||% NA_real_),
-        min_ess_bulk = as.numeric(term_diag$min_ess_bulk %||% sampler_diag$min_ess_bulk %||% NA_real_),
-        min_ess_tail = as.numeric(term_diag$min_ess_tail %||% sampler_diag$min_ess_tail %||% NA_real_),
-        n_terms_total = as.numeric(term_diag$n_terms_total %||% 0),
-        n_terms_bad_rhat = as.numeric(term_diag$n_terms_bad_rhat %||% 0),
-        n_terms_low_ess_bulk = as.numeric(term_diag$n_terms_low_ess_bulk %||% 0),
-        n_terms_low_ess_tail = as.numeric(term_diag$n_terms_low_ess_tail %||% 0)
-    )
-
-    tables <- list(
-        diagnostics = diagnostics_table,
-        overview = overview_table,
-        median_survival_time = median_survival_table,
-        random_effects_id = random_effects_id_table,
-        random_effects_marker_id = random_effects_marker_id_table,
-        corr_marker_id = corr_marker_id_table
-    )
-
-    summary_obj <- SummaryJoiNMeDynPred$new(tables = tables, metadata = object$metadata)
-    object$cache_set("summary", summary_obj)
-    summary_obj
-}
-
-#' Extract predicted random effects from dynamic predictions
-#'
-#' @description
-#' Returns predicted random effects from a `JoiNMeDynPred` object. Marker-by-id
-#' random effects are available only when marker covariance is configured to be
-#' subject-dependent.
-#'
-#' @param object A `JoiNMeDynPred` object.
-#' @param ... Unused.
-#'
-#' @return A named list containing random-effects summary tables.
-#' @importFrom lme4 ranef
-#' @export
-ranef.JoiNMeDynPred <- function(object, ...) {
-    assertthat::assert_that(inherits(object, "JoiNMeDynPred"), msg = "Object must be a JoiNMeDynPred instance.")
-
-    if (!isTRUE(object$metadata$marker_corr_depends_on_id)) {
-        cli::cli_abort(c(
-            x = "Predicted marker-by-id random effects are only available when marker covariance depends on id.",
-            i = "Refit with subject-dependent covariance structure in {.arg formulaVCov} and marker-by-id random effects (Q_idm > 0)."
-        ))
-    }
-
-    sum_obj <- summary(object)
-    list(
-        formulaLong = list(
-            marker_by_id = sum_obj$tables$random_effects_marker_id
-        )
-    )
-}
-
-#' Extract predicted covariance summaries
-#'
-#' @description
-#' Returns per-subject covariance summaries for marker-by-id random effects from
-#' a `JoiNMeDynPred` object. This method is available only when marker covariance
-#' depends on id.
-#'
-#' @param object A `JoiNMeDynPred` object.
-#' @param ... Unused.
-#'
-#' @return A named list containing covariance summary tables.
-#' @method vcov JoiNMeDynPred
-#' @export
-vcov.JoiNMeDynPred <- function(object, ...) {
-    assertthat::assert_that(inherits(object, "JoiNMeDynPred"), msg = "Object must be a JoiNMeDynPred instance.")
-
-    if (!isTRUE(object$metadata$marker_corr_depends_on_id)) {
-        cli::cli_abort(c(
-            x = "Predicted marker-by-id covariance is only available when marker covariance depends on id.",
-            i = "Refit with subject-dependent covariance structure in {.arg formulaVCov} and marker-by-id random effects (Q_idm > 0)."
-        ))
-    }
-
-    sum_obj <- summary(object)
-    list(
-        formulaLong = list(
-            marker_by_id = sum_obj$tables$corr_marker_id
-        )
-    )
-}
-
-#' Print dynamic prediction results
-#'
-#' @param x A dynamic prediction object.
-#' @param ... Unused.
-#'
-#' @return Invisibly returns the object.
-#' @export
-print.JoiNMeDynPred <- function(x, ...) {
-    
-    .cli_summary_heading("Joint mixed effects dynamic prediction", level = 1L)
-    if (!is.null(x$call)) {
-        cat("Call:\n")
-        print(x$call)
-    }
-    if (!is.null(x$metadata$pred_type)) {
-        cat("Prediction type: ", x$metadata$pred_type, "\n", sep = "")
-    }
-    scales <- x$metadata$scales %||% x$metadata$scale
-    if (!is.null(scales)) {
-        if (length(scales) > 1L) {
-            cat("Scales: ", paste(scales, collapse = ", "), "\n", sep = "")
-        } else {
-            cat("Scale: ", scales, "\n", sep = "")
-        }
-    }
-    if (!is.null(x$metadata$n_subjects)) {
-        cat("Subjects: ", x$metadata$n_subjects, "\n", sep = "")
-    }
-    if (!is.null(x$n_samples)) {
-        cat("Posterior draws: ", x$n_samples, "\n", sep = "")
-    }
-    cat("Use summary() for prediction summaries.\n")
-    cat("Use plot() for trajectory and interval visualisation.\n")
-    invisible(x)
-}
-
-#' @export
-print.summary_JoiNMeDynPred <- function(x, ...) {
-    .cli_summary_heading("Prediction summary", level = 1L)
-    meta_lines <- character(0)
-    if (!is.null(x$metadata$pred_type)) {
-        meta_lines <- c(meta_lines, paste0("Prediction type: ", x$metadata$pred_type))
-    }
-    if (!is.null(x$metadata$n_subjects)) {
-        meta_lines <- c(meta_lines, paste0("Subjects: ", x$metadata$n_subjects))
-    }
-    .cli_print_bullets(meta_lines)
-    .cli_print_table_section("Diagnostics", x$tables$diagnostics, level = 2L, formatter = .format_common_diagnostics_for_print)
-    .cli_print_table_section("Overview", x$tables$overview, level = 2L)
-    .cli_print_table_section("Median survival time", x$tables$median_survival_time, level = 2L)
-    .cli_print_table_section("Predicted id random effects", x$tables$random_effects_id, level = 2L)
-    .cli_print_table_section("Predicted marker-by-id random effects", x$tables$random_effects_marker_id, level = 2L)
-    .cli_print_table_section("Predicted marker-by-id covariance", x$tables$corr_marker_id, level = 2L)
-    invisible(x)
 }
 
 .summarize_pred_surv <- function(mat, t_grid, id) {

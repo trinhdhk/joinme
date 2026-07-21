@@ -1,5 +1,5 @@
 testthat::test_that("print.JoiNMeDynPred shows key metadata", {
-  pred <- JoiNMe::JoiNMeDynPred$new(
+  pred <- joinme::JoiNMeDynPred$new(
     predictions = list(longitudinal = NULL, survival = NULL, cumhaz = NULL),
     quantiles = list(),
     draws = list(),

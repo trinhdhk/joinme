@@ -7,7 +7,8 @@
 example_transform_spec()
 }
 \description{
-Helper function to construct user-friendly transform specifications
+Dummy function to print help this help page.
+See \code{build_standata_transforms()} for details on how to construct a transform
 for the association term.
 }
 \examples{

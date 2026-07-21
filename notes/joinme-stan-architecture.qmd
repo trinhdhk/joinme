@@ -89,10 +89,30 @@ also exposes explicit wrappers `longitudinal_plot()`, `survival_plot()`,
 These wrappers route through the same internal plotting logic while making the
 intended display explicit in scripts and reports.
 
-The public fit and prediction objects also expose compatibility aliases:
+Conditional effects form a separate post-fitting layer. They do not pass a
+condition object through `predict()` or `plot.JoiNMeFit()`. Instead,
+`conditional_effects()` constructs brms-style focal grids and labelled profile
+rows, then evaluates the longitudinal and event quantities independently. The
+longitudinal path offers three estimands:
 
-- `JoiNMeFit` in addition to `JoiNMeFit`,
-- `PredJoiNMeFit` in addition to `JoiNMeDynPred`.
+1. `"population"` evaluates the fixed-effect predictor `X * beta` and excludes
+   every random-effect block;
+2. `"marker"` adds `Z_mk * v_marker[d]` for marker `d`, while excluding the
+   subject and marker-by-subject blocks; and
+3. `"marginal_marker"` transforms every marker-specific linear predictor by
+   its fitted inverse link and averages those predictions across selected
+   markers inside each posterior draw.
+
+The event path evaluates `W * gamma_w`, reported as either a log relative
+hazard or `exp(W * gamma_w)`. Draw-wise marker averaging occurs before posterior
+summaries, preserving dependence among marker predictions and avoiding the
+generally invalid interchange of nonlinear transformation and averaging.
+
+The resulting process-specific tables conform to the
+`brms_conditional_effects` column and attribute contract, so graphical
+construction is delegated to the brms plot method. Dynamic prediction remains
+separate because it conditions subject-specific random effects on an observed
+marker history and integrates the full hazard beyond a conditioning time.
 
 Instances retain both class labels so legacy S3 methods still dispatch through
 the established `JoiNMeFit` and `JoiNMeDynPred` methods.
@@ -101,8 +121,8 @@ the established `JoiNMeFit` and `JoiNMeDynPred` methods.
 
 Runtime Stan selection now uses the threaded Stan programs exclusively:
 
-- `JoiNMe_fit_threading.stan` for model fitting,
-- `JoiNMe_dynpred_threading.stan` for dynamic prediction.
+- `joinme_fit_threading.stan` for model fitting,
+- `joinme_dynpred_threading.stan` for dynamic prediction.
 
 When `threads_per_chain = 1`, the same kernels run serially. When
 `threads_per_chain > 1`, Stan's TBB-backed `reduce_sum` parallelism is enabled.
@@ -127,6 +147,15 @@ This allows separate regression structures for shared parameter names across
 families (for example, separate `sigma` regressions for Gaussian and Student-t)
 without changing the Stan data schema.
 
+The remaining family-specific names reflect their statistical roles. `nu` is
+used only for Student-$t$ degrees of freedom. The Beta family uses the positive
+sample-size parameter `kappa`, with shapes $\mu\kappa$ and
+$(1-\mu)\kappa$. The skew-double-exponential family uses `tau` in $(0,1)$ as
+its quantile/asymmetry parameter. Fixed effects for `kappa` use a log link,
+whereas fixed effects for `tau` use a logit link. These names and links are
+preserved in standata, posterior variables, summaries, extraction, simulation,
+and dynamic prediction.
+
 # High-Level Architecture
 
 ```{mermaid}
@@ -140,8 +169,8 @@ flowchart TD
     
     subgraph Model["Model Layer"]
         direction TB
-        FitModel["JoiNMe_fit_threading.stan<br/><b>Model Fitting</b>"]
-        DynPred["JoiNMe_dynpred_threading.stan<br/><b>Dynamic Prediction</b>"]
+        FitModel["joinme_fit_threading.stan<br/><b>Model Fitting</b>"]
+        DynPred["joinme_dynpred_threading.stan<br/><b>Dynamic Prediction</b>"]
     end
     
     subgraph Parameters["Parameter Space"]
@@ -401,12 +430,12 @@ FUNCTION partial_joinme(id_seq, start, end, ... [all data & parameters]):
     
     // 6. Combine transformed features into survival predictor at GK nodes
     FOR j = 1 TO 15:
-      Î·_assoc_nodes[j] = Î±_cv_total * cv_total_tf[j]
-                       + Î±_cv_mean * cv_mean_tf[j]
-                       + Î±_cv_marker * cv_marker_tf[j]
-               + Î±_cs_total * cs_total_tf[j]
-                       + Î±_cs_mean * cs_mean_tf[j]
-                       + Î±_cs_marker * cs_marker_tf[j]
+      Î·_assoc_nodes[j] = alpha_cv_total * cv_total_tf[j]
+                       + alpha_cv_mean * cv_mean_tf[j]
+                       + alpha_cv_marker * cv_marker_tf[j]
+                       + alpha_cs_total * cs_total_tf[j]
+                       + alpha_cs_mean * cs_mean_tf[j]
+                       + alpha_cs_marker * cs_marker_tf[j]
                        + corr_tf[j]
     END FOR
 
@@ -1073,7 +1102,8 @@ $$ \lambda_k(t | i) = h_{0k}(t) \exp(W[i]'\gamma_k + \eta_{assoc}(t, i)) $$
 
 ## Distributional Regression
 
-Parameters like $\sigma, \nu, \phi$ can have their own regression structures:
+Parameters such as $\sigma$, $\nu$, $\phi$, $\kappa$, and $\tau$ can have
+their own regression structures:
 
 $$ \log(\sigma[n]) = X_{\sigma}[n] \beta_{\sigma} + Z_{\sigma}[n] b_{\sigma} $$
 
@@ -1087,9 +1117,9 @@ $$ \log(\sigma[n]) = X_{\sigma}[n] \beta_{\sigma} + Z_{\sigma}[n] b_{\sigma} $$
 - Gaussian: Ïƒ (scale)
 - Student-t: Ïƒ, Î½ (scale, df)
 - Negative binomial: Ï† (dispersion)
-- Beta: Ï† (precision)
+- Beta: $\kappa$ (positive sample size; shapes $\mu\kappa$ and $(1-\mu)\kappa$)
 - Skew-normal: Ïƒ, Î± (scale, skewness)
-- Skew-double-exponential: Ïƒ, Ï„ (scale, skewness)
+- Skew-double-exponential: $\sigma$, $\tau$ (scale, quantile/asymmetry)
 
 # Practical Workflow
 

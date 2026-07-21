@@ -1,5 +1,5 @@
 ---
-title: "simulate_JoiNMe Cookbook"
+title: "simulate_joinme Cookbook"
 output-dir: ../docs/tutorials
 format:
   html:

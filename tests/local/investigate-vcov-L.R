@@ -103,7 +103,7 @@ draw_vars <- c(
   as.vector(outer(rep(seq_len(n_id), each = n_marker), rep(seq_len(n_marker), times = n_id), function(i, d) paste0("w_idm[", i, ",", d, ",2]")))
 )
 
-draws <- JoiNMe:::.get_draws_matrix(fit$fit, variables = draw_vars, seed = seed)
+draws <- joinme:::.get_draws_matrix(fit$fit, variables = draw_vars, seed = seed)
 draw_names <- colnames(draws)
 
 reconstruct_L_draws <- function(draw_mat, n_subject) {

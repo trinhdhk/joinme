@@ -19,7 +19,7 @@ This note documents the exact `vcov` association algorithm currently used in:
 
 - simulation in `R/simulate.R`
 - fitting in Stan via `inst/stan/helper/transformed_parameters/fit_scaling_and_effects.stan`
-- the joint likelihood in `inst/stan/helper/functions/JoiNMe_fit_partial.stanfunctions`
+- the joint likelihood in `inst/stan/helper/functions/joinme_fit_partial.stanfunctions`
 
 The goal is to make the `vcov` association path auditable with the same variable names that appear in the code.
 
@@ -46,7 +46,9 @@ So the present evidence does **not** indicate that simulation is applying the `v
 
 The reproduction in `tests/local/issue-wrong-side.R` instead points to two practical issues:
 
-1. It tracks `alpha_vcov[...]`, which is the latent coefficient, not the hazard-scale coefficient used by the model.
+1. Earlier versions exposed the standardized latent and hazard-scale
+   coefficient under competing names. The canonical `alpha_vcov[...]` output
+   now denotes only the coefficient used by the hazard.
 2. The fitted model shows severe geometry problems in the covariance-regression block, with divergences, maximum-treedepth hits, and unstable chains. That can destroy association recovery even if the simulator is correct.
 
 # Key Variables
@@ -65,15 +67,16 @@ The reproduction in `tests/local/issue-wrong-side.R` instead points to two pract
 
 From `inst/stan/helper/transformed_parameters/fit_scaling_and_effects.stan`:
 
-- `alpha_vcov`: latent `vcov` association coefficients.
+- `z_alpha_vcov`: standardized latent `vcov` association coefficients.
 - `s_vcov`: positive global scale for the `vcov` association channel.
-- `alpha_vcov_eff = s_vcov * alpha_vcov`: effective hazard-scale coefficients.
-- `a_vcov = assoc_vcov * alpha_vcov_eff`: actual coefficients entering the hazard.
+- `alpha_vcov_scaled = s_vcov * z_alpha_vcov`: scaled coefficients.
+- `a_vcov = assoc_vcov * alpha_vcov_scaled`: coefficients entering the hazard.
+- `alpha_vcov = a_vcov`: canonical generated-quantity output.
 - `L_i[i]`: subject-specific Cholesky factor used by the hazard.
 
 ## Stan likelihood variables
 
-From `inst/stan/helper/functions/JoiNMe_fit_partial.stanfunctions`:
+From `inst/stan/helper/functions/joinme_fit_partial.stanfunctions`:
 
 - `vcov_terms_raw = eta_vcov_weighted_const(L_i[i], ...)`
 - `vcov_terms_tf = apply_transform_vector_by_component(vcov_terms_raw, ...)`
@@ -168,17 +171,18 @@ No extra penalty is applied inside the simulated hazard. The simulator uses the 
 In `fit_scaling_and_effects.stan`:
 
 ```stan
-vector[M_vcov] alpha_vcov_eff = s_vcov * alpha_vcov;
-vector[M_vcov] a_vcov = assoc_vcov * alpha_vcov_eff;
+vector[M_vcov] alpha_vcov_scaled = s_vcov * z_alpha_vcov;
+vector[M_vcov] a_vcov = assoc_vcov * alpha_vcov_scaled;
 ```
 
-So the fitted hazard does **not** use raw `alpha_vcov` directly. It uses:
+The fitted hazard uses:
 
 $$
-a_{vcov} = \texttt{assoc\_vcov} \cdot \left(\texttt{s\_vcov} \cdot \texttt{alpha\_vcov}\right).
+a_{vcov} = \texttt{assoc\_vcov} \cdot \left(\texttt{s\_vcov} \cdot \texttt{z\_alpha\_vcov}\right).
 $$
 
-This is why monitoring `alpha_vcov[...]` alone is incomplete.
+The generated quantity `alpha_vcov` is assigned this value directly, so it is
+the single posterior quantity used for interpretation and recovery assessment.
 
 ## Step 2: Extract raw `vcov` features from `L_i`
 
@@ -215,7 +219,7 @@ where `vcov_assoc` is a constant vector built from the scalar `vcov_assoc_scalar
 
 # Alignment Check: Simulation vs Stan
 
-| Stage | Simulation (`R/simulate.R`) | Stan fit (`JoiNMe_fit_partial.stanfunctions`) |
+| Stage | Simulation (`R/simulate.R`) | Stan fit (`joinme_fit_partial.stanfunctions`) |
 |---|---|---|
 | Raw source | `.assoc_vcov_features_from_chol(L_i)` | `eta_vcov_weighted_const(L_i[i], ...)` |
 | Transform timing | after raw extraction | after raw extraction |
@@ -229,25 +233,26 @@ This is algorithmic alignment.
 
 ## Finding 1: the script tracks the wrong association parameter
 
-The local script `tests/local/issue-wrong-side.R` currently monitors:
+The local script distinguishes the internal standardized latents:
+
+- `z_alpha_vcov[1]`
+- `z_alpha_vcov[2]`
+- `z_alpha_vcov[3]`
+
+from the canonical hazard-scale outputs:
 
 - `alpha_vcov[1]`
 - `alpha_vcov[2]`
 - `alpha_vcov[3]`
 
-But the fitted hazard uses:
-
-- `alpha_vcov_eff[1]`
-- `alpha_vcov_eff[2]`
-- `alpha_vcov_eff[3]`
-
 with
 
 $$
-\texttt{alpha\_vcov\_eff} = \texttt{s\_vcov} \cdot \texttt{alpha\_vcov}.
+\texttt{alpha\_vcov} = \texttt{assoc\_vcov} \cdot \texttt{s\_vcov} \cdot \texttt{z\_alpha\_vcov}.
 $$
 
-So a comparison against simulation truth should target the effective coefficient, not the latent coefficient.
+Comparisons against simulation truth therefore target `alpha_vcov`, not the
+internal standardized latent.
 
 ## Finding 2: the fit is geometrically unhealthy
 
@@ -305,14 +310,15 @@ END FOR
 
 ```text
 INPUT:
-  alpha_vcov
+  z_alpha_vcov
   s_vcov
   assoc_vcov
   L_i[i]
   transform configuration for vcov
 
-alpha_vcov_eff <- s_vcov * alpha_vcov
-a_vcov <- assoc_vcov * alpha_vcov_eff
+alpha_vcov_scaled <- s_vcov * z_alpha_vcov
+a_vcov <- assoc_vcov * alpha_vcov_scaled
+alpha_vcov <- a_vcov
 
 FOR subject i:
   vcov_terms_raw <- eta_vcov_weighted_const(L_i[i], diagonal_only)
@@ -346,7 +352,7 @@ sequenceDiagram
   participant TF as tf_funs$vcov[[m]]
   participant Haz as hazard_i
   participant StanTP as fit_scaling_and_effects.stan
-  participant StanLL as JoiNMe_fit_partial.stanfunctions
+  participant StanLL as joinme_fit_partial.stanfunctions
 
   Sim->>Chol: build L_i from alpha_cov, beta_cov, lambda_cov, z_cov
   Sim->>Chol: .assoc_vcov_features_from_chol(L_i)
@@ -355,8 +361,8 @@ sequenceDiagram
   TF-->>Sim: vcov_vals_tf[m] - tf(0)
   Sim->>Haz: vcov_assoc = sum(assoc_coef_vcov * vcov_vals_tf)
 
-  StanTP->>StanTP: alpha_vcov_eff = s_vcov * alpha_vcov
-  StanTP->>StanTP: a_vcov = assoc_vcov * alpha_vcov_eff
+  StanTP->>StanTP: alpha_vcov_scaled = s_vcov * z_alpha_vcov
+  StanTP->>StanTP: a_vcov = assoc_vcov * alpha_vcov_scaled
   StanLL->>Chol: eta_vcov_weighted_const(L_i[i], ...)
   Chol-->>StanLL: vcov_terms_raw
   StanLL->>StanLL: apply_transform_vector_by_component(vcov_terms_raw)
@@ -377,9 +383,9 @@ classDiagram
   }
 
   class StanTransformedParameters {
-    alpha_vcov
+    z_alpha_vcov
     s_vcov
-    alpha_vcov_eff
+    alpha_vcov_scaled
     a_vcov
   }
 
@@ -398,7 +404,7 @@ classDiagram
 
 If the goal is to check whether the fitted association matches simulation truth, inspect these variables in this order:
 
-1. `alpha_vcov_eff[m]`, not only `alpha_vcov[m]`
+1. `alpha_vcov[m]`, the canonical hazard-scale coefficient
 2. `s_vcov`
 3. `alpha_L[m]`
 4. `lambda_L[m]`
@@ -407,9 +413,9 @@ If the goal is to check whether the fitted association matches simulation truth,
 For the local script, the important correction is conceptual:
 
 ```text
-simulation truth     -> vcov[m]
-fit latent draw      -> alpha_vcov[m]
-fit hazard-scale draw -> alpha_vcov_eff[m] = s_vcov * alpha_vcov[m]
+simulation truth      -> vcov[m]
+fit latent draw       -> z_alpha_vcov[m]
+fit hazard-scale draw -> alpha_vcov[m] = assoc_vcov * s_vcov * z_alpha_vcov[m]
 ```
 
 # Bottom Line

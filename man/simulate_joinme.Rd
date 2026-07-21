@@ -37,8 +37,8 @@ simulate_joinme(
   family_params = list(gaussian = list(sigma = 1), student_t = list(sigma = 1.5, nu = 4),
     bernoulli = list(), binomial = list(trials = 10), poisson = list(), negbin2 =
     list(phi = 2), skew_normal = list(sigma = 1, alpha = 0), double_exponential =
-    list(sigma = 1), skew_double_exponential = list(sigma = 1, tau_sde = 0.5), beta =
-    list(phi_beta = 10), cumulative_logit = list(cutpoints = c(-1, 1))),
+    list(sigma = 1), skew_double_exponential = list(sigma = 1, tau = 0.5), beta =
+    list(kappa = 10), cumulative_logit = list(cutpoints = c(-1, 1))),
   h0 = NULL,
   baseline_hazard = list(type = "weibull", shape = 1.4, scale = 6),
   formulaBasehaz = NULL,
@@ -82,7 +82,7 @@ The default \code{~ 1} is supported and gives an intercept-only covariance regre
 
 \item{formulaDist}{Optional distributional regression formulas (same role as in \code{joinme()}).
 Supported LHS parameters are \code{sigma}, \code{nu}, \code{phi}, \code{alpha} (aliases:
-\code{alpha_skew}, \code{skew}), \code{phi_beta}, and \code{tau_sde}.
+\code{alpha_skew}, \code{skew}), \code{kappa}, and \code{tau}.
 
 Family-scoped syntax is supported with square brackets:
 \verb{param[family=<name>] ~ ...}, for example
@@ -250,7 +250,7 @@ terms in \code{formulaEvent} RHS.
 If NULL, coefficients are randomly generated.}
 
 \item{dist_coefs}{Distributional fixed-effect coefficients for \code{formulaDist}
-parameters (\code{sigma}, \code{nu}, \code{phi}, \code{alpha}, \code{phi_beta}, \code{tau_sde}).
+parameters (\code{sigma}, \code{nu}, \code{phi}, \code{alpha}, \code{kappa}, \code{tau}).
 
 For each parameter, coefficients can be:
 \itemize{
@@ -329,7 +329,13 @@ distributional parameter,
 controls (same \code{sd}/\code{corr} fields as above).
 }}
 
-\item{family_params}{Family-specific simulation parameters.}
+\item{family_params}{Family-specific constants used when the corresponding
+parameter has no distributional regression. In particular, specify the
+Beta mean/sample-size model with \code{beta = list(kappa = ...)} and the
+skew double exponential model with
+\code{skew_double_exponential = list(sigma = ..., tau = ...)}.
+\code{kappa} must be positive. \code{tau} must lie in \eqn{(0,1)}, with
+\eqn{0.5} giving the symmetric double exponential distribution.}
 
 \item{h0}{Optional baseline hazard function \code{h0(t)}
 If supplied, it takes precedence over \code{baseline_hazard}/\code{formulaBasehaz}.}
@@ -380,6 +386,9 @@ A list containing \code{dataLong}, \code{dataEvent}, \code{truth} (also availabl
 distinguishes base, latent, and effective values. Baseline-hazard truth is
 stored in \code{truth$baseline_hazard}; when a log-linear representation exists,
 its resolved coefficients are also in \code{truth$stan_fit$bs_gamma_c}.
+Hazard-scale association coefficients are stored as \code{alpha_cv_total},
+\code{alpha_cs_total}, \code{alpha_cv_mean}, \code{alpha_cs_mean}, \code{alpha_corr}, and
+\code{alpha_vcov}, matching the fitted posterior output names.
 
 List of results.
 

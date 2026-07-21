@@ -157,14 +157,14 @@ test_that("extract.JoiNMeFit returns draw matrices by friendly names", {
   expect_true(any(grepl("^id_marker_row_scale_eff: time$", colnames(ex_eff$draws))))
 })
 
-test_that("extract.JoiNMeFit assoc prefers effective vcov coefficients", {
+test_that("extract.JoiNMeFit assoc uses canonical hazard-scale vcov coefficients", {
   draws_obj <- posterior::as_draws_matrix(stats::setNames(
     data.frame(
       raw = c(0.1, 0.1, 0.1),
       eff = c(0.4, 0.5, 0.6),
       check.names = FALSE
     ),
-    c("alpha_vcov[1]", "alpha_vcov_eff[1]")
+    c("z_alpha_vcov[1]", "alpha_vcov[1]")
   ))
 
   fit_obj <- structure(list(
@@ -186,7 +186,7 @@ test_that("extract.JoiNMeFit assoc prefers effective vcov coefficients", {
   ex_assoc <- extract(fit_obj, what = "assoc", keep_chains = FALSE)
   expect_equal(colnames(ex_assoc$draws), "vcov[1]")
   expect_equal(as.numeric(ex_assoc$draws[, 1]), c(0.4, 0.5, 0.6))
-  expect_equal(as.character(ex_assoc$term_map$variable), "alpha_vcov_eff[1]")
+  expect_equal(as.character(ex_assoc$term_map$variable), "alpha_vcov[1]")
 })
 
 test_that("extract.JoiNMeFit fixef prefers internal coefficients on original-time scale", {

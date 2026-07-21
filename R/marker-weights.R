@@ -11,6 +11,7 @@
 #'
 #' @return Character vector of weighted association term keys.
 #' @keywords internal
+#' @noRd
 .weighted_assoc_term_keys <- function() {
   c("cv_total", "cs_total", "cv_marker", "cs_marker")
 }
@@ -22,6 +23,7 @@
 #'
 #' @return Named logical vector in canonical weighted-term order.
 #' @keywords internal
+#' @noRd
 .weighted_assoc_term_flags <- function(x) {
   keys <- .weighted_assoc_term_keys()
 
@@ -42,6 +44,7 @@
 #'
 #' @return Character vector of active weighted association terms.
 #' @keywords internal
+#' @noRd
 .active_weighted_assoc_terms <- function(x) {
   flags <- .weighted_assoc_term_flags(x)
   names(flags)[flags]
@@ -56,6 +59,7 @@
 #'
 #' @return Numeric vector with one entry per marker.
 #' @keywords internal
+#' @noRd
 .normalise_marker_weight_vector <- function(weights, marker_levels, context, arg_name = "marker_weights") {
   marker_levels <- as.character(marker_levels %||% character(0))
   n_markers <- length(marker_levels)
@@ -104,7 +108,7 @@
 #' simulation so the data-generating process and the fitted hazard use the same
 #' mapping between association terms and marker weights.
 #'
-#' The algorithm is:
+#' Summary:
 #' 1. identify the active weighted association terms,
 #' 2. normalise each supplied marker-weight vector into fitted marker order,
 #' 3. either map all active terms to one shared weight set or assign one weight
@@ -292,6 +296,7 @@
 #'
 #' @return Character label used in summaries and extraction maps.
 #' @keywords internal
+#' @noRd
 .marker_weight_summary_label <- function(term_key, marker_label, shared_marker_weights = TRUE) {
   if (isTRUE(shared_marker_weights)) {
     return(paste0("weight: ", marker_label))
@@ -307,6 +312,7 @@
 #'
 #' @return Character scalar prefix.
 #' @keywords internal
+#' @noRd
 .marker_weight_var_prefix <- function(term_key, effective = TRUE) {
   suffix <- if (isTRUE(effective)) "eff_" else ""
   paste0("marker_weights_", suffix, term_key)
@@ -322,6 +328,7 @@
 #'
 #' @return Iteration x chain x marker draw array, or `NULL` if unavailable.
 #' @keywords internal
+#' @noRd
 .association_marker_weight_array <- function(object, term_key, draws = NULL, seed = 1, all_vars = NULL) {
   sd <- object$stan_data
   n_markers <- as.integer(sd$D %||% 0L)
@@ -343,19 +350,8 @@
     return(.get_draws_array(object$fit, variables = eff_vars, draws = draws, seed = seed))
   }
 
-  legacy_eff_vars <- paste0("marker_weights_eff[", seq_len(n_markers), "]")
-  if (all(legacy_eff_vars %in% all_vars)) {
-    return(.get_draws_array(object$fit, variables = legacy_eff_vars, draws = draws, seed = seed))
-  }
-
-  probe_var <- .first_available_draw_var(
-    all_vars,
-    c(
-      paste0("alpha_", term_key, "_eff"),
-      paste0("alpha_", term_key)
-    )
-  )
-  if (is.null(probe_var)) {
+  probe_var <- paste0("alpha_", term_key)
+  if (!(probe_var %in% all_vars)) {
     return(NULL)
   }
 

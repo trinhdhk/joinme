@@ -103,7 +103,7 @@ test_that("marker-id draw reconstruction uses scaled-time rows only in w_idm", {
     zidm_cols = c("(Intercept)", "time")
   )
 
-  out <- JoiNMe:::.reconstruct_subject_marker_id_draws(draws_matrix, standata_subject, n_draws_target = 1)
+  out <- joinme:::.reconstruct_subject_marker_id_draws(draws_matrix, standata_subject, n_draws_target = 1)
 
   k21 <- tanh(3)
   l_i <- matrix(

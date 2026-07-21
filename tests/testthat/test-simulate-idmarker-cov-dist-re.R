@@ -246,7 +246,7 @@ test_that("simulate_joinme saves realized distributional parameter truth and avo
       sigma ~ 1 + time,
       nu[family = student_t] ~ 1,
       alpha[family = skew_normal] ~ 1,
-      phi_beta[family = beta] ~ 1
+      kappa[family = beta] ~ 1
     )
   )
 
@@ -257,13 +257,13 @@ test_that("simulate_joinme saves realized distributional parameter truth and avo
   expect_equal(length(dp$sigma), nrow(sim$dataLong))
   expect_equal(length(dp$nu), nrow(sim$dataLong))
   expect_equal(length(dp$alpha_skew), nrow(sim$dataLong))
-  expect_equal(length(dp$phi_beta), nrow(sim$dataLong))
+  expect_equal(length(dp$kappa), nrow(sim$dataLong))
   expect_equal(as.character(dp$rowwise$marker), as.character(sim$dataLong$marker))
   expect_equal(as.numeric(dp$rowwise$time), as.numeric(sim$dataLong$time))
   expect_true(all(is.finite(dp$sigma)))
   expect_true(all(is.finite(dp$nu)))
   expect_true(all(is.finite(dp$alpha_skew)))
-  expect_true(all(is.finite(dp$phi_beta)))
+  expect_true(all(is.finite(dp$kappa)))
   expect_false("beta" %in% names(sim$truth))
   expect_false("gamma_w" %in% names(sim$truth))
 })
@@ -292,12 +292,12 @@ test_that("simulate_joinme exposes fit-aligned truth for defaults and scaled par
   expect_equal(length(fit_truth$marker_id_row_scale_eff), length(sim$truth$re_effective$id_marker_cov$latent$sd))
   expect_true("student_t" %in% names(fit_truth$sigma_family))
   expect_true("student_t" %in% names(fit_truth$nu_family))
-  expect_true("beta" %in% names(fit_truth$phi_beta_family))
+  expect_true("beta" %in% names(fit_truth$kappa_family))
   expect_equal(unname(fit_truth$cutpoints_ord), c(-1, 1))
   expect_equal(nrow(fam_truth$by_marker), 4)
   expect_equal(fam_truth$by_marker$marker_to_sigma_family, c(1L, 2L, 0L, 0L))
   expect_equal(fam_truth$by_marker$marker_to_nu_family, c(0L, 1L, 0L, 0L))
-  expect_equal(fam_truth$by_marker$marker_to_phi_beta_family, c(0L, 0L, 1L, 0L))
+  expect_equal(fam_truth$by_marker$marker_to_kappa_family, c(0L, 0L, 1L, 0L))
 })
 
 test_that("simulate_joinme exposes public random-effect draws on the original-time scale", {

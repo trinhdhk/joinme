@@ -276,19 +276,25 @@ for (k in 1 : n_draws) {
       // Skew double exponential (asymmetric Laplace)
         real sig = (P_sigma > 0) ? exp(fmin(dot_product(X_sigma_pred[n], beta_sigma[k]), 20))
              : sigma_family[k][marker_to_sigma_family[d]];
-      real tau_sde = (P_tau_sde > 0) ? inv_logit(dot_product(X_tau_sde_pred[n], beta_tau_sde[k]))
-               : tau_sde_family[k][marker_to_tau_sde_family[d]];
-      // sig: scale, tau_sde: skewness in (0,1)
+      // Step 1: use the fixed quantile/asymmetry parameter when requested.
+      // Step 2: otherwise propagate the draw-specific regression or family
+      // value into posterior predictive outcome sampling.
+      real tau = use_tau_fixed == 1
+                 ? tau_fixed
+                 : ((P_tau > 0)
+                    ? inv_logit(dot_product(X_tau_pred[n], beta_tau[k]))
+                    : tau_family[k][marker_to_tau_family[d]]);
+      // sig: scale, tau: skewness in (0,1)
       y_pred_epred[k, n] = mu_long;
-      y_pred[k, n] = skew_double_exponential_rng(mu_long, sig, tau_sde);
+      y_pred[k, n] = skew_double_exponential_rng(mu_long, sig, tau);
       } else if (family_long[d] == 10) {
       // Beta
-      real phi_beta = (P_phi_beta > 0) ? exp(dot_product(X_phi_beta_pred[n], beta_phi_beta[k]))
-                      : phi_beta_family[k][marker_to_phi_beta_family[d]];
+      real kappa = (P_kappa > 0) ? exp(dot_product(X_kappa_pred[n], beta_kappa[k]))
+                      : kappa_family[k][marker_to_kappa_family[d]];
       real mu = fmin(fmax(mu_long, 1e-12), 1 - 1e-12);
-      real shape1 = fmax(mu * phi_beta, 1e-6);
-      real shape2 = fmax((1 - mu) * phi_beta, 1e-6);
-      // mu: mean, phi_beta: precision, shape1/shape2: beta shapes
+      real shape1 = fmax(mu * kappa, 1e-6);
+      real shape2 = fmax((1 - mu) * kappa, 1e-6);
+      // mu: mean, kappa: sample size, shape1/shape2: Beta shapes
       y_pred_epred[k, n] = mu;
       y_pred[k, n] = beta_rng(shape1, shape2);
       } else {

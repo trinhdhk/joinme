@@ -40,7 +40,7 @@ internal representation. This representation is used by both fitting and
 simulation so the data-generating process and the fitted hazard use the same
 mapping between association terms and marker weights.
 
-The algorithm is:
+Summary:
 \enumerate{
 \item identify the active weighted association terms,
 \item normalise each supplied marker-weight vector into fitted marker order,
