@@ -21,7 +21,7 @@ jobs:
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       MAKEFLAGS: "-j1"
-      CXXFLAGS: "-O1"
+      CXXFLAGS: "-O0"
     permissions:
       contents: write
     steps:
@@ -36,6 +36,7 @@ jobs:
         run: |
           echo "MAKEFLAGS=-j1" >> ~/.Renviron
           echo "CXXFLAGS+=-O0" >> ~/.Renviron
+          cat ~/.Renviron
 
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
