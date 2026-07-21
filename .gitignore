@@ -61,6 +61,9 @@ docs
 *.csv
 *.txt
 
+# internal notes
+*internal
+
 # rstan crap
 src/
 tests/local/*.png

@@ -198,13 +198,15 @@ if (quiet_require("cmdstanr")) {
                 model_base_name = model_base_name
             )
 
-            if (compile_cmdstan || file.exists(exe_file)) {
+            existing_files <- list.files(cache_dir, pattern = 'joinme_')
+
+            if (compile_cmdstan || length(existing_files) > 0) {
                 if (sf == stan_files[[1]]) {
                     quack("- Cleaning Stan cache directory before recompilation...")
                     
-                    if (file.exists(exe_file)) {
+                    if (!exe_file %in% existing_files) {
                         quack(
-                            ' - Found pre-existing CmdStanR model executable; updating to new version...'
+                            ' - Found mismatched CmdStanR model executable; updating to new version...'
                         )
                     } else {
                         quack("- Precompiling Stan models with CmdStanR...")
