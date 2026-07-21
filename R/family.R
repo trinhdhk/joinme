@@ -70,6 +70,7 @@ jm_family <- function(name, link = NULL, inv_link = NULL) {
 }
 
 #' @keywords internal
+#' @noRd
 .normalize_link_name <- function(link) {
   if (!is.character(link) || length(link) != 1L || !nzchar(link)) {
     cli::cli_abort(c(
@@ -101,6 +102,7 @@ jm_family <- function(name, link = NULL, inv_link = NULL) {
 }
 
 #' @keywords internal
+#' @noRd
 .link_code_from_name <- function(link_name) {
   nm <- .normalize_link_name(link_name)
   switch(
@@ -114,6 +116,7 @@ jm_family <- function(name, link = NULL, inv_link = NULL) {
 }
 
 #' @keywords internal
+#' @noRd
 .inv_link_bc_from_name <- function(link_name) {
   nm <- .normalize_link_name(link_name)
   bc <- switch(
@@ -130,6 +133,7 @@ jm_family <- function(name, link = NULL, inv_link = NULL) {
 }
 
 #' @keywords internal
+#' @noRd
 .canonical_link_from_inv_link_bc <- function(inv_link_bc) {
   ops <- as.integer(inv_link_bc$bytecode %||% integer(0))
   const_data <- as.numeric(inv_link_bc$const_data %||% numeric(0))
@@ -145,6 +149,7 @@ jm_family <- function(name, link = NULL, inv_link = NULL) {
 }
 
 #' @keywords internal
+#' @noRd
 .bytecode_has_potentially_noninvertible_ops <- function(inv_link_bc) {
   # Heuristic operators that are non-injective on their natural/global domains.
   risky_ops <- c(
@@ -162,6 +167,7 @@ jm_family <- function(name, link = NULL, inv_link = NULL) {
 }
 
 #' @keywords internal
+#' @noRd
 .bytecode_is_monotone_on_reference_grid <- function(inv_link_bc,
                                                     grid = seq(-8, 8, length.out = 257L),
                                                     tol = 1e-10) {
@@ -179,6 +185,7 @@ jm_family <- function(name, link = NULL, inv_link = NULL) {
 }
 
 #' @keywords internal
+#' @noRd
 .warn_noninvertible_inv_link <- function(inv_link_bc, context) {
   # Issue an explicit identifiability warning when inverse-link program is not canonical
   # or uses operations that are frequently non-invertible in practical model domains.
@@ -198,6 +205,7 @@ jm_family <- function(name, link = NULL, inv_link = NULL) {
 }
 
 #' @keywords internal
+#' @noRd
 .link_name_from_code <- function(link_code) {
   switch(
     as.character(as.integer(link_code)),
@@ -212,6 +220,7 @@ jm_family <- function(name, link = NULL, inv_link = NULL) {
 }
 
 #' @keywords internal
+#' @noRd
 .default_link_for_family <- function(family_code) {
   switch(
     as.character(as.integer(family_code)),
@@ -226,12 +235,14 @@ jm_family <- function(name, link = NULL, inv_link = NULL) {
 }
 
 #' @keywords internal
+#' @noRd
 .link_name_from_inv_link_expr <- function(inv_link) {
   bc <- parse_transform_expr(inv_link)
   .canonical_link_from_inv_link_bc(bc)
 }
 
 #' @keywords internal
+#' @noRd
 .extract_family_and_link <- function(x) {
   if (inherits(x, "JoiNMe_family_spec")) {
     fam_code <- .parse_family(x$family)

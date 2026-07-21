@@ -96,6 +96,7 @@
 #'
 #' @return Numeric vector on the domain expected by the configured transform.
 #' @keywords internal
+#' @noRd
 .transform_input_for_spec <- function(x, spec_or_type) {
   x <- as.numeric(x)
   if (.transform_uses_expit_input(spec_or_type)) {
@@ -1016,6 +1017,7 @@ penalized_ispline_transform <- function(...) {
 #' continue to work unchanged.
 #'
 #' @keywords internal
+#' @noRd
 default_identity_transforms <- function() {
   list(
     cv_tot = list(type = "identity"),

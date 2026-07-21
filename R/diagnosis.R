@@ -619,6 +619,7 @@ concordance.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NUL
 }
 
 #' @keywords internal
+#' @noRd
 .time_varying_concordance_single <- function(object, newdataLong, newdataEvent, time_start, time_horizon, cause, n_samples, seed, type_weights, ...) {
 	id_var <- eval(object$call$id_var) %||% "id"
 	time_var <- eval(object$call$time_var) %||% "time"

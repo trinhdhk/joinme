@@ -22,6 +22,7 @@ NULL
 
 #' Stable softplus
 #' @keywords internal
+#' @noRd
 .softplus <- function(x) {
   ifelse(x > 0, x + log1p(exp(-x)), log1p(exp(x)))
 }
@@ -89,6 +90,7 @@ weibull_h0 <- function(shape = 1.4, scale = 6.0) {
 
 #' Find a bracketing interval for root solving
 #' @keywords internal
+#' @noRd
 .find_bracket <- function(f, lower = 0, upper = 1, upper_max = 50, expand = 1.7, max_expand = 60L) {
   f_lower <- f(lower)
   if (!is.finite(f_lower) || f_lower > 0) {
@@ -967,6 +969,7 @@ simulate_joinme <- function(
   #' @param fun Function to apply.
   #' @param ... Additional arguments passed to fun.
   #' @return List of results.
+  #' @noRd
   .sim_parallel_lapply <- function(x, fun, ...) {
     # Parallel map with mirai; falls back to serial when mirai is disabled.
     # Each job sets a deterministic seed derived from the main seed.
@@ -1396,6 +1399,7 @@ simulate_joinme <- function(
   #' @param x Numeric vector on link scale.
   #' @param inv_link_bc Parsed inverse-link bytecode.
   #' @return Numeric vector on response scale.
+  #' @noRd
   .sim_apply_inv_link_bc <- function(x, inv_link_bc) {
     # Apply a parsed inverse-link bytecode using the shared interpreter.
     .sim_eval_bytecode_vector(
@@ -1406,6 +1410,7 @@ simulate_joinme <- function(
   }
 
   #' @keywords internal
+  #' @noRd
   #' @param families Family specification input (vector or list).
   #' @param D Number of markers.
   #' @return List with family codes, link names, and inverse-link bytecode per marker.

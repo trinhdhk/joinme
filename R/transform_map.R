@@ -136,6 +136,7 @@ parse_transform_expr <- function(expr, iota_nodes = NULL) {
 
 #' Coerce input to a language object
 #' @keywords internal
+#' @noRd
 .coerce_transform_expr <- function(expr) {
   # Normalise input to a single language object
   if (rlang::is_quosure(expr)) {
@@ -171,6 +172,7 @@ parse_transform_expr <- function(expr, iota_nodes = NULL) {
 
 #' Emit bytecode from an R language object (calls, names, constants).
 #' @keywords internal
+#' @noRd
 .emit_bytecode_expr <- function(
   node,
   bytecode,
@@ -381,6 +383,7 @@ parse_transform_expr <- function(expr, iota_nodes = NULL) {
 
 #' Verify functional bytecode for basic sanity (stack under/overflow, etc.)
 #' @keywords internal
+#' @noRd
 verify_bytecode <- function(bytecode, const_data) {
   stack_height <- 0
   const_idx <- 0

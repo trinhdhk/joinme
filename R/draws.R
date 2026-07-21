@@ -127,6 +127,7 @@ draws <- function(object, ...) {
 }
 
 #' @keywords internal
+#' @noRd
 .format_draws <- function(draws_obj, format = c("draws_array", "draws_matrix", "draws_df")) {
   format <- match.arg(format)
   switch(
@@ -156,6 +157,7 @@ draws <- function(object, ...) {
 }
 
 #' @keywords internal
+#' @noRd
 .flatten_dynpred_regular_block <- function(object, what) {
   ext <- tryCatch(extract.JoiNMeDynPred(object, what = what), error = function(e) NULL)
   if (is.null(ext) || is.null(ext$draws) || !length(ext$draws)) {
@@ -253,6 +255,7 @@ draws <- function(object, ...) {
 }
 
 #' @keywords internal
+#' @noRd
 .dynpred_cached_draws_array <- function(object) {
   cache_key <- "flattened_draws_array"
   cached <- object$cache_get(cache_key)

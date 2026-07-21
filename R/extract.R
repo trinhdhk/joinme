@@ -23,6 +23,7 @@ extract <- function(object, ...) {
 }
 
 #' @keywords internal
+#' @noRd
 .fixed_effect_var_map <- function(sd, all_vars) {
   p <- as.integer(sd$P %||% 0L)
   if (p <= 0L) {

@@ -130,6 +130,7 @@
 #' @return A named list containing per-term vectors, set indices, and the compact
 #'   matrix representation used by Stan.
 #' @keywords internal
+#' @noRd
 .resolve_marker_weight_structure <- function(marker_weights,
                                              marker_levels,
                                              active_terms,

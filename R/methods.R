@@ -48,6 +48,7 @@ NULL
 }
 
 #' @keywords internal
+#' @noRd
 .format_transform_expr <- function(expr) {
   if (is.null(expr)) return("identity")
   if (rlang::is_quosure(expr)) expr <- rlang::get_expr(expr)
@@ -60,6 +61,7 @@ NULL
 }
 
 #' @keywords internal
+#' @noRd
 .transform_expr_with_affine_shift <- function(expr, iota_nodes = list()) {
   if (is.null(iota_nodes) || !length(iota_nodes)) {
     return(expr)
@@ -110,6 +112,7 @@ NULL
 }
 
 #' @keywords internal
+#' @noRd
 .format_transform_spec <- function(spec) {
   if (is.null(spec) || is.null(spec$type) || spec$type == "identity") {
     return("identity")
@@ -145,6 +148,7 @@ NULL
 }
 
 #' @keywords internal
+#' @noRd
 .omit_fixed_transform_endpoint_rows <- function(tbl, channel, spec, sd) {
   if (is.null(tbl) || nrow(tbl) == 0L) {
     return(tbl)

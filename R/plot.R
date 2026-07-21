@@ -2053,6 +2053,7 @@ plot.JoiNMeFit <- function(x,
 #' @return A list containing `data`, the subject-marker evaluation rows, and
 #'   `times`, the common ordered time design.
 #' @keywords internal
+#' @noRd
 .JoiNMefit_longitudinal_evaluation_grid <- function(observed_longitudinal_data,
                                                     subject_variable,
                                                     time_variable,
