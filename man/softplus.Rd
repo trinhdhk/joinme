@@ -13,5 +13,5 @@ softplus(x)
 Numerically stable implementation of softplus transformation
 }
 \details{
-\eqn{\operatorname{softplus}(x) = \log(1+exp(x))}
+\deqn{\operatorname{softplus}(x) = \log(1+\exp(x))}
 }
