@@ -62,7 +62,7 @@ docs
 *.txt
 
 # internal notes
-*internal
+notes/
 
 # rstan crap
 src/
