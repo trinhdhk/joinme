@@ -22,7 +22,7 @@ jobs:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       MAKEFLAGS: "-j1"
       CXXFLAGS: "-O1"
-      R_QUARTO_QUIET = FALSE
+      R_QUARTO_QUIET: "FALSE"
     permissions:
       contents: write
     steps:
@@ -45,6 +45,7 @@ jobs:
         run: |
           echo "MAKEFLAGS=-j1" >> ~/.Renviron
           echo "CXXFLAGS+=-O1" >> ~/.Renviron
+          echo "R_QUARTO_QUIET=FALSE" >> ~/.Renviron
           cat ~/.Renviron
 
       - uses: r-lib/actions/setup-r-dependencies@v2
