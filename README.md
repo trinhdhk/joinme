@@ -266,9 +266,6 @@ coef(fit, summary = FALSE)
 # New marker levels in newdataLong are rejected; prediction marker levels must
 # match training levels. Dynamic prediction summaries marginalize latent
 # augmentation noise by averaging across dynpred posterior rows per stored draw.
-
-# Concordance uses a dense per-subject survival grid internally for stable
-# dynamic prediction at the requested horizon.
 ```
 
 Trinh Dong, 2026
