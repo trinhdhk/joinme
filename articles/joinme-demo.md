@@ -42,8 +42,8 @@ Accepted specifications include:
 - **Posterior reporting**
   ([`summary()`](https://rdrr.io/r/base/summary.html),
   [`draws()`](https://trinhdhk.github.io/joinme/reference/draws.md),
-  [`mcmc_plot()`](https://rdrr.io/pkg/joinme/man/mcmc_plot.html), helper
-  plots)
+  [`mcmc_plot()`](https://trinhdhk.github.io/joinme/reference/mcmc_plot.html),
+  helper plots)
 
 ### 2.1 Family-specific links (new)
 

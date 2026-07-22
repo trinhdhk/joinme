@@ -154,10 +154,10 @@
 <li>
 <code>as.array(fit)</code> and <code>as.array(pred)</code> return the same renamed posterior arrays</li>
 <li>
-<code><a href="https://rdrr.io/pkg/joinme/man/mcmc_plot.html" class="external-link">mcmc_plot()</a></code> forwards those draws to <code>bayesplot</code>, imitating the behaviour of <code>brms</code>
+<code><a href="https://trinhdhk.github.io/joinme/reference/mcmc_plot.html">mcmc_plot()</a></code> forwards those draws to <code>bayesplot</code>, imitating the behaviour of <code>brms</code>
 </li>
 <li>
-<code><a href="https://rdrr.io/pkg/joinme/man/longitudinal_plot.html" class="external-link">longitudinal_plot()</a></code>, <code><a href="https://rdrr.io/pkg/joinme/man/plot_helpers.html" class="external-link">survival_plot()</a></code>, <code><a href="https://rdrr.io/pkg/joinme/man/cumhaz_plot.html" class="external-link">cumhaz_plot()</a></code>, <code><a href="https://rdrr.io/pkg/joinme/man/association_plot.html" class="external-link">association_plot()</a></code>, and <code><a href="https://rdrr.io/pkg/joinme/man/diagnostic_plot.html" class="external-link">diagnostic_plot()</a></code> provide entry points to the main <code><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot()</a></code> methods.</li>
+<code><a href="https://trinhdhk.github.io/joinme/reference/longitudinal_plot.html">longitudinal_plot()</a></code>, <code><a href="https://trinhdhk.github.io/joinme/reference/plot_helpers.html">survival_plot()</a></code>, <code><a href="https://trinhdhk.github.io/joinme/reference/cumhaz_plot.html">cumhaz_plot()</a></code>, <code><a href="https://trinhdhk.github.io/joinme/reference/association_plot.html">association_plot()</a></code>, and <code><a href="https://trinhdhk.github.io/joinme/reference/diagnostic_plot.html">diagnostic_plot()</a></code> provide entry points to the main <code><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot()</a></code> methods.</li>
 </ul>
 <!--
 Summary-scale consistency:
@@ -239,7 +239,7 @@ Summary-scale consistency:
 <span><span class="fu"><a href="reference/draws.html">draws</a></span><span class="op">(</span><span class="va">fit</span>, variables <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"time"</span>, <span class="st">"alpha_cv_total"</span><span class="op">)</span>, format <span class="op">=</span> <span class="st">"draws_df"</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># Bayesplot-backed posterior display with renamed variables</span></span>
-<span><span class="fu"><a href="https://rdrr.io/pkg/joinme/man/mcmc_plot.html" class="external-link">mcmc_plot</a></span><span class="op">(</span><span class="va">fit</span>, variable <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"time"</span>, <span class="st">"alpha_cv_total"</span><span class="op">)</span>, type <span class="op">=</span> <span class="st">"trace"</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://trinhdhk.github.io/joinme/reference/mcmc_plot.html">mcmc_plot</a></span><span class="op">(</span><span class="va">fit</span>, variable <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"time"</span>, <span class="st">"alpha_cv_total"</span><span class="op">)</span>, type <span class="op">=</span> <span class="st">"trace"</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># Conditional effects for either joint-model process</span></span>
 <span><span class="va">profiles</span> <span class="op">&lt;-</span> <span class="fu">make_conditions</span><span class="op">(</span><span class="va">sim</span><span class="op">$</span><span class="va">dataEvent</span>, vars <span class="op">=</span> <span class="st">"x1"</span><span class="op">)</span></span>
@@ -298,8 +298,8 @@ Summary-scale consistency:
 <span></span>
 <span><span class="co"># Plot longitudinal and survival predictions</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">pred</span>, type <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"longitudinal"</span>, <span class="st">"survival"</span><span class="op">)</span>, combined <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://rdrr.io/pkg/joinme/man/longitudinal_plot.html" class="external-link">longitudinal_plot</a></span><span class="op">(</span><span class="va">pred</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://rdrr.io/pkg/joinme/man/plot_helpers.html" class="external-link">survival_plot</a></span><span class="op">(</span><span class="va">pred</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://trinhdhk.github.io/joinme/reference/longitudinal_plot.html">longitudinal_plot</a></span><span class="op">(</span><span class="va">pred</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://trinhdhk.github.io/joinme/reference/plot_helpers.html">survival_plot</a></span><span class="op">(</span><span class="va">pred</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># Alternative longitudinal display: posterior mean change heatmap</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span></span>
@@ -318,8 +318,8 @@ Summary-scale consistency:
 <span><span class="fu"><a href="reference/assoc.html">posterior_assoc</a></span><span class="op">(</span><span class="va">fit</span>, summary <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># Explicit fitted-object plot helpers</span></span>
-<span><span class="fu"><a href="https://rdrr.io/pkg/joinme/man/association_plot.html" class="external-link">association_plot</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://rdrr.io/pkg/joinme/man/diagnostic_plot.html" class="external-link">diagnostic_plot</a></span><span class="op">(</span><span class="va">fit</span>, type <span class="op">=</span> <span class="st">"rhat"</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://trinhdhk.github.io/joinme/reference/association_plot.html">association_plot</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://trinhdhk.github.io/joinme/reference/diagnostic_plot.html">diagnostic_plot</a></span><span class="op">(</span><span class="va">fit</span>, type <span class="op">=</span> <span class="st">"rhat"</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># All coefficient extractors support summary = TRUE/FALSE</span></span>
 <span><span class="fu"><a href="https://rdrr.io/pkg/nlme/man/fixed.effects.html" class="external-link">fixef</a></span><span class="op">(</span><span class="va">fit</span>, summary <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
@@ -331,10 +331,7 @@ Summary-scale consistency:
 <span><span class="co"># standard subject/outcome nested list.</span></span>
 <span><span class="co"># New marker levels in newdataLong are rejected; prediction marker levels must</span></span>
 <span><span class="co"># match training levels. Dynamic prediction summaries marginalize latent</span></span>
-<span><span class="co"># augmentation noise by averaging across dynpred posterior rows per stored draw.</span></span>
-<span></span>
-<span><span class="co"># Concordance uses a dense per-subject survival grid internally for stable</span></span>
-<span><span class="co"># dynamic prediction at the requested horizon.</span></span></code></pre></div>
+<span><span class="co"># augmentation noise by averaging across dynpred posterior rows per stored draw.</span></span></code></pre></div>
 <p>Trinh Dong, 2026</p>
 </div>
 </div>

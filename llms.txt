@@ -109,14 +109,14 @@ interface:
   draws
 - `as.array(fit)` and `as.array(pred)` return the same renamed posterior
   arrays
-- [`mcmc_plot()`](https://rdrr.io/pkg/joinme/man/mcmc_plot.html)
+- [`mcmc_plot()`](https://trinhdhk.github.io/joinme/reference/mcmc_plot.html)
   forwards those draws to `bayesplot`, imitating the behaviour of `brms`
-- [`longitudinal_plot()`](https://rdrr.io/pkg/joinme/man/longitudinal_plot.html),
-  [`survival_plot()`](https://rdrr.io/pkg/joinme/man/plot_helpers.html),
-  [`cumhaz_plot()`](https://rdrr.io/pkg/joinme/man/cumhaz_plot.html),
-  [`association_plot()`](https://rdrr.io/pkg/joinme/man/association_plot.html),
+- [`longitudinal_plot()`](https://trinhdhk.github.io/joinme/reference/longitudinal_plot.html),
+  [`survival_plot()`](https://trinhdhk.github.io/joinme/reference/plot_helpers.html),
+  [`cumhaz_plot()`](https://trinhdhk.github.io/joinme/reference/cumhaz_plot.html),
+  [`association_plot()`](https://trinhdhk.github.io/joinme/reference/association_plot.html),
   and
-  [`diagnostic_plot()`](https://rdrr.io/pkg/joinme/man/diagnostic_plot.html)
+  [`diagnostic_plot()`](https://trinhdhk.github.io/joinme/reference/diagnostic_plot.html)
   provide entry points to the main
   [`plot()`](https://rdrr.io/r/graphics/plot.default.html) methods.
 
@@ -279,9 +279,6 @@ coef(fit, summary = FALSE)
 # New marker levels in newdataLong are rejected; prediction marker levels must
 # match training levels. Dynamic prediction summaries marginalize latent
 # augmentation noise by averaging across dynpred posterior rows per stored draw.
-
-# Concordance uses a dense per-subject survival grid internally for stable
-# dynamic prediction at the requested horizon.
 ```
 
 Trinh Dong, 2026

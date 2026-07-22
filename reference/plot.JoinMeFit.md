@@ -59,8 +59,8 @@ plot(
   `"mcse_mean"`, `"mcse_sd"`, `"running_mean"`, and
   `"running_quantile"`. Fitted-data types are `"longitudinal"`,
   `"survival"`, `"cumhaz"`, and `"association"`. `"mcmc"` delegates to
-  [`mcmc_plot()`](https://rdrr.io/pkg/joinme/man/mcmc_plot.html) for
-  bayesplot-backed posterior displays. The compatibility alias
+  [`mcmc_plot()`](https://trinhdhk.github.io/joinme/reference/mcmc_plot.html)
+  for bayesplot-backed posterior displays. The compatibility alias
   `"longitudinal_heatmap"` is treated as
   `type = "longitudinal", longitudinal_style = "heatmap"`.
 

@@ -34,11 +34,11 @@ sequence:
 6.  **Post-processing (R)**: expose the posterior through
     [`draws()`](https://trinhdhk.github.io/joinme/reference/draws.md),
     summary helpers,
-    [`mcmc_plot()`](https://rdrr.io/pkg/joinme/man/mcmc_plot.html), and
-    explicit plotting wrappers such as
-    [`longitudinal_plot()`](https://rdrr.io/pkg/joinme/man/longitudinal_plot.html)
+    [`mcmc_plot()`](https://trinhdhk.github.io/joinme/reference/mcmc_plot.html),
+    and explicit plotting wrappers such as
+    [`longitudinal_plot()`](https://trinhdhk.github.io/joinme/reference/longitudinal_plot.html)
     and
-    [`survival_plot()`](https://rdrr.io/pkg/joinme/man/plot_helpers.html).
+    [`survival_plot()`](https://trinhdhk.github.io/joinme/reference/plot_helpers.html).
 
 This sequence is important because it clarifies where each modelling
 choice enters the inference: formula parsing happens in R, while all
@@ -268,8 +268,8 @@ fit <- joinme(
 #> 
 #> SAMPLING FOR MODEL 'joinme_fit_threading' NOW (CHAIN 1).
 #> Chain 1: 
-#> Chain 1: Gradient evaluation took 0.005868 seconds
-#> Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 58.68 seconds.
+#> Chain 1: Gradient evaluation took 0.006444 seconds
+#> Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 64.44 seconds.
 #> Chain 1: Adjust your expectations accordingly!
 #> Chain 1: 
 #> Chain 1: 
@@ -280,9 +280,9 @@ fit <- joinme(
 #> Chain 1: Iteration: 300 / 400 [ 75%]  (Sampling)
 #> Chain 1: Iteration: 400 / 400 [100%]  (Sampling)
 #> Chain 1: 
-#> Chain 1:  Elapsed Time: 291.331 seconds (Warm-up)
-#> Chain 1:                544.145 seconds (Sampling)
-#> Chain 1:                835.476 seconds (Total)
+#> Chain 1:  Elapsed Time: 300.658 seconds (Warm-up)
+#> Chain 1:                557.888 seconds (Sampling)
+#> Chain 1:                858.546 seconds (Total)
 #> Chain 1:
 
 # Counting-process fit with left truncation/time-split covariates:
@@ -297,8 +297,8 @@ fit_split <- joinme(
 #> 
 #> SAMPLING FOR MODEL 'joinme_fit_threading' NOW (CHAIN 1).
 #> Chain 1: 
-#> Chain 1: Gradient evaluation took 0.008307 seconds
-#> Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 83.07 seconds.
+#> Chain 1: Gradient evaluation took 0.009439 seconds
+#> Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 94.39 seconds.
 #> Chain 1: Adjust your expectations accordingly!
 #> Chain 1: 
 #> Chain 1: 
@@ -309,9 +309,9 @@ fit_split <- joinme(
 #> Chain 1: Iteration: 300 / 400 [ 75%]  (Sampling)
 #> Chain 1: Iteration: 400 / 400 [100%]  (Sampling)
 #> Chain 1: 
-#> Chain 1:  Elapsed Time: 308.23 seconds (Warm-up)
-#> Chain 1:                184.166 seconds (Sampling)
-#> Chain 1:                492.396 seconds (Total)
+#> Chain 1:  Elapsed Time: 355.621 seconds (Warm-up)
+#> Chain 1:                202.061 seconds (Sampling)
+#> Chain 1:                557.682 seconds (Total)
 #> Chain 1:
 ```
 
@@ -467,8 +467,8 @@ if (!is.null(preds)) {
 The scientific reporting layer should use the same user-facing parameter
 names as the tables returned by `summary(fit)`. The
 [`draws()`](https://trinhdhk.github.io/joinme/reference/draws.md) and
-[`mcmc_plot()`](https://rdrr.io/pkg/joinme/man/mcmc_plot.html) helpers
-make that possible without directly handling raw Stan variables.
+[`mcmc_plot()`](https://trinhdhk.github.io/joinme/reference/mcmc_plot.html)
+helpers make that possible without directly handling raw Stan variables.
 
 Code
 

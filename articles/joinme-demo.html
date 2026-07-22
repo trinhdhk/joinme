@@ -97,7 +97,7 @@
 <li>
 <strong>Computation</strong> (<code>control</code> for sampling, and optionally threading)</li>
 <li>
-<strong>Posterior reporting</strong> (<code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code>, <code><a href="../reference/draws.html">draws()</a></code>, <code><a href="https://rdrr.io/pkg/joinme/man/mcmc_plot.html" class="external-link">mcmc_plot()</a></code>, helper plots)</li>
+<strong>Posterior reporting</strong> (<code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code>, <code><a href="../reference/draws.html">draws()</a></code>, <code><a href="https://trinhdhk.github.io/joinme/reference/mcmc_plot.html">mcmc_plot()</a></code>, helper plots)</li>
 </ul>
 <section class="level2" data-number="2.1"><h3 data-number="2.1" id="family-specific-links-new">
 <span class="header-section-number">2.1</span> Family-specific links (new)<a class="anchor" aria-label="anchor" href="#family-specific-links-new"></a>
@@ -254,7 +254,7 @@
 <span></span>
 <span><span class="co"># Renamed posterior draws and MCMC visualisation</span></span>
 <span><span class="fu"><a href="../reference/draws.html">draws</a></span><span class="op">(</span><span class="va">fit</span>, variables <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"time"</span>, <span class="st">"alpha_cv_total"</span><span class="op">)</span>, format <span class="op">=</span> <span class="st">"draws_df"</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://rdrr.io/pkg/joinme/man/mcmc_plot.html" class="external-link">mcmc_plot</a></span><span class="op">(</span><span class="va">fit</span>, variable <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"time"</span>, <span class="st">"alpha_cv_total"</span><span class="op">)</span>, type <span class="op">=</span> <span class="st">"trace"</span><span class="op">)</span></span></code></pre></div>
+<span><span class="fu"><a href="https://trinhdhk.github.io/joinme/reference/mcmc_plot.html">mcmc_plot</a></span><span class="op">(</span><span class="va">fit</span>, variable <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"time"</span>, <span class="st">"alpha_cv_total"</span><span class="op">)</span>, type <span class="op">=</span> <span class="st">"trace"</span><span class="op">)</span></span></code></pre></div>
 </details>
 </div>
 </section><section class="level2" data-number="3.4"><h3 data-number="3.4" id="residual-sum-of-squares-for-fitted-trajectories">
@@ -328,8 +328,8 @@
 <span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">pred_ep</span>, type <span class="op">=</span> <span class="st">"longitudinal"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">pred_ep</span>, type <span class="op">=</span> <span class="st">"survival"</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://rdrr.io/pkg/joinme/man/longitudinal_plot.html" class="external-link">longitudinal_plot</a></span><span class="op">(</span><span class="va">pred_ep</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://rdrr.io/pkg/joinme/man/plot_helpers.html" class="external-link">survival_plot</a></span><span class="op">(</span><span class="va">pred_ep</span><span class="op">)</span></span></code></pre></div>
+<span><span class="fu"><a href="https://trinhdhk.github.io/joinme/reference/longitudinal_plot.html">longitudinal_plot</a></span><span class="op">(</span><span class="va">pred_ep</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://trinhdhk.github.io/joinme/reference/plot_helpers.html">survival_plot</a></span><span class="op">(</span><span class="va">pred_ep</span><span class="op">)</span></span></code></pre></div>
 </details>
 </div>
 <p><code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> now accepts <code>scale</code> as a character vector. If omitted, all longitudinal scales are produced: <code>c("epred", "linpred", "predict")</code>. Use <code>plot(..., scale = "epred")</code> (or another available scale) to choose which trajectory scale to visualise.</p>

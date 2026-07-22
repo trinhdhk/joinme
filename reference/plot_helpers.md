@@ -4,20 +4,22 @@ Convenience wrappers around the main
 [`plot()`](https://rdrr.io/r/graphics/plot.default.html) methods for
 JoiNMe fit and dynamic prediction objects.
 
-[`longitudinal_plot()`](https://rdrr.io/pkg/joinme/man/longitudinal_plot.html),
-[`survival_plot()`](https://rdrr.io/pkg/joinme/man/plot_helpers.html),
-and [`cumhaz_plot()`](https://rdrr.io/pkg/joinme/man/cumhaz_plot.html)
+[`longitudinal_plot()`](https://trinhdhk.github.io/joinme/reference/longitudinal_plot.html),
+[`survival_plot()`](https://trinhdhk.github.io/joinme/reference/plot_helpers.html),
+and
+[`cumhaz_plot()`](https://trinhdhk.github.io/joinme/reference/cumhaz_plot.html)
 route to the corresponding fitted or predicted trajectory plot.
 
-[`association_plot()`](https://rdrr.io/pkg/joinme/man/association_plot.html)
+[`association_plot()`](https://trinhdhk.github.io/joinme/reference/association_plot.html)
 exposes the fitted association-curve display for `JoiNMeFit` objects.
 
-[`diagnostic_plot()`](https://rdrr.io/pkg/joinme/man/diagnostic_plot.html)
+[`diagnostic_plot()`](https://trinhdhk.github.io/joinme/reference/diagnostic_plot.html)
 exposes the scalar and running sampler diagnostics for `JoiNMeFit`
 objects.
 
-[`mcmc_plot()`](https://rdrr.io/pkg/joinme/man/mcmc_plot.html) applies
-bayesplot MCMC geometries to the renamed posterior draws returned by
+[`mcmc_plot()`](https://trinhdhk.github.io/joinme/reference/mcmc_plot.html)
+applies bayesplot MCMC geometries to the renamed posterior draws
+returned by
 [`draws()`](https://trinhdhk.github.io/joinme/reference/draws.md), which
 means the displayed parameter labels are the same user-facing names used
 by summaries and diagnostics.
@@ -68,12 +70,12 @@ mcmc_plot(
 - pars:
 
   Deprecated alias of `variable` for
-  [`mcmc_plot()`](https://rdrr.io/pkg/joinme/man/mcmc_plot.html).
+  [`mcmc_plot()`](https://trinhdhk.github.io/joinme/reference/mcmc_plot.html).
 
 - variable:
 
   Optional renamed posterior variable names for
-  [`mcmc_plot()`](https://rdrr.io/pkg/joinme/man/mcmc_plot.html).
+  [`mcmc_plot()`](https://trinhdhk.github.io/joinme/reference/mcmc_plot.html).
 
 - regex:
 

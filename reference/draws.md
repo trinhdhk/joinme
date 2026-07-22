@@ -28,7 +28,7 @@ Use `draws()` when you want:
   and regex-style variable filtering,
 
 - `bayesplot` directly, similar to
-  [`mcmc_plot()`](https://rdrr.io/pkg/joinme/man/mcmc_plot.html),
+  [`mcmc_plot()`](https://trinhdhk.github.io/joinme/reference/mcmc_plot.html),
 
 - a standard draws array/matrix/data frame rather than a
   component-specific extraction payload.
