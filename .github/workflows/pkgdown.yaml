@@ -21,7 +21,8 @@ jobs:
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       MAKEFLAGS: "-j1"
-      CXXFLAGS: "-O0"
+      CXXFLAGS: "-O1"
+      R_QUARTO_QUIET = FALSE
     permissions:
       contents: write
     steps:
@@ -29,7 +30,7 @@ jobs:
       - name: Increase swapfile
         run: |
           sudo swapoff -a
-          sudo fallocate -l 10G /swapfile
+          sudo fallocate -l 9G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
@@ -43,7 +44,7 @@ jobs:
         shell: bash
         run: |
           echo "MAKEFLAGS=-j1" >> ~/.Renviron
-          echo "CXXFLAGS+=-O0" >> ~/.Renviron
+          echo "CXXFLAGS+=-O1" >> ~/.Renviron
           cat ~/.Renviron
 
       - uses: r-lib/actions/setup-r-dependencies@v2
