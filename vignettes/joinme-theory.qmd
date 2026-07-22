@@ -25,15 +25,15 @@ knitr::opts_chunk$set(
   fig.height = 4
 )
 options(width = 80)
-if (requireNamespace("JoiNMe", quietly = TRUE)) {
-  library(JoiNMe)
+if (requireNamespace("joinme", quietly = TRUE)) {
+  library(joinme)
 }
 library(dplyr)
 ```
 
 # Abstract
 
-The `JoiNMe` package provides a Bayesian framework for joint analysis of
+The `joinme` package provides a Bayesian framework for joint analysis of
 multivariate longitudinal biomarkers and time-to-event outcomes. The longitudinal
 process is expressed through a layered random-effects decomposition that separates
 subject-level signals, marker-level deviations, and marker-by-subject departures.

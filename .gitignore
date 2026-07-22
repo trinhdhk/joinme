@@ -66,4 +66,5 @@ notes/
 
 # rstan crap
 src/
+sim/
 tests/local/*.png

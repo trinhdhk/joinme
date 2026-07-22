@@ -60,7 +60,7 @@ NULL
 #' @param ci_levels Numeric vector of credible interval levels for plotting.
 #' Must be strictly between 0 and 1.
 #' @param tmax Numeric scalar. The maximum time used for scaling during model fitting.
-#' **CRITICAL**: If this is not provided and cannot be inferred from the object, predictions will be on the wrong time scale.
+#' If this is not provided and cannot be inferred from the object, predictions will be on the wrong time scale.
 #' @param control Named list for prediction configuration.
 #'   - cmdstanr::model$sample() arguments (e.g., `chains`, `parallel_chains`,
 #'     `iter_warmup`, `iter_sampling`, `seed`, `refresh`, `adapt_delta`).

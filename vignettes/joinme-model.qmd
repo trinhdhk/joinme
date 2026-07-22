@@ -25,15 +25,15 @@ knitr::opts_chunk$set(
   fig.height = 4
 )
 options(width = 80)
-if (requireNamespace("JoiNMe", quietly = TRUE)) {
-  library(JoiNMe)
+if (requireNamespace("joinme", quietly = TRUE)) {
+  library(joinme)
 }
 library(dplyr)
 ```
 
 # Overview
 
-This document provides the formal technical specification for the `JoiNMe` package model structure. It details the precise matrix formulations, transformation logic, and the exact algorithms used by the underlying Stan engine. Ideally, this document serves as a reference for advanced methodologists or developers seeking to understand or extend the package internals.
+This document provides the formal technical specification for the `joinme` package model structure. It details the precise matrix formulations, transformation logic, and the exact algorithms used by the underlying Stan engine. Ideally, this document serves as a reference for advanced methodologists or developers seeking to understand or extend the package internals.
 
 # Mathematical formulation
 

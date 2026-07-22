@@ -218,7 +218,7 @@ simulate_joinme_joint_student_t_cvtotal <- function(
   for (i in seq_len(n_id)) {
     for (q in seq_len(Q_idm)) {
       lp <- alpha_L[q] + lambda_L[q] * z_L[i, q]
-      L_i[i, q, q] <- .softplus(lp)
+      L_i[i, q, q] <- softplus(lp)
     }
   }
 
@@ -946,7 +946,7 @@ simulate_joinme <- function(
       } else if (op == 23L) {
         stack[length(stack)] <- atanh(stack[length(stack)])
       } else if (op == 24L) {
-        stack[length(stack)] <- .softplus(stack[length(stack)])
+        stack[length(stack)] <- softplus(stack[length(stack)])
       } else if (op == 25L) {
         a <- stack[length(stack)]
         stack[length(stack)] <- sign(a) * abs(a)^(1 / 3)
@@ -1894,7 +1894,7 @@ simulate_joinme <- function(
       slope <- as.numeric(spec$slope %||% 0.25)
       fun <- function(t) {
         t <- as.numeric(t)
-        # .softplus(intercept + slope * pmax(t, 0))
+        # softplus(intercept + slope * pmax(t, 0))
         exp(intercept + slope * pmax(t, 0))
       }
       return(tag_truth(

@@ -6,11 +6,7 @@
 #' @name family_utils
 NULL
 
-# File overview:
-# - Map between family names and integer codes.
-# - Validate outcome ranges and parse transform compositions.
-
-#' Build a per-marker family specification
+#' JoiNMe longitudinal family specification
 #'
 #' @description
 #' Creates a family specification object for `joinme(..., families = ...)` with an
@@ -33,8 +29,9 @@ NULL
 #'   (e.g. `~ exp(x)`, `~ inv_logit(x)`, `~ probit(x)`).
 #'
 #' @return Object of class `"JoiNMe_family_spec"`.
+#' @aliases jm_family
 #' @export
-jm_family <- function(name, link = NULL, inv_link = NULL) {
+joinme_family <- jm_family <- function(name, link = NULL, inv_link = NULL) {
   fam_code <- .parse_family(name)
   fam_name <- .family_code_to_name(fam_code)
 

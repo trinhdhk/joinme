@@ -27,6 +27,7 @@
 #'   transform declarations immediately.
 #'
 #' @return An object of class `joinme_tf`.
+#' @aliases jm_tf
 #' @export
 #'
 #' @examples
@@ -37,7 +38,7 @@
 #'   cv_marker = list(type = "pwlin", x = c(-1, 0, 1), y = c(0.2, 1, 0.2))
 #' )
 #' print(tf)
-joinme_tf <- function(..., .validate = TRUE) {
+joinme_tf <- jm_tf <- function(..., .validate = TRUE) {
   args <- list(...)
   if (length(args) == 1L && is.null(names(args)) &&
       (inherits(args[[1]], "joinme_tf") || is.list(args[[1]]))) {
@@ -105,6 +106,7 @@ print.joinme_tf <- function(x, ...) {
 #'   declarations immediately.
 #'
 #' @return An object of class `joinme_priors`.
+#' @aliases jm_priors
 #' @export
 #'
 #' @examples
@@ -115,8 +117,8 @@ print.joinme_tf <- function(x, ...) {
 #'   lkj = 2
 #' )
 #' print(pri)
-joinme_priors <- function(beta = NULL, alpha = NULL, iota = NULL, lkj = NULL, .validate = TRUE) {
-  .normalise_joinme_priors_input(
+joinme_priors <- jm_priors <- function(beta = NULL, alpha = NULL, iota = NULL, lkj = NULL, .validate = TRUE) {
+  .joinme_priors_(
     list(beta = beta, alpha = alpha, iota = iota, lkj = lkj),
     validate = .validate
   )
@@ -160,6 +162,7 @@ print.joinme_priors <- function(x, ...) {
 #' @param degree Degree of spline basis for baseline hazard.
 #' @param formula Formula for baseline hazard when `type = "formula"`. Ignored otherwise.
 #' @return An object of class `joinme_basehaz`.
+#' @aliases jm_basehaz
 #' @export
 #' @examples
 #' basehaz_spec <- joinme_basehaz(
@@ -167,7 +170,7 @@ print.joinme_priors <- function(x, ...) {
 #'  n_knots = 5,
 #'  degree = 3
 #' )
-joinme_basehaz <- function(
+joinme_basehaz <- jm_basehaz <- function(
   type = c('bs', 'ns', 'formula'),
   n_knots = 5L,
   knots = NULL,
@@ -542,7 +545,7 @@ make_conditions <- function(x, ...) {
 }
 
 #' @keywords internal
-.normalise_joinme_priors_input <- function(priors = NULL, validate = TRUE) {
+.joinme_priors_ <- function(priors = NULL, validate = TRUE) {
   if (is.null(priors)) {
     priors <- list(beta = NULL, alpha = NULL, iota = NULL, lkj = NULL)
   }

@@ -280,7 +280,7 @@ joinme <- function(
     ))
   }
   transforms <- unclass(.normalise_joinme_tf_input(transforms, validate = FALSE))
-  priors <- unclass(.normalise_joinme_priors_input(priors, validate = TRUE))
+  priors <- unclass(.joinme_priors_(priors, validate = TRUE))
 
   if (length(control) > 0 && is.null(names(control))) {
     cli::cli_abort(c(
@@ -301,7 +301,7 @@ joinme <- function(
   )
   assertthat::assert_that(
     inherits(basehaz, "joinme_basehaz"),
-    msg = "{.arg basehaz} must be a {.cls joinme_basehaz} object, created by {.fn joinme_basehaz()}."
+    msg = "{.arg basehaz} must be a {.cls joinme_basehaz} object, created by {.fn joinme_basehaz()} or {.fn jm_basehaz()}."
   )
 
   arg_list <- list(...)

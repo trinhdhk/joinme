@@ -198,7 +198,7 @@ fit <- joinme(
   assoc = c("cv_total"),
   families = "student_t",
   transforms = joinme_tf(cv_total = "identity"),
-  basehaz = 'bs', 
+  basehaz = joinme_basehaz('bs'), 
   control = list(
     engine = "rstan",
     chains = 1,

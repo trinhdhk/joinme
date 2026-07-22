@@ -1447,7 +1447,7 @@ gk_quadrature <- function(nodes = 15L) {
   if (identical(diag_link, "exp")) {
     return(exp(lp))
   }
-  .softplus(lp)
+  softplus(lp)
 }
 
 #' Invert the covariance-regression diagonal link

@@ -45,10 +45,10 @@ test_that("legacy unary bytecode is normalised with implicit PUSH_X", {
   legacy_softplus <- .normalize_bytecode_program(bytecode = 24L, const_data = numeric(0))
 
   expect_equal(legacy_softplus$bytecode, c(0L, 24L))
-  expect_equal(eval_bytecode_scalar(2.5, legacy_softplus$bytecode, legacy_softplus$const_data), .softplus(2.5))
+  expect_equal(eval_bytecode_scalar(2.5, legacy_softplus$bytecode, legacy_softplus$const_data), softplus(2.5))
   expect_equal(
     eval_bytecode_vector(c(-2, 0, 3), 24L, numeric(0)),
-    .softplus(c(-2, 0, 3))
+    softplus(c(-2, 0, 3))
   )
 })
 
@@ -68,6 +68,6 @@ test_that("bytecode evaluator applies per-node affine shifts", {
     op_iota_slope_idx = bc$op_iota_slope_idx
   )
 
-  expected <- .softplus(-0.2 + 0.8 * stats::plogis(0.4 + 1.5 * 0.3))
+  expected <- softplus(-0.2 + 0.8 * stats::plogis(0.4 + 1.5 * 0.3))
   expect_equal(val, expected)
 })

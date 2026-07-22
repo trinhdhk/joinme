@@ -31,7 +31,7 @@ repo_root <- normalizePath(if (dir.exists("R")) "." else "..", mustWork = FALSE)
 if (requireNamespace("devtools", quietly = TRUE) && file.exists(file.path(repo_root, "DESCRIPTION"))) {
   devtools::load_all(repo_root, quiet = TRUE)
 } else {
-  try(base::attachNamespace("JoiNMe"), silent = TRUE)
+  try(base::attachNamespace("joinme"), silent = TRUE)
 }
 
 options(stan_preferred_engine = "cmdstanr")
@@ -39,10 +39,8 @@ options(stan_preferred_engine = "cmdstanr")
 
 # Purpose and Reproducibility
 
-This vignette demonstrates the usage of `JoiNMe` with multiple scenarios,
-including **data simulation**, **model fitting**, **diagnostic interpretation**,
-**dynamic prediction**, **plotting**, and **threaded computation**. Each block is
-designed to be reproducible and to illustrate a specific modelling choice.
+This vignette demonstrates the usage of `joinme` with multiple scenarios, including **data simulation**, **model fitting**, **diagnostic interpretation**,
+**dynamic prediction**, **plotting**, and **threaded computation**. Each block is designed to be reproducible and to illustrate a specific modelling choice.
 
 For the methodological background, see the theory vignette in [joinme-theory.html](joinme-theory.html).
 
@@ -233,7 +231,7 @@ draws(fit, variables = c("time", "alpha_cv_total"), format = "draws_df")
 mcmc_plot(fit, variable = c("time", "alpha_cv_total"), type = "trace")
 ```
 
-## RSS for fitted trajectories
+## Residual sum of squares for fitted trajectories
 
 The `JoiNMeDynPred` object includes fitted values for observed history. We compute a **residual sum of squares** (RSS) on the expected-response scale (`epred`).
 

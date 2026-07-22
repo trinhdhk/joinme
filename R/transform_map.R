@@ -531,7 +531,7 @@ eval_bytecode_scalar <- function(
     } else if (op == 23L) {
       stack[length(stack)] <- atanh(resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx))
     } else if (op == 24L) {
-      stack[length(stack)] <- .softplus(resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx))
+      stack[length(stack)] <- softplus(resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx))
     } else if (op == 25L) {
       a <- resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx)
       stack[length(stack)] <- sign(a) * abs(a)^(1 / 3)
