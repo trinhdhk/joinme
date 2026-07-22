@@ -2,6 +2,7 @@
 % Please edit documentation in R/specs.R
 \name{joinme_basehaz}
 \alias{joinme_basehaz}
+\alias{jm_basehaz}
 \title{Build specs for baseline hazard}
 \usage{
 joinme_basehaz(

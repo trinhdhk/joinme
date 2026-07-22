@@ -2,6 +2,7 @@
 % Please edit documentation in R/specs.R
 \name{joinme_tf}
 \alias{joinme_tf}
+\alias{jm_tf}
 \title{Declare association transformations with validation}
 \usage{
 joinme_tf(..., .validate = TRUE)

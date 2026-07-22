@@ -84,7 +84,7 @@ subject entry time.}
 \code{times} is NULL. The default is \code{tmax}.}
 
 \item{tmax}{Numeric scalar. The maximum time used for scaling during model fitting.
-\strong{CRITICAL}: If this is not provided and cannot be inferred from the object, predictions will be on the wrong time scale.}
+If this is not provided and cannot be inferred from the object, predictions will be on the wrong time scale.}
 
 \item{ci_levels}{Numeric vector of credible interval levels for plotting.
 Must be strictly between 0 and 1.}

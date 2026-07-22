@@ -2,6 +2,7 @@
 % Please edit documentation in R/specs.R
 \name{joinme_priors}
 \alias{joinme_priors}
+\alias{jm_priors}
 \title{Declare priors with validation}
 \usage{
 joinme_priors(
