@@ -12,7 +12,7 @@
  *
  * @param now Values at current time t (vector of length K).
  * @param fwd Values at time t + eps (vector of length K).
- * @param eps Finite difference step size (must be > 0).
+ * @param eps Positive finite difference step size.
  * @return Vector of approximated slopes (length K).
  */
 vector eta_fd(vector now, vector fwd, real eps) {

@@ -1,5 +1,5 @@
   /**
-   * @brief Time-scaled coefficient vectors and derived random effects for both longitudinal and survival models.
+  * @brief Time-scaled coefficient vectors and derived random effects for both longitudinal and survival models.
    *
    * This block constructs:
    * 1. Scaled versions of fixed and random effect SDs where time transformations are applied
@@ -31,11 +31,14 @@
         tau_v_scaled[idx_time_vmk[k]] = tau_v[idx_time_vmk[k]] * tmax;
     }
   }
-  
-  vector[Q_idm] tau_w_scaled = tau_w;
-  if (n_time_widm > 0) {
-    for (k in 1 : n_time_widm) 
-      tau_w_scaled[idx_time_widm[k]] = tau_w[idx_time_widm[k]] * tmax;
+
+  // Marker-by-id covariance regression is parameterised on the original-time
+  // scale. We only row-scale time-indexed marker-by-id coefficients when they
+  // are paired with the scaled-time longitudinal design matrices.
+  vector[Q_idm] row_scale_idm = rep_vector(1.0, Q_idm);
+  if (n_time_idm > 0) {
+    for (k in 1 : n_time_idm)
+      row_scale_idm[idx_time_idm[k]] = tmax;
   }
   
   /* -------------------- id RE covariance */
@@ -62,69 +65,110 @@
       v_marker[d] = L_v * z_v[d];
   }
   
-  /* -------------------- marker-by-id latent covariance */
-  matrix[Q_idm, Q_idm] L_w; // Cholesky factor for marker-id latents
-  if (indep_marker_byid_latent_re == 1) 
-    L_w = diag_matrix(tau_w_scaled);
-  else 
-    L_w = diag_pre_multiply(tau_w_scaled, Lcorr_w);
-  
-  /* Construct z_w[i,d], optionally cross-correlated with v_marker[d] */
-  array[n_id, D] vector[Q_idm] z_w; // latent marker-id effects after correlation
+  /* -------------------- marker-by-id latent effects */
+  // The marker-by-id latent seeds are now always iid standard normal.
+  // Baseline covariance and subject-specific covariance changes are both
+  // encoded by L_i below, which avoids a redundant global covariance layer.
+  // Optional cross-correlation with marker-level effects is still added here
+  // before the subject-specific covariance scaling is applied.
+  array[n_id, D] vector[Q_idm] z_w; // latent marker-id effects after optional cross-correlation
   for (i in 1 : n_id) {
     for (d in 1 : D) {
       vector[Q_idm] cross = rep_vector(0.0, Q_idm);
       if (allow_marker_crosscorr == 1 && R_mk > 0)
         cross = B_cross * v_marker[d];
-      z_w[i, d] = cross + L_w * z_w_lat[i, d];
+      z_w[i, d] = cross + z_w_lat[i, d];
     }
   }
   
-  /* -------------------- id random effect for covariance regression */
-  vector[n_id] u_L; // latent scalar per subject for covariance regression
-  for (i in 1 : n_id) 
-    u_L[i] = tau_L * z_L[i];
-  
-  /* -------------------- id-specific Cholesky factors L_i */
-  array[n_id] matrix[Q_idm, Q_idm] L_i; // subject-specific Cholesky factor
+  /* -------------------- id-specific Cholesky factors L_i = SD_i * K_i */
+  array[n_id] matrix[Q_idm, Q_idm] L_i; // subject-specific covariance Cholesky factor
   for (i in 1 : n_id) {
     matrix[Q_idm, Q_idm] Li = rep_matrix(0.0, Q_idm, Q_idm); // local accumulator
+    vector[Q_idm] sd_i = rep_vector(1.0, Q_idm); // subject-specific standard deviations
+    int m_pos = 1;
+
+    // Step 1: reconstruct the subject-specific SD regression on the diagonal.
     for (m in 1 : M_cov) {
       int r = r_idx[m];
       int c = c_idx[m];
-      real lp = alpha_L[m] + dot_product(beta_L[m], to_vector(Xcov[i]'))
-            + lambda_L[m] * u_L[i]; // linear predictor for L_i element
       if (r == c) {
-        Li[r, c] = (corr_diag_link == 1) ? exp(lp) : log1p_exp(lp);
-      } else {
-        Li[r, c] = lp;
+        real lp = alpha_L[m] + dot_product(beta_L[m], to_vector(Xcov[i]'))
+          + lambda_L[m] * z_L[i][m];
+        sd_i[r] = (vcov_diag_link == 1) ? exp(lp) : log1p_exp(lp);
       }
     }
+
+    // Step 2: rebuild the Cholesky-correlation rows from tanh-linked
+    // row-specific partial correlations. This keeps K_i valid for every subject.
+    for (r in 1 : Q_idm) {
+      if (r == 1) {
+        Li[1, 1] = sd_i[1];
+        if (indep_idmarker_cov == 0)
+          m_pos += 1;
+      } else if (indep_idmarker_cov == 1) {
+        Li[r, r] = sd_i[r];
+        m_pos += 1;
+      } else {
+        real scale_prod = 1.0;
+        for (c in 1 : r) {
+          if (c < r) {
+            real lp = alpha_L[m_pos] + dot_product(beta_L[m_pos], to_vector(Xcov[i]'))
+              + lambda_L[m_pos] * z_L[i][m_pos];
+            real z_rc = tanh(lp);
+            Li[r, c] = sd_i[r] * scale_prod * z_rc;
+            scale_prod *= sqrt(fmax(1e-12, 1.0 - square(z_rc)));
+          } else {
+            Li[r, r] = sd_i[r] * scale_prod;
+          }
+          m_pos += 1;
+        }
+      }
+    }
+
     L_i[i] = Li;
   }
   
-  /* -------------------- marker-by-id scaled effects: w_idscaled[i,d] = L_i[i] * z_w[i,d] */
-  array[n_id, D] vector[Q_idm] w_idscaled; // scaled marker-id effects
-  for (i in 1 : n_id)
+  /* -------------------- marker-by-id scaled effects: w_idm[i,d] = L_i_eff[i] * z_w[i,d] */
+  array[n_id, D] vector[Q_idm] w_idm; // scaled marker-id effects
+  for (i in 1 : n_id) {
+    matrix[Q_idm, Q_idm] L_i_eff = diag_pre_multiply(row_scale_idm, L_i[i]);
     for (d in 1 : D)
-      w_idscaled[i, d] = L_i[i] * z_w[i, d];
+      w_idm[i, d] = L_i_eff * z_w[i, d];
+  }
   
   /* -------------------- marker weights (signed) */
   // Goal:
   // - Allow positive and negative marker contributions.
-  // - Keep perturbation model simple and directly interpretable.
-  // - No normalisation is applied; raw weights are used directly.
-  // Rule:
-  // - Start from signed base weights (provided from standata) as a prior offset.
-  // - If estimation is enabled, add a signed standard-normal perturbation z.
-  // - Map to effective weights via w_raw (no normalisation).
-  // - Interpret marker_weights_eff as marker-intensity multipliers for association.
-  vector[D] marker_weights_eff; // effective signed marker weights
+  // - Support either one shared marker-weight structure across all weighted
+  //   marker-based association terms or one structure per active term.
+  // - Keep perturbation model directly interpretable by adding signed latent
+  //   perturbations to the supplied base weights.
+  matrix[n_marker_weight_sets, D] z_marker_weight_sets = rep_matrix(0.0, n_marker_weight_sets, D);
+  vector[D] marker_weights_eff_cv_total = marker_weights_cv_total;
+  vector[D] marker_weights_eff_cs_total = marker_weights_cs_total;
+  vector[D] marker_weights_eff_cv_marker = marker_weights_cv_marker;
+  vector[D] marker_weights_eff_cs_marker = marker_weights_cs_marker;
   {
     if (estimate_marker_weights == 1 && use_marker_weight_assoc == 1) {
-      marker_weights_eff = marker_weights + z_marker_weights;
-    } else {
-      marker_weights_eff = marker_weights;
+      for (s in 1:n_marker_weight_sets) {
+        int start_pos = (s - 1) * D + 1;
+        int end_pos = s * D;
+        z_marker_weight_sets[s] = to_row_vector(z_marker_weights[start_pos:end_pos]);
+      }
+    }
+
+    if (assoc_cv_total == 1 && marker_weight_set_cv_total > 0) {
+      marker_weights_eff_cv_total = marker_weights_cv_total + to_vector(z_marker_weight_sets[marker_weight_set_cv_total]);
+    }
+    if (assoc_cs_total == 1 && marker_weight_set_cs_total > 0) {
+      marker_weights_eff_cs_total = marker_weights_cs_total + to_vector(z_marker_weight_sets[marker_weight_set_cs_total]);
+    }
+    if (assoc_cv_marker == 1 && marker_weight_set_cv_marker > 0) {
+      marker_weights_eff_cv_marker = marker_weights_cv_marker + to_vector(z_marker_weight_sets[marker_weight_set_cv_marker]);
+    }
+    if (assoc_cs_marker == 1 && marker_weight_set_cs_marker > 0) {
+      marker_weights_eff_cs_marker = marker_weights_cs_marker + to_vector(z_marker_weight_sets[marker_weight_set_cs_marker]);
     }
   }
 
@@ -142,7 +186,8 @@
   //   without any divide-by-a-nearly-zero normalisation step.
   vector[n_coeff_cv] coeff_cv_eff = coeff_cv;
   vector[n_coeff_cs] coeff_cs_eff = coeff_cs;
-  vector[n_coeff_corr] coeff_corr_eff = coeff_corr;
+  matrix[M_corr, n_coeff_corr] coeff_corr_eff = coeff_corr;
+  matrix[M_vcov, n_coeff_vcov] coeff_vcov_eff = coeff_vcov;
   vector[n_coeff_cv_mean] coeff_cv_mean_eff = coeff_cv_mean;
   vector[n_coeff_cv_marker] coeff_cv_marker_eff = coeff_cv_marker;
   vector[n_coeff_cs_mean] coeff_cs_mean_eff = coeff_cs_mean;
@@ -159,9 +204,18 @@
     for (j in 2:n_coeff_cs) coeff_cs_eff[j] = coeff_cs_eff[j - 1] + delta[j - 1];
   }
   if (estimate_spline_corr == 1 && n_coeff_corr > 1 && n_free_spline_corr == n_coeff_corr - 1) {
-    vector[n_coeff_corr - 1] delta = softmax(z_spline_corr);
-    coeff_corr_eff[1] = 0;
-    for (j in 2:n_coeff_corr) coeff_corr_eff[j] = coeff_corr_eff[j - 1] + delta[j - 1];
+    for (m in 1:M_corr) {
+      vector[n_coeff_corr - 1] delta = softmax(to_vector(row(z_spline_corr, m)));
+      coeff_corr_eff[m, 1] = 0;
+      for (j in 2:n_coeff_corr) coeff_corr_eff[m, j] = coeff_corr_eff[m, j - 1] + delta[j - 1];
+    }
+  }
+  if (estimate_spline_vcov == 1 && n_coeff_vcov > 1 && n_free_spline_vcov == n_coeff_vcov - 1) {
+    for (m in 1:M_vcov) {
+      vector[n_coeff_vcov - 1] delta = softmax(to_vector(row(z_spline_vcov, m)));
+      coeff_vcov_eff[m, 1] = 0;
+      for (j in 2:n_coeff_vcov) coeff_vcov_eff[m, j] = coeff_vcov_eff[m, j - 1] + delta[j - 1];
+    }
   }
   if (estimate_spline_cv_mean == 1 && n_coeff_cv_mean > 1 && n_free_spline_cv_mean == n_coeff_cv_mean - 1) {
     vector[n_coeff_cv_mean - 1] delta = softmax(z_spline_cv_mean);
@@ -183,6 +237,41 @@
     coeff_cs_marker_eff[1] = 0;
     for (j in 2:n_coeff_cs_marker) coeff_cs_marker_eff[j] = coeff_cs_marker_eff[j - 1] + delta[j - 1];
   }
+
+  /* -------------------- fit-only affine shift for functional transforms */
+  vector[estimate_iota_intercept_cv] iota_intercept_cv_eff = rep_vector(0, estimate_iota_intercept_cv);
+  vector[estimate_iota_slope_cv] iota_slope_cv_eff = rep_vector(1, estimate_iota_slope_cv);
+  vector[estimate_iota_intercept_cs] iota_intercept_cs_eff = rep_vector(0, estimate_iota_intercept_cs);
+  vector[estimate_iota_slope_cs] iota_slope_cs_eff = rep_vector(1, estimate_iota_slope_cs);
+  vector[M_corr * estimate_iota_intercept_corr] iota_intercept_corr_eff = rep_vector(0, M_corr * estimate_iota_intercept_corr);
+  vector[M_corr * estimate_iota_slope_corr] iota_slope_corr_eff = rep_vector(1, M_corr * estimate_iota_slope_corr);
+  vector[M_vcov * estimate_iota_intercept_vcov] iota_intercept_vcov_eff = rep_vector(0, M_vcov * estimate_iota_intercept_vcov);
+  vector[M_vcov * estimate_iota_slope_vcov] iota_slope_vcov_eff = rep_vector(1, M_vcov * estimate_iota_slope_vcov);
+  vector[estimate_iota_intercept_cv_mean] iota_intercept_cv_mean_eff = rep_vector(0, estimate_iota_intercept_cv_mean);
+  vector[estimate_iota_slope_cv_mean] iota_slope_cv_mean_eff = rep_vector(1, estimate_iota_slope_cv_mean);
+  vector[estimate_iota_intercept_cv_marker] iota_intercept_cv_marker_eff = rep_vector(0, estimate_iota_intercept_cv_marker);
+  vector[estimate_iota_slope_cv_marker] iota_slope_cv_marker_eff = rep_vector(1, estimate_iota_slope_cv_marker);
+  vector[estimate_iota_intercept_cs_mean] iota_intercept_cs_mean_eff = rep_vector(0, estimate_iota_intercept_cs_mean);
+  vector[estimate_iota_slope_cs_mean] iota_slope_cs_mean_eff = rep_vector(1, estimate_iota_slope_cs_mean);
+  vector[estimate_iota_intercept_cs_marker] iota_intercept_cs_marker_eff = rep_vector(0, estimate_iota_intercept_cs_marker);
+  vector[estimate_iota_slope_cs_marker] iota_slope_cs_marker_eff = rep_vector(1, estimate_iota_slope_cs_marker);
+
+  if (estimate_iota_intercept_cv > 0) iota_intercept_cv_eff = iota_scale * z_iota_intercept_cv;
+  if (estimate_iota_slope_cv > 0) iota_slope_cv_eff = iota_scale * z_iota_slope_cv;
+  if (estimate_iota_intercept_cs > 0) iota_intercept_cs_eff = iota_scale * z_iota_intercept_cs;
+  if (estimate_iota_slope_cs > 0) iota_slope_cs_eff = iota_scale * z_iota_slope_cs;
+  if (estimate_iota_intercept_corr > 0 && M_corr > 0) iota_intercept_corr_eff = iota_scale * z_iota_intercept_corr;
+  if (estimate_iota_slope_corr > 0 && M_corr > 0) iota_slope_corr_eff = iota_scale * z_iota_slope_corr;
+  if (estimate_iota_intercept_vcov > 0 && M_vcov > 0) iota_intercept_vcov_eff = iota_scale * z_iota_intercept_vcov;
+  if (estimate_iota_slope_vcov > 0 && M_vcov > 0) iota_slope_vcov_eff = iota_scale * z_iota_slope_vcov;
+  if (estimate_iota_intercept_cv_mean > 0) iota_intercept_cv_mean_eff = iota_scale * z_iota_intercept_cv_mean;
+  if (estimate_iota_slope_cv_mean > 0) iota_slope_cv_mean_eff = iota_scale * z_iota_slope_cv_mean;
+  if (estimate_iota_intercept_cv_marker > 0) iota_intercept_cv_marker_eff = iota_scale * z_iota_intercept_cv_marker;
+  if (estimate_iota_slope_cv_marker > 0) iota_slope_cv_marker_eff = iota_scale * z_iota_slope_cv_marker;
+  if (estimate_iota_intercept_cs_mean > 0) iota_intercept_cs_mean_eff = iota_scale * z_iota_intercept_cs_mean;
+  if (estimate_iota_slope_cs_mean > 0) iota_slope_cs_mean_eff = iota_scale * z_iota_slope_cs_mean;
+  if (estimate_iota_intercept_cs_marker > 0) iota_intercept_cs_marker_eff = iota_scale * z_iota_intercept_cs_marker;
+  if (estimate_iota_slope_cs_marker > 0) iota_slope_cs_marker_eff = iota_scale * z_iota_slope_cs_marker;
 
   /* -------------------- marker averages for survival association (unweighted mean across markers) */
   // For transformed marker-aggregated CV terms, signed marker weights are applied
@@ -210,41 +299,52 @@
   
   array[n_id] vector[Q_idm] wbar_i; // scaled weighted mean per subject
   for (i in 1 : n_id)
-    wbar_i[i] = L_i[i] * zbar[i];
+    wbar_i[i] = diag_pre_multiply(row_scale_idm, L_i[i]) * zbar[i];
   
   /* -------------------- Effective association coefficients (flags applied) */
   // Non-centred association construction with flexible sign constraints:
-  // if any marker-weight-involving association is active, only the first
-  // active latent in the order (cv_total, cs_total, cv_marker, cs_marker)
-  // is constrained positive; all others remain unconstrained.
-  real z_alpha_cv_total_eff = z_alpha_cv_total;
-  real z_alpha_cs_total_eff = z_alpha_cs_total;
-  real z_alpha_cv_marker_eff = z_alpha_cv_marker;
-  real z_alpha_cs_marker_eff = z_alpha_cs_marker;
+  // - when weighted marker-based association terms share one marker-weight
+  //   structure, only the first active weighted term is constrained positive;
+  // - when weighted marker-based association terms use separate weight
+  //   structures, every active weighted term is constrained positive.
+  real z_alpha_cv_total_constrained = z_alpha_cv_total;
+  real z_alpha_cs_total_constrained = z_alpha_cs_total;
+  real z_alpha_cv_marker_constrained = z_alpha_cv_marker;
+  real z_alpha_cs_marker_constrained = z_alpha_cs_marker;
 
   if ((assoc_cv_total + assoc_cs_total + assoc_cv_marker + assoc_cs_marker) > 0) {
-    if (assoc_cv_total == 1) {
-      z_alpha_cv_total_eff = abs(z_alpha_cv_total);
-    } else if (assoc_cs_total == 1) {
-      z_alpha_cs_total_eff = abs(z_alpha_cs_total);
-    } else if (assoc_cv_marker == 1) {
-      z_alpha_cv_marker_eff = abs(z_alpha_cv_marker);
-    } else if (assoc_cs_marker == 1) {
-      z_alpha_cs_marker_eff = abs(z_alpha_cs_marker);
+    if (shared_marker_weights == 1) {
+      if (assoc_cv_total == 1) {
+        z_alpha_cv_total_constrained = abs(z_alpha_cv_total);
+      } else if (assoc_cs_total == 1) {
+        z_alpha_cs_total_constrained = abs(z_alpha_cs_total);
+      } else if (assoc_cv_marker == 1) {
+        z_alpha_cv_marker_constrained = abs(z_alpha_cv_marker);
+      } else if (assoc_cs_marker == 1) {
+        z_alpha_cs_marker_constrained = abs(z_alpha_cs_marker);
+      }
+    } else {
+      if (assoc_cv_total == 1) z_alpha_cv_total_constrained = abs(z_alpha_cv_total);
+      if (assoc_cs_total == 1) z_alpha_cs_total_constrained = abs(z_alpha_cs_total);
+      if (assoc_cv_marker == 1) z_alpha_cv_marker_constrained = abs(z_alpha_cv_marker);
+      if (assoc_cs_marker == 1) z_alpha_cs_marker_constrained = abs(z_alpha_cs_marker);
     }
   }
 
-  real alpha_cv_total = z_alpha_cv_total_eff * sd_alpha_cv_total;
-  real alpha_cs_total = z_alpha_cs_total_eff * sd_alpha_cs_total;
-  real alpha_cv_mean = z_alpha_cv_mean * sd_alpha_cv_mean;
-  real alpha_cs_mean = z_alpha_cs_mean * sd_alpha_cs_mean;
-  real alpha_cv_marker = z_alpha_cv_marker_eff * sd_alpha_cv_marker;
-  real alpha_cs_marker = z_alpha_cs_marker_eff * sd_alpha_cs_marker;
+  real alpha_cv_total_scaled = z_alpha_cv_total_constrained * sd_alpha_cv_total;
+  real alpha_cs_total_scaled = z_alpha_cs_total_constrained * sd_alpha_cs_total;
+  real alpha_cv_mean_scaled = z_alpha_cv_mean * sd_alpha_cv_mean;
+  real alpha_cs_mean_scaled = z_alpha_cs_mean * sd_alpha_cs_mean;
+  real alpha_cv_marker = z_alpha_cv_marker_constrained * sd_alpha_cv_marker;
+  real alpha_cs_marker = z_alpha_cs_marker_constrained * sd_alpha_cs_marker;
+  vector[M_corr] alpha_corr_scaled = s_corr * z_alpha_corr;
+  vector[M_vcov] alpha_vcov_scaled = s_vcov * z_alpha_vcov;
 
-  real a_cv_total = assoc_cv_total * alpha_cv_total; // total CV coefficient
-  real a_cs_total = assoc_cs_total * alpha_cs_total; // total CS coefficient
-  real a_cv_mean = assoc_cv_mean * alpha_cv_mean;    // mean CV coefficient
+  real a_cv_total = assoc_cv_total * alpha_cv_total_scaled; // total CV coefficient
+  real a_cs_total = assoc_cs_total * alpha_cs_total_scaled; // total CS coefficient
+  real a_cv_mean = assoc_cv_mean * alpha_cv_mean_scaled;    // mean CV coefficient
   real a_cv_marker = assoc_cv_marker * alpha_cv_marker; // marker CV coefficient
-  real a_cs_mean = assoc_cs_mean * alpha_cs_mean;    // mean CS coefficient
+  real a_cs_mean = assoc_cs_mean * alpha_cs_mean_scaled;    // mean CS coefficient
   real a_cs_marker = assoc_cs_marker * alpha_cs_marker; // marker CS coefficient
-  vector[M_corr] a_corr = assoc_corr * alpha_corr; // corr correlation coefficients
+  vector[M_corr] a_corr = assoc_corr * alpha_corr_scaled; // corr coefficients used in the hazard
+  vector[M_vcov] a_vcov = assoc_vcov * alpha_vcov_scaled; // vcov coefficients used in the hazard

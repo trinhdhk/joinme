@@ -1,4 +1,4 @@
 library(testthat)
-library(joinme)
+library(JoiNMe)
 
 test_check("joinme")

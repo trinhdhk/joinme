@@ -1,43 +1,48 @@
 Package: joinme
 Type: Package
-Title: Joint Mixed-Effects (JoinME) Model for Multivariate Longitudinal and Survival Data
-Version: 0.0.0.9000
+Title: Joint Nested Mixed-Effects (JoiNMe) Model for Multivariate Longitudinal and Survival Data
+Version: 0.0.1.2608
 Author: Trinh Dong <trinh.dong@ncl.ac.uk>
 Maintainer: Trinh Dong <trinh.dong@ncl.ac.uk>
 Description: Bayesian joint models linking multivariate longitudinal markers with
     time-to-event outcomes using Stan. Supports mixed families, association
     transforms, covariance regression, and dynamic prediction.
-URL: https://trinhdhk.github.io/joinme
+URL: https://trinhdhk.github.io/joinme, https://trinhdhk.github.io/joinme/
 License: GPL-3
 Encoding: UTF-8
 LazyData: true
 Depends:
     R (>= 4.2.0),
+    data.table,
     lme4
 Imports:
-    R6,
-    methods,
-    Rcpp (>= 0.12.0),
-    RcppParallel (>= 5.0.1),
-    rstan (>= 2.18.1),
-    rstantools (>= 2.6.0),
     assertthat,
-    matrixStats,
+    bayesplot,
+    bridgesampling,
+    brms,
     cli,
     dplyr,
+    ggplot2,
+    latex2exp,
+    loo,
+    matrixStats,
+    methods,
     posterior,
+    R6,
+    Rcpp (>= 0.12.0),
+    RcppParallel (>= 5.0.1),
     reformulas,
     rlang,
+    rstan (>= 2.18.1),
+    rstantools (>= 2.6.0),
     splines,
     splines2,
-    survival,
+    StanHeaders,
     stats,
-    bridgesampling,
-    ggplot2,
+    survival,
+    tidytable,
     utils,
-    loo,
-    bayesplot,
-    brms
+    V8
 Suggests:
     knitr,
     quarto,
@@ -47,8 +52,9 @@ Suggests:
     patchwork,
     rmarkdown,
     testthat,
-    devtools,
-    pkgdown
+    devtools,  
+    pkgdown,
+    quarto
 LinkingTo: 
     BH (>= 1.66.0),
     Rcpp (>= 0.12.0),
@@ -57,8 +63,7 @@ LinkingTo:
     rstan (>= 2.18.1),
     StanHeaders (>= 2.18.0)
 VignetteBuilder: quarto
-SystemRequirements: 
-    Quarto (>= 1.2),
-    GNU make
+SystemRequirements: GNU make
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.3
+Config/roxygen2/version: 8.0.0
+Biarch: true

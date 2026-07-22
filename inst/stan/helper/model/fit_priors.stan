@@ -1,5 +1,5 @@
   /**
-   * @brief Prior distributions for all model parameters.
+  * @brief Prior distributions for all model parameters.
    *
    * Includes priors for:
    * - Fixed effects (beta) and distributional regression parameters
@@ -10,7 +10,7 @@
    */
 
   // -------------------- Basic outcome checks for discrete families
-  for (n in 1 : N) {
+  for (n in 1:N) {
     int fam = family_long[marker[n]]; // family for this marker
     if (fam == 3) {
       if (y_int[n] != 0 && y_int[n] != 1)
@@ -41,8 +41,8 @@
   beta_nu ~ student_t(6, 0, 1);
   beta_phi ~ student_t(6, 0, 1);
   beta_alpha ~ student_t(6, 0, 1);
-  beta_phi_beta ~ student_t(6, 0, 1);
-  beta_tau_sde ~ student_t(6, 0, 1);
+  beta_kappa ~ student_t(6, 0, 1);
+  beta_tau ~ student_t(6, 0, 1);
   /* Distributional random-effect scales + latent draws */
   for (j in 1 : n_re_sigma) { // sigma RE terms
     tau_sigma[j][1:K_sigma[j]] ~ exponential(1);
@@ -64,15 +64,15 @@
     for (g in 1 : G_alpha[j])
       target += re_weight_alpha[j][g] * std_normal_lpdf(to_vector(z_alpha[j][g, 1:K_alpha[j]]));
   }
-  for (j in 1 : n_re_phi_beta) { // phi_beta RE terms
-    tau_phi_beta[j][1:K_phi_beta[j]] ~ exponential(1);
-    for (g in 1 : G_phi_beta[j])
-      target += re_weight_phi_beta[j][g] * std_normal_lpdf(to_vector(z_phi_beta[j][g, 1:K_phi_beta[j]]));
+  for (j in 1 : n_re_kappa) { // kappa RE terms
+    tau_kappa[j][1:K_kappa[j]] ~ exponential(1);
+    for (g in 1 : G_kappa[j])
+      target += re_weight_kappa[j][g] * std_normal_lpdf(to_vector(z_kappa[j][g, 1:K_kappa[j]]));
   }
-  for (j in 1 : n_re_tau_sde) { // tau_sde RE terms
-    tau_tau_sde[j][1:K_tau_sde[j]] ~ exponential(1);
-    for (g in 1 : G_tau_sde[j])
-      target += re_weight_tau_sde[j][g] * std_normal_lpdf(to_vector(z_tau_sde[j][g, 1:K_tau_sde[j]]));
+  for (j in 1 : n_re_tau) { // tau RE terms
+    tau_tau[j][1:K_tau[j]] ~ exponential(1);
+    for (g in 1 : G_tau[j])
+      target += re_weight_tau[j][g] * std_normal_lpdf(to_vector(z_tau[j][g, 1:K_tau[j]]));
   }
   
   /* ID-level random effects (tau_u is ORIGINAL scale; internal scaling in transformed parameters) */
@@ -90,10 +90,10 @@
     to_vector(B_cross) ~ std_normal();
   }
   
-  /* Marker-by-id latent random effects (tau_w ORIGINAL scale) */
+  /* Marker-by-id latent random effects */
+  // These seeds are iid standard normal. Baseline covariance is carried by
+  // alpha_L rather than by a second global covariance layer.
   if (Q_idm > 0) {
-    tau_w ~ exponential(1);
-    Lcorr_w ~ lkj_corr_cholesky(lkj_eta);
     for (i in 1 : n_id)
       for (d in 1 : D)
         target += re_weight_idm[i] * std_normal_lpdf(z_w_lat[i, d]);
@@ -101,12 +101,12 @@
   
   /* Covariance regression priors */
   {
-    real corr_lp_scale = (corr_diag_link == 1) ? 0.2 : 0.3;
-    alpha_L ~ student_t(6, 0, corr_lp_scale);
+    real vcov_lp_scale = 1;
+    alpha_L ~ student_t(6, 0, vcov_lp_scale);
     for (m in 1 : M_cov) 
-      beta_L[m] ~ student_t(6, 0, corr_lp_scale);
-    tau_L ~ student_t(6, 0, corr_lp_scale);
-    lambda_L ~ student_t(6, 0, corr_lp_scale);
+      beta_L[m] ~ student_t(6, 0, vcov_lp_scale);
+    // lambda_L is constrained nonnegative; the sign alias is absorbed into z_L.
+    lambda_L ~ student_t(6, 0, vcov_lp_scale);
     for (i in 1 : n_id)
       target += re_weight_L[i] * std_normal_lpdf(z_L[i]);
   }
@@ -114,15 +114,22 @@
   /* Baseline hazard priors (per event type) */
   for (k_ev in 1 : K_event) { // event-specific baseline hazard
     // Intercept is encoded in the first basis column (constant 1s).
-    bs_gamma_c[k_ev][1] ~ normal(-3, alpha_scale);
+    // bs_gamma_c[k_ev][1] ~ normal(-3, alpha_scale);
+    bs_gamma_c[k_ev][1] ~ student_t(3, -5, 6);
     if (Kbs > 1)
-      bs_gamma_c[k_ev][2:Kbs] ~ normal(0, alpha_scale);
+      bs_gamma_c[k_ev][2:Kbs] ~ student_t(3, 0, alpha_scale);
     if (Kbs >= 4) // penalised spline second differences (exclude intercept)
       for (k in 4 : Kbs)
         target += normal_lpdf(
                               bs_gamma_c[k_ev][k] - 2 * bs_gamma_c[k_ev][k - 1]
                               + bs_gamma_c[k_ev][k - 2] | 0, tau_spline);
-    gamma_w[k_ev] ~ std_normal();
+    if (shrinkage == 1) {
+      gamma_w[k_ev] ~ double_exponential(0, alpha_scale);
+    } else if (shrinkage == 2) {
+      gamma_w[k_ev] ~ normal(0, alpha_scale);
+    } else {
+      gamma_w[k_ev] ~ student_t(6, 0, alpha_scale);
+    }
   }
   
   /* Distributional parameters (marker-specific + ordinal cutpoints) */
@@ -130,24 +137,30 @@
   nu_family ~ gamma(2, 1);
   phi_family ~ exponential(1);
   alpha_family ~ normal(0, 2);
-  phi_beta_family ~ exponential(1);
-  tau_sde_family ~ beta(2, 2);
+  kappa_family ~ exponential(1);
+  tau_family ~ beta(2, 2);
   cutpoints_ord ~ normal(0, 2);
   
   /* Association priors */
  
-  sd_alpha_cv_total ~ normal(0, 0.5);
-  sd_alpha_cs_total ~ normal(0, 0.5);
-  sd_alpha_cv_mean ~ normal(0, 0.5);
-  sd_alpha_cs_mean ~ normal(0, 0.5);
-  sd_alpha_cv_marker ~ normal(0, 0.5);
-  sd_alpha_cs_marker ~ normal(0, 0.5);
-  s_corr ~ normal(0, 0.5);
-  
+  sd_alpha_cv_total ~ exponential(1);
+  sd_alpha_cs_total ~ exponential(1);
+  sd_alpha_cv_mean ~ exponential(1);
+  sd_alpha_cs_mean ~ exponential(1);
+  sd_alpha_cv_marker ~ exponential(1);
+  sd_alpha_cs_marker ~ exponential(1);
+  // s_corr / s_vcov are global half-normal scales for covariance-style
+  // association coefficients. z_alpha_corr / z_alpha_vcov are standardized
+  // coefficient latents, and the effective hazard coefficients are defined in
+  // transformed parameters as s_* times those latents.
+  s_corr ~ exponential(1);
+  s_vcov ~ exponential(1);
+
   
   /* Shrinkage family switch for corr weights */
   if (shrinkage == 1) {
-    alpha_corr ~ double_exponential(0, 1);
+    z_alpha_corr ~ double_exponential(0, 1);
+    z_alpha_vcov ~ double_exponential(0, 1);
     z_alpha_cv_total ~ double_exponential(0, 1);
     z_alpha_cs_total ~ double_exponential(0, 1);
     z_alpha_cv_mean ~ double_exponential(0, 1);
@@ -156,8 +169,40 @@
     z_alpha_cs_marker ~ double_exponential(0, 1);
     // if (estimate_marker_weights == 1 && use_marker_weight_assoc == 1)
     z_marker_weights ~ double_exponential(0, 1);
+
+    /* Penalised monotone spline shape priors */
+    // Tight prior on the latent increment logits:
+    // - z = 0 implies equal increments,
+    // - expit(z) gives positive increments summing to 1,
+    // - smaller prior scale keeps the learned shape close to a smooth default
+    //   unless the data clearly support bends.
+    if (n_free_spline_cv > 0) z_spline_cv ~ double_exponential(0, 1);
+    if (n_free_spline_cs > 0) z_spline_cs ~ double_exponential(0, 1);
+    if (n_free_spline_corr > 0) to_vector(z_spline_corr) ~ double_exponential(0, 1);
+    if (n_free_spline_vcov > 0) to_vector(z_spline_vcov) ~ double_exponential(0, 1);
+    if (n_free_spline_cv_mean > 0) z_spline_cv_mean ~ double_exponential(0, 1);
+    if (n_free_spline_cv_marker > 0) z_spline_cv_marker ~ double_exponential(0, 1);
+    if (n_free_spline_cs_mean > 0) z_spline_cs_mean ~ double_exponential(0, 1);
+    if (n_free_spline_cs_marker > 0) z_spline_cs_marker ~ double_exponential(0, 1);
+    if (estimate_iota_intercept_cv > 0) z_iota_intercept_cv ~ std_normal();
+    if (estimate_iota_slope_cv > 0) z_iota_slope_cv ~ std_normal();
+    if (estimate_iota_intercept_cs > 0) z_iota_intercept_cs ~ std_normal();
+    if (estimate_iota_slope_cs > 0) z_iota_slope_cs ~ std_normal();
+    if (estimate_iota_intercept_corr > 0) z_iota_intercept_corr ~ std_normal();
+    if (estimate_iota_slope_corr > 0) z_iota_slope_corr ~ std_normal();
+    if (estimate_iota_intercept_vcov > 0) z_iota_intercept_vcov ~ std_normal();
+    if (estimate_iota_slope_vcov > 0) z_iota_slope_vcov ~ std_normal();
+    if (estimate_iota_intercept_cv_mean > 0) z_iota_intercept_cv_mean ~ std_normal();
+    if (estimate_iota_slope_cv_mean > 0) z_iota_slope_cv_mean ~ std_normal();
+    if (estimate_iota_intercept_cv_marker > 0) z_iota_intercept_cv_marker ~ std_normal();
+    if (estimate_iota_slope_cv_marker > 0) z_iota_slope_cv_marker ~ std_normal();
+    if (estimate_iota_intercept_cs_mean > 0) z_iota_intercept_cs_mean ~ std_normal();
+    if (estimate_iota_slope_cs_mean > 0) z_iota_slope_cs_mean ~ std_normal();
+    if (estimate_iota_intercept_cs_marker > 0) z_iota_intercept_cs_marker ~ std_normal();
+    if (estimate_iota_slope_cs_marker > 0) z_iota_slope_cs_marker ~ std_normal();
   } else if (shrinkage == 2) {
-    alpha_corr ~ std_normal();
+    z_alpha_corr ~ std_normal();
+    z_alpha_vcov ~ std_normal();
     z_alpha_cv_total ~ std_normal();
     z_alpha_cs_total ~ std_normal();
     z_alpha_cv_mean ~ std_normal();
@@ -166,23 +211,83 @@
     z_alpha_cs_marker ~ std_normal();
     // if (estimate_marker_weights == 1 && use_marker_weight_assoc == 1)
     z_marker_weights ~ std_normal();
+
+    /* Penalised monotone spline shape priors */
+    // Tight prior on the latent increment logits:
+    // - z = 0 implies equal increments,
+    // - expit(z) gives positive increments summing to 1,
+    // - smaller prior scale keeps the learned shape close to a smooth default
+    //   unless the data clearly support bends.
+    if (n_free_spline_cv > 0) z_spline_cv ~ std_normal();
+    if (n_free_spline_cs > 0) z_spline_cs ~ std_normal();
+    if (n_free_spline_corr > 0) to_vector(z_spline_corr) ~ std_normal();
+    if (n_free_spline_vcov > 0) to_vector(z_spline_vcov) ~ std_normal();
+    if (n_free_spline_cv_mean > 0) z_spline_cv_mean ~ std_normal();
+    if (n_free_spline_cv_marker > 0) z_spline_cv_marker ~ std_normal();
+    if (n_free_spline_cs_mean > 0) z_spline_cs_mean ~ std_normal();
+    if (n_free_spline_cs_marker > 0) z_spline_cs_marker ~ std_normal();
+    if (estimate_iota_intercept_cv > 0) z_iota_intercept_cv ~ std_normal();
+    if (estimate_iota_slope_cv > 0) z_iota_slope_cv ~ std_normal();
+    if (estimate_iota_intercept_cs > 0) z_iota_intercept_cs ~ std_normal();
+    if (estimate_iota_slope_cs > 0) z_iota_slope_cs ~ std_normal();
+    if (estimate_iota_intercept_corr > 0) z_iota_intercept_corr ~ std_normal();
+    if (estimate_iota_slope_corr > 0) z_iota_slope_corr ~ std_normal();
+    if (estimate_iota_intercept_vcov > 0) z_iota_intercept_vcov ~ std_normal();
+    if (estimate_iota_slope_vcov > 0) z_iota_slope_vcov ~ std_normal();
+    if (estimate_iota_intercept_cv_mean > 0) z_iota_intercept_cv_mean ~ std_normal();
+    if (estimate_iota_slope_cv_mean > 0) z_iota_slope_cv_mean ~ std_normal();
+    if (estimate_iota_intercept_cv_marker > 0) z_iota_intercept_cv_marker ~ std_normal();
+    if (estimate_iota_slope_cv_marker > 0) z_iota_slope_cv_marker ~ std_normal();
+    if (estimate_iota_intercept_cs_mean > 0) z_iota_intercept_cs_mean ~ std_normal();
+    if (estimate_iota_slope_cs_mean > 0) z_iota_slope_cs_mean ~ std_normal();
+    if (estimate_iota_intercept_cs_marker > 0) z_iota_intercept_cs_marker ~ std_normal();
+    if (estimate_iota_slope_cs_marker > 0) z_iota_slope_cs_marker ~ std_normal();
+  } else {
+    z_alpha_corr ~ student_t(6, 0, 1);
+    z_alpha_vcov ~ student_t(6, 0, 1);
+    z_alpha_cv_total ~ student_t(6, 0, 1);
+    z_alpha_cs_total ~ student_t(6, 0, 1);
+    z_alpha_cv_mean ~ student_t(6, 0, 1);
+    z_alpha_cs_mean ~ student_t(6, 0, 1);
+    z_alpha_cv_marker ~ student_t(6, 0, 1);
+    z_alpha_cs_marker ~ student_t(6, 0, 1);
+    // if (estimate_marker_weights == 1 && use_marker_weight_assoc == 1)
+    z_marker_weights ~ student_t(6, 0, 1);
+
+    /* Penalised monotone spline shape priors */
+    // Tight prior on the latent increment logits:
+    // - z = 0 implies equal increments,
+    // - expit(z) gives positive increments summing to 1,
+    // - smaller prior scale keeps the learned shape close to a smooth default
+    //   unless the data clearly support bends.
+    if (n_free_spline_cv > 0) z_spline_cv ~ student_t(6, 0, 1);
+    if (n_free_spline_cs > 0) z_spline_cs ~ student_t(6, 0, 1);
+    if (n_free_spline_corr > 0) to_vector(z_spline_corr) ~ student_t(6, 0, 1);
+    if (n_free_spline_vcov > 0) to_vector(z_spline_vcov) ~ student_t(6, 0, 1);
+    if (n_free_spline_cv_mean > 0) z_spline_cv_mean ~ student_t(6, 0, 1);
+    if (n_free_spline_cv_marker > 0) z_spline_cv_marker ~ student_t(6, 0, 1);
+    if (n_free_spline_cs_mean > 0) z_spline_cs_mean ~ student_t(6, 0, 1);
+    if (n_free_spline_cs_marker > 0) z_spline_cs_marker ~ student_t(6, 0, 1);
+    if (estimate_iota_intercept_cv > 0) z_iota_intercept_cv ~ student_t(6, 0, 1);
+    if (estimate_iota_slope_cv > 0) z_iota_slope_cv ~ student_t(6, 0, 1);
+    if (estimate_iota_intercept_cs > 0) z_iota_intercept_cs ~ student_t(6, 0, 1);
+    if (estimate_iota_slope_cs > 0) z_iota_slope_cs ~ student_t(6, 0, 1);
+    if (estimate_iota_intercept_corr > 0) z_iota_intercept_corr ~ student_t(6, 0, 1);
+    if (estimate_iota_slope_corr > 0) z_iota_slope_corr ~ student_t(6, 0, 1);
+    if (estimate_iota_intercept_vcov > 0) z_iota_intercept_vcov ~ student_t(6, 0, 1);
+    if (estimate_iota_slope_vcov > 0) z_iota_slope_vcov ~ student_t(6, 0, 1);
+    if (estimate_iota_intercept_cv_mean > 0) z_iota_intercept_cv_mean ~ student_t(6, 0, 1);
+    if (estimate_iota_slope_cv_mean > 0) z_iota_slope_cv_mean ~ student_t(6, 0, 1);
+    if (estimate_iota_intercept_cv_marker > 0) z_iota_intercept_cv_marker ~ student_t(6, 0, 1);
+    if (estimate_iota_slope_cv_marker > 0) z_iota_slope_cv_marker ~ student_t(6, 0, 1);
+    if (estimate_iota_intercept_cs_mean > 0) z_iota_intercept_cs_mean ~ student_t(6, 0, 1);
+    if (estimate_iota_slope_cs_mean > 0) z_iota_slope_cs_mean ~ student_t(6, 0, 1);
+    if (estimate_iota_intercept_cs_marker > 0) z_iota_intercept_cs_marker ~ student_t(6, 0, 1);
+    if (estimate_iota_slope_cs_marker > 0) z_iota_slope_cs_marker ~ student_t(6, 0, 1);
   }
 
-  /* Penalised monotone spline shape priors */
-  // Tight prior on the latent increment logits:
-  // - z = 0 implies equal increments,
-  // - softmax(z) gives positive increments summing to 1,
-  // - smaller prior scale keeps the learned shape close to a smooth default
-  //   unless the data clearly support bends.
-  if (n_free_spline_cv > 0) z_spline_cv ~ normal(0, 0.35);
-  if (n_free_spline_cs > 0) z_spline_cs ~ normal(0, 0.35);
-  if (n_free_spline_corr > 0) z_spline_corr ~ normal(0, 0.35);
-  if (n_free_spline_cv_mean > 0) z_spline_cv_mean ~ normal(0, 0.35);
-  if (n_free_spline_cv_marker > 0) z_spline_cv_marker ~ normal(0, 0.35);
-  if (n_free_spline_cs_mean > 0) z_spline_cs_mean ~ normal(0, 0.35);
-  if (n_free_spline_cs_marker > 0) z_spline_cs_marker ~ normal(0, 0.35);
+  
 
-  // Layman's view:
   // - first differences control monotone increase,
   // - second differences control wiggliness,
   // - lambda says how strongly we discourage bends.
@@ -195,8 +300,14 @@
       target += -0.5 * lambda_spline_cs * square(coeff_cs_eff[j] - 2 * coeff_cs_eff[j - 1] + coeff_cs_eff[j - 2]);
   }
   if (estimate_spline_corr == 1 && n_coeff_corr > 2 && lambda_spline_corr > 0) {
-    for (j in 3:n_coeff_corr)
-      target += -0.5 * lambda_spline_corr * square(coeff_corr_eff[j] - 2 * coeff_corr_eff[j - 1] + coeff_corr_eff[j - 2]);
+    for (m in 1:M_corr)
+      for (j in 3:n_coeff_corr)
+        target += -0.5 * lambda_spline_corr * square(coeff_corr_eff[m, j] - 2 * coeff_corr_eff[m, j - 1] + coeff_corr_eff[m, j - 2]);
+  }
+  if (estimate_spline_vcov == 1 && n_coeff_vcov > 2 && lambda_spline_vcov > 0) {
+    for (m in 1:M_vcov)
+      for (j in 3:n_coeff_vcov)
+        target += -0.5 * lambda_spline_vcov * square(coeff_vcov_eff[m, j] - 2 * coeff_vcov_eff[m, j - 1] + coeff_vcov_eff[m, j - 2]);
   }
   if (estimate_spline_cv_mean == 1 && n_coeff_cv_mean > 2 && lambda_spline_cv_mean > 0) {
     for (j in 3:n_coeff_cv_mean)

@@ -1,5 +1,5 @@
-#' @name joinme_utils
-#' @title joinme Utility Functions
+#' @name JoiNMe_utils
+#' @title JoiNMe Utility Functions
 #'
 #' @importFrom stats terms
 #'
@@ -32,7 +32,8 @@ suppressPackageStartupMessages({
 #'
 #' @return Character scalar naming the resolved response column.
 #' @keywords internal
-.resolve_response_var <- function(formulaLong, dataLong, context = "joinme") {
+#' @noRd
+.resolve_response_var <- function(formulaLong, dataLong, context = "JoiNMe") {
   if (!inherits(formulaLong, "formula") || length(formulaLong) < 3) {
     cli::cli_abort(c(
       x = "{context}: {.arg formulaLong} must be a two-sided formula with a response on the left-hand side.",
@@ -65,9 +66,12 @@ suppressPackageStartupMessages({
 #' @param dataEvent Event dataset.
 #' @param context Character label for error messages.
 #'
-#' @return Named list with extracted `event_time`, `event_status`, and `surv_type`.
+#' @return Named list with parsed event-process vectors:
+#'   `event_start`, `event_stop`, `event_time`, `event_status`,
+#'   `d_event_exact`, `d_event_any`, `event_censor_type`, and `surv_type`.
 #' @keywords internal
-.resolve_event_model_vars <- function(formulaEvent, dataEvent, context = "joinme") {
+#' @noRd
+.resolve_event_model_vars <- function(formulaEvent, dataEvent, context = "JoiNMe") {
   if (!inherits(formulaEvent, "formula") || length(formulaEvent) < 3) {
     cli::cli_abort(c(
       x = "{context}: {.arg formulaEvent} must be a two-sided survival formula.",
@@ -92,6 +96,18 @@ suppressPackageStartupMessages({
     ))
   }
 
+  lhs_call <- formulaEvent[[2]]
+  surv_type_arg <- NULL
+  if (is.call(lhs_call) && length(lhs_call) >= 2) {
+    arg_names <- names(lhs_call)
+    if (!is.null(arg_names) && any(arg_names == "type")) {
+      idx_type <- which(arg_names == "type")[1]
+      if (idx_type > 0 && idx_type <= length(lhs_call)) {
+        surv_type_arg <- tolower(as.character(lhs_call[[idx_type]])[1])
+      }
+    }
+  }
+
   surv_mat <- unclass(y)
   if (!is.matrix(surv_mat) || ncol(surv_mat) < 2L) {
     cli::cli_abort(c(
@@ -100,18 +116,228 @@ suppressPackageStartupMessages({
     ))
   }
 
-  if (ncol(surv_mat) == 2L) {
-    event_time <- surv_mat[, 1]
-    event_status <- surv_mat[, 2]
-  } else {
-    event_time <- surv_mat[, 2]
-    event_status <- surv_mat[, 3]
+  surv_type_raw <- tolower(as.character(attr(y, "type") %||% "right"))
+  surv_type <- surv_type_raw
+
+  event_start <- rep(0, nrow(surv_mat))
+  event_stop <- rep(NA_real_, nrow(surv_mat))
+  event_status <- rep(0, nrow(surv_mat))
+  event_censor_type <- rep(0L, nrow(surv_mat))
+
+  if (surv_type_raw %in% c("right", "counting")) {
+    if (ncol(surv_mat) == 2L) {
+      event_start <- rep(0, nrow(surv_mat))
+      event_stop <- surv_mat[, 1]
+      event_status <- surv_mat[, 2]
+    } else {
+      event_start <- surv_mat[, 1]
+      event_stop <- surv_mat[, 2]
+      event_status <- surv_mat[, 3]
+    }
+    event_censor_type <- ifelse(as.numeric(event_status) == 0, 0L, 1L)
+  } else if (surv_type_raw == "left") {
+    if (ncol(surv_mat) != 2L) {
+      cli::cli_abort(c(
+        x = "{context}: unsupported {.code Surv(...)} layout for left-censored data.",
+        i = "Use {.code survival::Surv(time, status, type='left')} with two columns."
+      ))
+    }
+    event_stop <- as.numeric(surv_mat[, 1])
+    event_status <- as.numeric(surv_mat[, 2])
+    event_censor_type <- ifelse(event_status == 0, 0L, 2L)
+    surv_type <- "left"
+  } else if (surv_type_raw == "interval") {
+    if (identical(surv_type_arg, "interval")) {
+      cli::cli_abort(c(
+        x = "{context}: {.code Surv(..., type='interval')} is not supported.",
+        i = "Use {.code survival::Surv(time1, time2, type='interval2')} instead."
+      ))
+    }
+    if (ncol(surv_mat) < 3L) {
+      cli::cli_abort(c(
+        x = "{context}: interval-censored survival input requires {.code time1}, {.code time2}, and status columns.",
+        i = "Use {.code survival::Surv(time1, time2, type='interval2')} for interval-censored data."
+      ))
+    }
+
+    t1 <- as.numeric(surv_mat[, 1])
+    t2 <- as.numeric(surv_mat[, 2])
+    st <- as.integer(surv_mat[, 3])
+
+    is_right <- st == 0L
+    is_exact <- st == 1L
+    is_left <- st == 2L
+    is_interval <- st == 3L
+
+    event_start <- ifelse(is_interval, t1, 0)
+    event_stop <- ifelse(is_right, t1,
+      ifelse(is_exact, t1,
+        ifelse(is_left, t2, t2)
+      )
+    )
+
+    event_status <- st
+    event_censor_type <- ifelse(is_right, 0L,
+      ifelse(is_exact, 1L,
+        ifelse(is_left, 2L, 3L)
+      )
+    )
+    surv_type <- "interval2"
+  }
+
+  event_start <- as.numeric(event_start)
+  event_stop <- as.numeric(event_stop)
+
+  if (any(!is.finite(event_start)) || any(!is.finite(event_stop))) {
+    cli::cli_abort(c(
+      x = "{context}: event start/stop times from {.code Surv(...)} must be finite.",
+      i = "Check missing or non-numeric values in the event-time columns."
+    ))
+  }
+  if (any(event_start < 0)) {
+    cli::cli_abort(c(
+      x = "{context}: event start times must be >= 0.",
+      i = "Use non-negative delayed-entry times in {.code Surv(start, stop, status)}."
+    ))
+  }
+  if (any(event_stop <= event_start)) {
+    cli::cli_abort(c(
+      x = "{context}: every event interval must satisfy {.code stop > start}.",
+      i = "Ensure {.code Surv(start, stop, status)} has strictly increasing interval endpoints."
+    ))
+  }
+
+  if (!surv_type %in% c("right", "counting", "left", "interval2")) {
+    cli::cli_abort(c(
+      x = "{context}: unsupported Surv type {.val {surv_type}}.",
+      i = "Supported types are right, counting, left, and interval2."
+    ))
+  }
+
+  event_time <- as.numeric(event_stop)
+  d_event_exact <- as.integer(event_censor_type == 1L)
+  d_event_any <- as.integer(event_censor_type %in% c(1L, 2L, 3L))
+
+  list(
+    event_start = event_start,
+    event_stop = event_stop,
+    event_status = event_status,
+    event_time = event_time,
+    d_event_exact = d_event_exact,
+    d_event_any = d_event_any,
+    event_censor_type = as.integer(event_censor_type),
+    surv_type = surv_type
+  )
+}
+
+#' Build interval index ranges for event rows grouped by id
+#'
+#' @param id_int Integer id index vector for event rows.
+#' @param n_id Number of unique subjects.
+#' @param context Character label for error messages.
+#'
+#' @return Named list with `event_start_idx` and `event_end_idx` arrays.
+#' @keywords internal
+#' @noRd
+.build_event_interval_index <- function(id_int, n_id, context = "JoiNMe") {
+  if (length(id_int) == 0L) {
+    cli::cli_abort(c(
+      x = "{context}: event data must contain at least one row.",
+      i = "Provide event rows with {.code Surv(...)} outcomes."
+    ))
+  }
+
+  split_idx <- split(seq_along(id_int), id_int)
+  start_idx <- integer(n_id)
+  end_idx <- integer(n_id)
+
+  for (i in seq_len(n_id)) {
+    rows_i <- split_idx[[as.character(i)]]
+    if (is.null(rows_i) || length(rows_i) == 0L) {
+      cli::cli_abort(c(
+        x = "{context}: each subject id must have at least one event interval row.",
+        i = "Missing interval rows for subject index {i}."
+      ))
+    }
+    start_idx[i] <- min(rows_i)
+    end_idx[i] <- max(rows_i)
   }
 
   list(
-    event_time = as.numeric(event_time),
-    event_status = event_status,
-    surv_type = as.character(attr(y, "type") %||% "right")
+    event_start_idx = as.integer(start_idx),
+    event_end_idx = as.integer(end_idx)
+  )
+}
+
+#' Resolve the covariance-regression formula
+#'
+#' @param formulaVCov Covariance-regression formula.
+#' @param default Default formula when the input is not supplied.
+#' @param context Character label for error messages.
+#'
+#' @return A formula for the subject-level covariance regression.
+#' @keywords internal
+#' @noRd
+.resolve_vcov_formula <- function(formulaVCov = NULL,
+                                  default = ~ 1,
+                                  context = "JoiNMe") {
+  chosen <- formulaVCov %||% default
+  if (!inherits(chosen, "formula")) {
+    cli::cli_abort(c(
+      x = "{context}: {.arg formulaVCov} must be a formula.",
+      i = "Example: {.code ~ x1 + x2}."
+    ))
+  }
+  chosen
+}
+
+#' Build the subject-level covariance-regression design matrix
+#'
+#' @param formulaVCov Covariance-regression formula.
+#' @param dataEvent Event-level data with one row per subject.
+#' @param time_var Longitudinal time variable name, forbidden in `formulaVCov`.
+#' @param context Character label for error messages.
+#'
+#' @return Named list with `formulaVCov`, `K_cov`, and `Xcov`.
+#' @keywords internal
+#' @noRd
+.build_vcov_design <- function(formulaVCov,
+                               dataEvent,
+                               time_var,
+                               context = "JoiNMe") {
+  if (length(reformulas::findbars(formulaVCov)) > 0) {
+    cli::cli_abort(c(
+      x = "{context}: {.arg formulaVCov} does not support random-effects terms.",
+      i = "Remove all ( ... | ... ) terms from {.arg formulaVCov}."
+    ))
+  }
+
+  fv_rhs <- stats::update(formulaVCov, . ~ .)
+  fv_rhs[[2]] <- NULL
+  if (length(fv_rhs) >= 3 && .expr_has_time(fv_rhs[[3]], time_var)) {
+    cli::cli_abort(c(
+      x = "{context}: {.arg formulaVCov} cannot include the time variable {.arg {time_var}}.",
+      i = "Remove time from {.arg formulaVCov} or move it to longitudinal formulas."
+    ))
+  }
+
+  Xtmp <- .mm(fv_rhs, dataEvent)
+  if ("(Intercept)" %in% colnames(Xtmp)) {
+    Xtmp <- Xtmp[, colnames(Xtmp) != "(Intercept)", drop = FALSE]
+  }
+
+  if (ncol(Xtmp) < 1L) {
+    return(list(
+      formulaVCov = formulaVCov,
+      K_cov = 0L,
+      Xcov = matrix(0.0, nrow(dataEvent), 0)
+    ))
+  }
+
+  list(
+    formulaVCov = formulaVCov,
+    K_cov = as.integer(ncol(Xtmp)),
+    Xcov = Xtmp
   )
 }
 
@@ -122,7 +348,8 @@ suppressPackageStartupMessages({
 #'
 #' @return Named list with `d_event`, `event_type`, and `K_event`.
 #' @keywords internal
-.derive_event_outcomes <- function(status_raw, context = "joinme") {
+#' @noRd
+.derive_event_outcomes <- function(status_raw, context = "JoiNMe") {
   n <- length(status_raw)
 
   if (is.numeric(status_raw) || is.integer(status_raw) || is.logical(status_raw)) {
@@ -219,6 +446,7 @@ gk_quadrature <- function(nodes = 15L) {
 }
 
 #' @keywords internal
+#' @noRd
 .gk_nodes <- function(rule) {
   rule <- as.integer(rule)
   if (!rule %in% c(7L, 15L, 31L, 41L, 51L, 61L)) {
@@ -525,16 +753,168 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Safe model.matrix wrapper
 #' @keywords internal
+#' @noRd
 .mm <- function(formula, data) {
   # Always return double matrices for Stan compatibility
-  X <- stats::model.matrix(formula, data = data)
+  data <- as.data.frame(data)
+  rownames(data) <- NULL
+  if (.is_model_matrix_blueprint(formula)) {
+    terms_obj <- formula$terms
+    mf <- stats::model.frame(
+      terms_obj,
+      data = data,
+      xlev = formula$xlev,
+      na.action = stats::na.pass
+    )
+    X <- stats::model.matrix(
+      terms_obj,
+      data = mf,
+      contrasts.arg = formula$contrasts
+    )
+  } else {
+    X <- stats::model.matrix(formula, data = data)
+  }
   storage.mode(X) <- "double"
   X
 }
 
+#' Detect stored model-matrix blueprint objects
+#' @keywords internal
+#' @noRd
+.is_model_matrix_blueprint <- function(x) {
+  is.list(x) && inherits(x, "JoiNMe_mm") && !is.null(x$terms)
+}
+
+#' Build a reusable model-matrix blueprint
+#' @keywords internal
+#' @noRd
+.make_model_matrix_blueprint <- function(formula,
+                                         data,
+                                         boundary_var = NULL,
+                                         boundary_values = NULL) {
+  data <- as.data.frame(data)
+  rownames(data) <- NULL
+
+  if (!is.null(boundary_var) && !is.null(boundary_values) && boundary_var %in% names(data) && nrow(data) > 0L) {
+    boundary_rows <- data[rep(1L, length(boundary_values)), , drop = FALSE]
+    boundary_rows[[boundary_var]] <- as.numeric(boundary_values)
+    data <- rbind(data, boundary_rows)
+    rownames(data) <- NULL
+  }
+
+  mf <- stats::model.frame(formula, data = data, na.action = stats::na.pass)
+  terms_obj <- stats::delete.response(stats::terms(mf))
+  X <- stats::model.matrix(terms_obj, data = mf)
+
+  structure(
+    list(
+      formula = formula,
+      terms = terms_obj,
+      xlev = stats::.getXlevels(terms_obj, mf),
+      contrasts = attr(X, "contrasts"),
+      assign = attr(X, "assign") %||% integer(0),
+      columns = colnames(X) %||% character(0)
+    ),
+    class = "JoiNMe_mm"
+  )
+}
+
+#' Build reusable blueprints for an RHS formula list
+#' @keywords internal
+#' @noRd
+.make_rhs_blueprints <- function(rhs_list, data) {
+  if (length(rhs_list) == 0L) {
+    return(list())
+  }
+  lapply(rhs_list, function(rhs) .make_model_matrix_blueprint(rhs, data = data))
+}
+
+#' Detect raw linear time terms from model.matrix term labels
+#' @keywords internal
+#' @noRd
+.term_is_raw_time_linear <- function(term_label, time_var) {
+  if (is.null(term_label) || !nzchar(term_label)) {
+    return(FALSE)
+  }
+
+  expr <- tryCatch(parse(text = term_label)[[1]], error = function(e) NULL)
+  if (is.null(expr)) {
+    return(FALSE)
+  }
+
+  inspect <- function(node) {
+    if (is.name(node)) {
+      return(list(ok = TRUE, has_time = identical(as.character(node), time_var)))
+    }
+    if (!is.call(node)) {
+      return(list(ok = FALSE, has_time = FALSE))
+    }
+
+    op <- as.character(node[[1]])
+    if (length(op) != 1L || !op %in% c(":", "*")) {
+      return(list(ok = FALSE, has_time = FALSE))
+    }
+
+    pieces <- lapply(as.list(node)[-1], inspect)
+    list(
+      ok = all(vapply(pieces, function(piece) isTRUE(piece$ok), logical(1))),
+      has_time = any(vapply(pieces, function(piece) isTRUE(piece$has_time), logical(1)))
+    )
+  }
+
+  res <- inspect(expr)
+  isTRUE(res$ok) && isTRUE(res$has_time)
+}
+
+#' Detect coefficient indices that need original-time rescaling
+#' @keywords internal
+#' @noRd
+.time_rescale_idx_from_blueprint <- function(blueprint, time_var) {
+  if (!.is_model_matrix_blueprint(blueprint)) {
+    return(integer(0))
+  }
+
+  assign_idx <- as.integer(blueprint$assign %||% integer(0))
+  if (length(assign_idx) == 0L) {
+    return(integer(0))
+  }
+
+  term_labels <- attr(blueprint$terms, "term.labels") %||% character(0)
+  keep <- vapply(assign_idx, function(idx) {
+    if (!is.finite(idx) || idx < 1L || idx > length(term_labels)) {
+      return(FALSE)
+    }
+    .term_is_raw_time_linear(term_labels[[idx]], time_var = time_var)
+  }, logical(1))
+  which(keep)
+}
+
+#' Flatten time-rescale indices across a blueprint list
+#' @keywords internal
+#' @noRd
+.time_rescale_idx_from_blueprint_list <- function(blueprints, time_var) {
+  if (length(blueprints) == 0L) {
+    return(integer(0))
+  }
+
+  out <- integer(0)
+  offset <- 0L
+  for (blueprint in blueprints) {
+    local_idx <- .time_rescale_idx_from_blueprint(blueprint, time_var = time_var)
+    if (length(local_idx) > 0L) {
+      out <- c(out, offset + local_idx)
+    }
+    offset <- offset + length(blueprint$columns %||% character(0))
+  }
+  as.integer(out)
+}
+
 #' Survival/event model matrix
 #' @keywords internal
+#' @noRd
 .mm_event <- function(formulaEvent, data) {
+  data <- as.data.frame(data)
+  rownames(data) <- NULL
   rhs <- stats::delete.response(stats::terms(formulaEvent))
   X <- stats::model.matrix(rhs, data = data)
   if ("(Intercept)" %in% colnames(X)) {
@@ -546,7 +926,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' @keywords internal
 .new_dist_scope <- function() {
-  structure(list(default = NULL, by_family = list()), class = "joinme_dist_scope")
+  structure(list(default = NULL, by_family = list()), class = "JoiNMe_dist_scope")
 }
 
 #' @keywords internal
@@ -556,11 +936,16 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' @keywords internal
 .canonical_dist_param <- function(param_raw) {
+  # Step 1: normalise spelling before matching a distributional parameter.
   param <- tolower(trimws(as.character(param_raw)))
+
+  # Step 2: retain the established aliases for the skew-normal shape parameter.
   if (param == "skew") param <- "alpha"
   if (param %in% c("alpha_skew", "skew_alpha")) param <- "alpha"
-  if (param %in% c("phi_beta", "beta_phi", "precision")) param <- "phi_beta"
-  if (param %in% c("tau", "tau_sde", "skew_sde")) param <- "tau_sde"
+
+  # Step 3: keep kappa and tau explicit. Unlike the alpha aliases above, these
+  # names identify distinct statistical roles and are deliberately not inferred
+  # from generic labels such as "precision" or family-specific legacy labels.
   param
 }
 
@@ -600,10 +985,10 @@ gk_quadrature <- function(nodes = 15L) {
   }
 
   param <- .canonical_dist_param(cap[2])
-  if (!param %in% c("sigma", "nu", "phi", "alpha", "phi_beta", "tau_sde")) {
+  if (!param %in% c("sigma", "nu", "phi", "alpha", "kappa", "tau")) {
     cli::cli_abort(c(
       x = "Unknown distributional parameter: {.val {cap[2]}}.",
-      i = "Allowed parameters: sigma, nu, phi, alpha (or alpha_skew/skew), phi_beta, tau_sde."
+      i = "Allowed parameters: sigma, nu, phi, alpha (or alpha_skew/skew), kappa, tau."
     ))
   }
 
@@ -626,6 +1011,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Normalise distributional formula input
 #' @keywords internal
+#' @noRd
 .normalize_formula_dist <- function(formulaDist) {
   # Normalise list input to named distributional formulas
   if (is.null(formulaDist)) return(list())
@@ -717,7 +1103,7 @@ gk_quadrature <- function(nodes = 15L) {
     if (length(bad_param_families) > 0) {
       cli::cli_abort(c(
         x = "Distributional parameter {.val {param_name}} is not used by family/families: {.val {paste(bad_param_families, collapse = ', ')}}.",
-        i = "Use supported combinations only (e.g., nu for student_t, phi for negbin2, phi_beta for beta)."
+        i = "Use supported combinations only (e.g., nu for student_t, phi for negbin2, kappa for beta)."
       ))
     }
   }
@@ -750,6 +1136,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Build distributional design matrix
 #' @keywords internal
+#' @noRd
 .build_dist_matrix <- function(formula, data, family_by_row = NULL) {
   # Construct fixed-effect matrix for distributional regression
   if (is.null(formula)) {
@@ -809,6 +1196,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Parse mixed-effects terms for distributional regression
 #' @keywords internal
+#' @noRd
 .build_dist_re_terms <- function(formula, data) {
   # Parse random-effect terms for distributional regression
   if (is.null(formula)) {
@@ -837,11 +1225,11 @@ gk_quadrature <- function(nodes = 15L) {
 
     fam_specs <- formula$by_family %||% list()
     if (length(fam_specs) > 0) {
-      family_by_row <- attr(data, "joinme_family_by_row", exact = TRUE)
+      family_by_row <- attr(data, "JoiNMe_family_by_row", exact = TRUE)
       if (is.null(family_by_row) || length(family_by_row) != nrow(data)) {
         cli::cli_abort(c(
           x = "Family-scoped distributional random effects require row-level family labels.",
-          i = "Attach {.code attr(data, 'joinme_family_by_row')} before parsing random effects."
+          i = "Attach {.code attr(data, 'JoiNMe_family_by_row')} before parsing random effects."
         ))
       }
       family_by_row <- as.character(family_by_row)
@@ -882,7 +1270,7 @@ gk_quadrature <- function(nodes = 15L) {
     if (any(grepl("\\|", deparse(rhs_expr)))) {
       cli::cli_abort(c(
         x = "Nested random effects are not supported in {.arg formulaDist}.",
-        i = "Use flat terms like (1 + t | id) + (1 | region)."
+        i = "Use flat terms like (1 | id) + (1 | marker)."
       ))
     }
 
@@ -938,6 +1326,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Pad random-effects term matrices to max dimensions
 #' @keywords internal
+#' @noRd
 .pad_re_terms <- function(re_terms, n_rows) {
   # Pad variable-size RE terms into aligned arrays for Stan
   if (re_terms$n_re == 0) {
@@ -1002,6 +1391,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Parse association include flags
 #' @keywords internal
+#' @noRd
 .parse_assoc <- function(assoc) {
   assoc <- unique(assoc)
   list(
@@ -1011,8 +1401,354 @@ gk_quadrature <- function(nodes = 15L) {
     assoc_cs_total  = as.integer("cs_total" %in% assoc),
     assoc_cs_mean   = as.integer("cs_mean" %in% assoc),
     assoc_cs_marker = as.integer("cs_marker" %in% assoc),
-    assoc_corr      = as.integer("corr" %in% assoc)
+    assoc_corr      = as.integer("corr" %in% assoc),
+    assoc_vcov      = as.integer("vcov" %in% assoc)
   )
+}
+
+#' Validate association channel combinations
+#' @keywords internal
+#' @noRd
+.validate_assoc_channels <- function(assoc, context = "association specification") {
+  assoc <- unique(as.character(assoc %||% character(0)))
+  if (all(c("corr", "vcov") %in% assoc)) {
+    cli::cli_warn(c(
+      x = "{.arg corr} is ignored because {.arg vcov} is also present in {.field {context}}.",
+      i = "{.arg vcov} already includes the off-diagonal correlation-factor terms together with the subject-specific standard deviations."
+    ))
+    assoc <- assoc[assoc != "corr"]
+  }
+  assoc
+}
+
+#' Map covariance-regression diagonal link codes to standard names
+#' @keywords internal
+#' @noRd
+.cov_diag_link_name <- function(diag_link) {
+  if (is.character(diag_link)) {
+    diag_name <- tolower(trimws(diag_link[1]))
+    if (diag_name %in% c("softplus", "exp")) {
+      return(diag_name)
+    }
+  }
+
+  diag_code <- suppressWarnings(as.integer(diag_link[1]))
+  if (isTRUE(diag_code == 1L)) {
+    return("exp")
+  }
+  "softplus"
+}
+
+#' Apply the covariance-regression diagonal link
+#' @keywords internal
+#' @noRd
+.cov_diag_link_forward <- function(lp, diag_link = "softplus") {
+  diag_link <- .cov_diag_link_name(diag_link)
+  if (identical(diag_link, "exp")) {
+    return(exp(lp))
+  }
+  softplus(lp)
+}
+
+#' Invert the covariance-regression diagonal link
+#' @keywords internal
+#' @noRd
+.cov_diag_link_inverse <- function(value, diag_link = "softplus") {
+  diag_link <- .cov_diag_link_name(diag_link)
+  value <- as.numeric(value)
+  if (any(!is.finite(value)) || any(value <= 0)) {
+    cli::cli_abort(c(
+      x = "Covariance-regression diagonal values must be finite and strictly positive.",
+      i = "Check the supplied standard deviation values before inverting the diagonal link."
+    ))
+  }
+  if (identical(diag_link, "exp")) {
+    return(log(value))
+  }
+  log(expm1(value))
+}
+
+#' Build one Cholesky-correlation row from row-specific partial correlations
+#' @keywords internal
+#' @noRd
+.cov_partial_row_to_chol_corr <- function(partials, row_index) {
+  row_index <- as.integer(row_index %||% 0L)
+  if (row_index <= 0L) {
+    return(numeric(0))
+  }
+
+  out <- numeric(row_index)
+  if (row_index == 1L) {
+    out[1] <- 1.0
+    return(out)
+  }
+
+  z_vals <- numeric(row_index - 1L)
+  if (length(partials) > 0L) {
+    n_copy <- min(length(partials), row_index - 1L)
+    z_vals[seq_len(n_copy)] <- as.numeric(partials[seq_len(n_copy)])
+  }
+  z_vals[!is.finite(z_vals)] <- 0.0
+  z_vals <- pmax(-0.999999, pmin(0.999999, z_vals))
+
+  scale_prod <- 1.0
+  for (c in seq_len(row_index - 1L)) {
+    out[c] <- scale_prod * z_vals[c]
+    scale_prod <- scale_prod * sqrt(pmax(1e-12, 1.0 - z_vals[c]^2))
+  }
+  out[row_index] <- scale_prod
+  out
+}
+
+#' Recover row-specific partial correlations from one Cholesky-correlation row
+#' @keywords internal
+#' @noRd
+.cov_chol_corr_row_to_partial_lp <- function(chol_row) {
+  chol_row <- as.numeric(chol_row)
+  row_index <- length(chol_row)
+  if (row_index <= 1L) {
+    return(numeric(0))
+  }
+
+  out <- numeric(row_index - 1L)
+  scale_prod <- 1.0
+  for (c in seq_len(row_index - 1L)) {
+    z_val <- if (abs(scale_prod) < 1e-12) 0.0 else chol_row[c] / scale_prod
+    z_val <- pmax(-0.999999, pmin(0.999999, z_val))
+    out[c] <- atanh(z_val)
+    scale_prod <- scale_prod * sqrt(pmax(1e-12, 1.0 - z_val^2))
+  }
+  out
+}
+
+#' Build a covariance Cholesky factor from covariance-regression predictors
+#' @keywords internal
+#' @noRd
+.cov_lp_to_chol <- function(lp_vec,
+                            q_idm,
+                            idx_row,
+                            idx_col,
+                            diag_link = "softplus") {
+  q_idm <- as.integer(q_idm %||% 0L)
+  if (q_idm <= 0L) {
+    return(matrix(0.0, nrow = 0L, ncol = 0L))
+  }
+
+  lp_vec <- as.numeric(lp_vec %||% numeric(0))
+  idx_row <- as.integer(idx_row %||% integer(0))
+  idx_col <- as.integer(idx_col %||% integer(0))
+  if (length(lp_vec) != length(idx_row) || length(lp_vec) != length(idx_col)) {
+    cli::cli_abort(c(
+      x = "Covariance-regression predictors and index maps must have the same length.",
+      i = "Check the marker-by-id covariance indexing before reconstructing the Cholesky factor."
+    ))
+  }
+
+  sd_vec <- rep(1.0, q_idm)
+  partials_by_row <- vector("list", q_idm)
+  for (m in seq_along(lp_vec)) {
+    r_ <- idx_row[m]
+    c_ <- idx_col[m]
+    if (r_ == c_) {
+      sd_vec[r_] <- .cov_diag_link_forward(lp_vec[m], diag_link = diag_link)
+    } else {
+      partials_by_row[[r_]] <- c(partials_by_row[[r_]], tanh(lp_vec[m]))
+    }
+  }
+
+  L_i <- matrix(0.0, nrow = q_idm, ncol = q_idm)
+  for (r in seq_len(q_idm)) {
+    k_row <- .cov_partial_row_to_chol_corr(partials_by_row[[r]], row_index = r)
+    L_i[r, seq_len(r)] <- sd_vec[r] * k_row
+  }
+
+  L_i
+}
+
+#' Split a covariance Cholesky factor into SD and Cholesky-correlation pieces
+#' @keywords internal
+#' @noRd
+.cov_sd_and_chol_corr_from_chol <- function(L_i) {
+  L_i <- as.matrix(L_i)
+  q_idm <- nrow(L_i)
+  if (!q_idm || ncol(L_i) != q_idm) {
+    return(list(sd = numeric(0), K = matrix(0.0, nrow = 0L, ncol = 0L)))
+  }
+
+  sd_vec <- numeric(q_idm)
+  K_i <- matrix(0.0, nrow = q_idm, ncol = q_idm)
+  for (r in seq_len(q_idm)) {
+    sd_r <- sqrt(sum(L_i[r, seq_len(r)]^2))
+    sd_vec[r] <- sd_r
+    if (is.finite(sd_r) && sd_r > 0) {
+      K_i[r, seq_len(r)] <- L_i[r, seq_len(r)] / sd_r
+    } else {
+      K_i[r, r] <- 1.0
+    }
+  }
+
+  list(sd = sd_vec, K = K_i)
+}
+
+#' Recover covariance-regression baseline predictors from a Cholesky factor
+#' @keywords internal
+#' @noRd
+.cov_chol_to_lp <- function(L_i,
+                            idx_row,
+                            idx_col,
+                            diag_link = "softplus") {
+  parts <- .cov_sd_and_chol_corr_from_chol(L_i)
+  idx_row <- as.integer(idx_row %||% integer(0))
+  idx_col <- as.integer(idx_col %||% integer(0))
+  if (length(idx_row) != length(idx_col)) {
+    cli::cli_abort(c(
+      x = "Covariance-regression row and column indices must have the same length.",
+      i = "Check the marker-by-id covariance indexing before translating the Cholesky factor."
+    ))
+  }
+
+  q_idm <- length(parts$sd)
+  partial_lp_by_row <- vector("list", q_idm)
+  if (q_idm > 1L) {
+    for (r in 2:q_idm) {
+      partial_lp_by_row[[r]] <- .cov_chol_corr_row_to_partial_lp(parts$K[r, seq_len(r)])
+    }
+  }
+
+  out <- numeric(length(idx_row))
+  row_pos <- rep.int(0L, q_idm)
+  for (m in seq_along(idx_row)) {
+    r_ <- idx_row[m]
+    c_ <- idx_col[m]
+    if (r_ == c_) {
+      out[m] <- .cov_diag_link_inverse(parts$sd[r_], diag_link = diag_link)
+    } else {
+      row_pos[r_] <- row_pos[r_] + 1L
+      if (length(partial_lp_by_row[[r_]]) >= row_pos[r_]) {
+        out[m] <- partial_lp_by_row[[r_]][row_pos[r_]]
+      } else {
+        out[m] <- 0.0
+      }
+    }
+  }
+  out
+}
+
+#' Extract raw corr-association features from a Cholesky factor
+#' @keywords internal
+#' @noRd
+.assoc_corr_features_from_chol <- function(L_i) {
+  parts <- .cov_sd_and_chol_corr_from_chol(L_i)
+  K_i <- parts$K
+  q_idm <- nrow(K_i)
+  if (!q_idm || q_idm < 2L) {
+    return(numeric(0))
+  }
+
+  out <- numeric(.assoc_cov_feature_count(q_idm, include_diag = FALSE))
+  pos <- 1L
+  for (r in 2:q_idm) {
+    for (c in seq_len(r - 1L)) {
+      out[pos] <- K_i[r, c]
+      pos <- pos + 1L
+    }
+  }
+  out
+}
+
+#' Covariance-association feature count
+#' @keywords internal
+#' @noRd
+.assoc_cov_feature_count <- function(q_idm, include_diag = FALSE) {
+  q_idm <- as.integer(q_idm %||% 0L)
+  if (q_idm <= 0L) {
+    return(0L)
+  }
+  if (isTRUE(include_diag)) {
+    return(as.integer((q_idm * (q_idm + 1L)) %/% 2L))
+  }
+  if (q_idm < 2L) {
+    return(0L)
+  }
+  as.integer((q_idm * (q_idm - 1L)) %/% 2L)
+}
+
+#' Association transform component count
+#' @keywords internal
+#' @noRd
+.assoc_transform_component_count <- function(term_key, q_idm, diagonal_only = FALSE) {
+  term_key <- as.character(term_key %||% "")[1]
+  q_idm <- as.integer(q_idm %||% 0L)
+  diagonal_only <- isTRUE(diagonal_only)
+
+  if (identical(term_key, "corr")) {
+    return(.assoc_cov_feature_count(q_idm, include_diag = FALSE))
+  }
+  if (identical(term_key, "vcov")) {
+    if (q_idm <= 0L) {
+      return(0L)
+    }
+    if (diagonal_only) {
+      return(q_idm)
+    }
+    return(.assoc_cov_feature_count(q_idm, include_diag = TRUE))
+  }
+  1L
+}
+
+#' Association transform component labels
+#' @keywords internal
+#' @noRd
+.assoc_transform_component_labels <- function(term_key, n_components) {
+  term_key <- as.character(term_key %||% "")[1]
+  n_components <- as.integer(n_components %||% 0L)
+  if (!(term_key %in% c("corr", "vcov")) || n_components <= 0L) {
+    return(term_key)
+  }
+  paste0(term_key, "[", seq_len(n_components), "]")
+}
+
+#' Covariance-association feature map
+#' @keywords internal
+#' @noRd
+.assoc_cov_feature_map <- function(q_idm, diagonal_only = FALSE, include_diag = TRUE) {
+  q_idm <- as.integer(q_idm %||% 0L)
+  if (q_idm <= 0L) {
+    return(matrix(integer(0), ncol = 2L))
+  }
+  if (isTRUE(diagonal_only)) {
+    idx <- seq_len(q_idm)
+    return(cbind(row = idx, col = idx))
+  }
+
+  rows <- list()
+  pos <- 1L
+  for (r in seq_len(q_idm)) {
+    c_start <- if (isTRUE(include_diag)) 1L else 1L
+    c_end <- if (isTRUE(include_diag)) r else r - 1L
+    if (c_end < c_start) next
+    for (c in seq.int(c_start, c_end)) {
+      rows[[pos]] <- c(r, c)
+      pos <- pos + 1L
+    }
+  }
+  do.call(rbind, rows)
+}
+
+#' Extract raw vcov-association features from a Cholesky factor
+#' @keywords internal
+#' @noRd
+.assoc_vcov_features_from_chol <- function(L_i, diagonal_only = FALSE) {
+  parts <- .cov_sd_and_chol_corr_from_chol(L_i)
+  q_idm <- length(parts$sd)
+  if (!q_idm) {
+    return(numeric(0))
+  }
+  if (isTRUE(diagonal_only)) {
+    return(parts$sd)
+  }
+
+  c(.assoc_corr_features_from_chol(L_i), parts$sd)
 }
 
 #' Validate transform flags
@@ -1021,8 +1757,9 @@ gk_quadrature <- function(nodes = 15L) {
 #' Restrictions: log and sqrt are restricted to cv_mean (legacy constraint).
 #'
 #' @keywords internal
+#' @noRd
 .validate_tf <- function(tf) {
-  nm <- c("cv_mean", "cv_marker", "cs_mean", "cs_marker", "corr")
+  nm <- c("cv_mean", "cv_marker", "cs_mean", "cs_marker", "corr", "vcov")
   tf_map <- c(
     identity = 0L,
     id = 0L,
@@ -1053,11 +1790,11 @@ gk_quadrature <- function(nodes = 15L) {
       ))
     }
   }
-  bad <- c(tf$cv_marker, tf$cs_mean, tf$cs_marker, tf$corr)
+  bad <- c(tf$cv_marker, tf$cs_mean, tf$cs_marker, tf$corr, tf$vcov)
   if (any(bad %in% c(2L, 5L))) {
     cli::cli_abort(c(
       x = "log/sqrt transforms are restricted to cv_mean only.",
-      i = "Use identity or other transforms for cs_mean/cs_marker/corr."
+      i = "Use identity or other transforms for cs_mean/cs_marker/corr/vcov."
     ))
   }
   tf
@@ -1065,6 +1802,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Detect whether RHS expression includes a time variable
 #' @keywords internal
+#' @noRd
 .expr_has_time <- function(expr, time_var) {
   f <- if (is.character(expr)) {
     stats::as.formula(paste0("~ ", expr))
@@ -1076,6 +1814,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Disable an association component with a warning
 #' @keywords internal
+#' @noRd
 .disable_assoc <- function(assoc, what, reason) {
   if (what %in% assoc) {
     warning(sprintf("Association '%s' disabled: %s", what, reason), call. = FALSE)
@@ -1086,6 +1825,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Convert lme4 bar terms into RHS-only formula list
 #' @keywords internal
+#' @noRd
 .bar_terms_to_rhs_list <- function(bar_terms) {
   lapply(bar_terms, function(bt) {
     expr <- bt[[2]]
@@ -1095,6 +1835,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Evaluate RHS list on an n_id x K matrix of times
 #' @keywords internal
+#' @noRd
 .eval_rhs_list_on_times <- function(rhs_list, dataEvent, time_var, times_mat) {
   n_id <- nrow(dataEvent)
   K <- ncol(times_mat)
@@ -1104,12 +1845,13 @@ gk_quadrature <- function(nodes = 15L) {
   if (length(mats) == 0) {
     return(array(0.0, dim = c(n_id, K, 0)))
   }
-  Xbig <- do.call(cbind, mats)
-  array(Xbig, dim = c(n_id, K, ncol(Xbig)))
+  X <- do.call(cbind, mats)
+  array(X, dim = c(n_id, K, ncol(X)))
 }
 
 #' Evaluate RHS list at event times
 #' @keywords internal
+#' @noRd
 .eval_rhs_list_at_event <- function(rhs_list, dataEvent, time_var, t_vec) {
   dd <- dataEvent
   dd[[time_var]] <- t_vec
@@ -1122,6 +1864,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Centre baseline hazard basis columns
 #' @keywords internal
+#' @noRd
 .center_baseline <- function(Bs_event_raw, Bs_gk_raw) {
   n_id <- nrow(Bs_event_raw)
   Kbs <- ncol(Bs_event_raw)
@@ -1142,6 +1885,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Construct a zero-dimension marker-only block
 #' @keywords internal
+#' @noRd
 .zero_marker_block <- function(N, n_id, n_gk = 15L) {
   n_gk <- as.integer(n_gk)
   list(
@@ -1156,6 +1900,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Baseline hazard basis (bs/ns)
 #' @keywords internal
+#' @noRd
 .make_basehaz_basis <- function(x, basis = c("bs", "ns"), knots, degree = 3, boundary = c(0, 1)) {
   basis <- match.arg(basis)
   # Suppress warnings about x values beyond boundary knots
@@ -1177,6 +1922,7 @@ gk_quadrature <- function(nodes = 15L) {
 #' @return Character scalar with the base grouping name.
 #'
 #' @keywords internal
+#' @noRd
 .group_name_from_expr <- function(grp_expr) {
   if (is.call(grp_expr) && identical(as.character(grp_expr[[1]]), "weighted")) {
     if (length(grp_expr) < 2) {
@@ -1197,6 +1943,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Parse weighted grouping expressions used in random-effect terms
 #' @keywords internal
+#' @noRd
 .parse_weighted_group_expr <- function(grp_expr, data, context = "random-effects term") {
   if (!(is.call(grp_expr) && identical(as.character(grp_expr[[1]]), "weighted"))) {
     return(list(
@@ -1259,13 +2006,18 @@ gk_quadrature <- function(nodes = 15L) {
 #' - Top-level `(... || id)` sets `indep_id_re = 1`.
 #' - `(... || marker)` sets `indep_marker_re = 1`.
 #' - Nested `(... || id)` inside a marker block sets `indep_idmarker_cov = 1`.
+#' - Outer `(... || marker)` around a nested marker block disables marker-to-
+#'   marker-by-id cross-correlation, even when the inner `( ... | id )` block
+#'   itself still has correlated components.
 #'
 #' @param formulaLong Longitudinal formula with random-effects terms.
 #' @param marker_var Marker grouping variable name.
 #' @param id_var Subject grouping variable name.
-#' @return Named list with `indep_id_re`, `indep_marker_re`, and `indep_idmarker_cov`.
+#' @return Named list with `indep_id_re`, `indep_marker_re`,
+#'   `indep_idmarker_cov`, and `indep_marker_id_crosscorr`.
 #'
 #' @keywords internal
+#' @noRd
 .resolve_re_independence <- function(formulaLong, marker_var, id_var) {
   # Collect random-effects terms with their operator and context so that
   # nested marker-by-id specifications can be distinguished from top-level id blocks.
@@ -1276,11 +2028,18 @@ gk_quadrature <- function(nodes = 15L) {
     }
 
     op <- as.character(expr[[1]])
-    if (op %in% c("|", "||")) {
+    if (length(op) == 1L && op %in% c("|", "||")) {
       grp <- .group_name_from_expr(expr[[3]])
-      terms <- c(terms, list(list(op = op, group = grp, context = context)))
+      nested_terms <- .collect_re_terms(expr[[2]], context = grp)
+      nested_groups <- unique(vapply(nested_terms, function(term) term$group %||% "", character(1)))
+      terms <- c(terms, list(list(
+        op = op,
+        group = grp,
+        context = context,
+        nested_groups = nested_groups[nzchar(nested_groups)]
+      )))
       # Traverse the left-hand side within the current group context.
-      return(c(terms, .collect_re_terms(expr[[2]], context = grp)))
+      return(c(terms, nested_terms))
     }
 
     for (i in seq_along(expr)[-1]) {
@@ -1292,7 +2051,12 @@ gk_quadrature <- function(nodes = 15L) {
   rhs <- formulaLong[[3]]
   terms <- .collect_re_terms(rhs, context = NULL)
   if (length(terms) == 0) {
-    return(list(indep_id_re = 0L, indep_marker_re = 0L, indep_idmarker_cov = 0L))
+    return(list(
+      indep_id_re = 0L,
+      indep_marker_re = 0L,
+      indep_idmarker_cov = 0L,
+      indep_marker_id_crosscorr = 0L
+    ))
   }
 
   indep_id_re <- any(vapply(
@@ -1310,12 +2074,54 @@ gk_quadrature <- function(nodes = 15L) {
     function(t) t$op == "||" && t$group == id_var && !is.null(t$context) && t$context == marker_var,
     logical(1)
   ))
+  indep_marker_id_crosscorr <- any(vapply(
+    terms,
+    function(t) {
+      t$op == "||" &&
+        t$group == marker_var &&
+        id_var %in% (t$nested_groups %||% character(0))
+    },
+    logical(1)
+  ))
 
   list(
     indep_id_re = as.integer(indep_id_re),
     indep_marker_re = as.integer(indep_marker_re),
-    indep_idmarker_cov = as.integer(indep_idmarker_cov)
+    indep_idmarker_cov = as.integer(indep_idmarker_cov),
+    indep_marker_id_crosscorr = as.integer(indep_marker_id_crosscorr)
   )
+}
+
+#' Validate covariance-style association structure against marker-by-id geometry
+#' @keywords internal
+#' @noRd
+.validate_assoc_cov_structure <- function(assoc,
+                                         q_idm,
+                                         diagonal_only = FALSE,
+                                         context = "association specification") {
+  assoc <- unique(as.character(assoc %||% character(0)))
+  q_idm <- as.integer(q_idm %||% 0L)
+  diagonal_only <- isTRUE(as.integer(diagonal_only) == 1L || identical(diagonal_only, TRUE))
+
+  if (!("corr" %in% assoc)) {
+    return(invisible(NULL))
+  }
+
+  if (q_idm < 2L) {
+    cli::cli_abort(c(
+      x = "{.arg corr} requires at least two marker-by-id random-effect components in {.field {context}}.",
+      i = "Use {.arg vcov} for SD-only covariance associations, or include at least two marker-by-id basis terms inside the nested {.code (... | id)} block."
+    ))
+  }
+
+  if (diagonal_only) {
+    cli::cli_abort(c(
+      x = "{.arg corr} is not available when the nested marker-by-id covariance is diagonal in {.field {context}}.",
+      i = "A nested {.code (... || id)} term removes off-diagonal marker-by-id correlation terms, so only {.arg vcov} on the SD scale is defined."
+    ))
+  }
+
+  invisible(NULL)
 }
 
 #' Extract nested marker syntax terms
@@ -1326,6 +2132,7 @@ gk_quadrature <- function(nodes = 15L) {
 #' Remaining no-bars part defines marker-only terms (optional).
 #'
 #' @keywords internal
+#' @noRd
 .extract_nested_marker_terms <- function(formulaLong, marker_var, id_var) {
   f_exp <- reformulas::expandDoubleVerts(formulaLong)
   bars <- reformulas::findbars(f_exp)
@@ -1401,6 +2208,7 @@ gk_quadrature <- function(nodes = 15L) {
 #' @param time_var Time variable name.
 #' @return Integer vector of indices.
 #' @keywords internal
+#' @noRd
 .detect_time_cols <- function(colnames_vec, time_var) {
   if (is.null(colnames_vec) || length(colnames_vec) == 0) {
     return(integer(0))
@@ -1417,11 +2225,29 @@ gk_quadrature <- function(nodes = 15L) {
 #'
 #' @return named list with n_time_* and idx_time_* values.
 #' @keywords internal
-.make_time_index_metadata <- function(x_cols, zid_cols, zmk_cols, zidm_cols, time_var) {
-  idx_beta <- .detect_time_cols(x_cols, time_var)
-  idx_uid <- .detect_time_cols(zid_cols, time_var)
-  idx_vmk <- .detect_time_cols(zmk_cols, time_var)
-  idx_widm <- .detect_time_cols(zidm_cols, time_var)
+#' @noRd
+.make_time_index_metadata <- function(x_cols = NULL,
+                                      zid_cols = NULL,
+                                      zmk_cols = NULL,
+                                      zidm_cols = NULL,
+                                      time_var,
+                                      fixed_design = NULL,
+                                      id_design = NULL,
+                                      marker_design = NULL,
+                                      idm_design = NULL) {
+  has_blueprints <- !is.null(fixed_design) || !is.null(id_design) || !is.null(marker_design) || !is.null(idm_design)
+
+  if (has_blueprints) {
+    idx_beta <- .time_rescale_idx_from_blueprint(fixed_design, time_var = time_var)
+    idx_uid <- .time_rescale_idx_from_blueprint_list(id_design %||% list(), time_var = time_var)
+    idx_vmk <- .time_rescale_idx_from_blueprint_list(marker_design %||% list(), time_var = time_var)
+    idx_idm <- .time_rescale_idx_from_blueprint_list(idm_design %||% list(), time_var = time_var)
+  } else {
+    idx_beta <- .detect_time_cols(x_cols, time_var)
+    idx_uid <- .detect_time_cols(zid_cols, time_var)
+    idx_vmk <- .detect_time_cols(zmk_cols, time_var)
+    idx_idm <- .detect_time_cols(zidm_cols, time_var)
+  }
 
   list(
     n_time_beta = length(idx_beta),
@@ -1430,15 +2256,31 @@ gk_quadrature <- function(nodes = 15L) {
     idx_time_uid = idx_uid,
     n_time_vmk = length(idx_vmk),
     idx_time_vmk = idx_vmk,
-    n_time_widm = length(idx_widm),
-    idx_time_widm = idx_widm
+    n_time_idm = length(idx_idm),
+    idx_time_idm = idx_idm
   )
 }
 
 # ---- Stan engine helpers ---------------------------------------------------
 
-#' Resolve preferred Stan engine
+#' Detect whether a Stan backend is currently usable
 #' @keywords internal
+#' @noRd
+.stan_backend_available <- function(engine) {
+  engine <- match.arg(engine, c("cmdstanr", "rstan"))
+  if (identical(engine, "cmdstanr")) {
+    if (!requireNamespace("cmdstanr", quietly = TRUE)) {
+      return(FALSE)
+    }
+    ver <- tryCatch(cmdstanr::cmdstan_version(error_on_NA = FALSE), error = function(e) NA)
+    return(!is.na(ver))
+  }
+  requireNamespace("rstan", quietly = TRUE)
+}
+
+#' Resolve Stan engine
+#' @keywords internal
+#' @noRd
 .resolve_stan_engine <- function(engine = NULL) {
   resolved <- engine %||% getOption("stan_preferred_engine", "cmdstanr")
   resolved <- tolower(as.character(resolved))
@@ -1448,24 +2290,40 @@ gk_quadrature <- function(nodes = 15L) {
       i = "Use 'cmdstanr' or 'rstan' via options(stan_preferred_engine=...)."
     ))
   }
+  if (.stan_backend_available(resolved)) {
+    return(resolved)
+  }
+
+  fallback <- setdiff(c("cmdstanr", "rstan"), resolved)
+  fallback <- fallback[vapply(fallback, .stan_backend_available, logical(1))]
+  if (length(fallback) > 0L) {
+    cli::cli_warn(c(
+      x = "Preferred Stan engine {.val {resolved}} is not available in this session.",
+      i = "Falling back to {.val {fallback[[1L]]}}."
+    ))
+    return(fallback[[1L]])
+  }
   resolved
 }
 
 #' Detect CmdStanR fit
 #' @keywords internal
+#' @noRd
 .is_cmdstanr_fit <- function(fit) {
   inherits(fit, "CmdStanMCMC")
 }
 
 #' Detect rstan fit
 #' @keywords internal
+#' @noRd
 .is_rstan_fit <- function(fit) {
   inherits(fit, "stanfit")
 }
 
 #' Materialize CmdStanR fit data in memory
 #' @keywords internal
-.materialize_cmdstanr_fit <- function(fit) {
+#' @noRd
+.import_cmdstanr_fit <- function(fit) {
   if (!.is_cmdstanr_fit(fit)) {
     return(fit)
   }
@@ -1481,18 +2339,24 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Unified draws object helper
 #' @keywords internal
+#' @noRd
 .get_draws_obj <- function(fit, variables = NULL, draws = NULL, seed = 1, keep_chains = FALSE) {
   if (.is_cmdstanr_fit(fit)) {
     d <- fit$draws(variables = variables)
   } else if (.is_rstan_fit(fit)) {
-    d <- posterior::as_draws_array(fit)
+    extract_args <- list(
+      object = fit,
+      permuted = FALSE,
+      inc_warmup = FALSE
+    )
     if (!is.null(variables)) {
-      vars_avail <- intersect(variables, posterior::variables(d))
-      d <- posterior::subset_draws(d, variable = vars_avail)
+      extract_args$pars <- variables
     }
+    d <- posterior::as_draws_array(do.call(rstan::extract, extract_args))
   } else {
     cli::cli_abort("Unsupported Stan fit object; expected CmdStanR or rstan.")
   }
+
   if (!is.null(draws) && is.finite(draws) && !isTRUE(keep_chains)) {
     nd <- posterior::ndraws(d)
     if (draws < nd) {
@@ -1501,11 +2365,13 @@ gk_quadrature <- function(nodes = 15L) {
       d <- posterior::subset_draws(d, draw = idx)
     }
   }
+
   d
 }
 
 #' Unified draws matrix helper
 #' @keywords internal
+#' @noRd
 .get_draws_matrix <- function(fit, variables = NULL, draws = NULL, seed = 1) {
   d <- .get_draws_obj(fit, variables = variables, draws = draws, seed = seed)
   posterior::as_draws_matrix(d)
@@ -1513,6 +2379,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Unified draws array helper (keeps chains separate)
 #' @keywords internal
+#' @noRd
 .get_draws_array <- function(fit, variables = NULL, draws = NULL, seed = 1) {
   d <- .get_draws_obj(fit, variables = variables, draws = NULL, seed = seed, keep_chains = TRUE)
   arr <- posterior::as_draws_array(d)
@@ -1531,6 +2398,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Subset draws safely before conversion to draws_df
 #' @keywords internal
+#' @noRd
 .get_draws_df <- function(fit, variables, draws = NULL, seed = 1) {
   d <- .get_draws_obj(fit, variables = variables, draws = draws, seed = seed)
   posterior::as_draws_df(d)
@@ -1538,6 +2406,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Summarise a numeric vector of draws
 #' @keywords internal
+#' @noRd
 .summarize_draw_col <- function(x) {
   c(
     Estimate = mean(x),
@@ -1549,6 +2418,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Clean summary wrapper
 #' @keywords internal
+#' @noRd
 .summarize_draws_cleaned <- function(fit, variables, draws = NULL, seed = 1) {
   ddf <- .get_draws_df(fit, variables = variables, draws = draws, seed = seed)
   out <- lapply(variables, function(v) .summarize_draw_col(ddf[[v]]))
@@ -1559,6 +2429,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' TF name helper
 #' @keywords internal
+#' @noRd
 .tf_name <- function(code) {
   map <- c("identity", "exp", "log", "inv_logit", "probit", "sqrt", "cbrt")
   if (code >= 0 && code <= 6) map[code + 1] else "unknown"
@@ -1568,6 +2439,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Expand Stan includes
 #' @keywords internal
+#' @noRd
 .read_stan_with_includes <- function(file, visited = character()) {
   if (!file.exists(file) || file %in% visited) return(character(0))
   visited <- c(visited, file)
@@ -1589,6 +2461,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Extract data block variable names from Stan file
 #' @keywords internal
+#' @noRd
 .stan_data_names <- function(stan_file) {
   lines <- .read_stan_with_includes(stan_file)
   if (length(lines) == 0) return(character(0))
@@ -1626,6 +2499,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Coerce distributional regression arrays for rstan
 #' @keywords internal
+#' @noRd
 .coerce_rstan_dist_arrays <- function(sd) {
   make_num_array <- function(x, dims) {
     if (length(dims) == 0) return(x)
@@ -1677,20 +2551,28 @@ gk_quadrature <- function(nodes = 15L) {
   sd$Z_alpha <- make_num_array(sd$Z_alpha, c(sd$n_re_alpha %||% 0L, N, sd$K_alpha_max %||% 0L))
   sd$J_alpha <- make_int_array(sd$J_alpha, c(sd$n_re_alpha %||% 0L, N))
   sd$re_weight_alpha <- make_num_array(sd$re_weight_alpha, c(sd$n_re_alpha %||% 0L, sd$G_alpha_max %||% 0L))
-  sd$Z_phi_beta <- make_num_array(sd$Z_phi_beta, c(sd$n_re_phi_beta %||% 0L, N, sd$K_phi_beta_max %||% 0L))
-  sd$J_phi_beta <- make_int_array(sd$J_phi_beta, c(sd$n_re_phi_beta %||% 0L, N))
-  sd$re_weight_phi_beta <- make_num_array(sd$re_weight_phi_beta, c(sd$n_re_phi_beta %||% 0L, sd$G_phi_beta_max %||% 0L))
-  sd$Z_tau_sde <- make_num_array(sd$Z_tau_sde, c(sd$n_re_tau_sde %||% 0L, N, sd$K_tau_sde_max %||% 0L))
-  sd$J_tau_sde <- make_int_array(sd$J_tau_sde, c(sd$n_re_tau_sde %||% 0L, N))
-  sd$re_weight_tau_sde <- make_num_array(sd$re_weight_tau_sde, c(sd$n_re_tau_sde %||% 0L, sd$G_tau_sde_max %||% 0L))
+  sd$Z_kappa <- make_num_array(sd$Z_kappa, c(sd$n_re_kappa %||% 0L, N, sd$K_kappa_max %||% 0L))
+  sd$J_kappa <- make_int_array(sd$J_kappa, c(sd$n_re_kappa %||% 0L, N))
+  sd$re_weight_kappa <- make_num_array(sd$re_weight_kappa, c(sd$n_re_kappa %||% 0L, sd$G_kappa_max %||% 0L))
+  sd$Z_tau <- make_num_array(sd$Z_tau, c(sd$n_re_tau %||% 0L, N, sd$K_tau_max %||% 0L))
+  sd$J_tau <- make_int_array(sd$J_tau, c(sd$n_re_tau %||% 0L, N))
+  sd$re_weight_tau <- make_num_array(sd$re_weight_tau, c(sd$n_re_tau %||% 0L, sd$G_tau_max %||% 0L))
   sd
 }
 
 #' Coerce time index fields for rstan
 #' @keywords internal
+#' @noRd
 .coerce_rstan_time_indices <- function(sd) {
-  idx_names <- c("idx_time_beta", "idx_time_uid", "idx_time_vmk", "idx_time_widm")
-  n_names <- c("n_time_beta", "n_time_uid", "n_time_vmk", "n_time_widm")
+  if (is.null(sd$idx_time_idm) && !is.null(sd$idx_time_widm)) {
+    sd$idx_time_idm <- sd$idx_time_widm
+  }
+  if (is.null(sd$n_time_idm) && !is.null(sd$n_time_widm)) {
+    sd$n_time_idm <- sd$n_time_widm
+  }
+
+  idx_names <- c("idx_time_beta", "idx_time_uid", "idx_time_vmk", "idx_time_idm")
+  n_names <- c("n_time_beta", "n_time_uid", "n_time_vmk", "n_time_idm")
   for (i in seq_along(idx_names)) {
     idx <- sd[[idx_names[i]]] %||% integer(0)
     idx <- as.integer(idx)
@@ -1702,6 +2584,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Coerce vector fields to 1D arrays for rstan
 #' @keywords internal
+#' @noRd
 .coerce_rstan_vectors <- function(sd, fields) {
   for (nm in fields) {
     x <- sd[[nm]]
@@ -1715,6 +2598,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Family name helper
 #' @keywords internal
+#' @noRd
 .family_name <- function(code) {
   map <- c("gaussian", "student", "bernoulli", "binomial", "poisson", "negbin")
   if (code > 0 && code <= 6) map[code] else "unknown"
@@ -1722,6 +2606,7 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Safe with progress  helper
 #' @keywords internal
+#' @noRd
 .safe_progress <- function(show_progress = FALSE, expr) {
   has_progressr <- requireNamespace("progressr", quietly = TRUE)
   if (has_progressr && show_progress) {

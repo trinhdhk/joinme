@@ -2,23 +2,31 @@
 % Please edit documentation in R/diagnosis.R
 \name{diagnosis}
 \alias{diagnosis}
-\title{Diagnostic summary for joinme objects}
+\title{Diagnostic summary for JoiNMe objects}
 \usage{
 diagnosis(object, ...)
 }
 \arguments{
-\item{object}{A joinme object.}
+\item{object}{A JoiNMe object.}
 
 \item{...}{Additional arguments passed to class-specific methods.}
 }
 \value{
-A data frame with \code{metric} and \code{value} columns.
+For \code{JoiNMeFit}, a \code{JoiNMe_diagnosis} object with components \code{summary} and
+\code{by_parameter}. For \code{JoiNMeDynPred}, a data frame with \code{metric} and \code{value}
+columns.
 }
 \description{
-Returns a compact diagnostics table for fitted (\code{JoinMeFit}) and dynamic
-prediction (\code{JoinMeDynPred}) objects.
+Returns diagnostic summaries for fitted (\code{JoiNMeFit}) and dynamic
+prediction (\code{JoiNMeDynPred}) objects.
 
-For \code{JoinMeFit}, diagnostics summarise the Stan sampler run. For
-\code{JoinMeDynPred}, diagnostics summarise posterior-draw quality for predicted
-quantities and are aligned to the same metric schema used for \code{JoinMeFit}.
+For \code{JoiNMeFit}, diagnostics include both an overall summary table and a
+parameter-level diagnostics table built from the same cached posterior
+summaries used by \code{\link[=summary.JoiNMeFit]{summary.JoiNMeFit()}}. This avoids the slower backend-wide
+diagnostic pass and keeps the reported metrics aligned with the summary
+sections users already inspect.
+
+For \code{JoiNMeDynPred}, diagnostics summarise posterior-draw quality for
+predicted quantities and are aligned to the same metric schema used for
+\code{JoiNMeFit}.
 }

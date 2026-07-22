@@ -7,12 +7,90 @@
  * computed in R and passed to Stan as data. The evaluation here is designed
  * for speed and robustness in the joint model association pipeline.
  *
- * @note All splines are defined on [x_min, x_max] and extrapolate linearly
- * beyond the boundary knots.
+ * @note I-splines are evaluated on the supplied boundary interval and clamp
+ * outside values to the nearest boundary, matching the R-side plotting helpers.
  */
 
   /**
-   * @brief Evaluate I-spline (Integral of B-spline) basis at a single point.
+  * @brief Evaluate a B-spline basis with intercept removed.
+   *
+   * The input knot vector contains the boundary knots as the first and last
+   * entries and any internal knots in between. The returned basis matches the
+   * dimensions used by splines::bs(..., intercept = FALSE).
+   */
+  vector bspline_basis_no_intercept(real x, vector knots, int degree) {
+    // Step 1: decode the compact knot specification.
+    // The first and last entries are boundary knots; everything in between is
+    // an internal knot. For an intercept-free B-spline basis of degree p, Stan
+    // needs the repeated-boundary knot sequence that splines::bs(...,
+    // intercept = FALSE) would use internally.
+    int n_total_knots = num_elements(knots);
+    int n_internal = n_total_knots - 2;
+    int left_reps = degree + 1;
+    int n_basis = n_internal + degree;
+    int n_basis_complete = n_basis + 1;
+    int n_basis_zero = n_basis_complete + degree;
+    vector[n_basis_zero + 1] knot_seq;
+    vector[n_basis_zero] basis_prev = rep_vector(0, n_basis_zero);
+    real lower_bound = knots[1];
+    real upper_bound = knots[n_total_knots];
+    real x_use = fmin(fmax(x, lower_bound), upper_bound);
+
+    if (n_total_knots < 2 || n_basis < 1) {
+      return rep_vector(0, 0);
+    }
+
+    // Step 2: build the repeated-boundary knot sequence used by the de Boor
+    // recursion. Values outside the declared boundary interval are clamped so
+    // Stan, simulation, and plotting all agree about the spline support.
+    for (i in 1:left_reps) {
+      knot_seq[i] = lower_bound;
+      knot_seq[left_reps + n_internal + i] = upper_bound;
+    }
+    if (n_internal > 0) {
+      for (i in 1:n_internal) {
+        knot_seq[left_reps + i] = knots[i + 1];
+      }
+    }
+
+    // Step 3: initialise the degree-0 basis indicators. Exactly one interval
+    // is active, except at the right boundary where we force the terminal basis
+    // to carry the endpoint so the basis remains right-continuous.
+    for (i in 1:n_basis_zero) {
+        if ((x_use >= knot_seq[i] && x_use < knot_seq[i + 1]) ||
+          (x_use == upper_bound && i == n_basis_complete)) {
+        basis_prev[i] = 1;
+      }
+    }
+
+    // Step 4: elevate the basis from degree 0 to the requested degree with the
+    // standard de Boor-Cox recursion. Each stage blends neighbouring basis
+    // functions using the local knot-span geometry.
+    if (degree > 0) {
+      for (p in 1:degree) {
+        vector[n_basis_zero] basis_curr = rep_vector(0, n_basis_zero);
+        for (i in 1:(n_basis_zero - p)) {
+          real denom_left = knot_seq[i + p] - knot_seq[i];
+          real denom_right = knot_seq[i + p + 1] - knot_seq[i + 1];
+          if (denom_left > 0) {
+            basis_curr[i] += ((x_use - knot_seq[i]) / denom_left) * basis_prev[i];
+          }
+          if (denom_right > 0) {
+            basis_curr[i] += ((knot_seq[i + p + 1] - x_use) / denom_right) * basis_prev[i + 1];
+          }
+        }
+        basis_prev = basis_curr;
+      }
+    }
+
+    // Step 5: drop the intercept column so the return value matches the shape
+    // expected by the R-side basis constructors and the stored spline
+    // coefficient vectors.
+    return segment(basis_prev, 2, n_basis);
+  }
+
+  /**
+  * @brief Evaluate I-spline (Integral of B-spline) basis at a single point.
    *
   * I-splines are monotonically increasing by construction, suitable for
   * transformations where monotonicity is desired.
@@ -20,75 +98,90 @@
   * Pre-computed I-spline basis coefficients are expected from R; this function
   * evaluates a linear combination of basis functions (including penalised fits).
    *
-   * @param x Input scalar
-   * @param knots Sorted vector of internal knots in [x_min, x_max]
-   * @param degree Degree of B-spline basis (typically 3 for cubic I-splines)
-   * @param coeff Spline coefficients (length = n_knots + degree)
-   * @return Interpolated value
+  * @param x Input scalar on the runtime association-feature scale.
+  * @param knots Strictly increasing knot vector whose first and last entries are
+  *   the boundary knots. For expit-domain spline modes these knots must already
+  *   live in [0, 1].
+  * @param degree Positive spline degree. Typical accepted values in this model
+  *   are 1-5, with 3 used most often.
+  * @param coeff Spline coefficients. Accepted lengths are those produced by the
+  *   corresponding R-side I-spline constructors for the supplied knots/degree.
+   * @return I-spline transform value
    */
   real ispline_eval(real x, vector knots, int degree, vector coeff) {
+    // Step 1: establish the spline order and clamp the evaluation point to the
+    // declared boundary interval. This is the same boundary behaviour used by
+    // simulation and plotting for expit-domain and raw-domain I-splines.
     int n_knots = num_elements(knots);
     int n_basis = num_elements(coeff);
+    int n_internal = n_knots - 2;
+    int ord = degree + 1;
+    vector[n_basis] bs_vec;
+    vector[n_basis] is_vec;
+    real lower_bound;
+    real upper_bound;
+    real x_use;
+    int j;
 
     if (n_knots < 2 || n_basis < 2) {
       return (n_basis >= 1) ? coeff[1] : 0.0;
     }
-    
-    // Extended knot vector: c(boundary, internal_knots, boundary)
-    // Assuming knots[1] = x_min, knots[n_knots] = x_max
-    // Boundary knots repeated `degree` times at each end
-    
-    vector[n_basis + 2 * degree] knot_ext; // extended knot vector with repeats
-    
-    // Left boundary knots
-    for (d in 1:degree) {
-      knot_ext[d] = knots[1];
+
+    lower_bound = knots[1];
+    upper_bound = knots[n_knots];
+    x_use = fmin(fmax(x, lower_bound), upper_bound);
+
+    // Step 2: evaluate the next-order B-spline basis. I-splines can be written
+    // as cumulative sums of one-order-higher B-splines, so this gives the raw
+    // ingredients for the monotone basis construction.
+    bs_vec = bspline_basis_no_intercept(x_use, knots, degree + 1);
+    is_vec = bs_vec;
+
+    // Step 3: locate the active knot interval. The interval index determines
+    // which basis functions are fully accumulated, partially accumulated, or
+    // exactly zero at the current x value.
+    j = ord;
+    if (n_internal > 0) {
+      for (k in 1:n_internal) {
+        if (x_use >= knots[k + 1]) {
+          j = ord + k;
+        }
+      }
     }
-    // Internal knots
-    for (k in 1:n_knots) {
-      knot_ext[degree + k] = knots[k];
+
+    // Step 4: zero any basis elements to the right of the active interval,
+    // because those I-spline basis functions have not started accumulating yet.
+    if (j < n_basis) {
+      for (idx in (j + 1):n_basis) {
+        is_vec[idx] = 0;
+      }
     }
-    // Right boundary knots
-    for (d in 1:degree) {
-      knot_ext[degree + n_knots + d] = knots[n_knots];
+
+    // Step 5: take the reverse cumulative sum through the active interval.
+    // This converts the B-spline representation into the I-spline basis values
+    // that rise monotonically from 0 toward 1.
+    if (j > 1) {
+      for (kk in 1:(j - 1)) {
+        int idx = j - kk;
+        is_vec[idx] = is_vec[idx] + is_vec[idx + 1];
+      }
     }
-    
-    // Evaluate B-spline basis functions (recursive de Boor-Cox algorithm)
-    // For simplicity, approximate via piecewise-linear evaluation on precomputed knots.
-    // In production, a full recursion or precomputed basis matrix can be used.
-    
-    // Fallback: linear interpolation for now.
-    // Full I-spline evaluation requires more complex recursion.
-    int idx = 1; // knot interval index
-    int max_idx = (n_knots < n_basis) ? n_knots : n_basis;
-    while (idx < n_knots && x >= knots[idx + 1]) {
-      idx += 1;
+
+    // Step 6: any basis functions entirely to the left of the active interval
+    // have already saturated and therefore contribute exactly 1.
+    if ((j - ord) > 1) {
+      for (idx in 1:(j - ord - 1)) {
+        is_vec[idx] = 1;
+      }
     }
-    
-    if (x <= knots[1]) {
-      // Before first knot: linear extrapolation
-      real dx = knots[2] - knots[1];
-      real dc = coeff[2] - coeff[1];
-      return coeff[1] + (dc / dx) * (x - knots[1]);
-    } else if (idx >= max_idx || idx >= n_knots) {
-      // After last knot: linear extrapolation
-      int knot_last = n_knots;
-      int coeff_last = n_basis;
-      real dx = knots[knot_last] - knots[knot_last - 1];
-      real dc = coeff[coeff_last] - coeff[coeff_last - 1];
-      return coeff[coeff_last] + (dc / dx) * (x - knots[knot_last]);
-    } else {
-      // Between knots: piecewise linear
-      int idx_next = idx + 1;
-      if (idx_next > n_knots) idx_next = n_knots;
-      if (idx_next > n_basis) idx_next = n_basis;
-      real w = (x - knots[idx]) / (knots[idx_next] - knots[idx]); // linear weight
-      return (1 - w) * coeff[idx] + w * coeff[idx_next];
-    }
+
+    // Step 7: combine the monotone basis values with the coefficient vector to
+    // obtain the transformed association feature.
+    return dot_product(is_vec, coeff);
   }
 
   /**
-   * @brief Evaluate I-spline basis at vector of points (element-wise).
+  * @brief Evaluate I-spline basis at vector of points (element-wise).
    *
    * @param x Vector of input values
    * @param knots Sorted vector of internal knots
@@ -152,7 +245,7 @@
   }
 
   /**
-   * @brief Piecewise-linear basis for vector inputs (element-wise).
+  * @brief Piecewise-linear basis for vector inputs (element-wise).
    *
    * @param x_knots Sorted vector of x-coordinates of knots
    * @param y_knots Vector of y-coordinates of knots
@@ -188,7 +281,7 @@
   }
 
   /**
-   * @brief Monotonic I-spline transformation for vectors.
+  * @brief Monotonic I-spline transformation for vectors.
    *
    * @param x Vector of input values
    * @param spline_knots Knot vector for spline

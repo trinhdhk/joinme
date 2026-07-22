@@ -1,19 +1,22 @@
-#' Fit joinme model via cmdstanr or rstan
+#' Fit Joint Nested Mixed-effects (JoiNMe) model via cmdstanr or rstan
 #'
 #' @importFrom stats setNames
 #' @importFrom utils modifyList
 #'
 #' @description
-#' Fits the joinme Stan model using cmdstanr (default) or rstan. The engine can be
-#' set globally via options(stan_preferred_engine = "cmdstanr"|"rstan") or via
+#' Fits the Joint Nested Mixed-effects (JoiNMe) Stan model using cmdstanr (default) or rstan.
+#' The engine can be set globally via options(stan_preferred_engine = "cmdstanr"|"rstan") or via
 #' control$engine.
-#' following the notebook, and supports association transformations and time-internal
-#' scaling metadata.
 #'
 #' @details
 #' Transformations are provided through a single `transforms` argument.
-#' Each element (cv_total, cs_total, corr) is defined as a list specifying a type
-#' and type-specific fields (see `build_standata_transforms()` for details).
+#' Each element (cv_total, cs_total, corr, vcov) is defined as a list specifying a type
+#' and type-specific fields (see `build_standata_transforms()` for details). For
+#' covariance-style associations, `corr` acts on the off-diagonal entries of the
+#' subject-specific Cholesky-correlation factor `K`, while `vcov` acts on those
+#' same off-diagonal `K` entries together with the subject-specific standard
+#' deviations. If both `corr` and `vcov` are requested, `vcov` is kept and
+#' `corr` is ignored with a warning.
 #'
 #' Distributional regression can be specified in two equivalent forms:
 #' 1. A named list with RHS-only formulas, e.g. `list(sigma = ~ 1 + time)`.
@@ -24,18 +27,22 @@
 #'
 #' Marker weights (see `joinme_standata()`) are used to form marker-average summaries
 #' for both current value (CV) and current slope (CS) association components. When
-#' `fixed_marker_weights = FALSE`, signed perturbations are estimated around base
-#' weights using `marker_weights + z_marker_weights` with
-#' `z_marker_weights ~ N(0, 1)`. The effective marker intensities are used directly
-#' from `w_raw` without additional normalisation and scale the association contributions.
+#' `shared_marker_weights = TRUE`, all weighted marker-based association terms share
+#' one marker-weight structure. When `shared_marker_weights = FALSE`, each active
+#' weighted marker-based association term (`cv_total`, `cs_total`, `cv_marker`,
+#' `cs_marker`) gets its own marker-weight structure. When
+#' `fixed_marker_weights = FALSE`, signed perturbations are estimated around the
+#' supplied base weights. The effective marker intensities are used directly,
+#' without additional normalisation, to scale the corresponding association
+#' contribution.
 #'
-#' The returned `JoinMeFit` object stores a compact association plotting payload
+#' The returned `JoiNMeFit` object stores a compact association plotting bundle
 #' containing only the posterior quantities needed to draw association curves
 #' (`alpha_*`, marker weights, spline coefficients, and cached model-implied raw
 #' support ranges). This keeps association plotting usable after serialization
 #' without needing the full transient CmdStan CSV outputs.
 #'
-#' For CmdStanR fits, `joinme()` also eagerly materializes the CSV-backed fit
+#' For CmdStanR fits, `joinme()` also eagerly imports the CSV-backed fit
 #' contents in memory before returning. This mirrors the loading step used by
 #' `cmdstanr::save_object()` so later `saveRDS()` calls do not rely on the
 #' original CmdStan CSV files remaining on disk.
@@ -50,25 +57,14 @@
 #' factor and applies subject-level likelihood weighting for the longitudinal and
 #' survival contributions. Weight columns must be finite and strictly positive.
 #'
-#' Association coefficients are denoted with the `alpha_` prefix to match joint-model
-#' conventions and to avoid confusion with the linear predictor eta used throughout
-#' the longitudinal and survival submodels. Total, marker, and mean associations use
-#' a positive non-centred parameterisation: `alpha = z_alpha * sd_alpha`, which
-#' stabilizes sampling while preserving the intended sign structure via marker weights.
-#'
-#' The typical workflow is:
-#' 1. Prepare `dataLong` and `dataEvent` with aligned ids and time scales.
-#' 2. Specify `formulaLong` and `formulaEvent` to define the longitudinal and survival submodels.
-#' 3. Choose `assoc` components and optional `transforms` for association terms.
-#' 4. Fit with `control` to manage sampling, threading, and reproducibility.
-#' 5. Validate convergence (R-hat, ESS, divergences), then predict.
-#'
-#' Example:
+#' Transformation for supported association terms
+#' can be fed to `joinme()` in a named list. For example
 #' `list(cv_total = list(type = "functional", expr = ~ log1p(x)),
 #'      cs_total = list(type = "identity"),
-#'      corr = list(type = "pwlin", x = c(-2, 0, 2), y = c(0.2, 1, 0.2)))`
+#'      corr = list(type = "pwlin", x = c(-2, 0, 2), y = c(0.2, 1, 0.2)),
+#'      vcov = list(type = "identity"))`
 #'
-#' Transformation parameterisation cheat sheet:
+#' Transformation parameterisation:
 #' - Omitted term, `NULL`, or `list(type = "identity")`:
 #'   identity transform (default).
 #' - `list(type = "functional", expr = ~ log1p(x))`:
@@ -76,7 +72,7 @@
 #' - `list(type = "ispline", knots = c(-1, 0, 1), coeff = c(0, 0.3, 0.8, 1.1, 1.3), degree = 3)`:
 #'   monotone I-spline; `knots` and `coeff` are required, `degree` defaults to `3`.
 #' - `list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), y = exp(seq(-2, 2, length.out = 50)), n_knots = 6, degree = 3, lambda = 1)`:
-#'   penalised monotone I-spline in legacy plug-in mode; defaults are
+#'   penalised monotone I-spline. This is intended for simulation but it works here too, off-labelly; defaults are
 #'   `n_knots = 6`, `degree = 3`, `lambda = 1` when those values are omitted.
 #' - `list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), n_knots = 6, degree = 3, lambda = 1)`:
 #'   penalised monotone I-spline with Stan-estimated coefficients; if `knots`
@@ -84,37 +80,54 @@
 #' - `list(type = "ispline_expit", knots = c(0.05, 0.5, 0.95), coeff = c(0, 0.25, 0.8, 1.0, 1.1), degree = 3)`:
 #'   monotone I-spline evaluated on `plogis(x)`; explicit `knots` are specified
 #'   on the expit scale because the spline basis itself lives on that bounded
-#'   `expit(x)` domain.
+#'   `expit(x)` domain. This maybe useful for numerical stability
+#'   but highly experimental and may be useful
+#'   to put for knots at the each (near 0 and 1) if users is concerned
+#'   about the curve at the tails.
 #' - `list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), y = seq(0.02, 0.98, length.out = 50)^0.8, n_knots = 6, degree = 3, lambda = 1)`:
-#'   penalised monotone I-spline on `plogis(x)` in legacy plug-in mode.
+#'   penalised monotone I-spline on `plogis(x)`. This is intended for simulation but it works here too, off-labelly.
 #' - `list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), n_knots = 6, degree = 3, lambda = 1)`:
 #'   penalised monotone I-spline on `plogis(x)` with Stan-estimated coefficients.
 #' - `list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))`:
-#'   piecewise-linear transform; both `x` and `y` are required and there are no
-#'   additional defaults.
+#'   piecewise-linear transform; both `x` and `y` are required.
+#'   This is intended for simulation but it works here too, off-labelly.
 #'
 #' For monotone spline transforms:
 #' - `type = "ispline"`: provide `knots` and `coeff` directly (plus optional
 #'   `degree`); `x`/`y`/`lambda` are not used.
 #' - `type = "ispline_penalised"` (alias: `"ispline_penalized"`): provide
 #'   spline structure through `knots` (or `n_knots`) and smoothness penalty `lambda`.
-#'   - If `y` is supplied, `joinme` first fits the monotone spline to training
+#'   - If `y` is supplied, `JoiNMe` first fits the monotone spline to training
 #'     pairs `(x, y)` in R and passes fixed coefficients to Stan. These plug-in
 #'     coefficients use the same anchored convention as the Stan-estimated path:
-#'     first coefficient `0`, last coefficient `1`.
+#'     increasing splines run from `0` to `1`, while decreasing splines run from
+#'     `1` to `0`.
 #'   - If `y` is omitted, Stan estimates the monotone spline coefficients
-#'     directly.
+#'     directly. Use `direction = "decreasing"` when the monotone transform
+#'     should fall as the raw association feature increases.
 #' - `x`: raw association-feature values used either to define training pairs or
 #'   to help derive knot locations.
 #' - `y`: optional target transformed values at those `x` points. Supplying `y`
 #'   activates the legacy plug-in fit; omitting it activates Stan estimation.
 #' - `lambda`: smoothness control (larger = smoother transform).
+#' - `direction`: monotone orientation for penalised spline families. Accepted
+#'   values are `"increasing"` and `"decreasing"`. When `y` is supplied, the
+#'   plug-in fit infers the direction from the training pairs if you omit it.
+#'   When `y` is omitted and Stan estimates the spline directly, the default
+#'   remains `"increasing"`.
 #' - `type = "ispline_expit"` / `"ispline_expit_penalised"`:
 #'   same semantics as the I-spline variants above, except the spline basis is
 #'   built on `plogis(x)`. This keeps the spline input on the bounded interval
 #'   $(0, 1)$ and is often more numerically stable when the raw association
-#'   feature spans a wide range. Explicit `knots` and training `x` values must
-#'   be specified on that expit scale.
+#'   feature spans a wide range. My experiments showed that this may help with
+#'   a workaround for the Boundary knots but may cause considerable suppress at
+#'   the tails if mis-specificied. Again, this may not affect the predictive value
+#'   at much because the tail of the association term is often scarced. However,
+#'   if you think the distribution of the latent association term is heavy-tailed,
+#'   you may want to put more knots at the tails (e.g knots = c(0.001, 0.01, 0.5, 0.99, 0.999))
+#'   to fight the impact of the `plogis()` transformation. In the future, a
+#'   normalisation of the latent association term may be added to the model; may be
+#'   dividing by sqrt of the second moment.
 #'
 #' Additional arguments are forwarded to `joinme_standata()` (e.g., `assoc`,
 #' `basehaz`, `basehaz_degree`, `n_knots`, `time_var`, and `shrinkage`). Use
@@ -124,24 +137,41 @@
 #'   and the marker block. The marker block may optionally include an inner
 #'   `( ... | id )` term for marker-by-id random effects. When omitted,
 #'   marker-by-id effects are disabled (Q_idm = 0). Grouping terms may use
+#'   `||` at either level: outer `( ... || marker )` keeps marker-only and
+#'   marker-by-id blocks independent, while inner `( ... || id )` keeps the
+#'   marker-by-id covariance diagonal. Grouping terms may also use
 #'   `weighted(group, weights = <column>)` to declare
 #'   formula-scoped subject/group weights.
 #' @param dataLong Long-format longitudinal data with columns for id, marker, time,
 #'   outcome, and covariates referenced in `formulaLong`.
 #' @param formulaEvent Survival formula for baseline covariates and event model.
-#' @param dataEvent One row per id event data with event time, event indicator, and
-#'   covariates referenced in `formulaEvent`.
-#' @param formulaCorr Covariance regression formula for id-specific marker-by-id effects.
+#'   Supported LHS forms are `survival::Surv(time, status)`,
+#'   `survival::Surv(start, stop, status)`,
+#'   `survival::Surv(time, status, type = "left")`, and
+#'   `survival::Surv(time1, time2, type = "interval2")`.
+#'   The legacy `type = "interval"` representation is not supported.
+#' @param dataEvent Event-process data with either one row per id
+#'   (`Surv(time, status)`) or multiple interval rows per id
+#'   (`Surv(start, stop, status)`). Covariates in `formulaEvent` may vary by interval.
+#' @param formulaVCov Covariance regression formula for id-specific marker-by-id effects.
 #'   If the marker block omits the inner `( ... | id )`, marker-by-id effects are
-#'   absent and `corr` associations are not allowed.
+#'   absent and covariance-style associations (`corr`, `vcov`) are not allowed.
+#'   When present, `corr` associations use the off-diagonal entries of the
+#'   subject-specific Cholesky-correlation factor `K`, whereas `vcov`
+#'   associations use those same off-diagonal `K` entries together with the
+#'   subject-specific standard deviations. If both `corr` and `vcov` are
+#'   requested, `vcov` is kept and `corr` is ignored with a warning. The
+#'   default `~ 1` remains a supported intercept-only covariance regression.
 #' @param formulaDist Optional list of formulas for distributional regression.
 #'   Supported LHS parameters are:
-#'   - `sigma`
-#'   - `nu`
-#'   - `phi`
-#'   - `alpha` (aliases: `alpha_skew`, `skew`)
-#'   - `phi_beta`
-#'   - `tau_sde`
+#'   - `sigma` (scale parameter)
+#'   - `nu`    (degrees of freedom for Student-t)
+#'   - `phi`   (precision for Negative Binomial 2)
+#'   - `alpha` (skewness parameter)
+#'   - `kappa` (positive sample-size parameter for the Beta distribution, with
+#'     shapes \eqn{\mu\kappa} and \eqn{(1-\mu)\kappa})
+#'   - `tau` (quantile/asymmetry parameter in \eqn{(0,1)} for the skew double
+#'     exponential distribution)
 #'
 #'   Three input styles are supported:
 #'   1. Named list with RHS-only formulas, e.g. `list(sigma = ~ 1 + time)`.
@@ -164,15 +194,22 @@
 #'   - cmdstanr::model$sample() arguments (e.g., chains, parallel_chains,
 #'     iter_warmup, iter_sampling, seed, refresh, adapt_delta, max_treedepth).
 #'   - engine: "cmdstanr" or "rstan". Defaults to options(stan_preferred_engine).
-#'   - threads_per_chain: integer; if > 1 uses `joinme_fit_threading.stan`.
-#'     For engine = "rstan", threading uses options(stan.thread = threads_per_chain).
-#'   - grainsize: integer; reduce_sum grainsize for threading (default max(1, min(n_cores, ceiling(n_id/(4*threads_per_chain*chains))))).
+#'   - threads_per_chain: integer; the threaded Stan program is always used.
+#'     `threads_per_chain = 1` keeps execution serial while preserving the
+#'     thread-capable kernel. For engine = "rstan", threading uses
+#'     options(stan.thread = threads_per_chain).
+#'   - grainsize: integer; reduce_sum grainsize for the threaded kernel.
+#'     Defaults to the full subject count when `threads_per_chain = 1`, and to
+#'     `max(1, min(n_cores, ceiling(n_id/(4*threads_per_chain*chains))))`
+#'     otherwise.
 #'   - force_recompile: logical; recompile the Stan model if needed.
 #'   - quadrature_nodes: optional positive integer total node target for survival
 #'     integration. Allowed values are exactly 7/15/31/41/51/61. Only the node
 #'     count is passed to Stan; GK nodes/weights are fixed in the Stan code.
-#'   - corr_diag_link: "softplus" or "exp" for covariance regression diagonals.
-#'   - tau_sde_fixed: optional fixed tau in (0,1) for skew-double-exponential.
+#'   - vcov_diag_link: "softplus" or "exp" for covariance regression diagonals.
+#'   - `tau_fixed`: optional fixed `tau` in \eqn{(0,1)} for the skew double
+#'     exponential distribution. It cannot be combined with a \code{tau}
+#'     distributional regression.
 #' @param draws Optional number of posterior draws used for summaries (not sampling).
 #' @param families Marker-specific family specification (optional).
 #'   Can be a character vector of family names aligned to marker order, or a
@@ -180,12 +217,24 @@
 #'   Supported links/inverse-links: `identity`, `log`, `logit`, `probit`, `exp`.
 #' @param transforms Transformation specifications for association terms.
 #'   Prefer declaring them with `joinme_tf(...)`; raw named lists remain
-#'   supported. See Details for `ispline` and `ispline_penalised` semantics.
+#'   supported. Fit-time functional transforms may also request a free affine
+#'   shift through `intercept = TRUE` and/or `slope = TRUE`, for example
+#'   `joinme_tf(cv_total = ~ expit(x, intercept = TRUE, slope = TRUE))`, which
+#'   is fitted as `expit(iota_1 + iota_2 * x)`. See details.
+#'
 #' @param priors Prior declaration. Prefer `joinme_priors(...)`; raw named lists
-#'   with components `beta`, `alpha`, and `lkj` remain supported.
-#' @param fixed_marker_weights Logical; if TRUE, marker weights are fixed at
-#'   provided `marker_weights` (or defaults). If FALSE, marker-weight perturbations
-#'   are estimated.
+#'   with components `beta`, `alpha`, `iota`, and `lkj` remain supported.
+#' @param fixed_marker_weights Logical; if TRUE, marker weights are fixed at the
+#'   supplied base values. If FALSE, marker-weight perturbations are estimated
+#'   using the family selected by `shrinkage` (0 = Student-t(6), 1 = Laplace,
+#'   2 = Normal).
+#' @param shared_marker_weights Logical; if TRUE, all weighted marker-based
+#'   association terms share one marker-weight structure. If FALSE, each active
+#'   weighted marker-based association term gets its own marker-weight structure.
+#'   When `marker_weights` is a named list, use names `cv_total`, `cs_total`,
+#'   `cv_marker`, and `cs_marker`.
+#' @param basehaz An object of class `joinme_basehaz` created by `joinme_basehaz()`.
+#' This controls the baseline hazard parameterisation and spline basis. See `?joinme_basehaz` for details.
 #' @param ... Additional args passed to joinme_standata().
 #'
 #' @examples
@@ -196,8 +245,8 @@
 #'   nu[family=student_t] ~ 1,
 #'   alpha[family=skew_normal] ~ 1 + x1,
 #'   phi[family=negbin2] ~ 1,
-#'   phi_beta[family=beta] ~ 1,
-#'   tau_sde[family=skew_double_exponential] ~ 1
+#'   kappa[family=beta] ~ 1,
+#'   tau[family=skew_double_exponential] ~ 1
 #' )
 #' }
 #'
@@ -205,13 +254,13 @@
 # File overview:
 # - Validate inputs and build Stan data.
 # - Resolve threading/engine settings and select the Stan program.
-# - Fit with cmdstanr/rstan and wrap results in a JoinMeFit object.
+# - Fit with cmdstanr/rstan and wrap results in a JoiNMeFit object.
 joinme <- function(
   formulaLong,
   dataLong,
   formulaEvent,
   dataEvent,
-  formulaCorr = ~1,
+  formulaVCov = ~1,
   formulaDist = NULL,
   control = list(),
   draws = NULL,
@@ -219,6 +268,9 @@ joinme <- function(
   transforms = NULL,
   priors = joinme_priors(),
   fixed_marker_weights = FALSE,
+  shared_marker_weights = TRUE,
+  basehaz = joinme_basehaz(),
+  seed = NULL,
   ...
 ) {
   if (!is.list(control)) {
@@ -228,7 +280,7 @@ joinme <- function(
     ))
   }
   transforms <- unclass(.normalise_joinme_tf_input(transforms, validate = FALSE))
-  priors <- unclass(.normalise_joinme_priors_input(priors, validate = TRUE))
+  priors <- unclass(.joinme_priors_(priors, validate = TRUE))
 
   if (length(control) > 0 && is.null(names(control))) {
     cli::cli_abort(c(
@@ -239,27 +291,47 @@ joinme <- function(
 
   # Workflow: build standata -> resolve threading -> choose engine -> fit -> wrap
   # - sd: prepared Stan data list with all dimensions and transforms
-  corr_diag_link <- control$corr_diag_link %||% "softplus"
-  tau_sde_fixed <- control$tau_sde_fixed %||% NULL
+  vcov_diag_link <- control$vcov_diag_link %||% "softplus"
+  tau_fixed <- control$tau_fixed %||% NULL
   quadrature_nodes <- control$quadrature_nodes %||% NULL
-  sd <- joinme_standata(
+  formulaVCov <- .resolve_vcov_formula(
+    formulaVCov = formulaVCov,
+    default = ~ 1,
+    context = "joinme()"
+  )
+  assertthat::assert_that(
+    inherits(basehaz, "joinme_basehaz"),
+    msg = "{.arg basehaz} must be a {.cls joinme_basehaz} object, created by {.fn joinme_basehaz()} or {.fn jm_basehaz()}."
+  )
+
+  arg_list <- list(...)
+  arg_list <- arg_list[names(arg_list) %in% names(formals(joinme_standata))]
+  arg_list <- modifyList(arg_list, list(
     formulaLong = formulaLong,
     dataLong = dataLong,
     formulaEvent = formulaEvent,
     dataEvent = dataEvent,
-    formulaCorr = formulaCorr,
+    formulaVCov = formulaVCov,
     formulaDist = formulaDist,
     families = families,
     transforms = transforms,
     beta_prior = priors$beta,
     alpha_prior = priors$alpha,
+    iota_prior = priors$iota,
     lkj_prior = priors$lkj,
     fixed_marker_weights = fixed_marker_weights,
+    shared_marker_weights = shared_marker_weights,
     quadrature_nodes = quadrature_nodes,
-    corr_diag_link = corr_diag_link,
-    tau_sde_fixed = tau_sde_fixed,
-    ...
-  )
+    vcov_diag_link = vcov_diag_link,
+    tau_fixed = tau_fixed,
+    basehaz = basehaz$type,
+    basehaz_n_knots = basehaz$n_knots,
+    basehaz_knots = basehaz$knots,
+    basehaz_degree = basehaz$degree,
+    basehaz_formula = basehaz$formula,
+    seed = seed
+  ))
+  sd <- do.call(joinme_standata, arg_list)
 
   # Threading: honor explicit control overrides, fall back to mc.cores or 1
   threads_per_chain <- control$threads_per_chain %||% control$threads %||% control$mc.cores %||% 1L
@@ -291,11 +363,15 @@ joinme <- function(
   grainsize <- control$grainsize
   if (is.null(grainsize)) {
     n_id <- sd$n_id %||% 1L
-    n_chains <- control$parallel_chains %||% control$chains %||% 4L
-    denom <- 4L * as.integer(threads_per_chain) * as.integer(n_chains)
-    denom <- max(1L, denom)
-    grainsize <- max(1L, as.integer(ceiling(n_id / denom)))
-    grainsize <- min(as.integer(n_cores), grainsize)
+    if (threads_per_chain <= 1L) {
+      grainsize <- as.integer(n_id)
+    } else {
+      n_chains <- control$parallel_chains %||% control$chains %||% 4L
+      denom <- 4L * as.integer(threads_per_chain) * as.integer(n_chains)
+      denom <- max(1L, denom)
+      grainsize <- max(1L, as.integer(ceiling(n_id / denom)))
+      grainsize <- min(as.integer(n_cores), grainsize)
+    }
   }
   if (!is.numeric(grainsize) || length(grainsize) != 1) {
     cli::cli_abort(c(
@@ -313,9 +389,8 @@ joinme <- function(
 
   stan_file <- .get_stan_file(
     program = "joinme_fit",
-    threaded = threads_per_chain > 1
+    threaded = TRUE
   )
-  use_threading <- threads_per_chain > 1
 
   engine <- .resolve_stan_engine(control$engine)
   if (engine == "rstan") {
@@ -324,7 +399,7 @@ joinme <- function(
     on.exit(options(stan.thread = old_stan_thread), add = TRUE)
   }
 
-  cpp_opts <- if (use_threading) list(stan_threads = TRUE) else NULL
+  cpp_opts <- list(stan_threads = TRUE)
   if (engine == "cmdstanr") {
     mod <- .get_cmdstan_model(
       stan_file,
@@ -335,6 +410,12 @@ joinme <- function(
     mod <- .get_rstan_model(
       stan_file
     )
+  }
+  if (engine == "cmdstanr" && !.cmdstan_threads_enabled(mod)) {
+    cli::cli_abort(c(
+      x = "The CmdStan model is not compiled with {.code stan_threads = TRUE}.",
+      i = "Retry with {.code control = list(force_recompile = TRUE)} or call {.fn precompile_cmdstanr_models}."
+    ))
   }
 
   # Remove non-Stan fields only
@@ -352,32 +433,31 @@ joinme <- function(
   sd_stan$basehaz <- NULL
   sd_stan$n_knots <- NULL
   sd_stan$basehaz_degree <- NULL
+  sd_stan$basehaz_cols <- NULL
   sd_stan$Bs_obj <- NULL
   sd_stan$dist_cols <- NULL
   sd_stan$dist_re_terms <- NULL
   sd_stan$dist_formulas <- NULL
 
-  if (use_threading) {
-    if (is.null(sd_stan$id) || is.null(sd_stan$n_id)) {
-      cli::cli_abort(c(
-        x = "Threading requires {.arg id} and {.arg n_id} in Stan data.",
-        i = "Check the standata builder output."
-      ))
-    }
-    id_vec <- sd_stan$id
-    idx <- split(seq_along(id_vec), id_vec)
-    id_start <- vapply(idx, min, integer(1))
-    id_end <- vapply(idx, max, integer(1))
-    if (length(id_start) != sd_stan$n_id) {
-      cli::cli_abort(c(
-        x = "Threading requires contiguous ids from 1..n_id.",
-        i = "Check the id mapping in standata."
-      ))
-    }
-    sd_stan$id_start <- as.integer(id_start)
-    sd_stan$id_end <- as.integer(id_end)
-    sd_stan$grainsize <- grainsize
+  if (is.null(sd_stan$id) || is.null(sd_stan$n_id)) {
+    cli::cli_abort(c(
+      x = "Threaded Stan execution requires {.arg id} and {.arg n_id} in Stan data.",
+      i = "Check the standata builder output."
+    ))
   }
+  id_vec <- sd_stan$id
+  idx <- split(seq_along(id_vec), id_vec)
+  id_start <- vapply(idx, min, integer(1))
+  id_end <- vapply(idx, max, integer(1))
+  if (length(id_start) != sd_stan$n_id) {
+    cli::cli_abort(c(
+      x = "Threaded Stan execution requires contiguous ids from 1..n_id.",
+      i = "Check the id mapping in standata."
+    ))
+  }
+  sd_stan$id_start <- as.integer(id_start)
+  sd_stan$id_end <- as.integer(id_end)
+  sd_stan$grainsize <- grainsize
 
   # Ensure time index arrays are preserved for cmdstanr JSON (avoid auto-unbox)
   sd_stan <- .coerce_rstan_time_indices(sd_stan)
@@ -388,7 +468,12 @@ joinme <- function(
     "beta_scale",
     "const_data_cv",
     "const_data_cs",
-    "const_data_corr"
+    "const_data_corr",
+    "const_data_vcov",
+    "const_data_cv_mean",
+    "const_data_cv_marker",
+    "const_data_cs_mean",
+    "const_data_cs_marker"
   ))
 
   has_nonstan_metadata <- function(x) {
@@ -448,7 +533,7 @@ joinme <- function(
   chains_val <- args$parallel_chains %||% args$chains %||% defaults$parallel_chains
   args$parallel_chains <- chains_val
   args$chains <- chains_val
-  if (use_threading) args$threads_per_chain <- threads_per_chain
+  args$threads_per_chain <- threads_per_chain
   args$data <- sd_stan
   args <- args[!vapply(args, is.null, logical(1))]
 
@@ -456,7 +541,7 @@ joinme <- function(
     allowed <- names(formals(mod$sample))
     args <- args[names(args) %in% allowed]
     fit <- do.call(mod$sample, args)
-    fit <- .materialize_cmdstanr_fit(fit)
+    fit <- .import_cmdstanr_fit(fit)
   } else {
     control_list <- list()
     if (!is.null(args$adapt_delta)) control_list$adapt_delta <- args$adapt_delta
@@ -472,10 +557,12 @@ joinme <- function(
       warmup = iter_warmup,
       seed = args$seed %||% defaults$seed,
       refresh = args$refresh %||% defaults$refresh,
+      open_progress = FALSE,
       cores = min(args$chains %||% 1, parallel::detectCores(logical = FALSE) %||% 1)
     )
     if (length(control_list) > 0) rstan_args$control <- control_list
-    fit <- do.call(rstan::sampling, rstan_args)
+    # Rstan returns warnings about NA in Rhat which is untrue. Can easily work out with diagnosis tho so let's suppress it for now.
+    fit <- suppressWarnings(do.call(rstan::sampling, rstan_args))
   }
 
   cfg <- list(
@@ -493,7 +580,8 @@ joinme <- function(
       cs_total = sd$assoc_cs_total,
       cs_mean = sd$assoc_cs_mean,
       cs_marker = sd$assoc_cs_marker,
-      corr = sd$assoc_corr
+      corr = sd$assoc_corr,
+      vcov = sd$assoc_vcov
     ),
     transforms = list(
       tf_mode_cv_tot = sd$tf_mode_cv_tot,
@@ -502,7 +590,8 @@ joinme <- function(
       tf_mode_cs_mean = sd$tf_mode_cs_mean,
       tf_mode_cv_marker = sd$tf_mode_cv_marker,
       tf_mode_cs_marker = sd$tf_mode_cs_marker,
-      tf_mode_corr = sd$tf_mode_corr
+      tf_mode_corr = sd$tf_mode_corr,
+      tf_mode_vcov = sd$tf_mode_vcov
     ),
     transforms_spec = transforms,
     dist = list(
@@ -520,12 +609,12 @@ joinme <- function(
     dims = c(n_id = sd$n_id, N = sd$N, D = sd$D, P = sd$P, R_id = sd$R_id, R_mk = sd$R_mk, Q_idm = sd$Q_idm),
     draws_default = draws,
     threads_per_chain = threads_per_chain,
-    tmax = sd$tmax,
+    # tmax_internal = sd$tmax,
     time_indices = list(
       idx_time_beta = sd$idx_time_beta,
       idx_time_uid = sd$idx_time_uid,
       idx_time_vmk = sd$idx_time_vmk,
-      idx_time_widm = sd$idx_time_widm
+      idx_time_idm = sd$idx_time_idm
     ),
     marker_weights = sd$marker_weights,
     fixed_marker_weights = sd$fixed_marker_weights,
@@ -533,18 +622,20 @@ joinme <- function(
     n_knots = sd$n_knots,
     basehaz_degree = sd$basehaz_degree,
     K_event = sd$K_event,
-    corr_diag_link = sd$corr_diag_link,
-    use_tau_sde_fixed = sd$use_tau_sde_fixed,
-    tau_sde_fixed = sd$tau_sde_fixed
+    surv_type = sd$surv_type,
+    event_censor_types_present = sd$event_censor_types_present,
+    vcov_diag_link = sd$vcov_diag_link,
+    use_tau_fixed = sd$use_tau_fixed,
+    tau_fixed = sd$tau_fixed
   )
   cfg$engine <- engine
 
-  fit_obj <- JoinMeFit$new(
+  fit_obj <- JoiNMeFit$new(
     fit = fit,
     stan_data = sd,
     formulaLong = formulaLong,
     formulaEvent = formulaEvent,
-    formulaCorr = formulaCorr,
+    formulaVCov = formulaVCov,
     config = cfg,
     call = match.call(),
     tmax = sd$tmax,
@@ -552,10 +643,10 @@ joinme <- function(
     dataEvent = dataEvent
   )
 
-  # Store a compact, self-contained plotting payload so association plots remain
+  # Store a compact, self-contained plotting bundle so association plots remain
   # usable even when cmdstanr CSV outputs are no longer available.
   fit_obj$config$association_plot_payload <- tryCatch(
-    .build_joinmefit_association_plot_payload(
+    .build_JoiNMefit_association_plot_payload(
       fit = fit,
       stan_data = sd,
       config = fit_obj$config,

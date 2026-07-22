@@ -1,5 +1,5 @@
 ---
-title: "joinme: Association Construction"
+title: "JoiNMe: Association Construction"
 output-dir: ../docs/articles
 format:
   html:
@@ -30,6 +30,10 @@ options(width = 80)
 
 This vignette focuses on **association term construction**, including transformation selection, interpretability, and practical trade-offs.
 
+It also explains how those association terms propagate into the public summary,
+draw-extraction, and plotting APIs so the same labels are used consistently in
+tables, MCMC plots, and fitted association curves.
+
 Association transforms apply to all supported longitudinal families (including
 double_exponential, skew_double_exponential, beta, and cumulative_logit) and to
 competing-risk survival models.
@@ -39,7 +43,7 @@ competing-risk survival models.
 At the event time and at the default 15 Gauss-Kronrod nodes used for integration
 (configurable), the
 longitudinal linear predictor is decomposed into a mean component and a marker
-component. From these components, `joinme` constructs:
+component. From these components, `JoiNMe` constructs:
 
 - **CV_total**: total current value (mean + marker components).
 - **CV_mean**: current value of the mean component only.
@@ -50,18 +54,42 @@ component. From these components, `joinme` constructs:
 - **CS_marker**: slope of the marker component.
 - **CORR**: a subject-specific variance summary of the marker-by-id covariance
   structure, constant across time.
+- **VCOV**: a subject-specific lower-triangular summary of the marker-by-id
+  Cholesky factor `L`, also constant across time. The channel uses the entries
+  of `L` directly rather than the reconstructed covariance matrix `L L'`.
 
 Each component can be included or excluded using the `assoc` argument. If
 `assoc` does not include a component, the corresponding coefficient is prior-only
 and does not enter the likelihood.
 
-The CORR component requires marker-by-id random effects. If the marker block
-does not include an inner `( ... | id )` term, then `Q_idm = 0` and CORR is not
-available.
+### Scale recovery and exponentiation in summaries
+
+`JoiNMe` reports association and survival-process coefficients on the linear
+predictor scale first. Any internal time normalisation used by the Stan model
+is recovered on that linear scale before exponentiation.
+
+For multiplicative interpretations:
+
+- `summary(fit)$tables$baseline_hazard` reports baseline-hazard coefficients on
+  the log scale and hazard-ratio scale. Only the intercept is adjusted by
+  `-log(tmax)`; non-intercept basis coefficients are unchanged.
+- `summary(fit)$tables$survival_process` reports baseline covariate coefficients
+  and `Hazard.Ratio` interval columns from exponentiated log-scale summaries.
+- `summary(fit)$tables$assoc` reports association coefficients on their native
+  linear scale (including marker-weight terms when active).
+
+The intercept-only baseline adjustment follows the proportional-hazards identity
+that internal time scaling contributes a constant offset on the log-hazard
+scale. Therefore only the intercept is shifted; spline/formula basis terms are
+kept as fitted.
+
+The CORR and VCOV components require marker-by-id random effects. If the marker
+block does not include an inner `( ... | id )` term, then `Q_idm = 0` and these
+covariance-style associations are not available.
 
 # Marker-weighted CV and CS
 
-When multiple biomarkers are modelled, `joinme` constructs marker-average association
+When multiple biomarkers are modelled, `JoiNMe` constructs marker-average association
 components using weights $\omega_d$ (one per marker). For marker-aggregated
 terms (`cv_total`, `cv_marker`, `cs_total`, `cs_marker`), transforms are applied
 at the marker level first and then averaged with weights. This matters whenever
@@ -71,7 +99,7 @@ For example, with marker-specific total current values $CV_{id}(t)$ and transfor
 $f_{cv}$:
 
 $$
-  ext{cv\_total}(t) = \frac{1}{D}\sum_{d=1}^{D} \omega_d\, f_{cv}\!\left(CV_{id}(t)\right),
+  	ext{cv\_total}(t) = \frac{1}{D}\sum_{d=1}^{D} \omega_d\, f_{cv}\!\left(CV_{id}(t)\right),
 $$
 
 which differs from $f_{cv}(\frac{1}{D}\sum_d \omega_d CV_{id}(t))$ unless $f_{cv}$
@@ -81,49 +109,95 @@ For slopes, let $CS_{id}(t)$ be a marker-specific slope feature and $f_{cs}$ the
 configured CS transform. Then
 
 $$
-  ext{cs\_total}(t) = \frac{1}{D}\sum_{d=1}^{D} \omega_d\, f_{cs}\!\left(CS_{id}(t)\right),
+  	ext{cs\_total}(t) = \frac{1}{D}\sum_{d=1}^{D} \omega_d\, f_{cs}\!\left(CS_{id}(t)\right),
 $$
 
 and analogously for `cs_marker`. This is intentionally not equal to
 $f_{cs}(\frac{1}{D}\sum_d \omega_d CS_{id}(t))$ unless $f_{cs}$ is linear.
 
-In practice, provide fixed weights via `marker_weights`, or set
-`fixed_marker_weights = FALSE` to estimate signed perturbations around base
-weights via `marker_weights + z_marker_weights` with
-`z_marker_weights ~ N(0, 1)`. The resulting weights are used directly in
-marker-aggregated association terms. The simulator reports them in
-`truth$marker_weights`.
+In practice, provide fixed weights with `marker_weights` and
+`fixed_marker_weights = TRUE`, or set `fixed_marker_weights = FALSE` to use
+signed perturbations around base weights,
+$\omega_d = \omega_d^{(0)} + z_d$. The `shrinkage` switch controls the
+standardized latent family in both fitting and simulation: `0` is
+Student-$t_6(0,1)$, `1` is Laplace$(0,1)$, and `2` is Normal$(0,1)$. With
+estimated weights and no supplied base, $\omega^{(0)}=0$. The simulator stores
+the base, latent, and effective truths in `truth$marker_weights_base`,
+`truth$marker_weights_latent`, and `truth$marker_weights`; the last of these is
+the effective weight used to generate survival times.
 
 ## Plotting fitted association curves
 
-`plot(fit, type = "association")` uses a compact association plotting payload
-stored on the fitted `JoinMeFit` object. The payload keeps only the posterior
-quantities needed for plotting: active association coefficients, marker weights,
-transform coefficients, and cached model-implied raw support ranges.
+```{r association-plot-helper, eval=FALSE}
+association_plot(fit)
+```
 
-This has two practical consequences:
+## Posterior association extraction and covariance-style labels
 
-- association plots remain usable after serializing a fitted object without
-  depending on transient CmdStan CSV files for this feature,
-- default x-axis grids are taken from model-implied feature support when
-  available, with spline plots falling back to knot support only when the fitted
-  spline support is narrower than the model-implied raw range.
+Use `posterior_assoc(fit, summary = TRUE)` (or `assoc(fit, summary = TRUE)`) to
+extract association-specific posterior summaries without requiring the full model
+summary. Use `summary = FALSE` to obtain posterior draws per association term.
+
+## Renamed posterior draws for association terms
+
+Association terms can be extracted directly on the reporting scale with
+`draws()`. The canonical posterior variables are `alpha_cv_total`,
+`alpha_cs_total`, `alpha_cv_mean`, `alpha_cs_mean`, `alpha_corr[...]`, and
+`alpha_vcov[...]`. Each is the coefficient actually used in the event hazard,
+which is also the scale reported by `summary()` and used by prediction and
+plotting methods.
+
+```{r association-renamed-draws, eval=FALSE}
+# All association terms with reporting-friendly names
+assoc_draws <- draws(fit, variables = "^alpha_", regex = TRUE, format = "draws_df")
+head(assoc_draws)
+
+# Bayesplot visualisation with the same labels used by summary(fit)
+mcmc_plot(fit, variable = "alpha_cv_total", type = "dens_overlay")
+```
+
+## Conditional effects in the two joint-model processes
+
+Conditional effects are distinct from subject-specific dynamic prediction. `conditional_effects()` varies named predictors while holding other predictors at explicit profile values and can return the longitudinal process, the event
+process, or both. The longitudinal estimand is the population-level expected marker response by default. Set `longitudinal_estimand = "marker"` to retain the fitted marker-level deviation, or `"marginal_marker"` to average the marker-specific predictions within each posterior draw. Because marker averaging occurs after each inverse-link transformation, it targets an average expected response rather than an expected response at an average marker effect.
+
+The event estimand is the direct relative-hazard component `exp(W * gamma)`; the baseline hazard and longitudinal association contribution are held fixed when making event-covariate comparisons.
+
+```{r association-conditional-effects, eval=FALSE}
+profiles <- make_conditions(fit$dataEvent, vars = "treatment")
+
+ce <- conditional_effects(
+  fit,
+  effects = list(
+    longitudinal = "time:treatment",
+    event = "treatment"
+  ),
+  conditions = profiles,
+  process = c("longitudinal", "event"),
+  longitudinal_estimand = "marker",
+  plot = FALSE
+)
+
+# The nested tables use the same estimate__, se__, lower__, upper__, and cond__
+# columns as brms conditional effects.
+head(ce$longitudinal[[1]])
+head(ce$event[[1]])
+plot(ce, ask = FALSE)
+```
 
 # Association coefficients and naming
 
-Association coefficients are denoted with the $\alpha$ prefix (e.g., `alpha_cv_total`).
+Internally, association coefficients are denoted with the $\alpha$ prefix (e.g., `alpha_cv_total`). 
 This follows joint-model conventions and avoids confusion with the linear predictor
 $\eta$ used throughout the longitudinal and survival submodels.
 Total, mean, and marker associations use a positive non-centred parameterisation
 $\alpha = z_{\alpha} \cdot sd_{\alpha}$ for stable sampling.
 
-When an association component is not selected in `assoc`, its coefficient is
-prior-only and does not enter the likelihood. Summaries only report active
-components to keep interpretation focused on the fitted association structure.
+When an association component is not selected in `assoc`, its coefficient is prior-only and does not enter the likelihood. Summaries only report active components to keep interpretation focused on the fitted association structure.
 
 # Transform modes
 
-`joinme` supports four transformation modes for association features:
+`JoiNMe` supports four transformation modes for association features:
 
 - **Identity** (`type = "identity"`): no transformation.
 - **Functional** (`type = "functional"`): a user-defined expression converted
@@ -135,33 +209,38 @@ components to keep interpretation focused on the fitted association structure.
   to `plogis(x)` rather than directly to `x`.
 - **Piecewise linear** (`type = "pwlin"`): linear interpolation across knots.
 
+Interpretation note for recovery experiments:
+
+- If you use a fixed spline (`type = "ispline"` or an expit variant with
+  explicit `coeff`), the association coefficient is interpretable on that fixed
+  transformed scale and can be checked directly in simulate-fit recovery tests.
+- If you use a jointly estimated penalised spline (`*_penalised`),
+  the transform shape and the association coefficient are learned together. The
+  fitted alpha is still meaningful inside the model, but coefficient recovery is
+  typically weaker than in the fixed-transform case because the data must learn
+  both the transformed scale and the hazard weight simultaneously.
+
 ## Default values and minimal parameterisations
 
 - **Identity**:
-  - Minimal form: `list(type = "identity")`
+  - Syntax: `list(type = "identity")`
   - Default when a transform term is omitted or set to `NULL`.
   - No other parameters are used.
 - **Functional**:
-  - Minimal form: `list(type = "functional", expr = ~ log1p(x))`
+  - Syntax: `list(type = "functional", expr = ~ log1p(x))`
   - Required field: `expr`.
   - No other defaults beyond the supplied expression.
 - **I-spline**:
-  - Minimal form:
-    `list(type = "ispline", knots = c(-1, 0, 1), coeff = c(0, 0.3, 0.8, 1.1, 1.3))`
+  - Syntax: `list(type = "ispline", knots = c(-1, 0, 1), coeff = c(0, 0.3, 0.8, 1.1, 1.3))`
   - Required fields: `knots`, `coeff`.
   - Default: `degree = 3` if omitted.
 - **Penalised I-spline**:
-  - Legacy plug-in mode:
-    `list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), y = exp(seq(-2, 2, length.out = 50)), n_knots = 6, degree = 3, lambda = 1)`
-  - Stan-estimated mode:
+  - Syntax:
     `list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), n_knots = 6, degree = 3, lambda = 1)`
   - Defaults: `n_knots = 6`, `degree = 3`, `lambda = 1`.
-  - If `knots` are omitted in Stan-estimated mode, they are derived from `x`
-    quantiles.
+  - If `knots` are omitted in Stan-estimated mode, they are derived from `x` quantiles.
 - **Expit-based penalised I-spline**:
-  - Legacy plug-in mode:
-    `list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), y = seq(0.02, 0.98, length.out = 50)^0.8, n_knots = 6, degree = 3, lambda = 1)`
-  - Stan-estimated mode:
+  - Syntax:
     `list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), n_knots = 6, degree = 3, lambda = 1)`
   - Defaults: `n_knots = 6`, `degree = 3`, `lambda = 1`.
   - The raw association feature is mapped through `plogis(x)` at runtime, and
@@ -169,8 +248,7 @@ components to keep interpretation focused on the fitted association structure.
     explicit `knots` directly on the expit scale in `[0, 1]` so the fitted
     spline domain matches the runtime basis.
 - **Piecewise linear**:
-  - Minimal form:
-    `list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))`
+  - Syntax: `list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))`
   - Required fields: `x`, `y`.
   - No additional defaults.
 
@@ -195,11 +273,6 @@ The functional evaluator supports common arithmetic and functions such as
 `log`, `exp`, `sqrt`, `sin`, `cos`, `tanh`, plus aliases `sigmoid`/`expit`,
 `softplus`/`log1p_exp`, and helpers like `cbrt` and `power`.
 
-Defaults:
-
-- Required field: `expr`.
-- No automatic defaults beyond the expression you provide.
-
 ```{r functional-transform-mixed-demo, eval=FALSE}
 transforms <- list(
   cv_total = list(type = "functional", expr = ~ inv_logit(x)),
@@ -210,31 +283,22 @@ transforms <- list(
 )
 ```
 
-**When to use**
-
-- You want a fixed functional form with no spline fitting.
-- You need fast reconfiguration without recompiling Stan.
-
 # Monotone I-Spline
 
-For `type = "ispline"`, there is no fitting step. You specify the transform
-shape directly:
+For `type = "ispline"`, we specify the transform shape following `splines2::iSpline()` convention:
 
 - `knots`: knot locations (first and last are boundary knots),
 - `coeff`: non-negative I-spline basis coefficients,
 - `degree`: spline degree (usually `3`).
-
-In this mode, `x`, `y`, and `lambda` are **not used**.
 
 Defaults:
 
 - `degree = 3` if omitted.
 - `knots` and `coeff` must be supplied explicitly.
 
-For `type = "ispline_expit"`, the same direct specification applies, except the
-I-spline basis is evaluated on `plogis(x)`. The runtime association feature is
-still shown on its raw scale, but the transform's `knots` must be supplied on
-the expit scale because that is the spline domain.
+For `type = "ispline_expit"`, the same direct specification applies, except the I-spline basis is evaluated on `plogis(x)`. The runtime association feature is still shown on its raw scale, but the transform's `knots` must be supplied on the expit scale because that is the spline domain.
+
+This is highly expremental and meant for stabilising the boundary knots (with is usually unknown). You may want to standardise the longitudinal outcome so that most association would not squashed to 0 or 1, as `plogis(x)` is very flat outside of the range `[-5, 5]`. You may also want to put more knots as the extreme values of `plogis(x)` to overcome the flatness of the transform. 
 
 ```{r monotone-ispline, eval=FALSE}
 transforms <- list(
@@ -253,26 +317,18 @@ transforms <- list(
 )
 ```
 
-**When to use**
-
-- You want monotone, smooth effects with constrained shape.
 
 # Penalised Monotone I-Spline
 
 For `type = "ispline_penalised"`, there are now two supported modes:
 
-- **Legacy plug-in mode**: provide `x` and `y`, and the package first learns a
-  monotone spline in R before passing fixed coefficients into Stan.
-- **Stan-estimated mode**: omit `y`, keep `knots` (or `n_knots`) plus `lambda`,
-  and Stan estimates the monotone spline coefficients jointly with the rest of
-  the model.
+- **Simulation mode**: provide `x` and `y`, and the package first learns a monotone spline in R before passing fixed coefficients into Stan. This is meant for the simulation but can be used in model fitting as a mean to provide some prior the association curve.
+- **Modelling mode**: omit `y`, keep `knots` (or `n_knots`) plus `lambda`, and Stan estimates the monotone spline coefficients jointly with the rest of the model.
 
 Meaning of the arguments:
 
-- `x`: raw association-feature values, used either as training inputs or to
-  help choose knots.
-- `y`: optional target transformed values at those `x` points. If present, you
-  are telling the package the shape you want to approximate.
+- `x`: raw association-feature values, used either as training inputs or to help choose knots.
+- `y`: optional target transformed values at those `x` points. If present, you are telling the package the shape you want to approximate.
 - `lambda`: smoothness penalty weight (higher = smoother, lower = more flexible).
 
 Defaults:
@@ -282,9 +338,6 @@ Defaults:
 - `lambda = 1.0` if omitted.
 - In helper-based plug-in fitting, `weights = NULL` means equal weights and
   `diff_order = 2` is the default penalty order.
-
-Practical tip: start with `lambda = 1.0`, then decrease if too flat or increase
-if too wiggly.
 
 ```{r penalised-ispline, eval=FALSE}
 transforms <- list(
@@ -319,13 +372,14 @@ transforms <- list(
 
 **When to use**
 
-- You want a monotone transform with smoothing, either anchored by `(x, y)` or
-  estimated jointly in Stan.
+- You want a monotone transform with smoothing, either anchored by `(x, y)` orestimated jointly in Stan.
 - Penalisation avoids overfitting when knot counts are moderate.
 
 # Piecewise-Linear
 
-```{r piecewise-linear, eval=FALSE}
+This is mean for simulation but you can use for fiting as well as a mean to provide some prior the association curve. The transform is defined by a set of knots and corresponding values. The transform is linear between knots and constant outside the knot range. 
+
+```{r  piecewise-linear, eval=FALSE}
 transforms <- list(
   cv_total = list(
     type = "identity"
@@ -341,14 +395,6 @@ transforms <- list(
 )
 ```
 
-Defaults:
-
-- `x` and `y` must both be supplied.
-- No additional defaults are added.
-
-**When to use**
-
-- You need simple, interpretable transformations.
 
 # Association Diagram
 
@@ -386,6 +432,6 @@ fit <- joinme(
   formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
   dataEvent = sim$dataEvent,
   transforms = transforms,
-  assoc = c("cv_total", "corr")
+  assoc = c("cv_total", "corr", "vcov")
 )
 ```

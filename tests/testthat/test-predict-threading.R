@@ -67,7 +67,7 @@ test_that("predict works with and without threading (cmdstanr)", {
       seed = 101
     )
   )
-  expect_s3_class(pred1, "JoinMeDynPred")
+  expect_s3_class(pred1, "JoiNMeDynPred")
 
   pred2 <- suppressWarnings(
     posterior_epred(
@@ -88,5 +88,5 @@ test_that("predict works with and without threading (cmdstanr)", {
       seed = 101
     )
   )
-  expect_s3_class(pred2, "JoinMeDynPred")
+  expect_s3_class(pred2, "JoiNMeDynPred")
 })

@@ -71,13 +71,13 @@ pred <- predict(
   seed = 2602
 )
 
-stopifnot(inherits(pred, "JoinMeDynPred"))
+stopifnot(inherits(pred, "JoiNMeDynPred"))
 stopifnot(all(c("epred", "linpred", "predict") %in% pred$metadata$scales))
 
 if (!dir.exists("tests/local")) dir.create("tests/local", recursive = TRUE)
 
-p_long <- plot(pred, which = "longitudinal", scale = "epred")
-p_surv <- plot(pred, which = "survival")
+p_long <- plot(pred, type = "longitudinal", scale = "epred")
+p_surv <- plot(pred, type = "survival")
 
 long_path <- "tests/local/e2e-link-longitudinal.png"
 surv_path <- "tests/local/e2e-link-survival.png"

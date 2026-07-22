@@ -3,3 +3,12 @@
 ^pkgdown$
 ^\.github$
 ^notes
+^src$
+^sim
+tmp
+^tests$
+\.RDS$
+\.rds$
+^\.artifacts$
+^\.vscode
+\.tmp*

@@ -1,8 +1,8 @@
 library(testthat)
 
-test_that("joinme fits with ispline assoc", {
+test_that("JoiNMe fits with ispline assoc", {
   skip_on_cran()
-  if (!requireNamespace("joinme", quietly = TRUE)) skip("joinme not installed")
+  if (!requireNamespace("JoiNMe", quietly = TRUE)) skip("JoiNMe not installed")
   has_cmd <- requireNamespace("cmdstanr", quietly = TRUE)
   has_rstan <- requireNamespace("rstan", quietly = TRUE)
   if (!has_cmd && !has_rstan) skip("No Stan backend available")
@@ -44,7 +44,7 @@ test_that("joinme fits with ispline assoc", {
     error = function(e) skip(paste("fit failed:", conditionMessage(e)))
   )
 
-  expect_s3_class(fit, "JoinMeFit")
+  expect_s3_class(fit, "JoiNMeFit")
 
   # basic sanity: summary runs
   s <- tryCatch(summary(fit), error = function(e) NULL)

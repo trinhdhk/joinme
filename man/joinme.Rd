@@ -2,14 +2,14 @@
 % Please edit documentation in R/fit.R
 \name{joinme}
 \alias{joinme}
-\title{Fit joinme model via cmdstanr or rstan}
+\title{Fit Joint Nested Mixed-effects (JoiNMe) model via cmdstanr or rstan}
 \usage{
 joinme(
   formulaLong,
   dataLong,
   formulaEvent,
   dataEvent,
-  formulaCorr = ~1,
+  formulaVCov = ~1,
   formulaDist = NULL,
   control = list(),
   draws = NULL,
@@ -17,6 +17,9 @@ joinme(
   transforms = NULL,
   priors = joinme_priors(),
   fixed_marker_weights = FALSE,
+  shared_marker_weights = TRUE,
+  basehaz = joinme_basehaz(),
+  seed = NULL,
   ...
 )
 }
@@ -25,30 +28,47 @@ joinme(
 and the marker block. The marker block may optionally include an inner
 \code{( ... | id )} term for marker-by-id random effects. When omitted,
 marker-by-id effects are disabled (Q_idm = 0). Grouping terms may use
+\code{||} at either level: outer \code{( ... || marker )} keeps marker-only and
+marker-by-id blocks independent, while inner \code{( ... || id )} keeps the
+marker-by-id covariance diagonal. Grouping terms may also use
 \verb{weighted(group, weights = <column>)} to declare
 formula-scoped subject/group weights.}
 
 \item{dataLong}{Long-format longitudinal data with columns for id, marker, time,
 outcome, and covariates referenced in \code{formulaLong}.}
 
-\item{formulaEvent}{Survival formula for baseline covariates and event model.}
+\item{formulaEvent}{Survival formula for baseline covariates and event model.
+Supported LHS forms are \code{survival::Surv(time, status)},
+\code{survival::Surv(start, stop, status)},
+\code{survival::Surv(time, status, type = "left")}, and
+\code{survival::Surv(time1, time2, type = "interval2")}.
+The legacy \code{type = "interval"} representation is not supported.}
 
-\item{dataEvent}{One row per id event data with event time, event indicator, and
-covariates referenced in \code{formulaEvent}.}
+\item{dataEvent}{Event-process data with either one row per id
+(\code{Surv(time, status)}) or multiple interval rows per id
+(\code{Surv(start, stop, status)}). Covariates in \code{formulaEvent} may vary by interval.}
 
-\item{formulaCorr}{Covariance regression formula for id-specific marker-by-id effects.
+\item{formulaVCov}{Covariance regression formula for id-specific marker-by-id effects.
 If the marker block omits the inner \code{( ... | id )}, marker-by-id effects are
-absent and \code{corr} associations are not allowed.}
+absent and covariance-style associations (\code{corr}, \code{vcov}) are not allowed.
+When present, \code{corr} associations use the off-diagonal entries of the
+subject-specific Cholesky-correlation factor \code{K}, whereas \code{vcov}
+associations use those same off-diagonal \code{K} entries together with the
+subject-specific standard deviations. If both \code{corr} and \code{vcov} are
+requested, \code{vcov} is kept and \code{corr} is ignored with a warning. The
+default \code{~ 1} remains a supported intercept-only covariance regression.}
 
 \item{formulaDist}{Optional list of formulas for distributional regression.
 Supported LHS parameters are:
 \itemize{
-\item \code{sigma}
-\item \code{nu}
-\item \code{phi}
-\item \code{alpha} (aliases: \code{alpha_skew}, \code{skew})
-\item \code{phi_beta}
-\item \code{tau_sde}
+\item \code{sigma} (scale parameter)
+\item \code{nu}    (degrees of freedom for Student-t)
+\item \code{phi}   (precision for Negative Binomial 2)
+\item \code{alpha} (skewness parameter)
+\item \code{kappa} (positive sample-size parameter for the Beta distribution, with
+shapes \eqn{\mu\kappa} and \eqn{(1-\mu)\kappa})
+\item \code{tau} (quantile/asymmetry parameter in \eqn{(0,1)} for the skew double
+exponential distribution)
 }
 
 Three input styles are supported:
@@ -78,15 +98,22 @@ are not. Grouping factors in random-effects terms may use
 \item cmdstanr::model$sample() arguments (e.g., chains, parallel_chains,
 iter_warmup, iter_sampling, seed, refresh, adapt_delta, max_treedepth).
 \item engine: "cmdstanr" or "rstan". Defaults to options(stan_preferred_engine).
-\item threads_per_chain: integer; if > 1 uses \code{joinme_fit_threading.stan}.
-For engine = "rstan", threading uses options(stan.thread = threads_per_chain).
-\item grainsize: integer; reduce_sum grainsize for threading (default max(1, min(n_cores, ceiling(n_id/(4\emph{threads_per_chain}chains))))).
+\item threads_per_chain: integer; the threaded Stan program is always used.
+\code{threads_per_chain = 1} keeps execution serial while preserving the
+thread-capable kernel. For engine = "rstan", threading uses
+options(stan.thread = threads_per_chain).
+\item grainsize: integer; reduce_sum grainsize for the threaded kernel.
+Defaults to the full subject count when \code{threads_per_chain = 1}, and to
+\code{max(1, min(n_cores, ceiling(n_id/(4*threads_per_chain*chains))))}
+otherwise.
 \item force_recompile: logical; recompile the Stan model if needed.
 \item quadrature_nodes: optional positive integer total node target for survival
 integration. Allowed values are exactly 7/15/31/41/51/61. Only the node
 count is passed to Stan; GK nodes/weights are fixed in the Stan code.
-\item corr_diag_link: "softplus" or "exp" for covariance regression diagonals.
-\item tau_sde_fixed: optional fixed tau in (0,1) for skew-double-exponential.
+\item vcov_diag_link: "softplus" or "exp" for covariance regression diagonals.
+\item \code{tau_fixed}: optional fixed \code{tau} in \eqn{(0,1)} for the skew double
+exponential distribution. It cannot be combined with a \code{tau}
+distributional regression.
 }}
 
 \item{draws}{Optional number of posterior draws used for summaries (not sampling).}
@@ -98,28 +125,44 @@ Supported links/inverse-links: \code{identity}, \code{log}, \code{logit}, \code{
 
 \item{transforms}{Transformation specifications for association terms.
 Prefer declaring them with \code{joinme_tf(...)}; raw named lists remain
-supported. See Details for \code{ispline} and \code{ispline_penalised} semantics.}
+supported. Fit-time functional transforms may also request a free affine
+shift through \code{intercept = TRUE} and/or \code{slope = TRUE}, for example
+\code{joinme_tf(cv_total = ~ expit(x, intercept = TRUE, slope = TRUE))}, which
+is fitted as \code{expit(iota_1 + iota_2 * x)}. See details.}
 
 \item{priors}{Prior declaration. Prefer \code{joinme_priors(...)}; raw named lists
-with components \code{beta}, \code{alpha}, and \code{lkj} remain supported.}
+with components \code{beta}, \code{alpha}, \code{iota}, and \code{lkj} remain supported.}
 
-\item{fixed_marker_weights}{Logical; if TRUE, marker weights are fixed at
-provided \code{marker_weights} (or defaults). If FALSE, marker-weight perturbations
-are estimated.}
+\item{fixed_marker_weights}{Logical; if TRUE, marker weights are fixed at the
+supplied base values. If FALSE, marker-weight perturbations are estimated
+using the family selected by \code{shrinkage} (0 = Student-t(6), 1 = Laplace,
+2 = Normal).}
+
+\item{shared_marker_weights}{Logical; if TRUE, all weighted marker-based
+association terms share one marker-weight structure. If FALSE, each active
+weighted marker-based association term gets its own marker-weight structure.
+When \code{marker_weights} is a named list, use names \code{cv_total}, \code{cs_total},
+\code{cv_marker}, and \code{cs_marker}.}
+
+\item{basehaz}{An object of class \code{joinme_basehaz} created by \code{joinme_basehaz()}.
+This controls the baseline hazard parameterisation and spline basis. See \code{?joinme_basehaz} for details.}
 
 \item{...}{Additional args passed to joinme_standata().}
 }
 \description{
-Fits the joinme Stan model using cmdstanr (default) or rstan. The engine can be
-set globally via options(stan_preferred_engine = "cmdstanr"|"rstan") or via
+Fits the Joint Nested Mixed-effects (JoiNMe) Stan model using cmdstanr (default) or rstan.
+The engine can be set globally via options(stan_preferred_engine = "cmdstanr"|"rstan") or via
 control$engine.
-following the notebook, and supports association transformations and time-internal
-scaling metadata.
 }
 \details{
 Transformations are provided through a single \code{transforms} argument.
-Each element (cv_total, cs_total, corr) is defined as a list specifying a type
-and type-specific fields (see \code{build_standata_transforms()} for details).
+Each element (cv_total, cs_total, corr, vcov) is defined as a list specifying a type
+and type-specific fields (see \code{build_standata_transforms()} for details). For
+covariance-style associations, \code{corr} acts on the off-diagonal entries of the
+subject-specific Cholesky-correlation factor \code{K}, while \code{vcov} acts on those
+same off-diagonal \code{K} entries together with the subject-specific standard
+deviations. If both \code{corr} and \code{vcov} are requested, \code{vcov} is kept and
+\code{corr} is ignored with a warning.
 
 Distributional regression can be specified in two equivalent forms:
 \enumerate{
@@ -132,18 +175,22 @@ are rescaled within Stan so fixed effects remain interpretable on the original s
 
 Marker weights (see \code{joinme_standata()}) are used to form marker-average summaries
 for both current value (CV) and current slope (CS) association components. When
-\code{fixed_marker_weights = FALSE}, signed perturbations are estimated around base
-weights using \code{marker_weights + z_marker_weights} with
-\code{z_marker_weights ~ N(0, 1)}. The effective marker intensities are used directly
-from \code{w_raw} without additional normalisation and scale the association contributions.
+\code{shared_marker_weights = TRUE}, all weighted marker-based association terms share
+one marker-weight structure. When \code{shared_marker_weights = FALSE}, each active
+weighted marker-based association term (\code{cv_total}, \code{cs_total}, \code{cv_marker},
+\code{cs_marker}) gets its own marker-weight structure. When
+\code{fixed_marker_weights = FALSE}, signed perturbations are estimated around the
+supplied base weights. The effective marker intensities are used directly,
+without additional normalisation, to scale the corresponding association
+contribution.
 
-The returned \code{JoinMeFit} object stores a compact association plotting payload
+The returned \code{JoiNMeFit} object stores a compact association plotting bundle
 containing only the posterior quantities needed to draw association curves
-(\code{alpha_*}, marker weights, spline coefficients, and cached model-implied raw
+(\verb{alpha_*}, marker weights, spline coefficients, and cached model-implied raw
 support ranges). This keeps association plotting usable after serialization
 without needing the full transient CmdStan CSV outputs.
 
-For CmdStanR fits, \code{joinme()} also eagerly materializes the CSV-backed fit
+For CmdStanR fits, \code{joinme()} also eagerly imports the CSV-backed fit
 contents in memory before returning. This mirrors the loading step used by
 \code{cmdstanr::save_object()} so later \code{saveRDS()} calls do not rely on the
 original CmdStan CSV files remaining on disk.
@@ -160,25 +207,11 @@ Weighted grouping affects latent random-effect priors for the referenced groupin
 factor and applies subject-level likelihood weighting for the longitudinal and
 survival contributions. Weight columns must be finite and strictly positive.
 
-Association coefficients are denoted with the \code{alpha_} prefix to match joint-model
-conventions and to avoid confusion with the linear predictor eta used throughout
-the longitudinal and survival submodels. Total, marker, and mean associations use
-a positive non-centred parameterisation: \code{alpha = z_alpha * sd_alpha}, which
-stabilizes sampling while preserving the intended sign structure via marker weights.
+Transformation for supported association terms
+can be fed to \code{joinme()} in a named list. For example
+\code{list(cv_total = list(type = "functional", expr = ~ log1p(x)), cs_total = list(type = "identity"), corr = list(type = "pwlin", x = c(-2, 0, 2), y = c(0.2, 1, 0.2)), vcov = list(type = "identity"))}
 
-The typical workflow is:
-\enumerate{
-\item Prepare \code{dataLong} and \code{dataEvent} with aligned ids and time scales.
-\item Specify \code{formulaLong} and \code{formulaEvent} to define the longitudinal and survival submodels.
-\item Choose \code{assoc} components and optional \code{transforms} for association terms.
-\item Fit with \code{control} to manage sampling, threading, and reproducibility.
-\item Validate convergence (R-hat, ESS, divergences), then predict.
-}
-
-Example:
-\code{list(cv_total = list(type = "functional", expr = ~ log1p(x)), cs_total = list(type = "identity"), corr = list(type = "pwlin", x = c(-2, 0, 2), y = c(0.2, 1, 0.2)))}
-
-Transformation parameterisation cheat sheet:
+Transformation parameterisation:
 \itemize{
 \item Omitted term, \code{NULL}, or \code{list(type = "identity")}:
 identity transform (default).
@@ -187,14 +220,25 @@ functional transform; \code{expr} is required and has no additional defaults.
 \item \code{list(type = "ispline", knots = c(-1, 0, 1), coeff = c(0, 0.3, 0.8, 1.1, 1.3), degree = 3)}:
 monotone I-spline; \code{knots} and \code{coeff} are required, \code{degree} defaults to \code{3}.
 \item \code{list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), y = exp(seq(-2, 2, length.out = 50)), n_knots = 6, degree = 3, lambda = 1)}:
-penalised monotone I-spline in legacy plug-in mode; defaults are
+penalised monotone I-spline. This is intended for simulation but it works here too, off-labelly; defaults are
 \code{n_knots = 6}, \code{degree = 3}, \code{lambda = 1} when those values are omitted.
 \item \code{list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), n_knots = 6, degree = 3, lambda = 1)}:
 penalised monotone I-spline with Stan-estimated coefficients; if \code{knots}
 are omitted they are derived from \code{x} quantiles using \code{n_knots = 6} by default.
+\item \code{list(type = "ispline_expit", knots = c(0.05, 0.5, 0.95), coeff = c(0, 0.25, 0.8, 1.0, 1.1), degree = 3)}:
+monotone I-spline evaluated on \code{plogis(x)}; explicit \code{knots} are specified
+on the expit scale because the spline basis itself lives on that bounded
+\code{expit(x)} domain. This maybe useful for numerical stability
+but highly experimental and may be useful
+to put for knots at the each (near 0 and 1) if users is concerned
+about the curve at the tails.
+\item \code{list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), y = seq(0.02, 0.98, length.out = 50)^0.8, n_knots = 6, degree = 3, lambda = 1)}:
+penalised monotone I-spline on \code{plogis(x)}. This is intended for simulation but it works here too, off-labelly.
+\item \code{list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), n_knots = 6, degree = 3, lambda = 1)}:
+penalised monotone I-spline on \code{plogis(x)} with Stan-estimated coefficients.
 \item \code{list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))}:
-piecewise-linear transform; both \code{x} and \code{y} are required and there are no
-additional defaults.
+piecewise-linear transform; both \code{x} and \code{y} are required.
+This is intended for simulation but it works here too, off-labelly.
 }
 
 For monotone spline transforms:
@@ -204,18 +248,38 @@ For monotone spline transforms:
 \item \code{type = "ispline_penalised"} (alias: \code{"ispline_penalized"}): provide
 spline structure through \code{knots} (or \code{n_knots}) and smoothness penalty \code{lambda}.
 \itemize{
-\item If \code{y} is supplied, \code{joinme} first fits the monotone spline to training
+\item If \code{y} is supplied, \code{JoiNMe} first fits the monotone spline to training
 pairs \verb{(x, y)} in R and passes fixed coefficients to Stan. These plug-in
 coefficients use the same anchored convention as the Stan-estimated path:
-first coefficient \code{0}, last coefficient \code{1}.
+increasing splines run from \code{0} to \code{1}, while decreasing splines run from
+\code{1} to \code{0}.
 \item If \code{y} is omitted, Stan estimates the monotone spline coefficients
-directly.
+directly. Use \code{direction = "decreasing"} when the monotone transform
+should fall as the raw association feature increases.
 }
 \item \code{x}: raw association-feature values used either to define training pairs or
 to help derive knot locations.
 \item \code{y}: optional target transformed values at those \code{x} points. Supplying \code{y}
 activates the legacy plug-in fit; omitting it activates Stan estimation.
 \item \code{lambda}: smoothness control (larger = smoother transform).
+\item \code{direction}: monotone orientation for penalised spline families. Accepted
+values are \code{"increasing"} and \code{"decreasing"}. When \code{y} is supplied, the
+plug-in fit infers the direction from the training pairs if you omit it.
+When \code{y} is omitted and Stan estimates the spline directly, the default
+remains \code{"increasing"}.
+\item \code{type = "ispline_expit"} / \code{"ispline_expit_penalised"}:
+same semantics as the I-spline variants above, except the spline basis is
+built on \code{plogis(x)}. This keeps the spline input on the bounded interval
+$(0, 1)$ and is often more numerically stable when the raw association
+feature spans a wide range. My experiments showed that this may help with
+a workaround for the Boundary knots but may cause considerable suppress at
+the tails if mis-specificied. Again, this may not affect the predictive value
+at much because the tail of the association term is often scarced. However,
+if you think the distribution of the latent association term is heavy-tailed,
+you may want to put more knots at the tails (e.g knots = c(0.001, 0.01, 0.5, 0.99, 0.999))
+to fight the impact of the \code{plogis()} transformation. In the future, a
+normalisation of the latent association term may be added to the model; may be
+dividing by sqrt of the second moment.
 }
 
 Additional arguments are forwarded to \code{joinme_standata()} (e.g., \code{assoc},
@@ -230,8 +294,8 @@ formulaDist <- list(
   nu[family=student_t] ~ 1,
   alpha[family=skew_normal] ~ 1 + x1,
   phi[family=negbin2] ~ 1,
-  phi_beta[family=beta] ~ 1,
-  tau_sde[family=skew_double_exponential] ~ 1
+  kappa[family=beta] ~ 1,
+  tau[family=skew_double_exponential] ~ 1
 )
 }
 

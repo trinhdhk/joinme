@@ -2,14 +2,14 @@
 % Please edit documentation in R/diagnosis.R
 \name{bayes_factor}
 \alias{bayes_factor}
-\title{Bayes factor between two JoinMe fits}
+\title{Bayes factor between two JoiNMe fits}
 \usage{
 bayes_factor(fit1, fit2, ...)
 }
 \arguments{
-\item{fit1}{First fitted \code{JoinMeFit} object.}
+\item{fit1}{First fitted \code{JoiNMeFit} object.}
 
-\item{fit2}{Second fitted \code{JoinMeFit} object.}
+\item{fit2}{Second fitted \code{JoiNMeFit} object.}
 
 \item{...}{Additional arguments passed to \code{bridgesampling::bridge_sampler()}.}
 }
@@ -17,5 +17,5 @@ bayes_factor(fit1, fit2, ...)
 A list with bridge sampling results and Bayes factor.
 }
 \description{
-Bayes factor between two JoinMe fits
+Bayes factor between two JoiNMe fits
 }

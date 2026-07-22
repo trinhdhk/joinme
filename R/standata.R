@@ -1,21 +1,9 @@
-#' Build Stan data for joinme (time-internal scaling)
+#' Prepare standata for Joint Nested Mixed-effects (JoiNMe) model.
 #'
 #' @importFrom stats predict setNames
-#' @importFrom dplyr %>% .data all_of
 #'
 #' @description
-#' Standata builder for the joinme joint model (multivariate longitudinal + survival).
-#'
-#' This function follows the notebook `joinme_standata()` design, with these updates:
-#'
-#' 1. Time is still scaled in the design matrices by tmax for numerical stability.
-#' 2. The Stan program internally rescales time-related coefficients using `tmax` and
-#'    index vectors indicating which columns correspond to time.
-#' 3. Therefore, this builder computes and supplies:
-#'    - n_time_beta, idx_time_beta
-#'    - n_time_uid,  idx_time_uid
-#'    - n_time_vmk,  idx_time_vmk
-#'    - n_time_widm, idx_time_widm
+#' This function process the input from `fit` to prepare standata for Joint Nested Mixed-effects (JoiNMe) model.
 #'
 #' @details
 #' This builder performs three key steps:
@@ -33,19 +21,42 @@
 #'   and the marker block. The marker block may optionally include an inner
 #'   `( ... | id )` term for marker-by-id random effects. When the inner term is
 #'   omitted, marker-by-id random effects are disabled (Q_idm = 0). Use `||` to
-#'   enforce diagonal random-effect covariance (e.g., `(1 + time || id)`). Grouping
+#'   enforce independence. In nested marker terms, outer `( ... || marker )`
+#'   keeps marker-only and marker-by-id blocks independent, while inner
+#'   `( ... || id )` makes the marker-by-id covariance diagonal. Grouping
 #'   terms may use `weighted(group, weights = <column>)`
 #'   to define formula-scoped positive subject/group weights.
 #' @param dataLong Long-format longitudinal data with columns for id, marker, time,
 #'   outcome, and covariates referenced in `formulaLong`.
 #' @param formulaEvent Survival formula for baseline covariates and event model.
-#' @param dataEvent One row per id event data with event time, event indicator, and
-#'   covariates referenced in `formulaEvent`.
-#' @param formulaCorr Covariance regression formula for id-specific marker-by-id effects.
+#'   Supported LHS forms are:
+#'   - `survival::Surv(time, status)`
+#'   - `survival::Surv(start, stop, status)`
+#'   - `survival::Surv(time, status, type = "left")`
+#'   - `survival::Surv(time1, time2, type = "interval2")`
+#'   The legacy `type = "interval"` form is intentionally rejected.
+#' @param dataEvent Event-process data with either one row per id
+#'   (`Surv(time, status)`) or multiple time-split rows per id
+#'   (`Surv(start, stop, status)`).
+#'   Covariates referenced in `formulaEvent` may vary by interval in the split form.
+#' @param formulaVCov Covariance regression formula for id-specific marker-by-id effects.
 #'   If the marker block omits the inner `( ... | id )`, then marker-by-id effects
-#'   are absent and `corr` associations are not allowed.
-#' @param formulaDist Optional list of formulas for distributional regression. Two
-#'   forms are supported:
+#'   are absent and covariance-style associations (`corr`, `vcov`) are not allowed.
+#'   Downstream, `corr` uses the off-diagonal entries of the subject-specific
+#'   Cholesky-correlation factor `K`, whereas `vcov` uses those off-diagonal `K`
+#'   entries together with the subject-specific standard deviations. If both
+#'   `corr` and `vcov` are requested, `vcov` is kept and `corr` is ignored with a
+#'   warning. The default `~ 1` is valid and yields an intercept-only covariance
+#'   regression with no subject-level slope columns.
+#' @param formulaDist Optional list of formulas for distributional regression.
+#'   Supported parameters are \code{sigma}, \code{nu}, \code{phi},
+#'   \code{alpha}, \code{kappa}, and \code{tau}. Here \code{nu} is reserved
+#'   for Student-t degrees of freedom; \code{kappa} is the positive Beta
+#'   sample-size parameter defining shapes \eqn{\mu\kappa} and
+#'   \eqn{(1-\mu)\kappa}; and \code{tau} is the skew-double-exponential
+#'   quantile/asymmetry parameter in \eqn{(0,1)}.
+#'
+#'   Three forms are supported:
 #'   1. Named list with RHS-only formulas, e.g. `list(sigma = ~ 1 + time)`.
 #'   2. Unnamed list with LHS parameter names, e.g. `list(sigma ~ 1 + time)`.
 #'   Random-effects terms with `|` are supported; nested random-effects formulas are not.
@@ -56,40 +67,62 @@
 #' @param time_var Column name for longitudinal time in `dataLong`.
 #' @param eps_fd Positive finite-difference step for association derivatives.
 #' @param assoc Character vector specifying association components
-#'   (e.g., "cv_mean", "cs_total", "corr").
+#'   (e.g., "cv_mean", "cs_total", "corr", "vcov"). The `corr` channel
+#'   targets off-diagonal entries of the subject-specific Cholesky-correlation
+#'   factor `K`; the `vcov` channel targets those off-diagonal `K` entries
+#'   together with the subject-specific standard deviations.
 #' @param families Optional marker-specific family specification. Can be
 #'   character family names or `jm_family(...)` entries with per-marker links.
 #'   If NULL, all markers use Gaussian responses with identity link.
 #'   Supported links/inverse-links: `identity`, `log`, `logit`, `probit`, `exp`.
 #' @param transforms Optional list specifying transformations for association terms.
-#'   Each element (cv_total, cs_total, corr) is a list with a `type` and fields
-#'   required by that type (see `build_standata_transforms()`).
+#'   Each element (cv_total, cs_total, corr, vcov) is a list with a `type` and fields
+#'   required by that type (see `build_standata_transforms()`). For covariance-style
+#'   terms, transforms apply either to off-diagonal `K` features (`corr`) or to the
+#'   combined off-diagonal `K` plus subject-specific SD features (`vcov`).
+#'   Functional transforms may request fit-only affine-shift parameters through
+#'   `intercept = TRUE` and/or `slope = TRUE` inside the transform formula.
 #' @param beta_prior Prior specification for longitudinal fixed effects.
 #' @param alpha_prior Prior specification for association parameters.
+#' @param iota_prior Prior specification for fit-only affine-shift intercept and
+#'   slope parameters used by functional association transforms.
 #' @param lkj_prior Prior specification for correlation structures.
 #' @param allow_marker_crosscorr Integer flag; 1 allows cross-marker correlation in marker RE.
-#' @param shrinkage Integer flag controlling shrinkage behaviour for marker-by-id effects.
-#' @param marker_weights Optional numeric vector of length D giving base weights
-#'   for marker-specific association components. These are used as prior offsets
-#'   for latent marker intensities and are used directly in Stan, where
-#'   `w_raw = marker_weights` or
-#'   `marker_weights + z_marker_weights`. When NULL, base weights default to
-#'   zeros for estimated weights and ones for fixed weights.
+#' @param shrinkage Integer flag controlling shrinkage behaviour for marker-by-id effects. 
+#'   0 = student_t(6, 0, 1), 1 = double_exponential(0, 1), 2 = std_normal();
+#' @param marker_weights Optional base weights for marker-specific association
+#'   components. If `shared_marker_weights = TRUE`, provide one numeric vector of
+#'   length D (or one named numeric vector keyed by marker level) that is shared
+#'   across all active weighted association terms. If
+#'   `shared_marker_weights = FALSE`, you may instead provide a named list with
+#'   entries `cv_total`, `cs_total`, `cv_marker`, and `cs_marker`. Each supplied
+#'   entry is aligned to marker order and used only for the matching active
+#'   weighted association term.
 #' @param fixed_marker_weights Logical; if TRUE, marker weights are kept fixed
 #'   at `marker_weights` (no perturbation). If FALSE, marker weights are estimated
 #'   via signed additive perturbations,
-#'   `marker_weights + z_marker_weights`, with `z_marker_weights ~ N(0, 1)`.
+#'   `marker_weights + z_marker_weights`. The standardized latent family is
+#'   selected by `shrinkage`: Student-t(6), Laplace, or Normal for 0, 1, or 2.
+#' @param shared_marker_weights Logical; if TRUE, all active weighted
+#'   marker-based association terms share one marker-weight structure. If FALSE,
+#'   each active weighted marker-based association term gets its own marker-weight
+#'   structure.
 #' @param flag_resid_dim Integer flag to include residual dimension checks.
 #' @param basehaz Baseline hazard basis type: "bs", "ns", or "formula".
-#' @param n_knots Number of internal knots for spline baseline hazards.
+#' @param basehaz_n_knots Number of internal knots for spline baseline hazards.
+#' @param basehaz_knots Optional numeric vector of internal knots for spline baseline hazards.
 #' @param basehaz_degree Degree of spline basis for baseline hazard.
 #' @param basehaz_formula Formula for baseline hazard when `basehaz = "formula"`.
 #' @param tau_spline Prior scale for spline coefficients (penalised spline).
 #' @param quadrature_nodes Optional positive integer target for total quadrature
 #'   points. Allowed values are exactly `7`, `15`, `31`, `41`, `51`, and `61`.
 #'   Only the node count is passed to Stan; GK nodes/weights are fixed in Stan.
-#' @param corr_diag_link Link for covariance regression diagonals: "softplus" or "exp".
-#' @param tau_sde_fixed Optional fixed tau for skew-double-exponential (0 < tau < 1).
+#' @param vcov_diag_link Link for the subject-specific standard deviation regression:
+#'   "softplus" or "exp".
+#' @param tau_fixed Optional fixed quantile/asymmetry parameter for the skew
+#'   double exponential family. It must lie strictly between zero and one; the
+#'   value \eqn{0.5} gives the symmetric double exponential distribution. It
+#'   cannot be combined with a \code{tau} distributional regression.
 #' @param seed Optional random seed for deterministic components of standata.
 #' @export
 # File overview:
@@ -100,7 +133,7 @@ joinme_standata <- function(
   dataLong,
   formulaEvent,
   dataEvent,
-  formulaCorr = ~1,
+  formulaVCov = ~1,
   formulaDist = NULL,
   id_var = "id",
   marker_var = "marker",
@@ -111,24 +144,28 @@ joinme_standata <- function(
   transforms = NULL,
   beta_prior = NULL,
   alpha_prior = NULL,
+  iota_prior = NULL,
   lkj_prior = NULL,
   allow_marker_crosscorr = 1L,
-  shrinkage = 2L,
+  shrinkage = 0L,
   marker_weights = NULL,
   fixed_marker_weights = FALSE,
-  flag_resid_dim = 0L,
+  shared_marker_weights = TRUE,
+  # flag_resid_dim = 0L,
   basehaz = c("bs", "ns", "formula"),
-  n_knots = 5L,
+  basehaz_n_knots = 5L,
+  basehaz_knots = NULL,
   basehaz_degree = 3L,
   basehaz_formula = ~ 1 + time,
   tau_spline = 0.4,
   quadrature_nodes = NULL,
-  corr_diag_link = c("softplus", "exp"),
-  tau_sde_fixed = NULL,
+  vcov_diag_link = c("softplus", "exp"),
+  tau_fixed = NULL,
   seed = NULL
 ) {
   assertthat::assert_that(is.data.frame(dataLong), msg = "dataLong must be a data.frame")
   assertthat::assert_that(is.data.frame(dataEvent), msg = "dataEvent must be a data.frame")
+  assoc <- .validate_assoc_channels(assoc, context = "joinme_standata()")
   y_var <- .resolve_response_var(
     formulaLong = formulaLong,
     dataLong = dataLong,
@@ -139,10 +176,13 @@ joinme_standata <- function(
     dataEvent = dataEvent,
     context = "joinme_standata()"
   )
-  event_time <- as.numeric(event_vars$event_time)
+  event_start <- as.numeric(event_vars$event_start)
+  event_stop <- as.numeric(event_vars$event_stop)
   event_status <- event_vars$event_status
+  event_censor_type <- as.integer(event_vars$event_censor_type %||% rep(0L, length(event_stop)))
+  surv_type <- as.character(event_vars$surv_type %||% "right")
   basehaz <- match.arg(basehaz)
-  corr_diag_link <- match.arg(corr_diag_link)
+  vcov_diag_link <- match.arg(vcov_diag_link)
   quad_req <- .resolve_gk_request(nodes = quadrature_nodes %||% 15L)
 
   if (!is.logical(fixed_marker_weights) || length(fixed_marker_weights) != 1L || is.na(fixed_marker_weights)) {
@@ -151,10 +191,16 @@ joinme_standata <- function(
       i = "Use TRUE to keep supplied marker weights fixed; FALSE to estimate marker-weight perturbations."
     ))
   }
+  if (!is.logical(shared_marker_weights) || length(shared_marker_weights) != 1L || is.na(shared_marker_weights)) {
+    cli::cli_abort(c(
+      x = "{.arg shared_marker_weights} must be TRUE/FALSE.",
+      i = "Use TRUE to share one marker-weight structure across weighted association terms, or FALSE to use one structure per active weighted association term."
+    ))
+  }
 
   # Workflow: parse formulas -> build matrices -> assemble survival basis -> pack list
   # Handle mixed families
-  priors <- .build_priors(beta_prior = beta_prior, alpha_prior = alpha_prior, lkj_prior = lkj_prior)
+  priors <- .build_priors(beta_prior = beta_prior, alpha_prior = alpha_prior, iota_prior = iota_prior, lkj_prior = lkj_prior)
   
   # Parse lme4 bars
   f_exp <- reformulas::expandDoubleVerts(formulaLong)
@@ -186,10 +232,10 @@ joinme_standata <- function(
     ))
   }
   has_idm <- length(idm_rhs_list) > 0
-  if (!has_idm && "corr" %in% assoc) {
+  if (!has_idm && any(c("corr", "vcov") %in% assoc)) {
     cli::cli_abort(c(
-      x = "Association {.arg corr} requires marker-by-id random effects.",
-      i = "Add an inner ( ... | {.arg id_var} ) term inside the marker block, or remove {.arg corr} from {.arg assoc}."
+      x = "Associations {.arg corr} and {.arg vcov} require marker-by-id random effects.",
+      i = "Add an inner ( ... | {.arg id_var} ) term inside the marker block, or remove covariance-style association terms from {.arg assoc}."
     ))
   }
 
@@ -197,21 +243,97 @@ joinme_standata <- function(
   fixed_rhs <- stats::update(f_fix, . ~ .)
   fixed_rhs[[2]] <- NULL
 
-  # Map ids by event data order
+  # Map ids by event process data order
   ids <- sort(unique(dataEvent[[id_var]]))
   id_map <- setNames(seq_along(ids), ids)
-  dataEvent <- dataEvent[match(ids, dataEvent[[id_var]]), , drop = FALSE]
   dataEvent$id_int <- as.integer(id_map[as.character(dataEvent[[id_var]])])
+
+  # Attach resolved event interval columns and order rows by (id, stop, start)
+  dataEvent$event_start <- event_start
+  dataEvent$event_stop <- event_stop
+  dataEvent$event_status <- event_status
+  dataEvent$event_censor_type <- event_censor_type
+  ord_event <- order(dataEvent$id_int, dataEvent$event_stop, dataEvent$event_start)
+  dataEvent <- dataEvent[ord_event, , drop = FALSE]
+  rownames(dataEvent) <- NULL
+
+  # Subject-level snapshot (first interval row per id) for id-level constructs
+  first_idx_by_id <- match(seq_along(ids), dataEvent$id_int)
+  dataEvent_id <- dataEvent[first_idx_by_id, , drop = FALSE]
+
+  # Interval-level vectors after sorting
+  event_start <- as.numeric(dataEvent$event_start)
+  event_stop <- as.numeric(dataEvent$event_stop)
+  event_status <- dataEvent$event_status
+  event_censor_type <- as.integer(dataEvent$event_censor_type)
+
+  # Validate interval structure within each id
+  n_id <- length(ids)
+  interval_index <- .build_event_interval_index(
+    id_int = dataEvent$id_int,
+    n_id = n_id,
+    context = "joinme_standata()"
+  )
+  for (i in seq_len(n_id)) {
+    ii <- interval_index$event_start_idx[i]:interval_index$event_end_idx[i]
+    starts_i <- event_start[ii]
+    stops_i <- event_stop[ii]
+    if (is.unsorted(stops_i, strictly = FALSE)) {
+      cli::cli_abort(c(
+        x = "joinme_standata(): event stop times must be non-decreasing within each id.",
+        i = "Check interval ordering for subject index {i}."
+      ))
+    }
+    if (any(starts_i[-1] < stops_i[-length(stops_i)])) {
+      cli::cli_abort(c(
+        x = "joinme_standata(): overlapping event intervals are not supported.",
+        i = "Each interval must start at or after the previous interval stop for subject index {i}."
+      ))
+    }
+  }
+
+  if (surv_type %in% c("right", "counting")) {
+    event_outcomes_all <- .derive_event_outcomes(
+      status_raw = event_status,
+      context = "joinme_standata()"
+    )
+    d_event <- event_outcomes_all$d_event
+    event_type <- event_outcomes_all$event_type
+    K_event <- event_outcomes_all$K_event
+  } else {
+    d_event <- as.integer(event_censor_type == 1L)
+    event_type <- rep.int(1L, length(event_censor_type))
+    K_event <- 1L
+  }
+
+  for (i in seq_len(n_id)) {
+    ii <- interval_index$event_start_idx[i]:interval_index$event_end_idx[i]
+    event_rows <- which(d_event[ii] == 1L)
+    if (length(event_rows) > 1L) {
+      cli::cli_abort(c(
+        x = "joinme_standata(): each id can have at most one event interval.",
+        i = "Subject index {i} has multiple rows with event status != 0."
+      ))
+    }
+    if (length(event_rows) == 1L && event_rows != length(ii)) {
+      cli::cli_abort(c(
+        x = "joinme_standata(): event row must be the final interval for each id.",
+        i = "Move the event indicator to the last interval row for subject index {i}."
+      ))
+    }
+  }
+
   dataLong$id_int <- as.integer(id_map[as.character(dataLong[[id_var]])])
 
-  dataLong <- dataLong |>
-    dplyr::filter(
-      !is.na(.data$id_int),
-      is.finite(.data[[time_var]]),
-      is.finite(.data[[y_var]]),
-      !is.na(.data[[marker_var]])
-    ) |>
-    dplyr::arrange(.data$id_int, .data[[marker_var]], .data[[time_var]])
+  keep_long <- !is.na(dataLong$id_int) &
+    is.finite(dataLong[[time_var]]) &
+    is.finite(dataLong[[y_var]]) &
+    !is.na(dataLong[[marker_var]])
+  dataLong <- dataLong[keep_long, , drop = FALSE]
+  if (nrow(dataLong) > 0L) {
+    ord_long <- order(dataLong$id_int, dataLong[[marker_var]], dataLong[[time_var]])
+    dataLong <- dataLong[ord_long, , drop = FALSE]
+  }
 
   dataLong[[marker_var]] <- factor(dataLong[[marker_var]])
   marker_levels <- levels(dataLong[[marker_var]])
@@ -253,7 +375,7 @@ joinme_standata <- function(
     out
   }
 
-  n_id <- nrow(dataEvent)
+  n_id <- nrow(dataEvent_id)
   id_group_exprs <- lapply(bars[id_idx], function(bt) bt[[3]])
   marker_idx <- which(grp == marker_var)
   marker_group_exprs <- lapply(bars[marker_idx], function(bt) bt[[3]])
@@ -305,39 +427,17 @@ joinme_standata <- function(
 
   # Marker-weighted association channels use marker weights only for:
   # cv_total, cv_marker, cs_total, cs_marker.
-  marker_weight_assoc_active <- as.integer(any(c("cv_total", "cv_marker", "cs_total", "cs_marker") %in% assoc))
+  active_weight_terms <- .active_weighted_assoc_terms(assoc)
+  marker_weight_assoc_active <- as.integer(length(active_weight_terms) > 0L)
   estimate_marker_weights_active <- as.integer(!isTRUE(fixed_marker_weights) && marker_weight_assoc_active == 1L)
-
-  # Marker weights (for weighted means in CV/CS association components)
-  if (is.null(marker_weights)) {
-    # If marker-weight estimation is active, use zero base so latent perturbations
-    # represent the full weight value. Otherwise, use fixed unit weights.
-    marker_weights <- rep(as.numeric(!as.logical(estimate_marker_weights_active)), D)
-  } else {
-    if (!is.numeric(marker_weights)) {
-      cli::cli_abort(c(
-        x = "{.arg marker_weights} must be numeric.",
-        i = "Provide a numeric vector with length D or named by marker levels."
-      ))
-    }
-    if (!is.null(names(marker_weights))) {
-      marker_weights <- marker_weights[marker_levels]
-    }
-    if (length(marker_weights) != D) {
-      cli::cli_abort(c(
-        x = "{.arg marker_weights} must have length D={D}.",
-        i = "Use one weight per marker level."
-      ))
-    }
-    if (any(!is.finite(marker_weights))) {
-      cli::cli_abort(c(
-        x = "{.arg marker_weights} must be finite.",
-        i = "Weights may be positive or negative, but cannot be NA/Inf."
-      ))
-    }
-    # All-zero base weights are allowed; raw weights are used directly in Stan.
-    # yield a well-defined set of effective weights.
-  }
+  marker_weight_spec <- .resolve_marker_weight_structure(
+    marker_weights = marker_weights,
+    marker_levels = marker_levels,
+    active_terms = active_weight_terms,
+    shared_marker_weights = shared_marker_weights,
+    estimate_marker_weights = as.logical(estimate_marker_weights_active),
+    context = "joinme_standata()"
+  )
 
   # Marker-weight estimation controls
   # - estimate_marker_weights_active toggles whether shrinkage is applied in Stan
@@ -351,7 +451,7 @@ joinme_standata <- function(
   # - link_codes drive family-specific inverse-link mapping in Stan
   if (!is.null(families)) {
     # Treat a single family spec object/list as scalar and recycle to D markers.
-    if (inherits(families, "joinme_family_spec") || (is.list(families) && !is.null(families$family))) {
+    if (inherits(families, "JoiNMe_family_spec") || (is.list(families) && !is.null(families$family))) {
       families <- rep(list(families), D)
     }
     # If only length 1, duplicate to all markers
@@ -373,7 +473,7 @@ joinme_standata <- function(
     link_names <- vapply(family_codes, .default_link_for_family, character(1))
     link_codes <- as.integer(vapply(link_names, .link_code_from_name, integer(1)))
     inv_link_specs <- lapply(link_names, .inv_link_bc_from_name)
-    inv_link_n_ops <- as.integer(vapply(inv_link_specs, function(x) length(x$opcodes), integer(1)))
+    inv_link_n_ops <- as.integer(vapply(inv_link_specs, function(x) length(x$bytecode), integer(1)))
     inv_link_n_const <- as.integer(vapply(inv_link_specs, function(x) length(x$const_data), integer(1)))
     max_inv_link_ops <- max(inv_link_n_ops, 1L)
     max_inv_link_const <- max(inv_link_n_const, 1L)
@@ -381,7 +481,7 @@ joinme_standata <- function(
     inv_link_const <- matrix(0.0, nrow = D, ncol = max_inv_link_const)
     for (d in seq_len(D)) {
       if (inv_link_n_ops[d] > 0L) {
-        inv_link_ops[d, seq_len(inv_link_n_ops[d])] <- as.integer(inv_link_specs[[d]]$opcodes)
+        inv_link_ops[d, seq_len(inv_link_n_ops[d])] <- as.integer(inv_link_specs[[d]]$bytecode)
       }
       if (inv_link_n_const[d] > 0L) {
         inv_link_const[d, seq_len(inv_link_n_const[d])] <- as.numeric(inv_link_specs[[d]]$const_data)
@@ -394,8 +494,8 @@ joinme_standata <- function(
   # Family-level distributional parameter indexing.
   #
   # Goal:
-  # - for each distributional parameter (sigma, nu, phi, alpha, phi_beta,
-  #   tau_sde), build one shared parameter per unique family that requires it,
+  # - for each distributional parameter (sigma, nu, phi, alpha, kappa,
+  #   tau), build one shared parameter per unique family that requires it,
   # - map each marker to its family-level parameter index,
   # - use index 0 for markers/families that do not use that parameter.
   .build_family_param_index <- function(param_name) {
@@ -427,38 +527,49 @@ joinme_standata <- function(
   fam_nu <- .build_family_param_index("nu")
   fam_phi <- .build_family_param_index("phi")
   fam_alpha <- .build_family_param_index("alpha")
-  fam_phi_beta <- .build_family_param_index("phi_beta")
-  fam_tau_sde <- .build_family_param_index("tau_sde")
+  fam_kappa <- .build_family_param_index("kappa")
+  fam_tau <- .build_family_param_index("tau")
 
-  corr_diag_link_code <- if (corr_diag_link == "exp") 1L else 0L
+  vcov_diag_link_code <- if (vcov_diag_link == "exp") 1L else 0L
 
-  use_tau_sde_fixed <- 0L
-  tau_sde_fixed_value <- 0.5
-  if (!is.null(tau_sde_fixed)) {
-    if (!is.numeric(tau_sde_fixed) || length(tau_sde_fixed) != 1 || !is.finite(tau_sde_fixed)) {
+  use_tau_fixed <- 0L
+  tau_fixed_value <- 0.5
+  if (!is.null(tau_fixed)) {
+    if (!is.numeric(tau_fixed) || length(tau_fixed) != 1 || !is.finite(tau_fixed)) {
       cli::cli_abort(c(
-        x = "{.arg tau_sde_fixed} must be a single finite numeric value.",
+        x = "{.arg tau_fixed} must be a single finite numeric value.",
         i = "Provide a number strictly between 0 and 1."
       ))
     }
-    tau_sde_fixed_value <- as.numeric(tau_sde_fixed)
-    if (tau_sde_fixed_value <= 0 || tau_sde_fixed_value >= 1) {
+    tau_fixed_value <- as.numeric(tau_fixed)
+    if (tau_fixed_value <= 0 || tau_fixed_value >= 1) {
       cli::cli_abort(c(
-        x = "{.arg tau_sde_fixed} must be between 0 and 1.",
+        x = "{.arg tau_fixed} must be between 0 and 1.",
         i = "Provide a number strictly between 0 and 1."
       ))
     }
     if (any(family_codes == 9L)) {
-      use_tau_sde_fixed <- 1L
+      use_tau_fixed <- 1L
     } else {
       cli::cli_warn(c(
-        x = "{.arg tau_sde_fixed} is ignored because no skew_double_exponential family is present.",
-        i = "Remove {.arg tau_sde_fixed} or include the skew_double_exponential family."
+        x = "{.arg tau_fixed} is ignored because no skew_double_exponential family is present.",
+        i = "Remove {.arg tau_fixed} or include the skew_double_exponential family."
       ))
     }
   }
   
   dist_formulas <- .normalize_formula_dist(formulaDist)
+
+  # A fixed tau and a tau regression describe competing quantile/asymmetry
+  # models. Require exactly one specification so the posterior never contains
+  # regression coefficients that are disconnected from the likelihood.
+  if (use_tau_fixed == 1L && !is.null(dist_formulas$tau)) {
+    cli::cli_abort(c(
+      x = "Specify either {.arg tau_fixed} or a {.code tau ~ ...} distributional regression, not both.",
+      i = "Remove {.arg tau_fixed} to estimate tau, or remove the tau formula to keep it fixed."
+    ))
+  }
+
   family_names_present <- vapply(family_codes, .family_code_to_name, character(1))
   .validate_dist_formula_scopes(dist_formulas, family_names_present)
   allowed_dist <- unique(unlist(lapply(family_codes, .family_distrib_params)))
@@ -478,12 +589,15 @@ joinme_standata <- function(
     tf_cs_marker_comp = list(codes = c(1L, rep(0L, 6)), n_codes = 1L)
   )
 
-  # Scale time to [0,1] by max event time
+  # Scale time to [0,1] by max event stop time
   # - tmax is also returned for coefficient rescaling in Stan
-  tmax <- max(event_time)
+  tmax <- max(event_stop, na.rm = TRUE)
   if (!is.finite(tmax) || tmax <= 0) stop("Invalid max event time.")
   dataLong$t_scaled <- dataLong[[time_var]] / tmax
-  dataEvent$S_scaled <- event_time / tmax
+  dataEvent$S_entry_scaled <- event_start / tmax
+  dataEvent$S_scaled <- event_stop / tmax
+  dataEvent_id$S_entry_scaled <- dataEvent_id$event_start / tmax
+  dataEvent_id$S_scaled <- dataEvent_id$event_stop / tmax
 
   # Build obs matrices on scaled time
   # - distributional regression matrices follow the same scaled timeline
@@ -494,49 +608,65 @@ joinme_standata <- function(
     marker_levels = marker_levels,
     family_codes = family_codes
   )
-  attr(dl, "joinme_family_by_row") <- family_by_row
+  attr(dl, "JoiNMe_family_by_row") <- family_by_row
 
   dist_sigma <- .build_dist_matrix(dist_formulas$sigma, dl, family_by_row = family_by_row)
   dist_nu <- .build_dist_matrix(dist_formulas$nu, dl, family_by_row = family_by_row)
   dist_phi <- .build_dist_matrix(dist_formulas$phi, dl, family_by_row = family_by_row)
   dist_alpha <- .build_dist_matrix(dist_formulas$alpha, dl, family_by_row = family_by_row)
-  dist_phi_beta <- .build_dist_matrix(dist_formulas$phi_beta, dl, family_by_row = family_by_row)
-  dist_tau_sde <- .build_dist_matrix(dist_formulas$tau_sde, dl, family_by_row = family_by_row)
+  dist_kappa <- .build_dist_matrix(dist_formulas$kappa, dl, family_by_row = family_by_row)
+  dist_tau <- .build_dist_matrix(dist_formulas$tau, dl, family_by_row = family_by_row)
 
   re_sigma <- .pad_re_terms(.build_dist_re_terms(dist_formulas$sigma, dl), nrow(dl))
   re_nu <- .pad_re_terms(.build_dist_re_terms(dist_formulas$nu, dl), nrow(dl))
   re_phi <- .pad_re_terms(.build_dist_re_terms(dist_formulas$phi, dl), nrow(dl))
   re_alpha <- .pad_re_terms(.build_dist_re_terms(dist_formulas$alpha, dl), nrow(dl))
-  re_phi_beta <- .pad_re_terms(.build_dist_re_terms(dist_formulas$phi_beta, dl), nrow(dl))
-  re_tau_sde <- .pad_re_terms(.build_dist_re_terms(dist_formulas$tau_sde, dl), nrow(dl))
+  re_kappa <- .pad_re_terms(.build_dist_re_terms(dist_formulas$kappa, dl), nrow(dl))
+  re_tau <- .pad_re_terms(.build_dist_re_terms(dist_formulas$tau, dl), nrow(dl))
 
-  X_obs <- .mm(fixed_rhs, dl)
+  fixed_blueprint <- .make_model_matrix_blueprint(
+    fixed_rhs,
+    dl,
+    boundary_var = time_var,
+    boundary_values = c(0, 1)
+  )
+  id_rhs_list <- .bar_terms_to_rhs_list(bars[id_idx])
+  id_blueprints <- lapply(id_rhs_list, function(rhs) {
+    .make_model_matrix_blueprint(rhs, dl, boundary_var = time_var, boundary_values = c(0, 1))
+  })
+  mk_blueprints <- lapply(mk_rhs_list, function(rhs) {
+    .make_model_matrix_blueprint(rhs, dl, boundary_var = time_var, boundary_values = c(0, 1))
+  })
+  idm_blueprints <- lapply(idm_rhs_list, function(rhs) {
+    .make_model_matrix_blueprint(rhs, dl, boundary_var = time_var, boundary_values = c(0, 1))
+  })
+
+  X_obs <- .mm(fixed_blueprint, dl)
   P <- ncol(X_obs)
 
   # id block
   # - always required (subject random effects)
-  id_rhs_list <- .bar_terms_to_rhs_list(bars[id_idx])
-  Z_id_obs <- do.call(cbind, lapply(id_rhs_list, function(rhs) .mm(rhs, dl)))
+  Z_id_obs <- do.call(cbind, lapply(id_blueprints, function(rhs) .mm(rhs, dl)))
   R_id <- ncol(Z_id_obs)
 
   # marker-only optional
   # - empty marker block yields zero columns
   if (length(mk_rhs_list) == 0) {
-    mk0 <- .zero_marker_block(N = nrow(dl), n_id = nrow(dataEvent))
+    mk0 <- .zero_marker_block(N = nrow(dl), n_id = n_id)
     R_mk <- mk0$R_mk
     Z_mk_obs <- mk0$Z_mk_obs
   } else {
-    Z_mk_obs <- do.call(cbind, lapply(mk_rhs_list, function(rhs) .mm(rhs, dl)))
+    Z_mk_obs <- do.call(cbind, lapply(mk_blueprints, function(rhs) .mm(rhs, dl)))
     R_mk <- ncol(Z_mk_obs)
   }
 
   # marker-by-id basis
-  # - enables corr association features
+  # - enables covariance-style association features (corr, vcov)
   if (!has_idm) {
     Z_idm_obs <- matrix(0.0, nrow(dl), 0)
     Q_idm <- 0L
   } else {
-    Z_idm_obs <- do.call(cbind, lapply(idm_rhs_list, function(rhs) .mm(rhs, dl)))
+    Z_idm_obs <- do.call(cbind, lapply(idm_blueprints, function(rhs) .mm(rhs, dl)))
     Q_idm <- ncol(Z_idm_obs)
   }
 
@@ -568,6 +698,13 @@ joinme_standata <- function(
     )
   }
 
+  .validate_assoc_cov_structure(
+    assoc = assoc,
+    q_idm = Q_idm,
+    diagonal_only = indep_flags$indep_idmarker_cov,
+    context = "joinme_standata()"
+  )
+
   # Prepare outcomes (mixed families)
   # - y_real/y_int mirror Stan data requirements
   y_real <- as.numeric(dl[[y_var]])
@@ -578,51 +715,31 @@ joinme_standata <- function(
   }
 
   # Hazard covariates W
-  # - baseline covariates (intercept removed; baseline level handled by spline basis)
+  # - interval covariates for piecewise survival contributions
   W <- .mm_event(formulaEvent, dataEvent)
   p_w <- ncol(W)
 
-  # Covariance covariates Xcov (intercept-only -> Xcov=0)
-  # - used to build subject-specific L_i in Stan
-  if (length(reformulas::findbars(formulaCorr)) > 0) {
-    cli::cli_abort(c(
-      x = "{.arg formulaCorr} does not support random-effects terms.",
-      i = "Remove all ( ... | ... ) terms from {.arg formulaCorr}."
-    ))
-  }
-  fv_rhs <- stats::update(formulaCorr, . ~ .)
-  fv_rhs[[2]] <- NULL
-  if (length(fv_rhs) >= 3 && .expr_has_time(fv_rhs[[3]], time_var)) {
-    cli::cli_abort(c(
-      x = "{.arg formulaCorr} cannot include the time variable {.arg {time_var}}.",
-      i = "Remove time from {.arg formulaCorr} or move it to longitudinal formulas."
-    ))
-  }
-  Xtmp <- .mm(fv_rhs, dataEvent)
-  if (ncol(Xtmp) == 1 && colnames(Xtmp)[1] == "(Intercept)") {
-    K_cov <- 1L
-    Xcov <- matrix(0.0, nrow(dataEvent), 1)
-  } else {
-    if ("(Intercept)" %in% colnames(Xtmp)) Xtmp <- Xtmp[, colnames(Xtmp) != "(Intercept)", drop = FALSE]
-    if (ncol(Xtmp) < 1) {
-      K_cov <- 1L
-      Xcov <- matrix(0.0, nrow(dataEvent), 1)
-    } else {
-      K_cov <- ncol(Xtmp)
-      Xcov <- Xtmp
-    }
-  }
-
-  # Survival outcomes (scaled)
-  # - S_event is on [0,1] after scaling by tmax
-  S_event <- as.numeric(dataEvent$S_scaled)
-  event_outcomes <- .derive_event_outcomes(
-    status_raw = event_status,
+  # Covariance covariates Xcov
+  # - used to build subject-specific lower-triangular factors L_i in Stan
+  formulaVCov <- .resolve_vcov_formula(
+    formulaVCov = formulaVCov,
+    default = ~ 1,
     context = "joinme_standata()"
   )
-  d_event <- event_outcomes$d_event
-  event_type <- event_outcomes$event_type
-  K_event <- event_outcomes$K_event
+  vcov_design <- .build_vcov_design(
+    formulaVCov = formulaVCov,
+    dataEvent = dataEvent_id,
+    time_var = time_var,
+    context = "joinme_standata()"
+  )
+  K_cov <- vcov_design$K_cov
+  Xcov <- vcov_design$Xcov
+
+  # Survival outcomes (scaled)
+  # - S_entry/S_event are interval bounds on [0,1] after scaling by tmax
+  S_entry <- as.numeric(dataEvent$S_entry_scaled)
+  S_event <- as.numeric(dataEvent$S_scaled)
+  n_event <- nrow(dataEvent)
 
   # GK times now/fwd on scaled domain
   # - u_now/u_fwd feed CV/CS feature computations
@@ -630,13 +747,14 @@ joinme_standata <- function(
   quad <- .gk_single_panel(rule = quad_req$rule)
   n_gk <- quad$n_gk
   gk_nodes <- quad$nodes
-  u_now <- matrix(NA_real_, n_id, n_gk)
-  u_fwd <- matrix(NA_real_, n_id, n_gk)
-  for (i in seq_len(n_id)) {
-    u <- S_event[i] * gk_nodes
+  u_now <- matrix(NA_real_, n_event, n_gk)
+  u_fwd <- matrix(NA_real_, n_event, n_gk)
+  for (e in seq_len(n_event)) {
+    delta_e <- S_event[e] - S_entry[e]
+    u <- S_entry[e] + delta_e * gk_nodes
     uf <- pmin(u + eps_fd, 1)
-    u_now[i, ] <- u
-    u_fwd[i, ] <- uf
+    u_now[e, ] <- u
+    u_fwd[e, ] <- uf
   }
 
   # Baseline hazard basis
@@ -647,10 +765,16 @@ joinme_standata <- function(
     Kbs <- ncol(Bs_event_raw)
     Bs_gk_raw <- .eval_rhs_list_on_times(list(basehaz_formula), dataEvent, time_var, u_now)
   } else {
-    probs <- (seq_len(n_knots)) / (n_knots + 1)
-    knots <- as.numeric(stats::quantile(S_event, probs = probs, names = FALSE, type = 7))
-    knots <- pmin(pmax(knots, 1e-6), 1 - 1e-6)
-    knots <- unique(knots)
+    if (is.null(basehaz_knots)) {
+      probs <- (seq_len(basehaz_n_knots)) / (basehaz_n_knots + 1)
+      knots <- as.numeric(stats::quantile(S_event, probs = probs, names = FALSE, type = 7))
+      knots <- pmin(pmax(knots, 1e-6), 1 - 1e-6)
+      knots  <- unique(knots)
+      basehaz_knots <- knots * tmax
+    } else {
+      knots <- unique(as.numeric(basehaz_knots))/tmax
+    }
+    
 
     Bs_obj <- .make_basehaz_basis(
       x = S_event, basis = basehaz, knots = knots, degree = basehaz_degree, boundary = c(0, 1)
@@ -660,7 +784,7 @@ joinme_standata <- function(
 
     u_vec <- as.vector(t(u_now))
     B_now <- as.matrix(predict(Bs_obj, newx = u_vec))
-    Bs_gk_raw <- array(B_now, dim = c(n_gk, n_id, Kbs))
+    Bs_gk_raw <- array(B_now, dim = c(n_gk, n_event, Kbs))
     Bs_gk_raw <- aperm(Bs_gk_raw, c(2, 1, 3))
   }
 
@@ -677,38 +801,44 @@ joinme_standata <- function(
   de_fwd[[time_var]] <- S_fwd
 
   # Mean designs
-  X_gk_now <- .eval_rhs_list_on_times(list(fixed_rhs), dataEvent, time_var, u_now)
-  X_gk_fwd <- .eval_rhs_list_on_times(list(fixed_rhs), dataEvent, time_var, u_fwd)
-  X_event_now <- .mm(fixed_rhs, de_now)
-  X_event_fwd <- .mm(fixed_rhs, de_fwd)
+  X_gk_now <- .eval_rhs_list_on_times(list(fixed_blueprint), dataEvent, time_var, u_now)
+  X_gk_fwd <- .eval_rhs_list_on_times(list(fixed_blueprint), dataEvent, time_var, u_fwd)
+  X_event_now <- .mm(fixed_blueprint, de_now)
+  X_event_fwd <- .mm(fixed_blueprint, de_fwd)
 
-  Z_id_gk_now <- .eval_rhs_list_on_times(id_rhs_list, dataEvent, time_var, u_now)
-  Z_id_gk_fwd <- .eval_rhs_list_on_times(id_rhs_list, dataEvent, time_var, u_fwd)
-  Z_id_event_now <- .eval_rhs_list_at_event(id_rhs_list, dataEvent, time_var, S_now)
-  Z_id_event_fwd <- .eval_rhs_list_at_event(id_rhs_list, dataEvent, time_var, S_fwd)
+  Z_id_gk_now <- .eval_rhs_list_on_times(id_blueprints, dataEvent, time_var, u_now)
+  Z_id_gk_fwd <- .eval_rhs_list_on_times(id_blueprints, dataEvent, time_var, u_fwd)
+  Z_id_event_now <- .eval_rhs_list_at_event(id_blueprints, dataEvent, time_var, S_now)
+  Z_id_event_fwd <- .eval_rhs_list_at_event(id_blueprints, dataEvent, time_var, S_fwd)
 
   # Marker-only designs (optional)
   if (R_mk == 0) {
-    mk0 <- .zero_marker_block(N = nrow(dl), n_id = n_id, n_gk = n_gk)
+    mk0 <- .zero_marker_block(N = nrow(dl), n_id = n_event, n_gk = n_gk)
     Z_mk_gk_now <- mk0$Z_mk_gk_now
     Z_mk_gk_fwd <- mk0$Z_mk_gk_fwd
     Z_mk_event_now <- mk0$Z_mk_event_now
     Z_mk_event_fwd <- mk0$Z_mk_event_fwd
   } else {
-    Z_mk_gk_now <- .eval_rhs_list_on_times(mk_rhs_list, dataEvent, time_var, u_now)
-    Z_mk_gk_fwd <- .eval_rhs_list_on_times(mk_rhs_list, dataEvent, time_var, u_fwd)
-    Z_mk_event_now <- .eval_rhs_list_at_event(mk_rhs_list, dataEvent, time_var, S_now)
-    Z_mk_event_fwd <- .eval_rhs_list_at_event(mk_rhs_list, dataEvent, time_var, S_fwd)
+    Z_mk_gk_now <- .eval_rhs_list_on_times(mk_blueprints, dataEvent, time_var, u_now)
+    Z_mk_gk_fwd <- .eval_rhs_list_on_times(mk_blueprints, dataEvent, time_var, u_fwd)
+    Z_mk_event_now <- .eval_rhs_list_at_event(mk_blueprints, dataEvent, time_var, S_now)
+    Z_mk_event_fwd <- .eval_rhs_list_at_event(mk_blueprints, dataEvent, time_var, S_fwd)
   }
 
   # Marker-by-id designs
-  Z_idm_gk_now <- .eval_rhs_list_on_times(idm_rhs_list, dataEvent, time_var, u_now)
-  Z_idm_gk_fwd <- .eval_rhs_list_on_times(idm_rhs_list, dataEvent, time_var, u_fwd)
-  Z_idm_event_now <- .eval_rhs_list_at_event(idm_rhs_list, dataEvent, time_var, S_now)
-  Z_idm_event_fwd <- .eval_rhs_list_at_event(idm_rhs_list, dataEvent, time_var, S_fwd)
+  Z_idm_gk_now <- .eval_rhs_list_on_times(idm_blueprints, dataEvent, time_var, u_now)
+  Z_idm_gk_fwd <- .eval_rhs_list_on_times(idm_blueprints, dataEvent, time_var, u_fwd)
+  Z_idm_event_now <- .eval_rhs_list_at_event(idm_blueprints, dataEvent, time_var, S_now)
+  Z_idm_event_fwd <- .eval_rhs_list_at_event(idm_blueprints, dataEvent, time_var, S_fwd)
 
   # Association flags
   af <- .parse_assoc(assoc)
+  M_corr_tf <- .assoc_transform_component_count("corr", Q_idm, diagonal_only = FALSE)
+  M_vcov_tf <- .assoc_transform_component_count(
+    "vcov",
+    Q_idm,
+    diagonal_only = as.integer(indep_flags$indep_idmarker_cov %||% 0L) == 1L
+  )
 
   # --------------------------
   # Time-index metadata
@@ -724,15 +854,39 @@ joinme_standata <- function(
     zid_cols = zid_cols,
     zmk_cols = zmk_cols,
     zidm_cols = zidm_cols,
-    time_var = time_var
+    time_var = time_var,
+    fixed_design = fixed_blueprint,
+    id_design = id_blueprints,
+    marker_design = mk_blueprints,
+    idm_design = idm_blueprints
   )
 
   # Prior scales (align to P)
   beta_scale <- as.numeric(priors$beta_scale)
+  if (length(beta_scale) == 0) beta_scale <- 2.5
   if (length(beta_scale) < P) {
-    beta_scale <- c(beta_scale, rep(2.0, P - length(beta_scale)))
+    # beta_scale <- c(beta_scale, rep(2.0, P - length(beta_scale)))
+    beta_scale <- rep(beta_scale, length.out = P)
   }
   beta_scale <- beta_scale[seq_len(P)]
+
+  allow_marker_crosscorr <- as.integer(allow_marker_crosscorr)
+  if (!allow_marker_crosscorr %in% c(0L, 1L)) {
+    cli::cli_abort(c(
+      x = "{.arg allow_marker_crosscorr} must be binary.",
+      i = "Set it to 1 to allow marker-to-marker-by-id cross-correlation when the formula structure permits it."
+    ))
+  }
+  # if (as.integer(indep_flags$indep_marker_id_crosscorr %||% 0L) == 1L && allow_marker_crosscorr == 1L) {
+  #   cli::cli_warn(c(
+  #     i = "Marker-to-marker-by-id cross-correlation is disabled by nested {.code || marker} syntax.",
+  #     v = "The outer marker double-bar makes the marker-only and marker-by-id blocks independent, so {.arg allow_marker_crosscorr} is being set to 0."
+  #   ))
+  #   allow_marker_crosscorr <- 0L
+  # }
+  if (as.integer(indep_flags$indep_marker_id_crosscorr %||% 0L) == 1L) {
+    allow_marker_crosscorr <- 0L
+  }
 
   # Family codes (vector by marker)
   family_long <- as.integer(family_codes)
@@ -750,32 +904,40 @@ joinme_standata <- function(
   }
 
   # Build arbitrary transformations (optional)
-  arbitrary_tf_data <- build_standata_transforms(transforms)
+  functional_tf_data <- build_standata_transforms(
+    transforms,
+    n_corr_components = M_corr_tf,
+    n_vcov_components = M_vcov_tf
+  )
 
   # if (af$assoc_cv_total == 0 && af$assoc_cv_mean == 1 && af$assoc_cv_marker == 1 &&
-  #     arbitrary_tf_data$tf_mode_cv_mean == 0 && arbitrary_tf_data$tf_mode_cv_marker == 0) {
+  #     functional_tf_data$tf_mode_cv_mean == 0 && functional_tf_data$tf_mode_cv_marker == 0) {
   #   warning("cv_mean and cv_marker are both identity; consider using cv_total instead.", call. = FALSE)
   # }
   # if (af$assoc_cv_total == 1 && af$assoc_cv_mean == 1 && af$assoc_cv_marker == 1 &&
-  #     arbitrary_tf_data$tf_mode_cv_tot == 0 &&
-  #     arbitrary_tf_data$tf_mode_cv_mean == 0 && arbitrary_tf_data$tf_mode_cv_marker == 0) {
+  #     functional_tf_data$tf_mode_cv_tot == 0 &&
+  #     functional_tf_data$tf_mode_cv_mean == 0 && functional_tf_data$tf_mode_cv_marker == 0) {
   #   warning("cv_total, cv_mean, and cv_marker are all identity; consider using only cv_total to avoid redundant association terms.", call. = FALSE)
   # }
   # if (af$assoc_cs_total == 0 && af$assoc_cs_mean == 1 && af$assoc_cs_marker == 1 &&
-  #     arbitrary_tf_data$tf_mode_cs_mean == 0 && arbitrary_tf_data$tf_mode_cs_marker == 0) {
+  #     functional_tf_data$tf_mode_cs_mean == 0 && functional_tf_data$tf_mode_cs_marker == 0) {
   #   warning("cs_mean and cs_marker are both identity; consider using cs_total instead.", call. = FALSE)
   # }
   # if (af$assoc_cs_total == 1 && af$assoc_cs_mean == 1 && af$assoc_cs_marker == 1 &&
-  #     arbitrary_tf_data$tf_mode_cs_tot == 0 &&
-  #     arbitrary_tf_data$tf_mode_cs_mean == 0 && arbitrary_tf_data$tf_mode_cs_marker == 0) {
+  #     functional_tf_data$tf_mode_cs_tot == 0 &&
+  #     functional_tf_data$tf_mode_cs_mean == 0 && functional_tf_data$tf_mode_cs_marker == 0) {
   #   warning("cs_total, cs_mean, and cs_marker are all identity; consider using only cs_total to avoid redundant association terms.", call. = FALSE)
   # }
 
   # Return Stan data
   standata_base <- list(
     n_id = as.integer(n_id),
+    N_event = as.integer(n_event),
     N = as.integer(nrow(dl)),
     id = as.integer(dl$id_int),
+    event_id = as.integer(dataEvent$id_int),
+    event_start_idx = as.integer(interval_index$event_start_idx),
+    event_end_idx = as.integer(interval_index$event_end_idx),
     marker = as.integer(dl$marker_int),
     D = as.integer(D),
     subject_weights = as.numeric(subject_weights),
@@ -798,10 +960,10 @@ joinme_standata <- function(
     marker_to_phi_family = fam_phi$marker_to,
     n_family_alpha = fam_alpha$n,
     marker_to_alpha_family = fam_alpha$marker_to,
-    n_family_phi_beta = fam_phi_beta$n,
-    marker_to_phi_beta_family = fam_phi_beta$marker_to,
-    n_family_tau_sde = fam_tau_sde$n,
-    marker_to_tau_sde_family = fam_tau_sde$marker_to,
+    n_family_kappa = fam_kappa$n,
+    marker_to_kappa_family = fam_kappa$marker_to,
+    n_family_tau = fam_tau$n,
+    marker_to_tau_family = fam_tau$marker_to,
     P = as.integer(P),
     X_obs = X_obs,
     R_id = as.integer(R_id),
@@ -814,15 +976,17 @@ joinme_standata <- function(
     Z_idm_obs = Z_idm_obs,
     re_weight_idm = as.numeric(re_weight_idm),
     re_weight_L = as.numeric(re_weight_L),
-    flag_resid_dim = as.integer(flag_resid_dim),
+    # flag_resid_dim = as.integer(flag_resid_dim),
     indep_id_re = as.integer(indep_flags$indep_id_re),
     indep_marker_re = as.integer(indep_flags$indep_marker_re),
     indep_marker_byid_latent_re = as.integer(1L), # keep as in your Page; extend if needed
     indep_idmarker_cov = as.integer(indep_flags$indep_idmarker_cov),
+    M_corr_tf = as.integer(M_corr_tf),
+    M_vcov_tf = as.integer(M_vcov_tf),
     allow_marker_crosscorr = as.integer(allow_marker_crosscorr),
-    corr_diag_link = as.integer(corr_diag_link_code),
-    use_tau_sde_fixed = as.integer(use_tau_sde_fixed),
-    tau_sde_fixed = as.numeric(tau_sde_fixed_value),
+    vcov_diag_link = as.integer(vcov_diag_link_code),
+    use_tau_fixed = as.integer(use_tau_fixed),
+    tau_fixed = as.numeric(tau_fixed_value),
     p_w = as.integer(p_w),
     W = W,
     K_cov = as.integer(K_cov),
@@ -831,8 +995,12 @@ joinme_standata <- function(
     Bs_event_c = Bs_event_c,
     Bs_gk_c = Bs_gk_c,
     tau_spline = tau_spline,
+    S_entry = as.numeric(S_entry),
     S_event = as.numeric(S_event),
     d_event = as.integer(d_event),
+    event_censor_type = as.integer(event_censor_type),
+    surv_type = as.character(surv_type),
+    event_censor_types_present = as.integer(sort(unique(event_censor_type))),
     K_event = as.integer(K_event),
     event_type = as.integer(event_type),
     eps_fd = eps_fd,
@@ -879,26 +1047,26 @@ joinme_standata <- function(
     Z_alpha = re_alpha$Z,
     J_alpha = re_alpha$J_mat,
     re_weight_alpha = re_alpha$W,
-    P_phi_beta = as.integer(dist_phi_beta$P),
-    X_phi_beta = dist_phi_beta$X,
-    n_re_phi_beta = as.integer(re_phi_beta$n_re),
-    K_phi_beta = as.array(as.integer(re_phi_beta$K)),
-    G_phi_beta = as.array(as.integer(re_phi_beta$G)),
-    K_phi_beta_max = as.integer(re_phi_beta$K_max),
-    G_phi_beta_max = as.integer(re_phi_beta$G_max),
-    Z_phi_beta = re_phi_beta$Z,
-    J_phi_beta = re_phi_beta$J_mat,
-    re_weight_phi_beta = re_phi_beta$W,
-    P_tau_sde = as.integer(dist_tau_sde$P),
-    X_tau_sde = dist_tau_sde$X,
-    n_re_tau_sde = as.integer(re_tau_sde$n_re),
-    K_tau_sde = as.array(as.integer(re_tau_sde$K)),
-    G_tau_sde = as.array(as.integer(re_tau_sde$G)),
-    K_tau_sde_max = as.integer(re_tau_sde$K_max),
-    G_tau_sde_max = as.integer(re_tau_sde$G_max),
-    Z_tau_sde = re_tau_sde$Z,
-    J_tau_sde = re_tau_sde$J_mat,
-    re_weight_tau_sde = re_tau_sde$W,
+    P_kappa = as.integer(dist_kappa$P),
+    X_kappa = dist_kappa$X,
+    n_re_kappa = as.integer(re_kappa$n_re),
+    K_kappa = as.array(as.integer(re_kappa$K)),
+    G_kappa = as.array(as.integer(re_kappa$G)),
+    K_kappa_max = as.integer(re_kappa$K_max),
+    G_kappa_max = as.integer(re_kappa$G_max),
+    Z_kappa = re_kappa$Z,
+    J_kappa = re_kappa$J_mat,
+    re_weight_kappa = re_kappa$W,
+    P_tau = as.integer(dist_tau$P),
+    X_tau = dist_tau$X,
+    n_re_tau = as.integer(re_tau$n_re),
+    K_tau = as.array(as.integer(re_tau$K)),
+    G_tau = as.array(as.integer(re_tau$G)),
+    K_tau_max = as.integer(re_tau$K_max),
+    G_tau_max = as.integer(re_tau$G_max),
+    Z_tau = re_tau$Z,
+    J_tau = re_tau$J_mat,
+    re_weight_tau = re_tau$W,
     K_ord = as.integer(K_ord),
 
     # Mean association designs
@@ -927,6 +1095,7 @@ joinme_standata <- function(
     assoc_cs_mean = af$assoc_cs_mean,
     assoc_cs_marker = af$assoc_cs_marker,
     assoc_corr = af$assoc_corr,
+    assoc_vcov = af$assoc_vcov,
     shrinkage = as.integer(shrinkage),
 
     # --------------------------
@@ -937,12 +1106,14 @@ joinme_standata <- function(
     # --------------------------
     beta_scale = as.numeric(beta_scale),
     alpha_scale = as.numeric(priors$alpha_scale),
+    iota_scale = as.numeric(priors$iota_scale),
     lkj_eta = as.numeric(priors$lkj_eta),
 
     # --------------------------
     # Time metadata
     # --------------------------
     tmax = as.numeric(tmax),
+    # tmax_internal = as.numeric(tmax),
     quadrature_nodes = as.integer(n_gk),
     n_time_beta = as.integer(time_meta$n_time_beta),
     idx_time_beta = as.array(as.integer(time_meta$idx_time_beta)),
@@ -950,8 +1121,8 @@ joinme_standata <- function(
     idx_time_uid = as.array(as.integer(time_meta$idx_time_uid)),
     n_time_vmk = as.integer(time_meta$n_time_vmk),
     idx_time_vmk = as.array(as.integer(time_meta$idx_time_vmk)),
-    n_time_widm = as.integer(time_meta$n_time_widm),
-    idx_time_widm = as.array(as.integer(time_meta$idx_time_widm)),
+    n_time_idm = as.integer(time_meta$n_time_idm),
+    idx_time_idm = as.array(as.integer(time_meta$idx_time_idm)),
 
     # --------------------------
     # Other metadata
@@ -961,9 +1132,30 @@ joinme_standata <- function(
     zid_cols = zid_cols,
     zmk_cols = zmk_cols,
     zidm_cols = zidm_cols,
+    design_blueprints = list(
+      fixed = fixed_blueprint,
+      id = id_blueprints,
+      marker = mk_blueprints,
+      idm = idm_blueprints
+    ),
     time_var = time_var,
     marker_levels = marker_levels,
-    marker_weights = as.numeric(marker_weights),
+    marker_weights = if (isTRUE(shared_marker_weights)) {
+      as.numeric(marker_weight_spec$base_matrix[1, ])
+    } else {
+      NULL
+    },
+    marker_weights_by_term = marker_weight_spec$base_by_term,
+    marker_weights_cv_total = as.numeric(marker_weight_spec$base_by_term$cv_total),
+    marker_weights_cs_total = as.numeric(marker_weight_spec$base_by_term$cs_total),
+    marker_weights_cv_marker = as.numeric(marker_weight_spec$base_by_term$cv_marker),
+    marker_weights_cs_marker = as.numeric(marker_weight_spec$base_by_term$cs_marker),
+    shared_marker_weights = as.integer(isTRUE(marker_weight_spec$shared_marker_weights)),
+    n_marker_weight_sets = as.integer(marker_weight_spec$n_sets),
+    marker_weight_set_cv_total = as.integer(marker_weight_spec$set_index[["cv_total"]]),
+    marker_weight_set_cs_total = as.integer(marker_weight_spec$set_index[["cs_total"]]),
+    marker_weight_set_cv_marker = as.integer(marker_weight_spec$set_index[["cv_marker"]]),
+    marker_weight_set_cs_marker = as.integer(marker_weight_spec$set_index[["cs_marker"]]),
     estimate_marker_weights = as.integer(estimate_marker_weights_active),
     fixed_marker_weights = as.integer(!as.logical(estimate_marker_weights_active)),
     use_marker_weight_assoc = as.integer(marker_weight_assoc_active),
@@ -978,13 +1170,14 @@ joinme_standata <- function(
     family_phi_names = fam_phi$family_names,
     family_alpha_codes = fam_alpha$family_codes,
     family_alpha_names = fam_alpha$family_names,
-    family_phi_beta_codes = fam_phi_beta$family_codes,
-    family_phi_beta_names = fam_phi_beta$family_names,
-    family_tau_sde_codes = fam_tau_sde$family_codes,
-    family_tau_sde_names = fam_tau_sde$family_names,
+    family_kappa_codes = fam_kappa$family_codes,
+    family_kappa_names = fam_kappa$family_names,
+    family_tau_codes = fam_tau$family_codes,
+    family_tau_names = fam_tau$family_names,
     tf_compositions = NULL,
     basehaz = basehaz,
-    n_knots = n_knots,
+    basehaz_n_knots = basehaz_n_knots,
+    basehaz_knots = basehaz_knots,
     basehaz_degree = basehaz_degree,
     Bs_obj = if (basehaz != "formula") Bs_obj else NULL,
     dist_cols = list(
@@ -992,19 +1185,19 @@ joinme_standata <- function(
       nu = dist_nu$cols,
       phi = dist_phi$cols,
       alpha = dist_alpha$cols,
-      phi_beta = dist_phi_beta$cols,
-      tau_sde = dist_tau_sde$cols
+      kappa = dist_kappa$cols,
+      tau = dist_tau$cols
     ),
     dist_re_terms = list(
       sigma = re_sigma$terms,
       nu = re_nu$terms,
       phi = re_phi$terms,
       alpha = re_alpha$terms,
-      phi_beta = re_phi_beta$terms,
-      tau_sde = re_tau_sde$terms
+      kappa = re_kappa$terms,
+      tau = re_tau$terms
     ),
     dist_formulas = dist_formulas
   )
 
-  c(standata_base, arbitrary_tf_data)
+  c(standata_base, functional_tf_data)
 }

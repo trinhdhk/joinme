@@ -1,52 +1,36 @@
-# Bayesian joint mixed-effects (JoinME) model using Stan
+# Bayesian joint mixed-effects (JoiNMe) model using Stan
 
-JoinMe fit Bayesian joint mixed-effects modelling of multivariate longitudinal markers and time-to-event outcomes.
-It supports multiple outcome families (Gaussian, Student-t, binary, count),
-flexible association structures (e.g. conditional or cumulative associations),
-covariance regression, transform-based modelling for functional effects, and
-dynamic prediction for individualised risk and trajectory forecasts.
+`JoiNMe` (with package name styled as `joinme` for deliberate ambiguity) fits Bayesian joint mixed-effects models for multivariate longitudinal markers and time-to-event outcomes. It supports multiple outcome families (Gaussian, Student-t, binary, count, beta, ordinal, skewed families), irregular measurement schedule. 
 
-JoinMe work with CmdStanR (recommended) or rstan for
-estimation, and includes helpers for data preparation, model diagnostics (ELPD,
-LOO, WAIC), simulation utilities and plotting. See the vignettes and reference
-for worked examples and API details.
+Current implementation experiments with flexible association structures, covariance regression, transform-based modelling for nonlinear effects, and dynamic prediction.
 
-For marker-aggregated association terms (`cv_total`, `cv_marker`, `cs_total`,
-`cs_marker`), transforms are applied at marker level before weighted averaging
-in simulation, fitting, and prediction.
+`joinme` works with CmdStanR and RStan. The package is designed with recipes for:
 
-Association plotting now follows the fitted model more closely: `plot(fit,
-type = "association")` uses a compact payload stored on the fitted object with
-the posterior association coefficients, marker weights, spline coefficients,
-and cached model-implied raw support ranges. This avoids relying on transient
-CmdStan CSV files just to recover association curves and reduces unsupported
-support extrapolation for nonlinear transforms.
+1. simulate or assemble longitudinal and event data with `simulate_joinme()`,
+2. fit the joint model with `joinme()`,
+3. inspect posterior draws and diagnostics,
+4. summarise and plot fitted effects,
+5. generate dynamic predictions and plot future trajectories or survival.
 
-## Family-shared distributional parameters
+## Marker distributional parameters
 
-When you fit mixed longitudinal families, `joinme` now uses **family-shared**
-distributional parameters by default (when no distributional regression is
-provided for that parameter).
+By default, `joinme` uses **family-shared** distributional parameters where possible, i.e.,
 
 - Markers with the same family share one latent parameter for each applicable
   distributional quantity.
 - Example: for two Student-`t` markers and one Gaussian marker,
   - Student-`t` markers share one `sigma` and one `nu` process,
-  - Gaussian marker has its own `sigma` process,
-  - `nu` is only defined for Student-`t`.
-- This is family-level pooling, not marker-level duplication.
+  - Gaussian marker has its own `sigma`.
 
-If you specify `formulaDist` for a distributional parameter (for example
+If `formulaDist` is specified for a distributional parameter (for example
 `sigma ~ 1 + time`), `joinme` uses that regression structure instead of a
 constant family-shared baseline for that parameter. In that case, summaries
 report regression terms (fixed/random effects) for the distributional model.
-
-This behaviour is applied consistently across fitting, standata/stancode,
-prediction, and summary extraction methods.
+Details below:
 
 ## Family-scoped `formulaDist` syntax
 
-You can now scope distributional regressions by family using square brackets on
+You can scope distributional regressions by family using square brackets on
 the LHS:
 
 - Global (applies to all rows where parameter exists):
@@ -61,8 +45,9 @@ Allowed distributional parameters:
 - `nu`
 - `phi`
 - `alpha` (aliases: `alpha_skew`, `skew`)
-- `phi_beta`
-- `tau_sde`
+- `kappa`: the positive Beta sample size, giving shape parameters
+  `mu * kappa` and `(1 - mu) * kappa`
+- `tau`: the skew-double-exponential asymmetry parameter in `(0, 1)`. This is different from fixing it via `tau_fixed`
 
 Example:
 
@@ -73,8 +58,8 @@ formulaDist <- list(
   nu[family=student_t] ~ 1,
   alpha_skew[family=skew_normal] ~ 1 + x1,
   phi[family=negbin2] ~ 1,
-  phi_beta[family=beta] ~ 1,
-  tau_sde[family=skew_double_exponential] ~ 1
+  kappa[family=beta] ~ 1,
+  tau[family=skew_double_exponential] ~ 1
 )
 ```
 
@@ -85,20 +70,47 @@ formulaDist <- list(
 # remotes::install_github("trinhdhk/joinme")
 ```
 
-We can use Rstan or cmdstanr.
+`joinme` is compatible to run with CmdStanR, but it needs compilation.
 
 ```r
-# CmdStanR backend
-# install.packages("cmdstanr", repos = repos = c('https://stan-dev.r-universe.dev', getOption("repos")))
+# Preferred: CmdStanR backend
+# install.packages("cmdstanr", repos = c("https://stan-dev.r-universe.dev", getOption("repos")))
 # cmdstanr::install_cmdstan()
-
-# RStan backend
-# install.packages("rstan")
+# precompile_cmdstanr_models()
 ```
+
+### Backend behaviour and threading
+
+- At runtime, `joinme` prefers CmdStanR when CmdStan is installed.
+- If the preferred backend is unavailable in the current session, `joinme`
+  falls back to the other available Stan backend and warns.
+
+### Public fit, prediction, and posterior interfaces
+
+Posterior draws are available through a dedicated renamed-draw interface:
+
+- `draws(fit, ...)` and `draws(pred, ...)` return `posterior`-compatible draws
+- `as.array(fit)` and `as.array(pred)` return the same renamed posterior arrays
+- `mcmc_plot()` forwards those draws to `bayesplot`, imitating the behaviour of `brms`
+- `longitudinal_plot()`, `survival_plot()`, `cumhaz_plot()`,
+  `association_plot()`, and `diagnostic_plot()` provide entry points to the main `plot()` methods.
+
+<!--
+Summary-scale consistency:
+
+- Baseline hazard summaries are reported in `summary(fit)$tables$baseline_hazard`
+  on both log and hazard-ratio scales.
+- Only the baseline-hazard intercept is adjusted by `-log(tmax)`; non-intercept
+  basis coefficients are kept as fitted because time scaling contributes a
+  constant log-hazard offset.
+- Baseline survival covariates are reported separately in
+  `summary(fit)$tables$survival_process` with hazard-ratio columns from
+  exponentiated log-scale summaries.
+-->
 
 ## Quick example
 
-``` r
+```r
 
 library(joinme)
 
@@ -149,15 +161,47 @@ fit <- joinme(
   )
 )
 
+inherits(fit, "JoiNMeFit")
+
 # Summaries
 summary(fit)
 diagnosis(fit)
+fixef(fit)
+coef(fit)
 
-# Random effects / covariance (nested by formula block)
+# Renamed posterior draws
+draws(fit, variables = c("time", "alpha_cv_total"), format = "draws_df")
+
+# Bayesplot-backed posterior display with renamed variables
+mcmc_plot(fit, variable = c("time", "alpha_cv_total"), type = "trace")
+
+# Conditional effects for either joint-model process
+profiles <- make_conditions(sim$dataEvent, vars = "x1")
+ce <- conditional_effects(
+  fit,
+  effects = list(longitudinal = "time", event = "x1"),
+  conditions = profiles,
+  process = c("longitudinal", "event"),
+  plot = FALSE
+)
+plot(ce, ask = FALSE)
+
+# Average marker-specific expected responses after applying each inverse link
+ce_average_marker <- conditional_effects(
+  fit,
+  effects = "time",
+  process = "longitudinal",
+  longitudinal_estimand = "marginal_marker",
+  plot = FALSE
+)
+
+# Random effects / covariance / combined coefficients (nested by formula block)
 re_fit <- ranef(fit)
-vc_fit <- corr(fit)
+cf_fit <- coef(fit)
+vc_fit <- vcov(fit)
 # Example accessors:
 # re_fit$formulaLong$id
+# cf_fit$formulaLong$id
 # re_fit$formulaDist$sigma$allFamilies
 # vc_fit$formulaDist$nu$allFamilies
 
@@ -183,11 +227,38 @@ diagnosis(pred)
 # Available only when marker covariance depends on id
 if (isTRUE(pred$metadata$marker_corr_depends_on_id)) {
   re_pred <- ranef(pred)
-  vc_pred <- corr(pred)
+  vc_pred <- vcov(pred)
 }
 
 # Plot longitudinal and survival predictions
-plot(pred, which = c("longitudinal", "survival"), combined = TRUE)
+plot(pred, type = c("longitudinal", "survival"), combined = TRUE)
+longitudinal_plot(pred)
+survival_plot(pred)
+
+# Alternative longitudinal display: posterior mean change heatmap
+plot(
+  fit,
+  type = "longitudinal",
+  longitudinal_style = "heatmap",
+  scale = "epred",
+  threshold = 0.05
+)
+
+# Posterior summary/extraction helpers
+posterior_summary(fit)
+posterior_fixef(fit)
+posterior_ranef(fit)
+posterior_coef(fit)
+posterior_assoc(fit, summary = TRUE)
+
+# Explicit fitted-object plot helpers
+association_plot(fit)
+diagnostic_plot(fit, type = "rhat")
+
+# All coefficient extractors support summary = TRUE/FALSE
+fixef(fit, summary = TRUE)
+ranef(fit, summary = FALSE)
+coef(fit, summary = FALSE)
 
 # For multiple subjects with combined=TRUE: returns one combined plot per subject
 # (named list). If combiner packages are unavailable, falls back to the
@@ -195,6 +266,9 @@ plot(pred, which = c("longitudinal", "survival"), combined = TRUE)
 # New marker levels in newdataLong are rejected; prediction marker levels must
 # match training levels. Dynamic prediction summaries marginalize latent
 # augmentation noise by averaging across dynpred posterior rows per stored draw.
+
+# Concordance uses a dense per-subject survival grid internally for stable
+# dynamic prediction at the requested horizon.
 ```
 
 Trinh Dong, 2026

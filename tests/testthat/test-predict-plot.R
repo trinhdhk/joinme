@@ -51,10 +51,10 @@ test_that("predict accepts time_start column and plot returns ribbons", {
     seed = 2027
   )
 
-  expect_true(inherits(pred, "JoinMeDynPred"))
+  expect_true(inherits(pred, "JoiNMeDynPred"))
   expect_true(all(names(pred$metadata$conditioning_time_by_id) %in% as.character(ndE$id)))
   expect_error(
-    plot(pred, which = "longitudinal", scale = "predict"),
+    plot(pred, type = "longitudinal", scale = "predict"),
     "should be|must be one of"
   )
 
@@ -72,7 +72,7 @@ test_that("predict accepts time_start column and plot returns ribbons", {
     q75 = c(1.1, 1.3, 1.1, 1.3),
     q97.5 = c(1.2, 1.4, 1.3, 1.5)
   )
-  pred_multi <- JoinMeDynPred$new(
+  pred_multi <- JoiNMeDynPred$new(
     predictions = list(longitudinal = toy_quant),
     quantiles = list(longitudinal = toy_quant, longitudinal_fitted = NULL),
     draws = list(longitudinal = list()),
@@ -92,14 +92,14 @@ test_that("predict accepts time_start column and plot returns ribbons", {
     n_samples = 10
   )
 
-  p_long_predict <- plot(pred_multi, which = "longitudinal", scale = "predict")
+  p_long_predict <- plot(pred_multi, type = "longitudinal", scale = "predict")
   expect_true(inherits(p_long_predict, "ggplot") || is.list(p_long_predict))
   expect_error(
-    plot(pred_multi, which = "longitudinal", scale = "linpred"),
+    plot(pred_multi, type = "longitudinal", scale = "linpred"),
     "should be|must be one of"
   )
 
-  p_surv <- plot(pred, which = "survival", ci_type = "ribbon")
+  p_surv <- plot(pred, type = "survival", ci_type = "ribbon")
   expect_true(inherits(p_surv, "ggplot") || is.list(p_surv))
   if (inherits(p_surv, "ggplot")) {
     has_ribbon <- any(vapply(p_surv$layers, function(l) inherits(l$geom, "GeomRibbon"), logical(1)))
@@ -107,7 +107,7 @@ test_that("predict accepts time_start column and plot returns ribbons", {
   }
 
   if (requireNamespace("patchwork", quietly = TRUE) || requireNamespace("cowplot", quietly = TRUE)) {
-    p_comb <- plot(pred, which = c("longitudinal", "survival", "cumhaz"), combined = TRUE)
+    p_comb <- plot(pred, type = c("longitudinal", "survival", "cumhaz"), combined = TRUE)
     expect_true(inherits(p_comb, "gg") || is.list(p_comb))
   }
 

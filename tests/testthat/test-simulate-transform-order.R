@@ -9,6 +9,7 @@ test_that("simulate_joinme applies cv_total transform before marker-weight avera
     assoc = c("cv_total", "cs_total"),
     assoc_coefs = c(cv_total = 0.0, cs_total = 0.0),
     marker_weights = c(2, 1),
+    fixed_marker_weights = TRUE,
     transforms = list(
       cv_total = list(type = "functional", expr = ~ x^2)
     ),
@@ -42,6 +43,7 @@ test_that("simulate_joinme applies cv_marker transform before marker-weight aver
     assoc = c("cv_marker"),
     assoc_coefs = c(cv_marker = 0.0),
     marker_weights = c(1.5, 0.5, 2.0),
+    fixed_marker_weights = TRUE,
     transforms = list(
       cv_marker = list(type = "functional", expr = ~ softplus(x))
     )
@@ -71,6 +73,7 @@ test_that("simulate_joinme applies cs_total transform before marker-weight avera
     assoc = c("cs_total"),
     assoc_coefs = c(cs_total = 0.0),
     marker_weights = c(2, -1),
+    fixed_marker_weights = TRUE,
     transforms = list(
       cs_total = list(type = "functional", expr = ~ x^2)
     ),
@@ -103,6 +106,7 @@ test_that("simulate_joinme applies cs_marker transform before marker-weight aver
     assoc = c("cs_marker"),
     assoc_coefs = c(cs_marker = 0.0),
     marker_weights = c(1.5, 0.5, 2.0),
+    fixed_marker_weights = TRUE,
     transforms = list(
       cs_marker = list(type = "functional", expr = ~ softplus(x))
     ),
@@ -122,4 +126,26 @@ test_that("simulate_joinme applies cs_marker transform before marker-weight aver
 
   expect_equal(comp$cs_marker, expected_cs_marker, tolerance = 1e-8)
   expect_false(isTRUE(all.equal(comp$cs_marker, expected_cs_marker_old, tolerance = 1e-8)))
+})
+
+test_that("simulate_joinme rejects expit spline knots outside [0, 1]", {
+  expect_error(
+    simulate_joinme(
+      n_id = 3,
+      families = c("gaussian", "gaussian"),
+      n_obs_per_marker_per_id = 3,
+      times_obs = seq(0, 2, length.out = 4),
+      seed = 1205,
+      assoc = c("cv_total"),
+      assoc_coefs = c(cv_total = 0),
+      transforms = list(
+        cv_total = list(
+          type = "ispline_expit",
+          knots = c(-0.1, 0.5, 1.1),
+          coeff = c(0, 0.5, 1)
+        )
+      )
+    ),
+    "must lie on the expit scale"
+  )
 })

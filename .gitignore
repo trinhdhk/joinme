@@ -56,7 +56,15 @@ sites/
 *~
 .#*
 docs
+*.json
+*.log
+*.csv
+*.txt
+
+# internal notes
+notes/
 
 # rstan crap
 src/
+sim/
 tests/local/*.png

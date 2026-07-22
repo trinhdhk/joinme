@@ -2,7 +2,7 @@
 % Please edit documentation in R/run-example.R
 \name{run_joinme_example}
 \alias{run_joinme_example}
-\title{Example runner for joinme}
+\title{Example runner for JoiNMe}
 \usage{
 run_joinme_example()
 }
@@ -10,7 +10,7 @@ run_joinme_example()
 A list with \code{fit} and \code{sim} entries.
 }
 \description{
-Runs a small end-to-end workflow: simulate data, build standata, fit the model,
+Runs a small workflow: simulate data, build standata, fit the model,
 and return both the fit and simulated data. This is intended as a quick smoke
 test or reproducible demo with fixed settings.
 }

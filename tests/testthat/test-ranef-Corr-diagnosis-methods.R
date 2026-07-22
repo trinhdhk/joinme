@@ -1,5 +1,5 @@
-test_that("ranef/corr.JoinMeDynPred require id-dependent marker covariance", {
-  pred_ok <- joinme::JoinMeDynPred$new(
+test_that("ranef/vcov.JoiNMeDynPred require id-dependent marker covariance", {
+  pred_ok <- joinme::JoiNMeDynPred$new(
     predictions = list(),
     quantiles = list(),
     draws = list(
@@ -27,12 +27,12 @@ test_that("ranef/corr.JoinMeDynPred require id-dependent marker covariance", {
   )
 
   re_ok <- ranef(pred_ok)
-  vc_ok <- corr(pred_ok)
+  vc_ok <- vcov(pred_ok)
   expect_true(is.data.frame(re_ok$formulaLong$marker_by_id))
   expect_true(is.data.frame(vc_ok$formulaLong$marker_by_id))
   expect_true(all(c("id", "row", "col", "Estimate") %in% names(vc_ok$formulaLong$marker_by_id)))
 
-  pred_bad <- joinme::JoinMeDynPred$new(
+  pred_bad <- joinme::JoiNMeDynPred$new(
     predictions = list(),
     quantiles = list(),
     draws = list(random_effects_marker_id = list()),
@@ -44,7 +44,7 @@ test_that("ranef/corr.JoinMeDynPred require id-dependent marker covariance", {
   )
 
   expect_error(ranef(pred_bad), "depends on id")
-  expect_error(corr(pred_bad), "depends on id")
+  expect_error(vcov(pred_bad), "depends on id")
 })
 
 test_that("marker_corr_depends_on_id follows fitted Q_idm", {
@@ -55,7 +55,7 @@ test_that("marker_corr_depends_on_id follows fitted Q_idm", {
   expect_false(joinme:::.marker_corr_depends_on_id(fit_like_without_qidm))
 })
 
-test_that("corr.JoinMeDynPred works when Q_idm > 0 without formulaCorr terms", {
+test_that("vcov.JoiNMeDynPred works when Q_idm > 0 without formulaVCov terms", {
   skip_on_cran()
   skip_if_not_installed("cmdstanr")
 
@@ -132,12 +132,12 @@ test_that("corr.JoinMeDynPred works when Q_idm > 0 without formulaCorr terms", {
   }
 
   expect_true(isTRUE(pred$metadata$marker_corr_depends_on_id))
-  expect_no_error(corr(pred))
-  vc <- corr(pred)
+  expect_no_error(vcov(pred))
+  vc <- vcov(pred)
   expect_true(is.data.frame(vc$formulaLong$marker_by_id))
 })
 
-test_that("ranef/corr.JoinMeFit include formulaDist random-effects blocks", {
+test_that("ranef/vcov.JoiNMeFit include formulaDist random-effects blocks", {
   skip_on_cran()
   skip_if_not_installed("rstan")
 
@@ -174,7 +174,7 @@ test_that("ranef/corr.JoinMeFit include formulaDist random-effects blocks", {
   )
 
   re <- ranef(fit, draws = 20)
-  vc <- corr(fit, draws = 20)
+  vc <- vcov(fit, draws = 20)
   dg <- diagnosis(fit)
 
   expect_true(is.list(re$formulaLong))
@@ -189,6 +189,188 @@ test_that("ranef/corr.JoinMeFit include formulaDist random-effects blocks", {
   expect_true("allFamilies" %in% names(vc$formulaDist$sigma))
   expect_true(all(c("block", "row", "col", "Estimate") %in% names(vc$formulaDist$sigma$allFamilies)))
 
-  expect_true(is.data.frame(dg))
-  expect_true(all(c("metric", "value") %in% names(dg)))
+  expect_s3_class(dg, "JoiNMe_diagnosis")
+  expect_true(is.data.frame(dg$summary))
+  expect_true(all(c("metric", "value") %in% names(dg$summary)))
+  expect_true(is.data.frame(dg$by_parameter))
+  expect_true(all(c("section", "parameter_label", "Rhat", "ess_bulk", "ess_tail") %in% names(dg$by_parameter)))
+  expect_true(any(dg$by_parameter$section == "fixef"))
+})
+
+test_that("diagnosis.JoiNMeFit exposes summary and parameter diagnostics from summary tables", {
+  testthat::local_mocked_bindings(
+    summary.JoiNMeFit = function(object, draws = NULL, seed = 1, digits = 3, include_corr = TRUE, ...) {
+      SummaryJoiNMeFit$new(
+        tables = list(
+          diagnostics = data.frame(
+            metric = c("draws", "n_terms_total", "n_terms_bad_rhat"),
+            value = c(100, 2, 1),
+            stringsAsFactors = FALSE
+          ),
+          fixef = data.frame(
+            term = c("(Intercept)", "time"),
+            Estimate = c(0.1, 0.2),
+            Est.Error = c(0.01, 0.02),
+            Q2.5 = c(0.0, 0.1),
+            Q97.5 = c(0.2, 0.3),
+            Rhat = c(1.00, 1.02),
+            ess_bulk = c(200, 80),
+            ess_tail = c(210, 90),
+            stringsAsFactors = FALSE
+          )
+        ),
+        diagnostics = list(draws = 100, divergences = 0),
+        metadata = list(draws = 50)
+      )
+    },
+    .package = "joinme"
+  )
+
+  fit <- joinme::JoiNMeFit$new(
+    fit = NULL,
+    stan_data = list(),
+    formulaLong = y ~ 1 + time,
+    formulaEvent = survival::Surv(time, event) ~ 1,
+    formulaVCov = NULL,
+    config = list(family_long = "gaussian"),
+    call = quote(joinme::joinme(formulaLong = y ~ 1 + time)),
+    tmax = 2,
+    dataLong = data.frame(id = 1, time = 0, marker = "m1", y = 1),
+    dataEvent = data.frame(id = 1, time = 1, event = 1)
+  )
+
+  dg <- diagnosis(fit)
+
+  expect_s3_class(dg, "JoiNMe_diagnosis")
+  expect_true(all(c("metric", "value") %in% names(dg$summary)))
+  expect_true(all(c("section", "parameter_label", "Rhat", "ess_bulk", "ess_tail") %in% names(dg$by_parameter)))
+  expect_equal(nrow(dg$by_parameter), 2)
+  expect_equal(unique(dg$by_parameter$section), "fixef")
+  expect_equal(dg$summary$value[dg$summary$metric == "n_terms_total"], 2)
+})
+
+test_that("concordance.JoiNMeFit reports the concordance engine pair count", {
+  testthat::local_mocked_bindings(
+    predict.JoiNMeFit = function(object, newdataLong, newdataEvent, process, times, time_start,
+                                 control, seed, ...) {
+      expect_equal(length(times[[1]]), 50L)
+      expect_equal(unname(times[[1]][1]), 1)
+      expect_equal(unname(utils::tail(times[[1]], 1)), 2)
+      joinme::JoiNMeDynPred$new(
+        predictions = list(
+          survival = data.frame(
+            id = c(1, 2),
+            time = c(2, 2),
+            Survival = c(0.2, 0.8),
+            stringsAsFactors = FALSE
+          )
+        ),
+        quantiles = list(),
+        draws = list(),
+        data = list(longitudinal = newdataLong, event = newdataEvent),
+        metadata = list(id_var = "id", time_var = "time", marker_var = "marker", response_var = "y"),
+        call = quote(predict(fit_obj)),
+        tmax = 2,
+        n_samples = if (is.null(control$n_samples)) 10 else control$n_samples
+      )
+    },
+    .package = "joinme"
+  )
+  testthat::local_mocked_bindings(
+    concordance = function(object, ...) {
+      list(
+        concordance = 0.75,
+        count = c(concordant = 2, discordant = 1, tied.x = 0, tied.y = 0, tied.xy = 0)
+      )
+    },
+    .package = "survival"
+  )
+
+  fit <- joinme::JoiNMeFit$new(
+    fit = NULL,
+    stan_data = list(),
+    formulaLong = y ~ 1 + time,
+    formulaEvent = survival::Surv(time, event) ~ 1,
+    formulaVCov = NULL,
+    config = list(transforms = list(), transforms_spec = list()),
+    call = quote(joinme::joinme(formulaLong = y ~ 1 + time)),
+    tmax = 2,
+    dataLong = data.frame(id = c(1, 1, 2, 2), time = c(0, 1, 0, 1), marker = "m1", y = c(1, 2, 1.5, 2.5)),
+    dataEvent = data.frame(id = c(1, 2), time = c(1.5, 3), event = c(1L, 0L))
+  )
+
+  out <- concordance(
+    fit,
+    time_start = 1,
+    time_horizon = 2,
+    n_samples = 5,
+    seed = 1
+  )
+
+  expect_equal(out$n_cases, 1)
+  expect_equal(out$n_controls, 1)
+  expect_equal(out$n_pairs, 3)
+  expect_equal(out$concordance, 0.75)
+})
+
+test_that("concordance.JoiNMeFit also reports pair counts with split marker weights", {
+  testthat::local_mocked_bindings(
+    predict.JoiNMeFit = function(object, newdataLong, newdataEvent, process, times, time_start,
+                                 control, seed, ...) {
+      expect_equal(length(times[[1]]), 50L)
+      joinme::JoiNMeDynPred$new(
+        predictions = list(
+          survival = data.frame(
+            id = c(1, 2),
+            time = c(2, 2),
+            Survival = c(0.25, 0.75),
+            stringsAsFactors = FALSE
+          )
+        ),
+        quantiles = list(),
+        draws = list(),
+        data = list(longitudinal = newdataLong, event = newdataEvent),
+        metadata = list(id_var = "id", time_var = "time", marker_var = "marker", response_var = "y"),
+        call = quote(predict(fit_obj)),
+        tmax = 2,
+        n_samples = if (is.null(control$n_samples)) 10 else control$n_samples
+      )
+    },
+    .package = "joinme"
+  )
+  testthat::local_mocked_bindings(
+    concordance = function(object, ...) {
+      list(
+        concordance = 0.6,
+        count = c(concordant = 3, discordant = 2, tied.x = 0, tied.y = 0, tied.xy = 0)
+      )
+    },
+    .package = "survival"
+  )
+
+  fit <- joinme::JoiNMeFit$new(
+    fit = NULL,
+    stan_data = list(shared_marker_weights = 0L),
+    formulaLong = y ~ 1 + time,
+    formulaEvent = survival::Surv(time, event) ~ 1,
+    formulaVCov = NULL,
+    config = list(transforms = list(), transforms_spec = list()),
+    call = quote(joinme::joinme(formulaLong = y ~ 1 + time, shared_marker_weights = FALSE)),
+    tmax = 2,
+    dataLong = data.frame(id = c(1, 1, 2, 2), time = c(0, 1, 0, 1), marker = c("m1", "m2", "m1", "m2"), y = c(1, 2, 1.5, 2.5)),
+    dataEvent = data.frame(id = c(1, 2), time = c(1.5, 3), event = c(1L, 0L))
+  )
+
+  out <- concordance(
+    fit,
+    time_start = 1,
+    time_horizon = 2,
+    n_samples = 5,
+    seed = 1
+  )
+
+  expect_equal(out$n_cases, 1)
+  expect_equal(out$n_controls, 1)
+  expect_equal(out$n_pairs, 5)
+  expect_equal(out$concordance, 0.6)
 })

@@ -7,7 +7,7 @@ test_that("posterior_predict handles single-covariate hazard/corr shapes", {
     n_id = 8,
     formulaLong = y ~ 1 + time + x1 + (1 + time | id) + (0 + x1 + (1 + time | id) | marker),
     formulaEvent = survival::Surv(time, event) ~ x2,
-    formulaCorr = ~ x1,
+    formulaVCov = ~ x1,
     families = c("gaussian", "student_t", "student_t"),
     n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 3, length.out = 4),
@@ -18,7 +18,7 @@ test_that("posterior_predict handles single-covariate hazard/corr shapes", {
   fit <- joinme(
     formulaLong = y ~ 1 + time + x1 + (1 + time | id) + (0 + x1 + (1 + time | id) | marker),
     formulaEvent = survival::Surv(time, event) ~ x2,
-    formulaCorr = ~ x1,
+    formulaVCov = ~ x1,
     families = c("gaussian", "student_t", "student_t"),
     dataLong = sim$dataLong,
     dataEvent = sim$dataEvent,
@@ -35,15 +35,14 @@ test_that("posterior_predict handles single-covariate hazard/corr shapes", {
   )
 
   last_time <- sim$dataLong |>
-    dplyr::group_by(id) |>
-    dplyr::summarize(time_start = max(time), .groups = "drop")
+    tidytable::summarize(time_start = max(time), .by = id)
 
-  ndE <- dplyr::left_join(sim$dataEvent, last_time, by = "id")
+  ndE <- tidytable::left_join(sim$dataEvent, last_time, by = "id")
 
   pred <- posterior_predict(
     fit,
-    newdataLong = dplyr::filter(sim$dataLong, id %in% c(1, 2)),
-    newdataEvent = dplyr::filter(ndE, id %in% c(1, 2)),
+    newdataLong = tidytable::filter(sim$dataLong, id %in% c(1, 2)),
+    newdataEvent = tidytable::filter(ndE, id %in% c(1, 2)),
     time_start = "time_start",
     time_horizon = 4,
     control = list(
@@ -57,6 +56,6 @@ test_that("posterior_predict handles single-covariate hazard/corr shapes", {
     )
   )
 
-  expect_s3_class(pred, "JoinMeDynPred")
+  expect_s3_class(pred, "JoiNMeDynPred")
   expect_true(is.data.frame(pred$results$survival))
 })

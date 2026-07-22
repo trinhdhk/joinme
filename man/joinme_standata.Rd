@@ -2,14 +2,14 @@
 % Please edit documentation in R/standata.R
 \name{joinme_standata}
 \alias{joinme_standata}
-\title{Build Stan data for joinme (time-internal scaling)}
+\title{Prepare standata for Joint Nested Mixed-effects (JoiNMe) model.}
 \usage{
 joinme_standata(
   formulaLong,
   dataLong,
   formulaEvent,
   dataEvent,
-  formulaCorr = ~1,
+  formulaVCov = ~1,
   formulaDist = NULL,
   id_var = "id",
   marker_var = "marker",
@@ -20,20 +20,22 @@ joinme_standata(
   transforms = NULL,
   beta_prior = NULL,
   alpha_prior = NULL,
+  iota_prior = NULL,
   lkj_prior = NULL,
   allow_marker_crosscorr = 1L,
-  shrinkage = 2L,
+  shrinkage = 0L,
   marker_weights = NULL,
   fixed_marker_weights = FALSE,
-  flag_resid_dim = 0L,
+  shared_marker_weights = TRUE,
   basehaz = c("bs", "ns", "formula"),
-  n_knots = 5L,
+  basehaz_n_knots = 5L,
+  basehaz_knots = NULL,
   basehaz_degree = 3L,
   basehaz_formula = ~1 + time,
   tau_spline = 0.4,
   quadrature_nodes = NULL,
-  corr_diag_link = c("softplus", "exp"),
-  tau_sde_fixed = NULL,
+  vcov_diag_link = c("softplus", "exp"),
+  tau_fixed = NULL,
   seed = NULL
 )
 }
@@ -42,24 +44,49 @@ joinme_standata(
 and the marker block. The marker block may optionally include an inner
 \code{( ... | id )} term for marker-by-id random effects. When the inner term is
 omitted, marker-by-id random effects are disabled (Q_idm = 0). Use \code{||} to
-enforce diagonal random-effect covariance (e.g., \code{(1 + time || id)}). Grouping
+enforce independence. In nested marker terms, outer \code{( ... || marker )}
+keeps marker-only and marker-by-id blocks independent, while inner
+\code{( ... || id )} makes the marker-by-id covariance diagonal. Grouping
 terms may use \verb{weighted(group, weights = <column>)}
 to define formula-scoped positive subject/group weights.}
 
 \item{dataLong}{Long-format longitudinal data with columns for id, marker, time,
 outcome, and covariates referenced in \code{formulaLong}.}
 
-\item{formulaEvent}{Survival formula for baseline covariates and event model.}
+\item{formulaEvent}{Survival formula for baseline covariates and event model.
+Supported LHS forms are:
+\itemize{
+\item \code{survival::Surv(time, status)}
+\item \code{survival::Surv(start, stop, status)}
+\item \code{survival::Surv(time, status, type = "left")}
+\item \code{survival::Surv(time1, time2, type = "interval2")}
+The legacy \code{type = "interval"} form is intentionally rejected.
+}}
 
-\item{dataEvent}{One row per id event data with event time, event indicator, and
-covariates referenced in \code{formulaEvent}.}
+\item{dataEvent}{Event-process data with either one row per id
+(\code{Surv(time, status)}) or multiple time-split rows per id
+(\code{Surv(start, stop, status)}).
+Covariates referenced in \code{formulaEvent} may vary by interval in the split form.}
 
-\item{formulaCorr}{Covariance regression formula for id-specific marker-by-id effects.
+\item{formulaVCov}{Covariance regression formula for id-specific marker-by-id effects.
 If the marker block omits the inner \code{( ... | id )}, then marker-by-id effects
-are absent and \code{corr} associations are not allowed.}
+are absent and covariance-style associations (\code{corr}, \code{vcov}) are not allowed.
+Downstream, \code{corr} uses the off-diagonal entries of the subject-specific
+Cholesky-correlation factor \code{K}, whereas \code{vcov} uses those off-diagonal \code{K}
+entries together with the subject-specific standard deviations. If both
+\code{corr} and \code{vcov} are requested, \code{vcov} is kept and \code{corr} is ignored with a
+warning. The default \code{~ 1} is valid and yields an intercept-only covariance
+regression with no subject-level slope columns.}
 
-\item{formulaDist}{Optional list of formulas for distributional regression. Two
-forms are supported:
+\item{formulaDist}{Optional list of formulas for distributional regression.
+Supported parameters are \code{sigma}, \code{nu}, \code{phi},
+\code{alpha}, \code{kappa}, and \code{tau}. Here \code{nu} is reserved
+for Student-t degrees of freedom; \code{kappa} is the positive Beta
+sample-size parameter defining shapes \eqn{\mu\kappa} and
+\eqn{(1-\mu)\kappa}; and \code{tau} is the skew-double-exponential
+quantile/asymmetry parameter in \eqn{(0,1)}.
+
+Three forms are supported:
 \enumerate{
 \item Named list with RHS-only formulas, e.g. \code{list(sigma = ~ 1 + time)}.
 \item Unnamed list with LHS parameter names, e.g. \code{list(sigma ~ 1 + time)}.
@@ -77,7 +104,10 @@ Grouping factors in distributional random-effects terms may also use
 \item{eps_fd}{Positive finite-difference step for association derivatives.}
 
 \item{assoc}{Character vector specifying association components
-(e.g., "cv_mean", "cs_total", "corr").}
+(e.g., "cv_mean", "cs_total", "corr", "vcov"). The \code{corr} channel
+targets off-diagonal entries of the subject-specific Cholesky-correlation
+factor \code{K}; the \code{vcov} channel targets those off-diagonal \code{K} entries
+together with the subject-specific standard deviations.}
 
 \item{families}{Optional marker-specific family specification. Can be
 character family names or \code{jm_family(...)} entries with per-marker links.
@@ -85,36 +115,52 @@ If NULL, all markers use Gaussian responses with identity link.
 Supported links/inverse-links: \code{identity}, \code{log}, \code{logit}, \code{probit}, \code{exp}.}
 
 \item{transforms}{Optional list specifying transformations for association terms.
-Each element (cv_total, cs_total, corr) is a list with a \code{type} and fields
-required by that type (see \code{build_standata_transforms()}).}
+Each element (cv_total, cs_total, corr, vcov) is a list with a \code{type} and fields
+required by that type (see \code{build_standata_transforms()}). For covariance-style
+terms, transforms apply either to off-diagonal \code{K} features (\code{corr}) or to the
+combined off-diagonal \code{K} plus subject-specific SD features (\code{vcov}).
+Functional transforms may request fit-only affine-shift parameters through
+\code{intercept = TRUE} and/or \code{slope = TRUE} inside the transform formula.}
 
 \item{beta_prior}{Prior specification for longitudinal fixed effects.}
 
 \item{alpha_prior}{Prior specification for association parameters.}
 
+\item{iota_prior}{Prior specification for fit-only affine-shift intercept and
+slope parameters used by functional association transforms.}
+
 \item{lkj_prior}{Prior specification for correlation structures.}
 
 \item{allow_marker_crosscorr}{Integer flag; 1 allows cross-marker correlation in marker RE.}
 
-\item{shrinkage}{Integer flag controlling shrinkage behaviour for marker-by-id effects.}
+\item{shrinkage}{Integer flag controlling shrinkage behaviour for marker-by-id effects.
+0 = student_t(6, 0, 1), 1 = double_exponential(0, 1), 2 = std_normal();}
 
-\item{marker_weights}{Optional numeric vector of length D giving base weights
-for marker-specific association components. These are used as prior offsets
-for latent marker intensities and are used directly in Stan, where
-\code{w_raw = marker_weights} or
-\code{marker_weights + z_marker_weights}. When NULL, base weights default to
-zeros for estimated weights and ones for fixed weights.}
+\item{marker_weights}{Optional base weights for marker-specific association
+components. If \code{shared_marker_weights = TRUE}, provide one numeric vector of
+length D (or one named numeric vector keyed by marker level) that is shared
+across all active weighted association terms. If
+\code{shared_marker_weights = FALSE}, you may instead provide a named list with
+entries \code{cv_total}, \code{cs_total}, \code{cv_marker}, and \code{cs_marker}. Each supplied
+entry is aligned to marker order and used only for the matching active
+weighted association term.}
 
 \item{fixed_marker_weights}{Logical; if TRUE, marker weights are kept fixed
 at \code{marker_weights} (no perturbation). If FALSE, marker weights are estimated
 via signed additive perturbations,
-\code{marker_weights + z_marker_weights}, with \code{z_marker_weights ~ N(0, 1)}.}
+\code{marker_weights + z_marker_weights}. The standardized latent family is
+selected by \code{shrinkage}: Student-t(6), Laplace, or Normal for 0, 1, or 2.}
 
-\item{flag_resid_dim}{Integer flag to include residual dimension checks.}
+\item{shared_marker_weights}{Logical; if TRUE, all active weighted
+marker-based association terms share one marker-weight structure. If FALSE,
+each active weighted marker-based association term gets its own marker-weight
+structure.}
 
 \item{basehaz}{Baseline hazard basis type: "bs", "ns", or "formula".}
 
-\item{n_knots}{Number of internal knots for spline baseline hazards.}
+\item{basehaz_n_knots}{Number of internal knots for spline baseline hazards.}
+
+\item{basehaz_knots}{Optional numeric vector of internal knots for spline baseline hazards.}
 
 \item{basehaz_degree}{Degree of spline basis for baseline hazard.}
 
@@ -126,28 +172,20 @@ via signed additive perturbations,
 points. Allowed values are exactly \code{7}, \code{15}, \code{31}, \code{41}, \code{51}, and \code{61}.
 Only the node count is passed to Stan; GK nodes/weights are fixed in Stan.}
 
-\item{corr_diag_link}{Link for covariance regression diagonals: "softplus" or "exp".}
+\item{vcov_diag_link}{Link for the subject-specific standard deviation regression:
+"softplus" or "exp".}
 
-\item{tau_sde_fixed}{Optional fixed tau for skew-double-exponential (0 < tau < 1).}
+\item{tau_fixed}{Optional fixed quantile/asymmetry parameter for the skew
+double exponential family. It must lie strictly between zero and one; the
+value \eqn{0.5} gives the symmetric double exponential distribution. It
+cannot be combined with a \code{tau} distributional regression.}
 
 \item{seed}{Optional random seed for deterministic components of standata.}
+
+\item{flag_resid_dim}{Integer flag to include residual dimension checks.}
 }
 \description{
-Standata builder for the joinme joint model (multivariate longitudinal + survival).
-
-This function follows the notebook \code{joinme_standata()} design, with these updates:
-\enumerate{
-\item Time is still scaled in the design matrices by tmax for numerical stability.
-\item The Stan program internally rescales time-related coefficients using \code{tmax} and
-index vectors indicating which columns correspond to time.
-\item Therefore, this builder computes and supplies:
-\itemize{
-\item n_time_beta, idx_time_beta
-\item n_time_uid,  idx_time_uid
-\item n_time_vmk,  idx_time_vmk
-\item n_time_widm, idx_time_widm
-}
-}
+This function process the input from \code{fit} to prepare standata for Joint Nested Mixed-effects (JoiNMe) model.
 }
 \details{
 This builder performs three key steps:

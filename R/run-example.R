@@ -1,7 +1,7 @@
-#' Example runner for joinme
+#' Example runner for JoiNMe
 #'
 #' @description
-#' Runs a small end-to-end workflow: simulate data, build standata, fit the model,
+#' Runs a small workflow: simulate data, build standata, fit the model,
 #' and return both the fit and simulated data. This is intended as a quick smoke
 #' test or reproducible demo with fixed settings.
 #'
@@ -26,7 +26,7 @@ run_joinme_example <- function() {
   fit <- joinme(
     formulaLong = formulaLong,
     formulaEvent = formulaEvent,
-    formulaCorr = ~1,
+    formulaVCov = ~1,
     dataLong = sim$dataLong,
     dataEvent = sim$dataEvent,
     draws = 500,

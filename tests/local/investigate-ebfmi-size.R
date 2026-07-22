@@ -27,6 +27,7 @@ run_case <- function(n_id, seed_offset = 0L, adapt_delta = 0.75) {
     assoc = c("cv_mean", "cv_marker"),
     assoc_coefs = c(cv_mean = truth_cv_mean, cv_marker = truth_cv_marker),
     marker_weights = c(1, 2, 1),
+    fixed_marker_weights = TRUE,
     baseline_hazard = list(type = "weibull", shape = 1.1, scale = 10),
     seed = 20260225 + as.integer(seed_offset),
     time_cens = 10,

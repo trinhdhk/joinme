@@ -11,8 +11,8 @@ ignore:
 - vignettes/_quarto_out
 - vignettes/.quarto
 home:
-  title: JoinMe
-  description: Bayesian Joint Mixed-Effects (JoinME) models for multivariate longitudinal
+  title: JoiNMe
+  description: Bayesian Joint Nested Mixed-Effects (JoiNMe) models for multivariate longitudinal
     and survival data.
 articles:
 - title: Get started
@@ -25,48 +25,3 @@ articles:
   - joinme-associations
   - joinme-model
   - joinme-theory
-reference:
-- title: Core modelling
-  contents:
-  - joinme-package
-  - joinme
-  - joinme_standata
-  - build_standata_transforms
-  - simulate_joinme
-  - simulate_joinme_joint_student_t_cvtotal
-  - update.JoinMeFit
-  - print.JoinMeFit
-  - summary.JoinMeFit
-  - print.summary_JoinMeFit
-- title: Prediction
-  contents:
-  - predict.JoinMeFit
-  - posterior_epred.JoinMeFit
-  - posterior_linpred.JoinMeFit
-  - posterior_predict.JoinMeFit
-  - plot.JoinMeDynPred
-- title: Model diagnosis and performance
-  contents:
-  - loo.JoinMeFit
-  - waic.JoinMeFit
-  - elpd.JoinMeFit
-  - pp_check.JoinMeFit
-  - concordance.JoinMeFit
-  - log_lik.JoinMeFit
-- title: Utilities
-  contents:
-  - fixef.JoinMeFit
-  - ranef.JoinMeFit
-  - corr.JoinMeFit
-- title: Transforms
-  contents:
-  - parse_transform_expr
-  - example_transform_spec
-  - penalised_ispline_transform
-- title: Misc
-  contents:
-  - bayes_factor
-  - family_utils
-  - weibull_h0
-  - precompile_cmdstanr_models
-  - run_joinme_example

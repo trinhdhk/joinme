@@ -1,5 +1,5 @@
 ---
-title: "The joinme Framework: Methodology and Statistical Theory"
+title: "The JoiNMe Framework: Methodology and Statistical Theory"
 output-dir: ../docs/articles
 format:
   html:
@@ -25,8 +25,12 @@ knitr::opts_chunk$set(
   fig.height = 4
 )
 options(width = 80)
-if (requireNamespace("joinme", quietly = TRUE)) {
-  library(joinme)
+if (!require('joinme', quietly = TRUE)) {
+  if (requireNamespace("devtools", quietly = TRUE) && file.exists(file.path(repo_root, "DESCRIPTION"))) {
+    devtools::load_all(repo_root, quiet = TRUE)
+  } else {
+    try(base::attachNamespace("joinme"), silent = TRUE)
+  }
 }
 library(dplyr)
 ```
@@ -39,12 +43,18 @@ process is expressed through a layered random-effects decomposition that separat
 subject-level signals, marker-level deviations, and marker-by-subject departures.
 The survival component links risk to summaries of the longitudinal trajectories,
 most notably the current value (CV), current slope (CS), and a variance summary
-of the marker-by-subject covariance structure (CORR). Association summaries can be
+of the marker-by-subject covariance structure through correlation-style (`corr`)
+and covariance-style (`vcov`) channels. Association summaries can be
 transformed by user-defined monotone splines, piecewise linear rules, or functional
 bytecode expressions. Estimation is performed with Hamiltonian Monte Carlo in Stan,
 and the main likelihood is evaluated with reduce_sum for within-chain parallelism.
 
-For monotone spline transforms, `joinme` supports both raw-scale I-splines and
+In the public summaries and plotting output, covariance-style associations are
+reported on the effective hazard scale used by the fitted model. This keeps the
+reported `corr[...]` and `vcov[...]` coefficients aligned with the printed
+matrix labels, association plots, and posterior extraction helpers.
+
+For monotone spline transforms, `JoiNMe` supports both raw-scale I-splines and
 bounded-domain I-splines evaluated on `plogis(x)`. The bounded-domain variant
 keeps the spline input inside $(0, 1)$, which often yields more stable knot
 placement and smoother optimisation when raw association features are wide or
@@ -62,7 +72,7 @@ limitations:
 1.  **Computational Scalability**: As the number of markers $D$ increases, the dimension of the random effects vector grows linearly or quadratically, creating a "curse of dimensionality" for numerical integration or MCMC sampling.
 2.  **Rigidity**: Models often assume Gaussian error terms and linear associations, limiting their applicability to skewed data or non-linear biological mechanisms.
 
-`joinme` addresses these challenges through a structural decomposition of the
+`JoiNMe` addresses these challenges through a structural decomposition of the
 linear predictor and a flexible distributional regression framework. This
 vignette outlines the statistical theory underpinning the package, using
 notation and narrative that are intended to be accessible to applied
@@ -97,7 +107,7 @@ $$
 y_{id}(t) \sim \mathcal{F}_d(\cdot | \eta_{id}(t), \boldsymbol{\psi}_{d})
 $$
 
-`joinme` supports a wide range of families $\mathcal{F}_d$, including:
+`JoiNMe` supports a wide range of families $\mathcal{F}_d$, including:
 
 -   **Gaussian / Student's $t$**: For continuous, potentially heavy-tailed data.
 -   **Beta**: For bounded $(0,1)$ proportions.
@@ -112,7 +122,7 @@ $$
 \log(\sigma_{id}(t)) = \mathbf{x}_{\sigma, id}(t)^\top \boldsymbol{\beta}_\sigma
 $$
 
-JoinME also supports **family-scoped** distributional regressions using bracket
+JoiNMe also supports **family-scoped** distributional regressions using bracket
 syntax on the left-hand side, e.g.
 
 - `sigma[family=student_t] ~ 1 + time`
@@ -124,20 +134,20 @@ the formula applies to all rows where the parameter exists.
 
 # Covariance Regression
 
-A unique feature of `joinme` is the ability to model the covariance structure of the marker-by-id effects $\mathbf{w}_{id}$. In standard models, $\Sigma_w$ is constant. In `joinme`, we can allow the variance to depend on subject-level covariates $\mathbf{x}_{cov, i}$:
+A unique feature of `JoiNMe` is the ability to model the covariance structure of the marker-by-id effects $\mathbf{w}_{id}$. In standard models, $\Sigma_w$ is constant. In `JoiNMe`, we can allow the variance to depend on subject-level covariates $\mathbf{x}_{cov, i}$:
 
 $$
 \Sigma_{w, i} = \text{diag}(\boldsymbol{\tau}_i) \, \Omega \, \text{diag}(\boldsymbol{\tau}_i)
 $$
-where $\log(\boldsymbol{\tau}_i) = \mathbf{X}_{cov, i} \boldsymbol{\beta}_{\tau}$. This allows, for example, the variability in biomarker trajectories to differ between treatment groups or with baseline age (`formulaCorr`).
+where $\log(\boldsymbol{\tau}_i) = \mathbf{X}_{cov, i} \boldsymbol{\beta}_{\tau}$. This allows, for example, the variability in biomarker trajectories to differ between treatment groups or with baseline age (`formulaVCov`).
 
 In the Stan implementation, the subject-specific covariance matrix is built from
 its Cholesky factor $L_i$. Each unique lower-triangular element of $L_i$ is
 modelled through a regression with a subject-level latent effect:
 
 $$
-\ell_{im} = \alpha_m + \mathbf{x}_{cov,i}^\top \boldsymbol{\beta}_m + \lambda_m u_{L,i},
-\qquad u_{L,i} \sim \mathcal{N}(0, \tau_L^2).
+\ell_{im} = \alpha_m + \mathbf{x}_{cov,i}^\top \boldsymbol{\beta}_m + \lambda_m z_{L,i},
+\qquad z_{L,i} \sim \mathcal{N}(0, 1).
 $$
 
 For diagonal elements, a softplus (default) or exp transform ensures positivity:
@@ -146,7 +156,7 @@ $$
 L_i[r,r] = \log(1 + \exp(\ell_{im}))\;\text{or}\;\exp(\ell_{im}), \qquad L_i[r,c] = \ell_{im} \; (r > c).
 $$
 
-Use `control$corr_diag_link` to select `"softplus"` (default) or `"exp"`.
+Use `control$vcov_diag_link` to select `"softplus"` (default) or `"exp"`.
 
 This construction allows both covariate-driven heterogeneity and subject-level
 latent variability in the marker-by-subject covariance structure.
@@ -170,15 +180,20 @@ where $B_l(t)$ are B-spline basis functions.
 
 ## Association Structure
 The term $\mathcal{H}_{i}(t) = \{ \eta_{id}(s) : s \le t, d=1\dots D \}$
-represents the history of the longitudinal processes. `joinme` summarises this
+represents the history of the longitudinal processes. `JoiNMe` summarises this
 history using a small set of interpretable features:
 
 - **Current value (CV)**: the value of the latent longitudinal linear predictor
   at time $t$.
 - **Current slope (CS)**: the derivative of the latent longitudinal linear
   predictor at time $t$.
-- **Variance association (CORR)**: a subject-specific, time-constant summary of
-  the marker-by-subject covariance structure.
+- **Correlation association (CORR)**: a subject-specific, time-constant summary
+  of the off-diagonal entries of the Cholesky-correlation factor `K_i` from the
+  marker-by-subject covariance model.
+- **Variance-covariance association (VCOV)**: a subject-specific,
+  time-constant summary of those same off-diagonal `K_i` entries together with
+  the subject-specific standard deviations. This channel therefore avoids
+  double-counting information that would appear again in `L_i L_i^\top`.
 
 In implementation, CV and CS are evaluated at a default set of 15 Gauss-Kronrod
 nodes on the scaled time interval $[0, 1]$ (configurable). Only the node count
@@ -187,9 +202,21 @@ code and used via precomputed design matrices. CS is approximated by a forward
 finite difference with step size $\varepsilon$. These summaries can be
 transformed before entering the hazard, as described below.
 
+For covariance-style channels (`corr`, `vcov`), the fitted association
+coefficients follow a scale-times-latent form. Internally, a positive global
+scale (`s_corr` or `s_vcov`) multiplies a latent coefficient vector, and the
+reported posterior summaries correspond to the effective coefficients that enter
+the hazard.
+
+The covariance-regression layer itself uses an identified parameterisation for
+the subject-specific Cholesky factor: each lower-triangular entry has its own
+latent perturbation $z_{im}$ and a non-negative loading $\lambda_m$, so
+$\eta_{im} = \alpha_m + x_i^\top \beta_m + \lambda_m z_{im}$ with
+$\lambda_m \ge 0$ and $z_{im} \sim \mathcal{N}(0, 1)$.
+
 ### Marker-weighted contributions (CV and CS)
 
-When multiple markers are present, `joinme` forms marker-average association components using weights $\omega_d$ (one per marker). These weights apply **both** to the current value (CV) and current slope (CS) summaries. Let $\eta_{id}^{(mk)}(t)$ denote the marker-specific deviation component of the linear predictor for marker $d$. Then the marker-weighted summaries are:
+When multiple markers are present, `JoiNMe` forms marker-average association components using weights $\omega_d$ (one per marker). These weights apply **both** to the current value (CV) and current slope (CS) summaries. Let $\eta_{id}^{(mk)}(t)$ denote the marker-specific deviation component of the linear predictor for marker $d$. Then the marker-weighted summaries are:
 
 $$
 \eta_{i}^{(mk)}(t) = \frac{1}{D}\sum_{d=1}^{D} \omega_d \eta_{id}^{(mk)}(t), \quad
@@ -221,7 +248,7 @@ current value and slope calculations.
 Marker weights and CV/CS association coefficients are regularized to avoid
 overfitting when $D$ is large.
 
-- **Marker weights**: when estimated, `joinme` uses latent additive perturbations
+- **Marker weights**: when estimated, `JoiNMe` uses latent additive perturbations
   $\,w^{raw} = w^{(0)} + z_w$ with $z_w \sim \mathcal{N}(0, I)$ and uses the
   resulting weights directly in marker-aggregated association terms.
 - **CV/CS total and marker coefficients**: non-centred priors
@@ -234,7 +261,7 @@ overfitting when $D$ is large.
 This keeps marker effects signed (positive or negative) while improving sampling
 geometry for hierarchical association parameters.
 
-Crucially, `joinme` supports non-linear transformations of these terms via the
+Crucially, `JoiNMe` supports non-linear transformations of these terms via the
 `transforms` argument. Available transformation modes include identity, a
 functional bytecode evaluator, monotone I-splines, and piecewise linear rules.
 
@@ -245,11 +272,26 @@ and their slope counterparts. The transformed summaries take the form
 $$
 	ilde{\text{CV}}_\text{tot}(t) = g_{\text{CV,tot}}(\text{CV}_\text{tot}(t)), \quad
 	ilde{\text{CS}}_\text{tot}(t) = g_{\text{CS,tot}}(\text{CS}_\text{tot}(t)), \quad
-	ilde{\text{CORR}} = g_{\text{CORR}}(\text{CORR}).
+	ilde{\text{CORR}} = g_{\text{CORR}}(\text{CORR}), \quad
+	ilde{\text{VCOV}} = g_{\text{VCOV}}(\text{VCOV}).
 $$
 
 Each $g(\cdot)$ is determined by the transformation mode and its inputs
 (bytecode, spline knots, or piecewise linear knots).
+
+For `corr` and `vcov`, the transformed summary is time-constant for a fixed
+subject because it depends only on that subject's covariance-regression
+Cholesky factor. The implemented likelihood therefore computes the transformed
+covariance-style scalar once per subject, then reuses that same value in both:
+
+- the exact event-time log-hazard $\log \lambda_i(T_i)$,
+- the Gauss-Kronrod node evaluations used inside
+  $\int_0^{T_i} \lambda_i(s) ds$.
+
+That symmetry is not just an efficiency trick; it is part of the statistical
+definition of the model. If a covariance-style term entered only one of those
+two pieces, coefficient recovery would be distorted even when simulation and
+fitting used the same raw feature definition.
 
 We use the $\alpha$ notation for association coefficients to align with joint-model
 literature and to distinguish these coefficients from the linear predictor $\eta$.
@@ -263,7 +305,7 @@ p(\theta, \mathbf{u}, \mathbf{v}, \mathbf{w} | \mathbf{y}, \mathbf{T}, \boldsymb
 $$
 
 ## The Stan Implementation
-`joinme` compiles this model to a Stan program. Key efficiency features include:
+`JoiNMe` compiles this model to a Stan program. Key efficiency features include:
 
 1.  **Analytic Gradient of the Log-Likelihood**: Stan's autodiff engine handles the complex chain rule derivatives required for the joint likelihood.
 2.  **Multithreading via `reduce_sum`**: The likelihood calculation is parallelised over subjects ("grainsize"). This allows linear scaling with the number of available CPU cores.
@@ -283,10 +325,12 @@ Default priors are weakly informative and aligned with the Stan implementation:
   marker-weight-involving channels (`cv_total`, `cs_total`, `cv_marker`,
   `cs_marker`), only the first active latent is sign-anchored non-negative to
   improve identifiability; other channels remain free to be positive or negative.
-- **Marker weights**: when estimated, marker-weight perturbations use
-  standard normal priors in additive latent form around user-supplied base
-  weights, and the resulting weights enter marker-aggregated association terms
-  without additional normalisation.
+- **Marker weights**: when estimated, marker-weight perturbations use additive
+  latent form around user-supplied base weights. `shrinkage = 0, 1, 2` selects
+  standard Student-$t_6$, Laplace, or Normal latents, respectively. The resulting
+  signed weights enter marker-aggregated association terms without additional
+  normalisation. `simulate_joinme()` uses the identical switch and defaults to
+  a zero base when it simulates estimated weights.
 - **Random-effect scales**: subject, marker, and marker-by-subject standard
   deviations use half-normal priors on the original scale for weakly informative
   positivity constraints.
@@ -306,7 +350,7 @@ Default priors are weakly informative and aligned with the Stan implementation:
 
 # Competing risks and dynamic prediction
 
-`joinme` supports competing risks through the event-type indicator
+`JoiNMe` supports competing risks through the event-type indicator
 (`event_type`) or, when available, a multi-state pair of variables
 (`stage_from`, `stage_to`) that are collapsed into a single event-type factor.
 The baseline hazard and hazard covariates are then indexed by event type, so the

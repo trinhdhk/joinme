@@ -1,5 +1,5 @@
 ---
-title: "Introduction to joinme"
+title: "Introduction to JoiNMe"
 output-dir: ../docs/articles
 format:
   html:
@@ -15,7 +15,7 @@ execute:
 
 ```r
 # install.packages("remotes")
-# remotes::install_github("trinhdhk/joinme")
+# remotes::install_github("trinhdhk/JoiNMe")
 ```
 
 For Stan backends:
@@ -29,11 +29,11 @@ For Stan backends:
 # install.packages("rstan", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
 ```
 
-## Quick start: simulate â†’ fit â†’ predict â†’ plot
+## Quick start
 
 ## Conceptual overview
 
-The `joinme` model links two components:
+The `JoiNMe` model links two components:
 
 1. A multivariate longitudinal model for repeated biomarker measurements.
 2. A survival model whose hazard depends on summaries of the longitudinal
@@ -47,12 +47,14 @@ optional marker-by-subject random effects. The survival part uses a
 proportional hazards model with a flexible spline baseline hazard and
 time-dependent association terms.
 
-The association terms implemented in `joinme` are:
+The association terms implemented in `joinme` package are:
 
 - Current value (CV) of the latent linear predictor.
 - Current slope (CS) of the latent linear predictor.
-- Variance association (CORR) derived from the marker-by-subject
-  covariance structure.
+- Correlation association (CORR) derived from off-diagonal marker-by-subject
+  correlations.
+- Variance-covariance association (VCOV) derived from lower-triangular
+  marker-by-subject Cholesky-factor entries taken directly from `L`.
 
 Each association term can be left on its original scale or transformed
 using a functional expression, a monotone I-spline, or a piecewise linear
@@ -61,7 +63,7 @@ data so that the likelihood remains fully deterministic.
 
 ## Family-shared distributional semantics
 
-For mixed longitudinal families, `joinme` treats distributional parameters as
+For mixed longitudinal families, `JoiNMe` treats distributional parameters as
 **shared by family** when no distributional regression is supplied.
 
 Concretely:
@@ -116,16 +118,13 @@ returns coefficients on the original time scale.
 
 ### Step 1: Load packages and set a reproducible seed
 
-```{r intro-setup}
-if (requireNamespace("pkgload", quietly = TRUE)) {
-  repo_root <- normalizePath("..", mustWork = FALSE)
-  if (file.exists(file.path(repo_root, "DESCRIPTION"))) {
-    pkgload::load_all(repo_root, quiet = TRUE, compile = FALSE)
+```{r setup}
+if (!require('joinme', quietly = TRUE)) {
+  if (requireNamespace("devtools", quietly = TRUE) && file.exists(file.path(repo_root, "DESCRIPTION"))) {
+    devtools::load_all(repo_root, quiet = TRUE)
   } else {
-    library(joinme)
+    try(base::attachNamespace("joinme"), silent = TRUE)
   }
-} else {
-  library(joinme)
 }
 library(survival)
 
@@ -142,10 +141,11 @@ sim <- simulate_joinme(
   n_id = 10,
   families = list(
     jm_family("student_t"),
-    jm_family("student_t", inv_link = ~ inv_logit(x / 2))
+    jm_family("student_t")
   ),
   n_obs_per_marker_per_id = 4,
   times_obs = seq(0, 5, length.out = 8),
+  baseline_hazard = list(type='weibull', shape = 2, scale = 20),
   quadrature_nodes = 31,
   seed = 2026,
   assoc = c("cv_total"),
@@ -193,17 +193,18 @@ fit <- joinme(
   formulaEvent = formulaEvent,
   dataEvent = sim$dataEvent,
   assoc = c("cv_total"),
-  families = rep("student_t", 2),
+  families = "student_t",
   transforms = joinme_tf(cv_total = "identity"),
+  basehaz = joinme_basehaz('bs'), 
   control = list(
     engine = "rstan",
     chains = 1,
     parallel_chains = 1,
-    iter_warmup = 100,
-    iter_sampling = 100,
+    iter_warmup = 500,
+    iter_sampling = 500,
     seed = 2026,
     refresh = 0,
-    adapt_delta = 0.9
+    adapt_delta = 0.85
   )
 )
 ```
@@ -211,9 +212,19 @@ fit <- joinme(
 ### Step 5: Summarise fixed effects and associations
 
 ```{r intro-summaries}
-summary(fit)
-fixef(fit)
+summary(fit) # or posterior_summary(fit)fixef(fit)
+coef(fit)
+posterior_assoc(fit, summary = TRUE)
 ```
+
+`posterior_summary()` is an alias for `summary()`. `posterior_assoc()` returns
+association-specific posterior output in a format that stays close to the main
+summary tables. For covariance-style channels (`corr`, `vcov`), the printed and
+tabular output now uses readable matrix labels instead of raw numeric indices.
+`coef()` returns coefficients on the model-matrix scale after adding the
+population-level contribution and the matching group-level deviation. As with
+`fixef()` and `ranef()`, use `summary = FALSE` to retrieve posterior draws
+instead of posterior summaries.
 
 ### Step 6: Dynamic prediction for one subject
 
@@ -225,13 +236,18 @@ ndL <- sim$dataLong[sim$dataLong$id == 1, ]
 ndE <- sim$dataEvent[sim$dataEvent$id == 1, ]
 time_start <- max(ndL$time)
 
-pred <- rstantools::posterior_epred(
+pred <- posterior_predict(
   fit,
   newdataLong = ndL,
   newdataEvent = ndE,
   time_start = time_start,
   times = seq(time_start, time_start + 1, length.out = 20),
-  control = list(n_samples = 50, n_pred_draws = 80),
+  control = list(
+    n_samples = 50, 
+    n_pred_draws = 1000,
+    iter_warmup = 200,
+    chains = 1
+    ),
   seed = 2026
 )
 
@@ -245,12 +261,42 @@ pred <- rstantools::posterior_epred(
 ### Step 7: Plot longitudinal and survival predictions
 
 ```{r intro-plot}
-plot(pred, which = c("longitudinal", "survival"), scale = "epred", combined = TRUE)
+plot(pred, type = c("longitudinal", "survival"), combined = TRUE)
 ```
 
 If `patchwork`/`cowplot` is unavailable, `combined = TRUE` falls back to the
 standard per-subject structured return (grouped by subject and outcome) instead
 of any flattened helper list.
+
+The heatmap is an alternative to the usual separated marker curves. It orders
+markers by the magnitude of posterior mean change and makes tiles transparent
+when the posterior sign certainty does not exceed `1 - threshold`.
+
+`plot(fit, ...)` uses fitted posterior samples directly and has no conditioning
+argument. Conditional covariate profiles are evaluated with
+`conditional_effects()`, while `predict()` remains reserved for dynamic
+subject-specific forecasts given observed longitudinal history.
+
+```{r intro-conditional-effects, eval=FALSE}
+profiles <- make_conditions(sim$dataEvent, vars = "x1")
+
+effects_data <- conditional_effects(
+  fit,
+  effects = list(longitudinal = "time", event = "x1"),
+  conditions = profiles,
+  process = c("longitudinal", "event"),
+  longitudinal_estimand = "population",
+  plot = FALSE
+)
+
+plot(effects_data, ask = FALSE)
+```
+
+For the longitudinal process, set `longitudinal_estimand = "marker"` to add
+the fitted marker-level deviation, or use `"marginal_marker"` to average
+marker-specific predictions within each posterior draw. This latter estimand
+applies each marker's inverse link before averaging, so it represents the
+average expected marker response rather than the response of an average marker.
 
 ### Step 8: Diagnostics and extraction helpers
 
@@ -259,12 +305,15 @@ diagnosis(fit)
 diagnosis(pred)
 ```
 
-`ranef(fit)` and `corr(fit)` are nested by `formulaLong` and `formulaDist`.
-For prediction objects, `ranef(pred)` and `corr(pred)` are available only when
-marker covariance is configured to depend on id.
+`ranef(fit)`, `coef(fit)`, and `vcov(fit)` are nested by `formulaLong` and
+`formulaDist`. The posterior aliases `posterior_fixef()`,
+`posterior_ranef()`, and `posterior_coef()` are short forms for requesting the
+draw-level output of those extractors. For prediction objects, `ranef(pred)`
+and `vcov(pred)` are available only when marker covariance is configured to
+depend on id.
 
 ## Next steps
 
-- See the modelling workflow in `joinme-workflow`.
-- Explore association structures in `joinme-associations`.
-- Review the statistical details in `joinme-model` and `joinme-theory`.
+- See the modelling workflow in `JoiNMe-workflow`.
+- Explore association structures in `JoiNMe-associations`.
+- Review the statistical details in `JoiNMe-model` and `JoiNMe-theory`.

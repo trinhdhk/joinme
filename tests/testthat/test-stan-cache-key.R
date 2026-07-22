@@ -1,5 +1,5 @@
 test_that("stan cache key tracks include dependency content", {
-  tmp <- tempfile("joinme-stan-key-")
+  tmp <- tempfile("JoiNMe-stan-key-")
   dir.create(tmp, recursive = TRUE, showWarnings = FALSE)
   on.exit(unlink(tmp, recursive = TRUE, force = TRUE), add = TRUE)
   root_file <- file.path(tmp, "model.stan")
@@ -38,7 +38,7 @@ test_that("stan cache key tracks include dependency content", {
 })
 
 test_that("stan cache key reflects cpp options", {
-  tmp <- tempfile("joinme-stan-key-cpp-")
+  tmp <- tempfile("JoiNMe-stan-key-cpp-")
   dir.create(tmp, recursive = TRUE, showWarnings = FALSE)
   on.exit(unlink(tmp, recursive = TRUE, force = TRUE), add = TRUE)
   root_file <- file.path(tmp, "model_simple.stan")
@@ -56,8 +56,8 @@ test_that("stan cache key reflects cpp options", {
 })
 
 test_that("stan cache key is stable across different absolute root paths", {
-  tmp1 <- tempfile("joinme-stan-key-path-a-")
-  tmp2 <- tempfile("joinme-stan-key-path-b-")
+  tmp1 <- tempfile("JoiNMe-stan-key-path-a-")
+  tmp2 <- tempfile("JoiNMe-stan-key-path-b-")
   dir.create(tmp1, recursive = TRUE, showWarnings = FALSE)
   dir.create(tmp2, recursive = TRUE, showWarnings = FALSE)
   on.exit(unlink(tmp1, recursive = TRUE, force = TRUE), add = TRUE)

@@ -4,13 +4,14 @@ library(dplyr)
 sim <- simulate_joinme(
   formulaLong = y ~ 1 + time + x1 + (1 + time | id) + (0 + x1 + (1 + time | id) | marker),
   formulaEvent = survival::Surv(time, event) ~ x2,
-  formulaCorr = ~ x1,
+  formulaVCov = ~ x1,
   families = c("gaussian", "student_t", "student_t"),
   n_id = 100,
   n_obs_per_marker_per_id = 8,
   times_obs = seq(0, 6, length.out = 10),
   assoc = c("cv_total", "corr"),
   marker_weights = c(1, -0.5, 2),
+  fixed_marker_weights = TRUE,
   beta_long = c('(Intercept)' = 0.5, time = 0.3, x1 = -0.2),
   beta_event = c(x2 = 0.4),
   assoc_coefs = list(cv_total = 0.35, corr = c(0.1)),
@@ -21,8 +22,7 @@ sim <- simulate_joinme(
     id_marker_cov = list(
       latent = list(sd = c(0.7, 0.3)),
       alpha = c(-0.2, 0.0, -0.1),
-      lambda = 0.35,
-      sd_u = 0.5
+      lambda = 0.175
     ),
     dist = list(sigma = list(sd = 0.4))
   ),
@@ -34,7 +34,7 @@ sim <- simulate_joinme(
 fit <- joinme(
   formulaLong = y ~ 1 + time + x1 + (1 + time | id) + (0 + x1 + (1 + time | id) | marker),
   formulaEvent = survival::Surv(time, event) ~ x2,
-  formulaCorr = ~ x1,
+  formulaVCov = ~ x1,
   families = c("gaussian", "student_t", "student_t"),
   dataLong = sim$dataLong,
   dataEvent = sim$dataEvent,
@@ -88,7 +88,7 @@ pred <- posterior_predict(
   )
 )
 
-p <- plot(pred, which = c("longitudinal", "survival"), combined = TRUE)
+p <- plot(pred, type = c("longitudinal", "survival"), combined = TRUE)
 
 p3 <- if (is.list(p) && "3" %in% names(p)) p[["3"]] else p
 ggplot2::ggsave(

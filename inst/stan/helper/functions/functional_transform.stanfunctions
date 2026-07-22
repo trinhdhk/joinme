@@ -48,20 +48,54 @@
  */
 
   /**
-   * @brief Functional bytecode evaluator for scalar inputs.
-   *
-   * @param x Input value
-  * @param bytecode Array of bytecode instructions (0-26)
-   * @param const_data Vector of constant values for PUSH_CONST operations
-   * @return Scalar result of bytecode evaluation
-   */
-  real eval_bytecode_scalar(real x, array[] int bytecode, vector const_data) {
+  * @brief Functional bytecode evaluator for scalar inputs.
+  *
+  * @param x Input value
+  * @param bytecode Array of bytecode instructions. Accepted instruction IDs are 0-26 as
+  *   enumerated in the file-level description.
+  * @param const_data Vector of constant values for PUSH_CONST operations
+  * @return Scalar result of bytecode evaluation
+  */
+  real apply_iota_shift_scalar(
+    real value,
+    vector iota_intercepts,
+    vector iota_slopes,
+    int intercept_idx,
+    int slope_idx,
+    int intercept_offset,
+    int slope_offset
+  ) {
+    real intercept = 0;
+    real slope = 1;
+    if (intercept_idx > 0) intercept = iota_intercepts[intercept_offset + intercept_idx];
+    if (slope_idx > 0) slope = iota_slopes[slope_offset + slope_idx];
+    return intercept + slope * value;
+  }
+
+  real eval_bytecode_scalar(
+    real x,
+    array[] int bytecode,
+    vector const_data,
+    vector iota_intercepts,
+    vector iota_slopes,
+    array[] int op_iota_intercept_idx,
+    array[] int op_iota_slope_idx,
+    int intercept_offset,
+    int slope_offset
+  ) {
     vector[100] stack;  // Stack for computation (fixed maximum depth)
     int stack_ptr = 0;  // Stack pointer (top index)
     int const_idx = 1;  // Index into const_data for PUSH_CONST
 
     for (op_idx in 1:size(bytecode)) {
       int op = bytecode[op_idx];
+
+      // Backward compatibility for legacy unary programs encoded without an
+      // explicit PUSH_X, e.g. [SOFTPLUS] instead of [PUSH_X, SOFTPLUS].
+      if (stack_ptr == 0 && (op == 6 || op == 7 || op == 8 || op == 9 || op == 10 || op == 11 || op == 13 || op == 14 || op == 15 || op == 16 || op == 17 || op == 18 || op == 19 || op == 20 || op == 21 || op == 22 || op == 23 || op == 24 || op == 25 || op == 26)) {
+        stack_ptr += 1;
+        stack[stack_ptr] = x;
+      }
 
       if (op == 0) {
         // PUSH_X
@@ -94,69 +128,69 @@
         stack[stack_ptr] = stack[stack_ptr] / b;
       } else if (op == 6) {
         // LOG
-        stack[stack_ptr] = log(stack[stack_ptr]);
+        stack[stack_ptr] = log(apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset));
       } else if (op == 7) {
         // EXP
-        stack[stack_ptr] = exp(stack[stack_ptr]);
+        stack[stack_ptr] = exp(apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset));
       } else if (op == 8) {
         // SQRT
-        stack[stack_ptr] = sqrt(stack[stack_ptr]);
+        stack[stack_ptr] = sqrt(apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset));
       } else if (op == 9) {
         // INV_LOGIT
-        stack[stack_ptr] = inv_logit(stack[stack_ptr]);
+        stack[stack_ptr] = inv_logit(apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset));
       } else if (op == 10) {
         // LOGIT
-        stack[stack_ptr] = logit(stack[stack_ptr]);
+        stack[stack_ptr] = logit(apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset));
       } else if (op == 11) {
         // RECIPROCAL
-        stack[stack_ptr] = 1.0 / stack[stack_ptr];
+        stack[stack_ptr] = 1.0 / apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset);
       } else if (op == 12) {
         // POW
         real b = stack[stack_ptr];
         stack_ptr -= 1;
-        stack[stack_ptr] = stack[stack_ptr] ^ b;
+        stack[stack_ptr] = apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset) ^ b;
       } else if (op == 13) {
         // SIN
-        stack[stack_ptr] = sin(stack[stack_ptr]);
+        stack[stack_ptr] = sin(apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset));
       } else if (op == 14) {
         // COS
-        stack[stack_ptr] = cos(stack[stack_ptr]);
+        stack[stack_ptr] = cos(apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset));
       } else if (op == 15) {
         // TAN
-        stack[stack_ptr] = tan(stack[stack_ptr]);
+        stack[stack_ptr] = tan(apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset));
       } else if (op == 16) {
         // ABS
-        stack[stack_ptr] = abs(stack[stack_ptr]);
+        stack[stack_ptr] = abs(apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset));
       } else if (op == 17) {
         // SQUARE
-        stack[stack_ptr] = square(stack[stack_ptr]);
+        stack[stack_ptr] = square(apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset));
       } else if (op == 18) {
         // SINH
-        stack[stack_ptr] = sinh(stack[stack_ptr]);
+        stack[stack_ptr] = sinh(apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset));
       } else if (op == 19) {
         // COSH
-        stack[stack_ptr] = cosh(stack[stack_ptr]);
+        stack[stack_ptr] = cosh(apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset));
       } else if (op == 20) {
         // TANH
-        stack[stack_ptr] = tanh(stack[stack_ptr]);
+        stack[stack_ptr] = tanh(apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset));
       } else if (op == 21) {
         // ASINH
-        stack[stack_ptr] = asinh(stack[stack_ptr]);
+        stack[stack_ptr] = asinh(apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset));
       } else if (op == 22) {
         // ACOSH
-        stack[stack_ptr] = acosh(stack[stack_ptr]);
+        stack[stack_ptr] = acosh(apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset));
       } else if (op == 23) {
         // ATANH
-        stack[stack_ptr] = atanh(stack[stack_ptr]);
+        stack[stack_ptr] = atanh(apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset));
       } else if (op == 24) {
         // SOFTPLUS
-        stack[stack_ptr] = log1p_exp(stack[stack_ptr]);
+        stack[stack_ptr] = log1p_exp(apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset));
       } else if (op == 25) {
         // CBRT
-        stack[stack_ptr] = cbrt(stack[stack_ptr]);
+        stack[stack_ptr] = cbrt(apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset));
       } else if (op == 26) {
         // PROBIT
-        stack[stack_ptr] = Phi(stack[stack_ptr]);
+        stack[stack_ptr] = Phi(apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset));
       }
     }
 
@@ -164,35 +198,54 @@
   }
 
   /**
-   * @brief Functional bytecode evaluator for vector inputs (element-wise).
+  * @brief Functional bytecode evaluator for vector inputs (element-wise).
    *
    * @param x Vector of input values
-  * @param bytecode Array of bytecode instructions (0-26)
+  * @param bytecode Array of bytecode instructions. Accepted instruction IDs are 0-26 as
+  *   enumerated in the file-level description.
    * @param const_data Vector of constant values for PUSH_CONST operations
    * @return Vector result of bytecode evaluation applied element-wise
    */
-  vector eval_bytecode_vector(vector x, array[] int bytecode, vector const_data) {
+  vector eval_bytecode_vector(
+    vector x,
+    array[] int bytecode,
+    vector const_data,
+    vector iota_intercepts,
+    vector iota_slopes,
+    array[] int op_iota_intercept_idx,
+    array[] int op_iota_slope_idx,
+    int intercept_offset,
+    int slope_offset
+  ) {
     int n = num_elements(x);
     vector[n] result;
 
     for (i in 1:n) {
       // Apply scalar evaluator element-wise
-      result[i] = eval_bytecode_scalar(x[i], bytecode, const_data);
+      result[i] = eval_bytecode_scalar(x[i], bytecode, const_data, iota_intercepts, iota_slopes, op_iota_intercept_idx, op_iota_slope_idx, intercept_offset, slope_offset);
     }
 
     return result;
   }
 
-  /**
-   * @brief Backward-compatible alias for older functional interpreter naming.
-   */
-  real eval_functional_scalar(real x, array[] int opcodes, vector const_data) {
-    return eval_bytecode_scalar(x, opcodes, const_data);
+  real eval_bytecode_scalar(real x, array[] int bytecode, vector const_data) {
+    return eval_bytecode_scalar(x, bytecode, const_data, rep_vector(0, 0), rep_vector(0, 0), rep_array(0, size(bytecode)), rep_array(0, size(bytecode)), 0, 0);
+  }
+
+  vector eval_bytecode_vector(vector x, array[] int bytecode, vector const_data) {
+    return eval_bytecode_vector(x, bytecode, const_data, rep_vector(0, 0), rep_vector(0, 0), rep_array(0, size(bytecode)), rep_array(0, size(bytecode)), 0, 0);
   }
 
   /**
-   * @brief Backward-compatible alias for older functional interpreter naming.
+  * @brief Backward-compatible alias for older functional interpreter naming.
    */
-  vector eval_functional_vector(vector x, array[] int opcodes, vector const_data) {
-    return eval_bytecode_vector(x, opcodes, const_data);
+  real eval_functional_scalar(real x, array[] int bytecode, vector const_data) {
+    return eval_bytecode_scalar(x, bytecode, const_data);
+  }
+
+  /**
+  * @brief Backward-compatible alias for older functional interpreter naming.
+   */
+  vector eval_functional_vector(vector x, array[] int bytecode, vector const_data) {
+    return eval_bytecode_vector(x, bytecode, const_data);
   }

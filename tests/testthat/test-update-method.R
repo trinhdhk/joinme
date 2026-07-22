@@ -1,4 +1,4 @@
-test_that("update.JoinMeFit refits with updated formulas", {
+test_that("update.JoiNMeFit refits with updated formulas", {
   testthat::skip_on_cran()
   testthat::skip_if_not_installed("rstan")
 
@@ -55,7 +55,7 @@ test_that("update.JoinMeFit refits with updated formulas", {
     )
   )
 
-  expect_s3_class(fit2, "JoinMeFit")
+  expect_s3_class(fit2, "JoiNMeFit")
   expect_true("x2" %in% all.vars(fit2$formulaLong))
   expect_true("x3" %in% all.vars(fit2$formulaEvent))
 })

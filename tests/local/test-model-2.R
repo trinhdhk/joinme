@@ -15,6 +15,7 @@ sim <- simulate_joinme(
   assoc = c("cv_mean", "cv_marker"),
   assoc_coefs = c(cv_mean = truth_cv_mean, cv_marker = truth_cv_marker),
   marker_weights = c(-1,2,1),
+  fixed_marker_weights = TRUE,
   transforms = joinme_tf(cv_marker = ~ expit(x)),
   baseline_hazard = list(
     type='weibull',
@@ -92,13 +93,11 @@ run_fit <- function(label, alpha_prior, tau_spline) {
   beta_vars <- paste0("beta[", seq_len(sd$P), "]")
   u_vars <- paste0("u_id[", i, ",", seq_len(sd$R_id), "]")
   v_vars <- if (sd$R_mk > 0) paste0("v_marker[", d, ",", seq_len(sd$R_mk), "]") else character(0)
-  w_vars <- if (sd$Q_idm > 0) paste0("w_idscaled[", i, ",", d, ",", seq_len(sd$Q_idm), "]") else character(0)
+  w_vars <- if (sd$Q_idm > 0) paste0("w_idm[", i, ",", d, ",", seq_len(sd$Q_idm), "]") else character(0)
   alpha_vars <- c("alpha_cv_marker")
   cov_vars <- c(
-    paste0("tau_w[", seq_len(sd$Q_idm), "]"),
     paste0("alpha_L[", seq_len(sd$Q_idm), "]"),
-    paste0("lambda_L[", seq_len(sd$Q_idm), "]"),
-    "tau_L"
+    paste0("lambda_L[", seq_len(sd$Q_idm), "]")
   )
 
   draws_key <- get_draw_array(c(beta_vars, u_vars, v_vars, w_vars, alpha_vars, cov_vars))

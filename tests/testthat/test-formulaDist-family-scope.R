@@ -3,14 +3,14 @@ test_that("normalize_formula_dist parses family-scoped syntax", {
     sigma[family = student] ~ 1 + time,
     sigma[family = normal] ~ 1 + x1,
     alpha_skew[family = skew_normal] ~ 1,
-    phi_beta ~ 1
+    kappa ~ 1
   ))
 
   expect_true(joinme:::.is_dist_scope(spec$sigma))
   expect_setequal(names(spec$sigma$by_family), c("student_t", "gaussian"))
   expect_true(inherits(spec$sigma$by_family$student_t, "formula"))
   expect_true(inherits(spec$alpha$by_family$skew_normal, "formula"))
-  expect_true(inherits(spec$phi_beta$default, "formula"))
+  expect_true(inherits(spec$kappa$default, "formula"))
 })
 
 
@@ -137,7 +137,7 @@ test_that("simulate_joinme supports family-specific dist_coefs for scoped formul
 })
 
 
-test_that("joinme fits and predicts with family-scoped formulaDist", {
+test_that("JoiNMe fits and predicts with family-scoped formulaDist", {
   skip_on_cran()
   skip_if_not_installed("cmdstanr")
 
@@ -189,7 +189,7 @@ test_that("joinme fits and predicts with family-scoped formulaDist", {
     )
   )
 
-  expect_s3_class(fit, "JoinMeFit")
+  expect_s3_class(fit, "JoiNMeFit")
   expect_true(fit$stan_data$P_sigma >= 2)
   expect_true(any(grepl("^family=student_t::", fit$stan_data$dist_cols$sigma)))
 
@@ -213,5 +213,5 @@ test_that("joinme fits and predicts with family-scoped formulaDist", {
     seed = 1905
   )
 
-  expect_s3_class(pred, "JoinMeDynPred")
+  expect_s3_class(pred, "JoiNMeDynPred")
 })

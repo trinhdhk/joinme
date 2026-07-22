@@ -43,7 +43,7 @@ testthat::test_that("combined multi-subject returns per-subject combined plots",
     )
   }))
 
-  pred <- joinme::JoinMeDynPred$new(
+  pred <- joinme::JoiNMeDynPred$new(
     predictions = list(longitudinal = NULL, survival = NULL, cumhaz = NULL),
     quantiles = list(
       longitudinal = quant_long,
@@ -72,7 +72,7 @@ testthat::test_that("combined multi-subject returns per-subject combined plots",
 
   out <- plot(
     pred,
-    which = c("longitudinal", "survival"),
+    type = c("longitudinal", "survival"),
     subject = ids,
     combined = TRUE,
     ci_levels = 0.95,
@@ -133,7 +133,7 @@ testthat::test_that("combined multi-subject fallback preserves per-subject struc
     )
   }))
 
-  pred <- joinme::JoinMeDynPred$new(
+  pred <- joinme::JoiNMeDynPred$new(
     predictions = list(longitudinal = NULL, survival = NULL, cumhaz = NULL),
     quantiles = list(
       longitudinal = quant_long,
@@ -162,7 +162,7 @@ testthat::test_that("combined multi-subject fallback preserves per-subject struc
 
   out <- plot(
     pred,
-    which = c("longitudinal", "survival"),
+    type = c("longitudinal", "survival"),
     subject = ids,
     combined = TRUE,
     ci_levels = 0.95,

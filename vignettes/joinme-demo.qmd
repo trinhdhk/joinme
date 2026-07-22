@@ -1,5 +1,5 @@
 ---
-title: "joinme: Usage Demo"
+title: "JoiNMe: Usage Demo"
 output-dir: ../docs/articles
 format:
   html:
@@ -28,22 +28,21 @@ options(width = 80)
 
 library(dplyr)
 repo_root <- normalizePath(if (dir.exists("R")) "." else "..", mustWork = FALSE)
-if (requireNamespace("devtools", quietly = TRUE) && file.exists(file.path(repo_root, "DESCRIPTION"))) {
-  devtools::load_all(repo_root, quiet = TRUE)
-} else {
-  library(joinme)
+if (!require('joinme', quietly = TRUE)) {
+  if (requireNamespace("devtools", quietly = TRUE) && file.exists(file.path(repo_root, "DESCRIPTION"))) {
+    devtools::load_all(repo_root, quiet = TRUE)
+  } else {
+    try(base::attachNamespace("joinme"), silent = TRUE)
+  }
 }
 
 options(stan_preferred_engine = "cmdstanr")
-options(stan_preferred_engine = 'rstan')
 ```
 
 # Purpose and Reproducibility
 
-This vignette demonstrates the usage of `joinme` with multiple scenarios,
-including **data simulation**, **model fitting**, **diagnostic interpretation**,
-**dynamic prediction**, **plotting**, and **threaded computation**. Each block is
-designed to be reproducible and to illustrate a specific modelling choice.
+This vignette demonstrates the usage of `joinme` with multiple scenarios, including **data simulation**, **model fitting**, **diagnostic interpretation**,
+**dynamic prediction**, **plotting**, and **threaded computation**. Each block is designed to be reproducible and to illustrate a specific modelling choice.
 
 For the methodological background, see the theory vignette in [joinme-theory.html](joinme-theory.html).
 
@@ -51,7 +50,7 @@ This demo covers mixed families (including double_exponential, skew_double_expon
 beta, and cumulative_logit) and competing-risk survival via event type columns.
 
 For skew_double_exponential, you can fix the quantile parameter with
-`control = list(tau_sde_fixed = 0.2)` to model a specific quantile. If no
+`control = list(tau_fixed = 0.2)` to model a specific quantile. If no
 skew_double_exponential family is present, the control is ignored with a warning.
 
 ```{r seed}
@@ -67,6 +66,7 @@ Accepted specifications include:
 - **Association structure** (`assoc` plus `transforms = joinme_tf(...)`)
 - **Priors** (`priors = joinme_priors(beta = ..., alpha = ..., lkj = ...)`)
 - **Computation** (`control` for sampling, and optionally threading)
+- **Posterior reporting** (`summary()`, `draws()`, `mcmc_plot()`, helper plots)
 
 ## Family-specific links (new)
 
@@ -196,7 +196,7 @@ knitr::kable(diag_tbl, digits = 3, caption = "Sampler diagnostics (scenario A)."
 
 # Fixed effects (beta)
 fixef_tbl <- sum_obj$tables$fixef
-truth_beta <- sim$truth$beta
+truth_beta <- sim$truth$beta_long
 
 fixef_tbl$truth <- truth_beta[fixef_tbl$term]
 fixef_tbl$bias <- fixef_tbl$Estimate - fixef_tbl$truth
@@ -209,7 +209,7 @@ knitr::kable(fixef_view, digits = 3, caption = "Fixed effects summary (scenario 
 # Survival covariates (gamma_w)
 if (!is.null(sum_obj$tables$gamma_w)) {
   gamma_tbl <- sum_obj$tables$gamma_w
-  truth_gamma <- sim$truth$gamma_w
+  truth_gamma <- sim$truth$beta_event
 
   gamma_tbl$truth <- truth_gamma[gamma_tbl$term]
   gamma_tbl$bias <- gamma_tbl$Estimate - gamma_tbl$truth
@@ -227,14 +227,18 @@ if (!is.null(sum_obj$tables$assoc)) {
   alpha_total_bias <- alpha_total_hat - sim$truth$alpha_cv_total
   list(alpha_total_hat = alpha_total_hat, alpha_total_bias = alpha_total_bias)
 }
+
+# Renamed posterior draws and MCMC visualisation
+draws(fit, variables = c("time", "alpha_cv_total"), format = "draws_df")
+mcmc_plot(fit, variable = c("time", "alpha_cv_total"), type = "trace")
 ```
 
-## RSS for fitted trajectories
+## Residual sum of squares for fitted trajectories
 
-The `JoinMeDynPred` object includes fitted values for observed history. We compute a **residual sum of squares** (RSS) on the expected-response scale (`epred`).
+The `JoiNMeDynPred` object includes fitted values for observed history. We compute a **residual sum of squares** (RSS) on the expected-response scale (`epred`).
 
 ```{r scenario-a-rss}
-pred_fit <- rstantools::posterior_epred(
+pred_fit <- posterior_epred(
   fit,
   newdataLong = sim$dataLong,
   newdataEvent = sim$dataEvent,
@@ -281,7 +285,7 @@ ndE <- sim$dataEvent[sim$dataEvent$id == id, ]
 time_start <- max(ndL$time)
 times <- seq(time_start, time_start + 2, length.out = 50)
 
-pred_ep <- rstantools::posterior_epred(
+pred_ep <- posterior_epred(
   fit,
   newdataLong = ndL,
   newdataEvent = ndE,
@@ -297,8 +301,10 @@ pred_ep <- rstantools::posterior_epred(
   )
 )
 
-plot(pred_ep, which = "longitudinal")
-plot(pred_ep, which = "survival")
+plot(pred_ep, type = "longitudinal")
+plot(pred_ep, type = "survival")
+longitudinal_plot(pred_ep)
+survival_plot(pred_ep)
 ```
 
 `predict()` now accepts `scale` as a character vector. If omitted, all
@@ -317,7 +323,7 @@ When `times = NULL`, you can now control the default forecast window with
 `time_horizon` (defaulting to `tmax` from the fitted model):
 
 ```{r scenario-a-predict-horizon}
-pred_ep_horizon <- rstantools::posterior_epred(
+pred_ep_horizon <- posterior_epred(
   fit,
   newdataLong = ndL,
   newdataEvent = ndE,
@@ -341,7 +347,7 @@ Prediction enforces marker-level consistency: `newdataLong$marker` must use only
 
 ### Diagnostics and random-effects extraction
 
-`joinme` now uses the same diagnostics table schema for fitted and predicted
+`JoiNMe` now uses the same diagnostics table schema for fitted and predicted
 objects.
 
 ```{r scenario-a-diagnosis}
@@ -349,15 +355,17 @@ diagnosis(fit)
 diagnosis(pred_ep)
 ```
 
-For fitted models, `ranef()` and `corr()` are nested by `formulaLong` and
-`formulaDist`:
+For fitted models, `ranef()`, `coef()`, and `vcov()` are nested by
+`formulaLong` and `formulaDist`:
 
 ```{r scenario-a-ranef-corr-fit}
 re_fit <- ranef(fit)
-vc_fit <- corr(fit)
+cf_fit <- coef(fit)
+vc_fit <- vcov(fit)
 
 # Examples
 re_fit$formulaLong$id
+cf_fit$formulaLong$id
 vc_fit$formulaLong$id
 ```
 
@@ -367,7 +375,7 @@ only when marker covariance depends on id:
 ```{r scenario-a-ranef-corr-pred}
 if (isTRUE(pred_ep$metadata$marker_corr_depends_on_id)) {
   ranef(pred_ep)
-  corr(pred_ep)
+  vcov(pred_ep)
 }
 ```
 
@@ -377,8 +385,6 @@ This example adds a competing-risk indicator via `event_type`. The dynamic
 survival output corresponds to overall survival across causes.
 
 ```{r scenario-b-competing-sim, eval=FALSE}
-library(joinme)
-
 sim_comp <- simulate_joinme(
   n_id = 40,
   families = rep("student_t", 3),
@@ -525,7 +531,7 @@ pred_comp <- predict(
   )
 )
 
-plot(pred_comp, which = "survival")
+plot(pred_comp, type = "survival")
 ```
 
 # Scenario C: Mixed Families and Nonlinear Association
@@ -570,9 +576,12 @@ transforms <- joinme_tf(
 
 ## Optional: distributional regression
 
-If a marker family supports additional parameters (for example, Student-$t$
-scale or degrees of freedom, negative binomial dispersion), you can model these
-via `formulaDist`. Example (heteroscedastic scale):
+If a marker family supports additional parameters, you can model these via
+`formulaDist`. `nu` denotes Student-$t$ degrees of freedom, `kappa` denotes the
+positive Beta sample size (with shapes $\mu\kappa$ and
+$(1-\mu)\kappa$), and `tau` denotes the skew-double-exponential
+quantile/asymmetry parameter. For example, the following model allows a
+heteroscedastic longitudinal scale:
 
 ```{r scenario-b-dist}
 #| eval: false
@@ -617,9 +626,12 @@ if (!is.null(sum_mixed$tables$fixef)) {
 }
 ```
 
-# Scenario D: Threaded Fit and Threaded Prediction
+# Scenario D: Thread-capable Fit and Prediction
 
-Threading is useful when the longitudinal dimension is large. This example shows a threaded fit and dynamic prediction using two threads.
+Threading is useful when the longitudinal dimension is large. `JoiNMe` now
+always uses the threaded Stan programs internally; `threads_per_chain = 1`
+keeps that same kernel serial, while larger values enable parallel `reduce_sum`
+execution. This example shows the same public workflow with two threads.
 
 ```{r scenario-c-threaded}
 #| eval: false
@@ -654,7 +666,7 @@ fit_thread <- joinme(
 ndL_thread <- sim_thread$dataLong[sim_thread$dataLong$id %in% c(1, 2), ]
 ndE_thread <- sim_thread$dataEvent[sim_thread$dataEvent$id %in% c(1, 2), ]
 
-pred_thread <- rstantools::posterior_epred(
+pred_thread <- posterior_epred(
   fit_thread,
   newdataLong = ndL_thread,
   newdataEvent = ndE_thread,
@@ -671,8 +683,8 @@ pred_thread <- rstantools::posterior_epred(
   )
 )
 
-plot(pred_thread, which = "longitudinal")
-plot(pred_thread, which = "survival")
+plot(pred_thread, type = "longitudinal")
+plot(pred_thread, type = "survival")
 ```
 
 When requesting multiple outcomes with `combined = TRUE`, the method returns:

@@ -59,6 +59,7 @@ sim300 <- simulate_joinme(
   assoc = c("cv_mean", "cv_marker"),
   assoc_coefs = c(cv_mean = 0.3, cv_marker = 0.1),
   marker_weights = c(1, 2, 1),
+  fixed_marker_weights = TRUE,
   baseline_hazard = list(type = "weibull", shape = 1.1, scale = 10),
   seed = 20260303,
   time_cens = 10,

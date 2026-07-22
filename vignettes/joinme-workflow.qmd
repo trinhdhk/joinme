@@ -1,5 +1,5 @@
 ---
-title: "A Scientifically Rigorous Workflow for Joint Modelling"
+title: "A Example Workflow for Joint Modelling with mutlivariate Longitudinal and Survival Data using joinme"
 output-dir: ../docs/articles
 format:
   html:
@@ -29,10 +29,12 @@ knitr::opts_chunk$set(
 options(width = 100)
 # Ensure the package is available for the vignette to run if possible
 repo_root <- normalizePath(if (dir.exists("R")) "." else "..")
-if (requireNamespace("devtools", quietly = TRUE) && file.exists(file.path(repo_root, "DESCRIPTION"))) {
-  devtools::load_all(repo_root, quiet = TRUE)
-} else if (requireNamespace("joinme", quietly = TRUE)) {
-  library(joinme)
+if (!require('joinme', quietly = TRUE)) {
+  if (requireNamespace("devtools", quietly = TRUE) && file.exists(file.path(repo_root, "DESCRIPTION"))) {
+    devtools::load_all(repo_root, quiet = TRUE)
+  } else {
+    try(base::attachNamespace("joinme"), silent = TRUE)
+  }
 }
 library(dplyr)
 library(ggplot2)
@@ -43,17 +45,18 @@ library(posterior)
 
 # Introduction
 
-Applying a joint model in a scientific publication requires more than just fitting the model. It requires a rigorous validation process to ensure the results are robust, converged, and meaningful. This vignette outlines a "best practice" workflow for using `joinme` in a research context, suitable for inclusion in high-impact statistical or clinical journals.
+This vignette outlines a workflow for using `joinme` in a research context, suitable for inclusion in high-impact statistical or clinical journals.
 
-We will walk through a complete end-to-end simulation study:
+In this document, we will be
 1.  Generating synthetic data with known ground truth.
 2.  Fitting the joint model.
-3.  Assessing convergence and model fit.
+3.  Assessing convergence and model fit with renamed posterior draws.
 4.  Performing dynamic predictions for individual subjects.
+5.  Reporting results with consistent summaries and plotting helpers.
 
 ## Program flow in practice
 
-The `joinme` workflow follows a fixed sequence that mirrors the Stan program:
+The `joinme` package follows the below data-processing and model-fitting sequence:
 
 1. **Data assembly (R)**: build design matrices, scale time to $[0, 1]$,
   and prepare Gauss-Kronrod nodes (default 15, configurable) for survival integration.
@@ -66,6 +69,9 @@ The `joinme` workflow follows a fixed sequence that mirrors the Stan program:
   `reduce_sum`, which splits subjects across threads when requested.
 5. **Generated quantities (Stan)**: compute per-observation log-likelihoods,
   fitted values, and prediction summaries for posterior diagnostics.
+6. **Post-processing (R)**: expose the posterior through `draws()`,
+  summary helpers, `mcmc_plot()`, and explicit plotting wrappers such as
+  `longitudinal_plot()` and `survival_plot()`.
 
 This sequence is important because it clarifies where each modelling choice
 enters the inference: formula parsing happens in R, while all probability
@@ -96,24 +102,39 @@ sim <- simulate_joinme(
   quadrature_nodes = 31,
   beta_long = c("(Intercept)" = 1.0, "time" = 0.5, "x1" = 0.4),
   assoc = c("cv_total"),
-  assoc_coefs = c(cv_total = 0.5)
+  assoc_coefs = c(cv_total = 0.5),
+  fixed_marker_weights = FALSE,
+  shrinkage = 0L
 )
 
 # Gauss-Kronrod nodes/weights are fixed in Stan; `quadrature_nodes` selects
 # the node count used to build the design matrices in R.
 
-# When estimating marker weights, compare against sim$truth$marker_weights
-# because weights are used directly in Stan.
+# `truth$marker_weights` is the effective base + latent value used in the hazard.
+# The decomposition is available as marker_weights_base/marker_weights_latent.
 
 dataLong <- sim$dataLong
 dataEvent <- sim$dataEvent
+
+# Optional: generate counting-process event rows with delayed entry.
+sim_split <- simulate_joinme(
+  n_id = 20,
+  formulaEvent = survival::Surv(time_start, time_stop, event) ~ x1 + x2,
+  covariate_formulas = list(
+    x1 ~ time_varyring(rnorm, c(2, 5), mean = 0, sd = 1),
+    x2 ~ rnorm(n_id)
+  ),
+  left_truncation_max = 1.0,
+  seed = 2026
+)
+dataEvent_split <- sim_split$dataEvent
 
 # Preview the data
 head(dataLong)
 head(dataEvent)
 ```
 
-**Scientific Check**: Always visualise your longitudinal trajectories and survival distribution before modelling.
+Visualise your longitudinal trajectories and survival distribution before modelling.
 
 ```{r explore-plot}
 # Visualise trajectories for a subset of IDs
@@ -157,20 +178,19 @@ data so that the likelihood remains deterministic and reproducible.
 
 ## Marker-only random effects (no inner id term)
 
-In some studies, you may want **marker-level random effects only**, without subject-specific marker deviations. This is now supported by omitting the inner `( ... | id )` term inside the marker block. In this configuration, marker-by-id random effects are disabled (`Q_idm = 0`), and associations that require those effects (notably `corr`) are not permitted.
+In some studies, we may want **marker-level random effects only**, without subject-specific marker deviations. This is done by omitting the inner `( ... | id )` term inside the marker block. In this configuration, marker-by-id random effects are disabled (internal standata `Q_idm = 0`), and covariance-style associations that require those effects (`corr`, `vcov`) are not permitted. Note: assoc = c("corr") or assoc = c("vcov") is not allowed when Q_idm = 0.
 
 ```{r marker-only-example, eval=FALSE}
 # Marker-only random effects: no inner ( ... | id )
 formulaLong_marker_only <- y ~ time + x1 +
   (1 + time || id) +
   (0 + x1 || marker)
-
-# Note: assoc = c("corr") is not allowed when Q_idm = 0
 ```
 
+Scales of the parameters can be set via `joinme_priors()`, which allows explicit control over the prior distributions for fixed effects, association coefficients, and correlation matrices. Stricter shrinkage can be set via `shrinkage` params.
 ```{r priors}
 # Define explicit priors for transparency (optional but recommended)
-# Note: joinme exposes beta (fixed effects), alpha (associations), and lkj
+# Note: JoiNMe exposes beta (fixed effects), alpha (associations), and lkj
 priors <- joinme_priors(
   beta = list(scale = 2.5),       # Fixed effects (Student-t, df = 6)
   alpha = list(scale = 1.0),      # Association coefficients
@@ -180,10 +200,12 @@ priors <- joinme_priors(
 
 # Model Fitting
 
-We fit the model using Hamiltonian Monte Carlo (HMC) via the `cmdstanr` backend (recommended for speed and reliability).
+We fit the model using Hamiltonian Monte Carlo (HMC) via Stan. By default, `joinme` prefers `cmdstanr` if compiled, otherwise it falls back to `rstan`. The control parameters can be adjusted using `cmdstanr` syntax.
 
 ```{r fit}
-engine <- if (requireNamespace("rstan", quietly = TRUE)) "rstan" else "cmdstanr"
+has_cmdstan <- requireNamespace("cmdstanr", quietly = TRUE) &&
+  !is.null(tryCatch(cmdstanr::cmdstan_version(error_on_NA = FALSE), error = function(e) NULL))
+engine <- if (has_cmdstan) "cmdstanr" else "rstan"
 
 control <- list(
   engine = engine,
@@ -192,8 +214,7 @@ control <- list(
   iter_sampling = 200,  # Typically 1000+
   parallel_chains = 1,
   adapt_delta = 0.90,   # Increase if divergences occur
-  max_treedepth = 12,
-  force_recompile = (engine == "cmdstanr")
+  max_treedepth = 12
 )
 if (engine == "cmdstanr") control$init <- 0
 
@@ -210,27 +231,33 @@ fit <- joinme(
   priors = priors,
   control = control
 )
+
+# Counting-process fit with left truncation/time-split covariates:
+fit_split <- joinme(
+  dataLong = sim_split$dataLong,
+  dataEvent = dataEvent_split,
+  formulaLong = y ~ time + x1 + (1 + time || id) + (0 + x1 + (1 + time || id) || marker),
+  formulaEvent = survival::Surv(time_start, time_stop, event) ~ x1 + x2,
+  assoc = c("cv_total"),
+  control = control
+)
 ```
 
 # Convergence Diagnostics
 
-**Do not interpret results without checking convergence.** We use the `posterior` and `bayesplot` packages to inspect the MCMC chains.
+We use the `posterior` and `bayesplot` packages to inspect the MCMC chains.
 
 ## R-hat and Effective Sample Size
 
-Values of $\hat{R} < 1.01$ and ESS > 400 indicate reasonable convergence for inference.
+Values of $\hat{R} < 1.01$ and ESS > 400 indicate reasonable convergence for inference, as recommended by Stan developers. 
 
 ```{r diagnostics}
-# robust summary of regression coefficients
-draws_obj <- if (inherits(fit$fit, "CmdStanMCMC")) {
-  fit$fit$draws()
-} else {
-  posterior::as_draws_array(fit$fit)
-}
+# robust summary of regression coefficients on the renamed user-facing scale
+draws_obj <- draws(fit, format = "draws_array")
 
 draws_sub <- posterior::subset_draws(
   draws_obj,
-  variable = c("^beta\\[", "^gamma_w\\[", "^alpha"),
+  variable = c("^\\(Intercept\\)$", "^time$", "^event", "^cv_total"),
   regex = TRUE
 )
 
@@ -243,21 +270,11 @@ posterior::summarise_draws(
 
 ## Traceplots
 
-Visual inspection of traceplots helps identify mixing issues or stuck chains.
+Visual inspection of traceplots helps identify mixing issues or stuck chains. Note that the marker-specific association term for the first association (if marker weights are shared) is forced to be positive. If `shared_marker_weights == FALSE`, then the marker-specific association terms are all constrained to be positive.
 
 ```{r trace}
-# Plot traces for the association parameter
-bayesplot::mcmc_trace(draws_obj, regex_pars = "alpha")
-```
-
-# Posterior Predictive Checks (PPC)
-
-A key step in validation is checking if the model can reproduce the observed data patterns.
-
-```{r ppc, eval=FALSE}
-# posterior_predict draws from the fitted model for PPC
-# y_rep <- posterior_predict(fit, ndraws = 100)
-# bayesplot::ppc_dens_overlay(dataLong$y, y_rep)
+# Plot traces for the association parameter using the helper API
+mcmc_plot(fit, variable = "cv_total", type = "trace")
 ```
 
 # Dynamic Prediction
@@ -282,8 +299,8 @@ t_cond <- 4
 # You can also pass a column name in newdataEvent, e.g. time_start = "time_start".
 
 # Filter history up to t_cond
-ndLong <- dataLong %>% filter(id == target_id, time <= t_cond)
-ndEvent <- dataEvent %>% filter(id == target_id)
+ndLong <- dataLong |> filter(id == target_id, time <= t_cond)
+ndEvent <- dataEvent |> filter(id == target_id)
 
 print(paste("Predicting for ID:", target_id, "conditioned on history up to t =", t_cond))
 ```
@@ -299,7 +316,8 @@ preds <- tryCatch(
     newdataEvent = ndEvent,
     time_start = t_cond,
     times = seq(t_cond, 8, length.out = 30),
-    process = "event" # Focus on survival and cumhaz
+    process = "event", # Focus on survival and cumhaz
+    control = list(progress = FALSE) # just to silence the progress bar
   ),
   error = function(e) {
     message("Prediction skipped: ", conditionMessage(e))
@@ -307,28 +325,97 @@ preds <- tryCatch(
   }
 )
 
-# The result is a list with survival and cumhaz data frames
-if (!is.null(preds)) head(preds$survival)
+head(preds$predictions$survival)
 ```
+
+`concordance(fit, ...)` now evaluates dynamic prediction on a dense per-subject
+survival grid between the landmark and the requested horizon. This keeps the
+discrimination calculation aligned with the same prediction machinery used by
+the fitted plotting helpers and avoids the instability that can arise from
+endpoint-only event prediction.
 
 Finally, we visualise the predicted survival curve. The shaded area represents the 95% credible interval, accounting for uncertainty in both the parameters and the random effects.
 
 ```{r predict-plot}
 if (!is.null(preds)) {
-  plot(preds) +
+  survival_plot(preds) +
     ggtitle(paste("Dynamic Survival Prediction for Subject", target_id)) +
     geom_vline(xintercept = dataEvent$time[dataEvent$id == target_id], linetype = "dashed", color = "red") +
     annotate("text", x = dataEvent$time[dataEvent$id == target_id], y = 0.1, label = "Observed event time", color = "red", hjust = 1.1)
 }
 ```
 
-# Conclusion
+# Posterior reporting helpers
 
-By following this workflow:
-1.  **Simulate** (or explore) to understand data properties.
-2.  **Fit** with explicit priors and robust settings.
-3.  **Diagnose** convergence thoroughly using $\hat{R}$ and traceplots.
-4.  **Validate** using posterior predictive checks.
-5.  **Predict** to demonstrate clinical utility.
+The scientific reporting layer should use the same user-facing parameter names as the tables returned by `summary(fit)`. The `draws()` and `mcmc_plot()` helpers make that possible without directly handling raw Stan variables.
 
-You ensure that your joint modelling analysis is scientifically sound and robust against common pitfalls in Bayesian inference.
+```{r posterior-reporting}
+renamed_draws <- draws(fit, variables = c("time", "cv_total"), format = "draws_df")
+head(renamed_draws)
+
+mcmc_plot(fit, variable = c("time", "cv_total"), type = "intervals")
+```
+
+The plotting wrappers expose the same fitted and predicted views as the main `plot()` methods while making the intent explicit in scripts and reports:
+
+```{r plot-wrappers, eval=FALSE}
+longitudinal_plot(fit, subject = 1, scale = "epred")
+association_plot(fit)
+diagnostic_plot(fit, type = "ess_bulk")
+
+if (!is.null(preds)) {
+  longitudinal_plot(preds)
+  survival_plot(preds)
+  cumhaz_plot(preds)
+}
+```
+
+For fitted longitudinal displays, the heatmap is now an alternative to the
+usual separated marker curves:
+
+```{r predict-heatmap, eval=FALSE}
+plot(
+  fit,
+  type = "longitudinal",
+  longitudinal_style = "heatmap",
+  scale = "epred",
+  threshold = 0.05
+)
+```
+
+`plot(fit, ...)` uses fitted posterior samples directly and does not accept a conditioning argument. Named covariate profiles belong to the conditional- effects estimand. Build those profiles with `make_conditions()` and pass them to `conditional_effects()`:
+
+```{r predict-conditions, eval=FALSE}
+profiles <- make_conditions(dataEvent, vars = c("x1", "x2"))
+
+effects_data <- conditional_effects(
+  fit,
+  effects = list(
+    longitudinal = "time",
+    event = c("x1", "x2")
+  ),
+  conditions = profiles,
+  process = c("longitudinal", "event"),
+  longitudinal_estimand = "population",
+  plot = FALSE
+)
+
+plot(effects_data, ask = FALSE)
+```
+
+The longitudinal calculation has three estimands. `"population"` uses only the fixed-effect contribution. `"marker"` adds the fitted marker-level deviation while still excluding subject and marker-by-subject deviations.
+`"marginal_marker"` calculates each selected marker response first and averages those responses within every posterior draw. The last ordering is important for nonlinear links: it estimates the average expected response rather than the expected response at an average marker effect. The `markers` argument restricts the marker-specific panels or the equally weighted set entering that average.
+
+```{r predict-conditions-marker-average, eval=FALSE}
+average_marker_effect <- conditional_effects(
+  fit,
+  effects = "time",
+  process = "longitudinal",
+  longitudinal_estimand = "marginal_marker",
+  markers = c("m1", "m2"),
+  plot = FALSE
+)
+```
+
+The event tables contain the covariate-specific relative hazard
+`exp(W * gamma)`, holding the baseline hazard and longitudinal association contribution fixed.

@@ -138,4 +138,3 @@ test_that("weighted grouping requires weights= argument (weight= rejected)", {
     "weights"
   )
 })
-

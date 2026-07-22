@@ -4,11 +4,16 @@
 \alias{build_standata_transforms}
 \title{Transform Specification Helper}
 \usage{
-build_standata_transforms(transform_list = NULL, default_mode = 0)
+build_standata_transforms(
+  transform_list = NULL,
+  default_mode = 0,
+  n_corr_components = NULL,
+  n_vcov_components = NULL
+)
 }
 \arguments{
 \item{transform_list}{List with elements cv_total, cs_total, cv_mean, cs_mean,
-cv_marker, cs_marker, corr, each specifying a transformation. See details.}
+cv_marker, cs_marker, corr, vcov, each specifying a transformation. See details.}
 
 \item{default_mode}{Default transformation mode if not specified.}
 }
@@ -17,42 +22,58 @@ List of standata entries for transformation parameters:
 \itemize{
 \item tf_mode_*
 \item functional_ops_* and const_data_* (if mode 1)
-\item knots_* and coeff_* and spline_degree_* (if mode 2 or 3)
+\item estimate_iota_intercept_* and estimate_iota_slope_* (fit-only functional affine-shift counts)
+\item functional_iota_intercept_idx_* and functional_iota_slope_idx_* (per-op affine-shift indices)
+\item knots_* and coeff_* and spline_degree_* (if mode 2, 3, or 4)
 }
 }
 \description{
-Transform can be specified in three modes:
+Transform can be specified in four modes:
 \itemize{
 \item Mode 0: Identity (no transformation)
 \item Mode 1: Functional (arbitrary nested functions via parser)
 \item Mode 2: I-spline basis (monotonic, smooth)
 \item Mode 2 (penalised): I-spline coefficients estimated with smoothness penalty
+\item Mode 4: I-spline basis evaluated on \code{expit(x)} for a bounded, numerically
+stable spline input domain
 \item Mode 3: Piecewise-linear (user-defined interpolation)
 }
 
 Each transformation term (CV_total, CS_total, CV_mean, CS_mean, CV_marker,
-CS_marker, corr) can have its own independent specification, enabling
-flexibility in model building.
+CS_marker, corr, vcov) can have its own independent specification, enabling
+flexibility in model building. For covariance-style channels, \code{corr}
+transformations act on off-diagonal entries of the subject-specific
+Cholesky-correlation factor \code{K}, while \code{vcov} transformations act on those
+same off-diagonal \code{K} entries together with the subject-specific standard
+deviations.
 }
 \details{
 Provides utilities to build and manage transformation specifications
-for the joinme Stan model's association term.
+for the JoiNMe Stan model's association term.
 
 Each element of transform_list should be a list with:
 \itemize{
 \item type: "identity", "functional", "ispline", "ispline_penalised" (or alias
-"ispline_penalized"), or "pwlin"
+"ispline_penalized"), "ispline_expit", "ispline_expit_penalised" (aliases
+\code{"ispline_exp_penalised"}, \code{"ispline_exp_penalized"},
+\code{"ispline_expit_penalized"}), or "pwlin"
 \item Additional fields depend on type:
 \itemize{
 \item functional: expr (quosure, formula, quoted expression, or string)
 \item ispline: knots (vector), coeff (vector), degree (int)
 \item ispline_penalised: knots or n_knots, degree, lambda, optional x, optional y, optional weights
 \itemize{
-\item if y is supplied, joinme fits the monotone spline to the training pairs (x, y) in R
+\item if y is supplied, JoiNMe fits the monotone spline to the training pairs (x, y) in R
 using the same anchored endpoint convention as the Stan-estimated path
 (first coefficient = 0, last coefficient = 1)
 \item if y is omitted, Stan estimates the monotone spline coefficients directly and lambda controls smoothness
 }
+\item ispline_expit / ispline_expit_penalised: identical to the I-spline
+variants above, except the raw association feature is first mapped
+through \code{plogis(x)} and the spline basis is then evaluated on that
+bounded expit-scale input. User-supplied training \code{x} values and
+explicit \code{knots} for these transform types must therefore already be
+specified on the expit scale in \verb{[0, 1]}.
 \item pwlin: x (vector), y (vector)
 }
 }
@@ -67,6 +88,12 @@ with \code{degree = 3} by default when omitted.
 \code{list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), y = exp(seq(-2, 2, length.out = 50)), n_knots = 6, degree = 3, lambda = 1)}
 \item ispline_penalised (Stan-estimated):
 \code{list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), n_knots = 6, degree = 3, lambda = 1)}
+\item ispline_expit:
+\code{list(type = "ispline_expit", knots = c(0.05, 0.5, 0.95), coeff = c(0, 0.25, 0.8, 1.0, 1.1))}
+\item ispline_expit_penalised (plug-in fit):
+\code{list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), y = seq(0, 1, length.out = 50), n_knots = 6, degree = 3, lambda = 1)}
+\item ispline_expit_penalised (Stan-estimated):
+\code{list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), n_knots = 6, degree = 3, lambda = 1)}
 \item pwlin:
 \code{list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))}
 }
@@ -78,6 +105,13 @@ Default values used internally:
 \item \code{ispline_penalised}: \code{n_knots = 6}, \code{degree = 3}, \code{lambda = 1} if omitted,
 \item \code{pwlin} and \code{functional}: no additional defaults beyond their required fields.
 }
+
+For \verb{ispline_expit*} declarations, the internal spline basis lives on the
+bounded interval $(0, 1)$ after applying \code{plogis()} to the raw association
+feature. User-supplied training \code{x} values and explicit \code{knots} should be on
+that same bounded scale so the fitted spline domain matches the runtime basis.
+This often yields better-conditioned knot placement and smoother optimisation
+for steep nonlinear transforms.
 
 For user-facing declarations, prefer \code{joinme_tf(...)}, which validates and
 normalises channel specifications before they are passed here.
