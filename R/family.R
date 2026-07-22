@@ -31,7 +31,7 @@ NULL
 #' @return Object of class `"JoiNMe_family_spec"`.
 #' @aliases jm_family
 #' @export
-joinme_family <- jm_family <- function(name, link = NULL, inv_link = NULL) {
+joinme_family <- function(name, link = NULL, inv_link = NULL) {
   fam_code <- .parse_family(name)
   fam_name <- .family_code_to_name(fam_code)
 
@@ -65,6 +65,10 @@ joinme_family <- jm_family <- function(name, link = NULL, inv_link = NULL) {
     class = "JoiNMe_family_spec"
   )
 }
+
+#' @rdname joinme_family
+#' @export
+jm_family <- joinme_family
 
 #' @keywords internal
 #' @noRd

@@ -12,6 +12,14 @@ joinme_basehaz(
   degree = 3L,
   formula = ~1 + time
 )
+
+jm_basehaz(
+  type = c("bs", "ns", "formula"),
+  n_knots = 5L,
+  knots = NULL,
+  degree = 3L,
+  formula = ~1 + time
+)
 }
 \arguments{
 \item{type}{Baseline hazard type: "bs", "ns", or "formula".}

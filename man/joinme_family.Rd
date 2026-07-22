@@ -6,6 +6,8 @@
 \title{JoiNMe longitudinal family specification}
 \usage{
 joinme_family(name, link = NULL, inv_link = NULL)
+
+jm_family(name, link = NULL, inv_link = NULL)
 }
 \arguments{
 \item{name}{Character scalar family name, e.g. \code{"student_t"}, \code{"bernoulli"}.}

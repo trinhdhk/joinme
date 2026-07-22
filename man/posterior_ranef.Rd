@@ -9,7 +9,7 @@ posterior_ranef(object, ...)
 \arguments{
 \item{object}{A \code{JoiNMeFit} object.}
 
-\item{...}{Additional arguments forwarded to \code{\link[nlme:ranef]{ranef()}}.}
+\item{...}{Additional arguments forwarded to \code{\link[=ranef]{ranef()}}.}
 }
 \value{
 The same object returned by \code{ranef(object, summary = FALSE, ...)}.

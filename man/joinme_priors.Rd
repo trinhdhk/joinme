@@ -12,6 +12,8 @@ joinme_priors(
   lkj = NULL,
   .validate = TRUE
 )
+
+jm_priors(beta = NULL, alpha = NULL, iota = NULL, lkj = NULL, .validate = TRUE)
 }
 \arguments{
 \item{beta}{Beta prior specification. Use either a numeric scale (or vector of

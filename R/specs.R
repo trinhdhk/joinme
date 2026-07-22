@@ -38,7 +38,7 @@
 #'   cv_marker = list(type = "pwlin", x = c(-1, 0, 1), y = c(0.2, 1, 0.2))
 #' )
 #' print(tf)
-joinme_tf <- jm_tf <- function(..., .validate = TRUE) {
+joinme_tf <- function(..., .validate = TRUE) {
   args <- list(...)
   if (length(args) == 1L && is.null(names(args)) &&
       (inherits(args[[1]], "joinme_tf") || is.list(args[[1]]))) {
@@ -46,6 +46,10 @@ joinme_tf <- jm_tf <- function(..., .validate = TRUE) {
   }
   .normalise_joinme_tf_input(args, validate = .validate)
 }
+
+#' @rdname joinme_tf
+#' @export
+jm_tf <- joinme_tf
 
 #' @export
 print.joinme_tf <- function(x, ...) {
@@ -117,12 +121,16 @@ print.joinme_tf <- function(x, ...) {
 #'   lkj = 2
 #' )
 #' print(pri)
-joinme_priors <- jm_priors <- function(beta = NULL, alpha = NULL, iota = NULL, lkj = NULL, .validate = TRUE) {
+joinme_priors <- function(beta = NULL, alpha = NULL, iota = NULL, lkj = NULL, .validate = TRUE) {
   .joinme_priors_(
     list(beta = beta, alpha = alpha, iota = iota, lkj = lkj),
     validate = .validate
   )
 }
+
+#' @rdname joinme_priors
+#' @export
+jm_priors <- joinme_priors
 
 #' @export
 print.joinme_priors <- function(x, ...) {
@@ -170,7 +178,7 @@ print.joinme_priors <- function(x, ...) {
 #'  n_knots = 5,
 #'  degree = 3
 #' )
-joinme_basehaz <- jm_basehaz <- function(
+joinme_basehaz <- function(
   type = c('bs', 'ns', 'formula'),
   n_knots = 5L,
   knots = NULL,
@@ -211,6 +219,10 @@ joinme_basehaz <- jm_basehaz <- function(
     class = "joinme_basehaz"
   )
 }
+
+#' @rdname joinme_basehaz
+#' @export
+jm_basehaz <- joinme_basehaz
 
 #' Build named conditional-effects profiles
 #'

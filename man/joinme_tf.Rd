@@ -6,6 +6,8 @@
 \title{Declare association transformations with validation}
 \usage{
 joinme_tf(..., .validate = TRUE)
+
+jm_tf(..., .validate = TRUE)
 }
 \arguments{
 \item{...}{Named channel specifications.}
