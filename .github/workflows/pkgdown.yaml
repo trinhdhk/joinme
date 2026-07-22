@@ -21,7 +21,7 @@ jobs:
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       MAKEFLAGS: "-j1"
-      CXXFLAGS: "-O1"
+      CXXFLAGS: "-O2"
       R_QUARTO_QUIET: "FALSE"
     permissions:
       contents: write
@@ -44,7 +44,7 @@ jobs:
         shell: bash
         run: |
           echo "MAKEFLAGS=-j1" >> ~/.Renviron
-          echo "CXXFLAGS+=-O1" >> ~/.Renviron
+          echo "CXXFLAGS+=-O2" >> ~/.Renviron
           echo "R_QUARTO_QUIET=FALSE" >> ~/.Renviron
           cat ~/.Renviron
 
