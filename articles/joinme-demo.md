@@ -1,0 +1,761 @@
+# JoiNMe: Usage Demo
+
+## 1 Purpose and Reproducibility
+
+This vignette demonstrates the usage of `joinme` with multiple
+scenarios, including **data simulation**, **model fitting**,
+**diagnostic interpretation**, **dynamic prediction**, **plotting**, and
+**threaded computation**. Each block is designed to be reproducible and
+to illustrate a specific modelling choice.
+
+For the methodological background, see the theory vignette in
+[joinme-theory.html](https://trinhdhk.github.io/joinme/articles/joinme-theory.md).
+
+This demo covers mixed families (including double_exponential,
+skew_double_exponential, beta, and cumulative_logit) and competing-risk
+survival via event type columns.
+
+For skew_double_exponential, you can fix the quantile parameter with
+`control = list(tau_fixed = 0.2)` to model a specific quantile. If no
+skew_double_exponential family is present, the control is ignored with a
+warning.
+
+Code
+
+``` r
+
+set.seed(123)
+```
+
+## 2 Quick model-spec checklist
+
+Accepted specifications include:
+
+- **Longitudinal structure** (`formulaLong`, `families`, optional
+  `formulaDist`)
+- **Survival structure** (`formulaEvent`, and optional baseline hazard
+  controls like `basehaz`, `n_knots`)
+- **Association structure** (`assoc` plus `transforms = joinme_tf(...)`)
+- **Priors**
+  (`priors = joinme_priors(beta = ..., alpha = ..., lkj = ...)`)
+- **Computation** (`control` for sampling, and optionally threading)
+- **Posterior reporting**
+  ([`summary()`](https://rdrr.io/r/base/summary.html),
+  [`draws()`](https://trinhdhk.github.io/joinme/reference/draws.md),
+  [`mcmc_plot()`](https://rdrr.io/pkg/joinme/man/mcmc_plot.html), helper
+  plots)
+
+### 2.1 Family-specific links (new)
+
+Longitudinal families can now carry per-marker inverse-links with
+`jm_family(...)`. This affects both `epred` and `predict` scales in
+dynamic prediction.
+
+Code
+
+``` r
+
+families_linked <- list(
+  jm_family("student_t", link = "identity"),
+  jm_family("bernoulli", link = "probit"),
+  jm_family("poisson", inv_link = ~ exp(x))
+)
+
+fit_linked <- joinme(
+  formulaLong = formulaLong,
+  dataLong = sim$dataLong,
+  formulaEvent = formulaEvent,
+  dataEvent = sim$dataEvent,
+  families = families_linked,
+  assoc = c("cv_total")
+)
+```
+
+## 3 Scenario A: Multivariate Continuous Markers with CV Association
+
+### 3.1 Data simulation
+
+We simulate a multi-marker longitudinal dataset with a survival process
+linked through **current value (CV)**. The simulator also returns truth
+values for fixed effects and survival coefficients.
+
+For marker-aggregated terms (`cv_total`, `cv_marker`, `cs_total`,
+`cs_marker`), both simulation and Stan fit/prediction apply transforms
+at marker level before weighted averaging. This keeps nonlinear
+association terms consistent end-to-end.
+
+Code
+
+``` r
+
+sim <- simulate_joinme(
+  n_id = 100,
+  families = rep("student_t", 5),
+  n_obs_per_marker_per_id = 10,
+  times_obs = seq(0, 8, length.out = 14),
+  quadrature_nodes = 31,
+  seed = 123,
+  assoc = c("cv_total"),
+  assoc_coefs = c(cv_total = 0.6)
+)
+
+# Gauss-Kronrod nodes/weights are fixed in Stan; `quadrature_nodes` selects
+# the node count used to build the design matrices in R.
+
+# Custom inverse-links can be supplied via jm_family(..., inv_link = ~ ...).
+
+# When estimating marker weights, compare against sim$truth$marker_weights
+# because weights are used directly in Stan.
+```
+
+### 3.2 Model specification and fit
+
+We start with identity transforms and a conservative sampling
+configuration to keep runtime manageable. The nested marker block
+`( ... | marker )` supports an inner `( ... | id )` term; this enables
+marker-by-id effects and the CORR association.
+
+Subject/group-weighted declarations can be made per grouping term with
+`weighted(group, weights = <column>)`, e.g.
+`(0 + x1 + (1 + time | weighted(id, weights = id_w)) | weighted(marker, weights = marker_w))`.
+
+Code
+
+``` r
+
+formulaLong <- y ~ 1 + time + x1 +
+  (1 + time || id) +
+  (0 + x1 + (1 + time || id) || marker)
+
+formulaEvent <- survival::Surv(time, event) ~ 1 + x1 + x2
+
+fit <- joinme(
+  formulaLong = formulaLong,
+  dataLong = sim$dataLong,
+  formulaEvent = formulaEvent,
+  dataEvent = sim$dataEvent,
+  assoc = c("cv_total"),
+  families = rep('student_t',5),
+  transforms = joinme_tf(cv_total = "identity"),
+  priors = joinme_priors(),
+  control = list(
+    parallel_chains = 2,
+    iter_warmup = 300,
+    iter_sampling = 700,
+    seed = 123,
+    refresh = 100,
+    adapt_delta = 0.75,
+    max_treedepth=12,
+    init = 1
+    # engine = 'rstan'
+  )
+)
+```
+
+To customise priors or the baseline hazard basis, supply
+`priors = joinme_priors(...)` and/or forward standata arguments via
+`...`. Distributional regression for parameters such as $`\sigma`$ or
+$`\nu`$ can be specified through `formulaDist`.
+
+Code
+
+``` r
+
+fit2 <- joinme(
+  formulaLong = formulaLong,
+  dataLong = sim$dataLong,
+  formulaEvent = formulaEvent,
+  dataEvent = sim$dataEvent,
+  assoc = c("cv_total"),
+  transforms = joinme_tf(cv_total = "identity"),
+  priors = joinme_priors(beta = list(scale = 1.5), alpha = list(scale = 1.5), lkj = 2),
+  basehaz = "bs",
+  n_knots = 5,
+  basehaz_degree = 3,
+  control = list(iter_warmup = 500, iter_sampling = 500, adapt_delta = 0.9)
+)
+```
+
+### 3.3 Diagnostics and parameter interpretation
+
+We extract diagnostics (R-hat, ESS, divergences) and compare posterior
+summaries to known truth values. This yields **bias** and **coverage**
+diagnostics for fixed effects and survival coefficients.
+
+Code
+
+``` r
+
+sum_obj <- summary(fit)
+print(sum_obj)
+
+# Sampler diagnostics
+diag_tbl <- as.data.frame(t(unlist(sum_obj$diagnostics)))
+knitr::kable(diag_tbl, digits = 3, caption = "Sampler diagnostics (scenario A).")
+
+# Fixed effects (beta)
+fixef_tbl <- sum_obj$tables$fixef
+truth_beta <- sim$truth$beta_long
+
+fixef_tbl$truth <- truth_beta[fixef_tbl$term]
+fixef_tbl$bias <- fixef_tbl$Estimate - fixef_tbl$truth
+fixef_tbl$covered <- fixef_tbl$truth >= fixef_tbl$Q2.5 &
+  fixef_tbl$truth <= fixef_tbl$Q97.5
+
+fixef_view <- fixef_tbl[, c("term", "Estimate", "Q2.5", "Q97.5", "truth", "bias", "covered")]
+knitr::kable(fixef_view, digits = 3, caption = "Fixed effects summary (scenario A).")
+
+# Survival covariates (gamma_w)
+if (!is.null(sum_obj$tables$gamma_w)) {
+  gamma_tbl <- sum_obj$tables$gamma_w
+  truth_gamma <- sim$truth$beta_event
+
+  gamma_tbl$truth <- truth_gamma[gamma_tbl$term]
+  gamma_tbl$bias <- gamma_tbl$Estimate - gamma_tbl$truth
+  gamma_tbl$covered <- gamma_tbl$truth >= gamma_tbl$Q2.5 &
+    gamma_tbl$truth <= gamma_tbl$Q97.5
+
+  gamma_view <- gamma_tbl[, c("term", "Estimate", "Q2.5", "Q97.5", "truth", "bias", "covered")]
+  knitr::kable(gamma_view, digits = 3, caption = "Survival covariate summary (scenario A).")
+}
+
+# Association (aggregate CV total)
+if (!is.null(sum_obj$tables$assoc)) {
+  assoc_tbl <- sum_obj$tables$assoc
+  alpha_total_hat <- assoc_tbl$Estimate[assoc_tbl$term %in% c("cv_total")]
+  alpha_total_bias <- alpha_total_hat - sim$truth$alpha_cv_total
+  list(alpha_total_hat = alpha_total_hat, alpha_total_bias = alpha_total_bias)
+}
+
+# Renamed posterior draws and MCMC visualisation
+draws(fit, variables = c("time", "alpha_cv_total"), format = "draws_df")
+mcmc_plot(fit, variable = c("time", "alpha_cv_total"), type = "trace")
+```
+
+### 3.4 Residual sum of squares for fitted trajectories
+
+The `JoiNMeDynPred` object includes fitted values for observed history.
+We compute a **residual sum of squares** (RSS) on the expected-response
+scale (`epred`).
+
+Code
+
+``` r
+
+pred_fit <- posterior_epred(
+  fit,
+  newdataLong = sim$dataLong,
+  newdataEvent = sim$dataEvent,
+  time_start = max(sim$dataLong$time),
+  times = seq(0, max(sim$dataLong$time) + 1, length.out = 60),
+  control = list(
+    n_samples = 100,
+    iter_sampling = 500,
+    iter_warmup = 400,
+    chains = 3,
+    threads_per_chain = 5
+  )
+)
+
+fitted_ep <- pred_fit$predictions$longitudinal_fitted
+
+if (!requireNamespace("dplyr", quietly = TRUE)) {
+  stop("Install dplyr to run RSS calculation.")
+}
+
+library(dplyr)
+
+rss_tbl <- fitted_ep %>%
+  filter(scale == "epred") %>%
+  inner_join(
+    sim$dataLong,
+    by = c("id", "marker", "time")
+  ) %>%
+  summarise(RSS = sum((y - Estimate)^2, na.rm = TRUE))
+
+knitr::kable(rss_tbl, digits = 3, caption = "RSS for fitted trajectories (scenario A).")
+```
+
+### 3.5 Dynamic prediction and plotting
+
+We generate a future prediction for one subject and plot longitudinal
+and survival outputs.
+
+Code
+
+``` r
+
+id <- 1
+ndL <- sim$dataLong[sim$dataLong$id == id, ]
+ndE <- sim$dataEvent[sim$dataEvent$id == id, ]
+
+time_start <- max(ndL$time)
+times <- seq(time_start, time_start + 2, length.out = 50)
+
+pred_ep <- posterior_epred(
+  fit,
+  newdataLong = ndL,
+  newdataEvent = ndE,
+  time_start = time_start,
+  times = times,
+  control = list(
+    n_samples = 200,
+    n_pred_draws = 400,
+    iter_sampling = 500,
+    iter_warmup = 400,
+    threads_per_chain = 5,
+    chains = 2
+  )
+)
+
+plot(pred_ep, type = "longitudinal")
+plot(pred_ep, type = "survival")
+longitudinal_plot(pred_ep)
+survival_plot(pred_ep)
+```
+
+[`predict()`](https://rdrr.io/r/stats/predict.html) now accepts `scale`
+as a character vector. If omitted, all longitudinal scales are produced:
+`c("epred", "linpred", "predict")`. Use `plot(..., scale = "epred")` (or
+another available scale) to choose which trajectory scale to visualise.
+
+Dynamic prediction is conditional on observed history up to `time_start`
+and (by construction) survival up to that landmark; the survival plot
+corresponds to
+$`\Pr(T > t \mid T > T_{start}, \mathcal{H}(T_{start}))`$.
+
+`control$n_samples` controls how many posterior parameter draws are
+extracted from the fitted model, while `control$n_pred_draws` controls
+how many draws are produced in the dynpred output object. This
+decoupling allows lightweight posterior extraction with a larger
+prediction Monte Carlo layer when needed.
+
+When `times = NULL`, you can now control the default forecast window
+with `time_horizon` (defaulting to `tmax` from the fitted model):
+
+Code
+
+``` r
+
+pred_ep_horizon <- posterior_epred(
+  fit,
+  newdataLong = ndL,
+  newdataEvent = ndE,
+  time_start = time_start,
+  times = NULL,
+  time_horizon = 2,
+  control = list(
+    n_samples = 100,
+    n_pred_draws = 150,
+    iter_sampling = 200,
+    iter_warmup = 200,
+    threads_per_chain = 2,
+    chains = 1
+  )
+)
+
+head(pred_ep_horizon$predictions$survival)
+```
+
+Prediction enforces marker-level consistency: `newdataLong$marker` must
+use only levels seen during fitting. Internally, dynamic prediction
+outputs are stabilised by averaging over dynpred posterior rows for each
+indexed draw before constructing quantile summaries.
+
+#### 3.5.1 Diagnostics and random-effects extraction
+
+`JoiNMe` now uses the same diagnostics table schema for fitted and
+predicted objects.
+
+Code
+
+``` r
+
+diagnosis(fit)
+diagnosis(pred_ep)
+```
+
+For fitted models,
+[`ranef()`](https://rdrr.io/pkg/nlme/man/random.effects.html),
+[`coef()`](https://rdrr.io/r/stats/coef.html), and
+[`vcov()`](https://rdrr.io/r/stats/vcov.html) are nested by
+`formulaLong` and `formulaDist`:
+
+Code
+
+``` r
+
+re_fit <- ranef(fit)
+cf_fit <- coef(fit)
+vc_fit <- vcov(fit)
+
+# Examples
+re_fit$formulaLong$id
+cf_fit$formulaLong$id
+vc_fit$formulaLong$id
+```
+
+For dynamic prediction, marker-by-id random effects and covariance are
+exposed only when marker covariance depends on id:
+
+Code
+
+``` r
+
+if (isTRUE(pred_ep$metadata$marker_corr_depends_on_id)) {
+  ranef(pred_ep)
+  vcov(pred_ep)
+}
+```
+
+## 4 Scenario B: Competing-Risk Survival
+
+This example adds a competing-risk indicator via `event_type`. The
+dynamic survival output corresponds to overall survival across causes.
+
+Code
+
+``` r
+
+sim_comp <- simulate_joinme(
+  n_id = 40,
+  families = rep("student_t", 3),
+  n_obs_per_marker_per_id = 6,
+  times_obs = seq(0, 8, length.out = 12),
+  seed = 444,
+  assoc = c("cv_total"),
+  assoc_coefs = c(cv_total = 0.6)
+)
+
+# Simulate cause-specific event times and derive event_type from the minimum time.
+set.seed(444)
+cause_levels <- c("cause1", "cause2")
+time_cens <- 8.0
+
+h0_list <- list(
+  cause1 = weibull_h0(shape = 1.2, scale = 5.0),
+  cause2 = weibull_h0(shape = 2.0, scale = 7.0)
+)
+
+gamma_w_mat <- rbind(
+  cause1 = c("(Intercept)" = -0.2, "x1" = 0.4, "x2" = -0.3),
+  cause2 = c("(Intercept)" = 0.1, "x1" = -0.2, "x2" = 0.5)
+)
+
+find_bracket <- function(f, lower = 0, upper = 1, upper_max = 50, expand = 1.7, max_expand = 60L) {
+  f_lower <- f(lower)
+  if (!is.finite(f_lower) || f_lower > 0) return(NULL)
+  f_upper <- f(upper)
+  if (!is.finite(f_upper)) return(NULL)
+  it <- 0L
+  while (f_upper < 0 && upper < upper_max && it < max_expand) {
+    upper <- min(upper_max, upper * expand)
+    f_upper <- f(upper)
+    if (!is.finite(f_upper)) return(NULL)
+    it <- it + 1L
+  }
+  if (f_upper >= 0) list(lower = lower, upper = upper) else NULL
+}
+
+draw_cause_time <- function(i, k) {
+  haz_row <- c("(Intercept)" = 1, "x1" = sim_comp$dataEvent$x1[i], "x2" = sim_comp$dataEvent$x2[i])
+  eta_w <- sum(haz_row * gamma_w_mat[k, ])
+  alpha_cv <- sim_comp$truth$alpha_cv_total
+  h0 <- h0_list[[k]]
+
+  hazard_i <- function(t) h0(t) * exp(eta_w + alpha_cv * sim_comp$helpers$cv_total(i, t))
+  cumhaz_i <- function(t) {
+    if (t <= 0) return(0)
+    out <- integrate(hazard_i, lower = 0, upper = t, rel.tol = 1e-6, subdivisions = 2000L)
+    as.numeric(out$value)
+  }
+
+  U <- runif(1)
+  target <- -log(U)
+  f_root <- function(t) cumhaz_i(t) - target
+  br <- find_bracket(f_root, lower = 0, upper = 1, upper_max = 50)
+  if (is.null(br)) return(list(time = time_cens, event = 0L))
+  T <- uniroot(f_root, lower = br$lower, upper = br$upper)$root
+  if (T > time_cens) list(time = time_cens, event = 0L) else list(time = T, event = 1L)
+}
+
+event_time <- numeric(nrow(sim_comp$dataEvent))
+event_type <- character(nrow(sim_comp$dataEvent))
+event_flag <- integer(nrow(sim_comp$dataEvent))
+
+for (i in seq_len(nrow(sim_comp$dataEvent))) {
+  times_k <- vapply(cause_levels, function(k) draw_cause_time(i, k)$time, numeric(1))
+  min_idx <- which.min(times_k)
+  event_time[i] <- times_k[min_idx]
+  event_flag[i] <- as.integer(event_time[i] < time_cens)
+  event_type[i] <- cause_levels[min_idx]
+  if (event_flag[i] == 0L) {
+    event_type[i] <- cause_levels[1]
+  }
+}
+
+sim_comp$dataEvent$time <- event_time
+sim_comp$dataEvent$event <- event_flag
+sim_comp$dataEvent$event_type <- factor(event_type, levels = cause_levels)
+
+sim_comp$dataLong <- sim_comp$dataLong |>
+  dplyr::inner_join(sim_comp$dataEvent[, c("id", "time")], by = "id", suffix = c("", "_event")) |>
+  dplyr::filter(time <= time_event) |>
+  dplyr::select(-time_event)
+```
+
+Code
+
+``` r
+
+formulaLong_comp <- y ~ 1 + time + x1 +
+  (1 + time || id) +
+  (0 + x1 + (1 + time || id) || marker)
+
+formulaEvent_comp <- survival::Surv(time, event) ~ 1 + x1 + x2
+
+fit_comp <- joinme(
+  formulaLong = formulaLong_comp,
+  dataLong = sim_comp$dataLong,
+  formulaEvent = formulaEvent_comp,
+  dataEvent = sim_comp$dataEvent,
+  assoc = c("cv_total"),
+  families = rep("student_t", 3),
+  transforms = joinme_tf(cv_total = "identity"),
+  event_type_var = "event_type",
+  control = list(
+    engine = "cmdstanr",
+    chains = 1,
+    parallel_chains = 1,
+    iter_warmup = 150,
+    iter_sampling = 150,
+    seed = 444,
+    refresh = 0,
+    adapt_delta = 0.85,
+    max_treedepth = 10
+  )
+)
+```
+
+Prediction is shown below but left unevaluated during rendering. Set
+`eval = TRUE` once CmdStan is configured for dynamic prediction.
+
+Code
+
+``` r
+
+id_comp <- 1
+ndL_comp <- sim_comp$dataLong[sim_comp$dataLong$id == id_comp, ]
+ndE_comp <- sim_comp$dataEvent[sim_comp$dataEvent$id == id_comp, ]
+
+time_start_comp <- max(ndL_comp$time)
+times_comp <- seq(time_start_comp, time_start_comp + 2, length.out = 40)
+
+pred_comp <- predict(
+  fit_comp,
+  newdataLong = ndL_comp,
+  newdataEvent = ndE_comp,
+  process = "event",
+  time_start = time_start_comp,
+  times = times_comp,
+  control = list(
+    n_samples = 100,
+    engine = "cmdstanr",
+    chains = 1,
+    iter_warmup = 0,
+    iter_sampling = 1,
+    fixed_param = TRUE,
+    refresh = 0
+  )
+)
+
+plot(pred_comp, type = "survival")
+```
+
+## 5 Scenario C: Mixed Families and Nonlinear Association
+
+This example uses **mixed families** and a **nonlinear association
+transform** to illustrate interpretability when markers live on distinct
+scales. The goal is to show how different distributional families can
+coexist within a single joint model.
+
+Code
+
+``` r
+
+sim_mixed <- simulate_joinme(
+  n_id = 20,
+  n_obs_per_marker_per_id = 5,
+  families = c("gaussian", "bernoulli", "poisson"),
+  times_obs = seq(0, 4, length.out = 5),
+  seed = 101
+)
+
+formulaLong_mixed <- y ~ 1 + time + x1 +
+  (1 + time || id) +
+  (0 + x1 + (1 + time || id) || marker)
+
+formulaEvent_mixed <- survival::Surv(time, event) ~ 1 + x1 + x2
+
+transforms <- joinme_tf(
+  cv_total = list(
+    type = "ispline",
+    knots = c(-1, 0, 1),
+    coeff = c(0, 0.3, 0.7, 1.1, 1.3, 1.4),
+    degree = 3
+  )
+)
+
+# Notes on spline arguments:
+# - type = "ispline": provide knots + coeff directly (no x/y/lambda fitting).
+# - type = "ispline_penalised": provide knots (or n_knots) plus lambda.
+#   Supplying y uses the legacy (x, y) plug-in fit; omitting y lets Stan
+#   estimate the monotone spline jointly.
+```
+
+### 5.1 Optional: distributional regression
+
+If a marker family supports additional parameters, you can model these
+via `formulaDist`. `nu` denotes Student-$`t`$ degrees of freedom,
+`kappa` denotes the positive Beta sample size (with shapes $`\mu\kappa`$
+and $`(1-\mu)\kappa`$), and `tau` denotes the skew-double-exponential
+quantile/asymmetry parameter. For example, the following model allows a
+heteroscedastic longitudinal scale:
+
+Code
+
+``` r
+
+fit_dist <- joinme(
+  formulaLong = formulaLong,
+  dataLong = sim$dataLong,
+  formulaEvent = formulaEvent,
+  dataEvent = sim$dataEvent,
+  assoc = c("cv_total"),
+  transforms = joinme_tf(cv_total = "identity"),
+  families = rep("student_t", 4),
+  formulaDist = list(sigma = ~ 1 + time),
+  control = list(iter_warmup = 300, iter_sampling = 300, seed = 123, refresh = 0)
+)
+
+fit_mixed <- joinme(
+  formulaLong = formulaLong_mixed,
+  dataLong = sim_mixed$dataLong,
+  formulaEvent = formulaEvent_mixed,
+  dataEvent = sim_mixed$dataEvent,
+  families = sim_mixed$marker_info$families,
+  transforms = transforms,
+  assoc = c("cv_total"),
+  control = list(
+    parallel_chains = 1,
+    iter_warmup = 200,
+    iter_sampling = 200,
+    seed = 101,
+    refresh = 0,
+    adapt_delta = 0.95
+  )
+)
+
+sum_mixed <- summary(fit_mixed)
+diag_mixed <- as.data.frame(t(unlist(sum_mixed$diagnostics)))
+knitr::kable(diag_mixed, digits = 3, caption = "Sampler diagnostics (scenario B).")
+
+if (!is.null(sum_mixed$tables$fixef)) {
+  fixef_mixed <- sum_mixed$tables$fixef
+  fixef_mixed <- fixef_mixed[, c("term", "Estimate", "Q2.5", "Q97.5", "Rhat", "ESS")]
+  knitr::kable(fixef_mixed, digits = 3, caption = "Fixed effects summary (scenario B).")
+}
+```
+
+## 6 Scenario D: Thread-capable Fit and Prediction
+
+Threading is useful when the longitudinal dimension is large. `JoiNMe`
+now always uses the threaded Stan programs internally;
+`threads_per_chain = 1` keeps that same kernel serial, while larger
+values enable parallel `reduce_sum` execution. This example shows the
+same public workflow with two threads.
+
+Code
+
+``` r
+
+sim_thread <- simulate_joinme(
+  n_id = 60,
+  families = rep("student_t", 6),
+  n_obs_per_marker_per_id = 6,
+  times_obs = seq(0, 8, length.out = 12),
+  seed = 202,
+  assoc = c("cv_total"),
+  assoc_coefs = c(cv_total = 0.6)
+)
+
+fit_thread <- joinme(
+  formulaLong = formulaLong,
+  dataLong = sim_thread$dataLong,
+  formulaEvent = formulaEvent,
+  dataEvent = sim_thread$dataEvent,
+  assoc = c("cv_total"),
+  transforms = joinme_tf(cv_total = "identity"),
+  control = list(
+    parallel_chains = 1,
+    iter_warmup = 200,
+    iter_sampling = 200,
+    seed = 202,
+    refresh = 0,
+    threads_per_chain = 2,
+    adapt_delta = 0.9
+  )
+)
+
+ndL_thread <- sim_thread$dataLong[sim_thread$dataLong$id %in% c(1, 2), ]
+ndE_thread <- sim_thread$dataEvent[sim_thread$dataEvent$id %in% c(1, 2), ]
+
+pred_thread <- posterior_epred(
+  fit_thread,
+  newdataLong = ndL_thread,
+  newdataEvent = ndE_thread,
+  time_start = max(ndL_thread$time),
+  times = seq(0, max(ndL_thread$time) + 2, length.out = 60),
+  control = list(
+    n_samples = 100,
+    threads_per_chain = 2,
+    chains = 1,
+    iter_warmup = 100,
+    iter_sampling = 1,
+    seed = 202,
+    refresh = 0
+  )
+)
+
+plot(pred_thread, type = "longitudinal")
+plot(pred_thread, type = "survival")
+```
+
+When requesting multiple outcomes with `combined = TRUE`, the method
+returns:
+
+- one combined object for a single subject when `patchwork`/`cowplot` is
+  available,
+- a named list of combined objects (one per subject) for multiple
+  subjects,
+- and, if combiner backends are unavailable, a per-subject fallback to
+  the regular nested outcome list.
+
+## 7 Discussion and Reporting Guidance
+
+These scenarios illustrate how model assumptions and association choices
+influence interpretation. In a report or manuscript, we recommend:
+
+- Reporting **R-hat**, **ESS**, and divergences as primary convergence
+  diagnostics.
+- Presenting **bias and coverage** for simulated truth when validation
+  is possible.
+- Summarizing **association parameters** alongside the transform used
+  (functional, spline, piecewise).
+- Including **dynamic prediction plots** to show how uncertainty evolves
+  beyond the observed history.
+- Stating whether **threading** was used and the number of threads per
+  chain.
+
+This structure provides a reproducible, interpretable workflow that can
+be adapted to substantive scientific questions.
