@@ -57,9 +57,8 @@ The association terms implemented in `joinme` package are:
   marker-by-subject Cholesky-factor entries taken directly from `L`.
 
 Each association term can be left on its original scale or transformed
-using a functional expression, a monotone I-spline, or a piecewise linear
-mapping. These transformations are configured in R and passed to Stan as
-data so that the likelihood remains fully deterministic.
+using a functional expression, a monotone I-spline, or an ordered piecewise-linear
+mapping.
 
 ## Family-shared distributional semantics
 

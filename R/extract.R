@@ -316,6 +316,9 @@ extract <- function(object, ...) {
 #'   - `term_map`: data.frame mapping `term` to Stan `variable`
 #'   - `support`: for `what = "association_plot"`, cached model-implied raw
 #'     support ranges used by association plotting.
+#'   - `transform_coeff_draws`: for `what = "association_plot"`,
+#'     draw-specific fitted I-spline or ordered piecewise-linear ordinates,
+#'     including one matrix per covariance component when applicable.
 #' @seealso [draws()] for a higher-level interface that returns a single `posterior`
 #' @export
 extract.JoiNMeFit <- function(object,

@@ -126,11 +126,10 @@
     return(paste0(label, "(degree = ", degree, direction_text, ")"))
   }
   if (spec$type == "pwlin") {
-    x_vals <- spec$x
-    y_vals <- spec$y
-    x_text <- if (!is.null(x_vals)) paste(format(x_vals, digits = 3, trim = TRUE), collapse = ", ") else ""
-    y_text <- if (!is.null(y_vals)) paste(format(y_vals, digits = 3, trim = TRUE), collapse = ", ") else ""
-    return(paste0("pwlin(x = c(", x_text, "), y = c(", y_text, "))"))
+    knots <- spec$knots %||% spec$cutpoints %||% spec$x
+    knot_text <- if (!is.null(knots)) paste(format(knots, digits = 3, trim = TRUE), collapse = ", ") else ""
+    direction <- .monotone_direction_label(spec$direction %||% if (!is.null(spec$y)) .infer_monotone_direction(knots, spec$y) else 1L)
+    return(paste0("pwlin(knots = c(", knot_text, "), direction = ", direction, ")"))
   }
   spec$type
 }
@@ -741,6 +740,7 @@ print.summary_JoiNMeFit <- function(x, ...) {
   .cli_print_table_section("Survival process (non-association covariates)", x$tables$survival_process, level = 2L)
   .cli_print_table_section("Association parameters", x$tables$assoc, level = 2L)
   .cli_print_table_section("Transform parameters", x$tables$transform_parameters, level = 2L)
+  .cli_print_table_section("Piecewise-linear relative log-hazard ordinates", x$tables$piecewise_ordinates, level = 2L)
   .cli_print_table_section("Distributional parameters", x$tables$distributional, level = 2L)
   .cli_print_table_section("Distributional regression", x$tables$distributional_regression, level = 2L)
   if (!is.null(x$tables$corr)) {

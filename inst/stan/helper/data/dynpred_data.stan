@@ -212,14 +212,14 @@
   array[n_draws] vector[estimate_iota_intercept_cs_marker] iota_intercept_cs_marker;
   array[n_draws] vector[estimate_iota_slope_cs_marker] iota_slope_cs_marker;
 
-  int<lower=0, upper=6> tf_mode_cv_tot;        // transform mode: total CV
-  int<lower=0, upper=6> tf_mode_cs_tot;        // transform mode: total CS
-  int<lower=0, upper=6> tf_mode_corr;          // transform mode: corr
-  int<lower=0, upper=6> tf_mode_vcov;          // transform mode: vcov
-  int<lower=0, upper=6> tf_mode_cv_mean;       // transform mode: mean CV
-  int<lower=0, upper=6> tf_mode_cv_marker;     // transform mode: marker CV
-  int<lower=0, upper=6> tf_mode_cs_mean;       // transform mode: mean CS
-  int<lower=0, upper=6> tf_mode_cs_marker;     // transform mode: marker CS
+  int<lower=0, upper=7> tf_mode_cv_tot;        // transform mode: total CV
+  int<lower=0, upper=7> tf_mode_cs_tot;        // transform mode: total CS
+  int<lower=0, upper=7> tf_mode_corr;          // transform mode: corr
+  int<lower=0, upper=7> tf_mode_vcov;          // transform mode: vcov
+  int<lower=0, upper=7> tf_mode_cv_mean;       // transform mode: mean CV
+  int<lower=0, upper=7> tf_mode_cv_marker;     // transform mode: marker CV
+  int<lower=0, upper=7> tf_mode_cs_mean;       // transform mode: mean CS
+  int<lower=0, upper=7> tf_mode_cs_marker;     // transform mode: marker CS
 
   int<lower=0> n_functional_ops_cv;            // op count for total CV
   array[n_functional_ops_cv] int<lower=0, upper=26> functional_ops_cv; // bytecode stream

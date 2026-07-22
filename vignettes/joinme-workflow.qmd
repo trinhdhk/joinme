@@ -172,7 +172,7 @@ markers.
 ### Association transformations
 
 The association terms can be transformed using one of four modes: identity,
-functional bytecode expressions, monotone I-splines, or piecewise linear
+functional bytecode expressions, monotone I-splines, or ordered piecewise-linear
 interpolation. These transformations are specified in R and passed to Stan as
 data so that the likelihood remains deterministic and reproducible.
 

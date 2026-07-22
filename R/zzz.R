@@ -38,7 +38,7 @@ utils::globalVariables(c(
     any(grepl("joinme_dynpred", cached_dir_files))
   cli::simple_theme()
   cli::cli_h2('Join Mixed-Effects Model')
-  cli::cli_text('Version: {packageVersion("joinme")}')
+  cli::cli_text('Version: {utils::packageVersion("joinme")}')
   # cli::cli_alert_success('RStan version: { stanmodels$.META$stan_version }')
   if (has_model_exe) {
     cli::cli_alert_success('CmdStanR model compiled')

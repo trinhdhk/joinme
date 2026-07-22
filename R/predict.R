@@ -118,6 +118,11 @@ NULL
 #' 4.  Evaluate longitudinal and survival quantities on requested future grids.
 #' 5.  Pool draws to form marginal predictive summaries and intervals.
 #'
+#' Dynamic prediction passes the fitted, draw-specific transform ordinates to
+#' Stan. Ordered piecewise-linear associations therefore use the same posterior
+#' curve as the fitted event model and never reconstruct a curve from legacy
+#' user-supplied `y` values.
+#'
 #' @export
 predict.JoiNMeFit <- function(object,
                            newdataLong,

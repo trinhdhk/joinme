@@ -462,6 +462,9 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'     penalised monotone I-spline on `plogis(x)` in legacy plug-in mode.
 #'   - `list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))`:
 #'     piecewise-linear transform; `x` and `y` are required.
+#'     Simulation deliberately treats these as fixed interpolation pairs. This
+#'     differs from model fitting, where knot ordinates are estimated as an
+#'     ordered simplex construction and `y` no longer fixes the curve.
 #'
 #'   For monotone spline transforms during simulation:
 #'   - `type = "ispline"`: provide `knots` and `coeff` directly (plus optional

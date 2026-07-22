@@ -23,7 +23,11 @@
 \item{...}{Unused.}
 }
 \value{
-A \code{summary_JoiNMeFit} object
+A \code{summary_JoiNMeFit} object. Its \code{tables} element includes
+posterior association coefficients, transform parameters, and, when an
+ordered piecewise-linear association is active, \code{piecewise_ordinates}
+containing the relative log-hazard and hazard-ratio contribution at every
+knot.
 }
 \description{
 Builds posterior summaries for the longitudinal process, survival process,

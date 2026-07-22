@@ -16,6 +16,14 @@ build_standata_transforms(
 cv_marker, cs_marker, corr, vcov, each specifying a transformation. See details.}
 
 \item{default_mode}{Default transformation mode if not specified.}
+
+\item{n_corr_components}{Optional non-negative number of correlation
+components. It determines the row count of component-specific coefficient
+matrices.}
+
+\item{n_vcov_components}{Optional non-negative number of covariance
+components. It determines the row count of component-specific coefficient
+matrices.}
 }
 \value{
 List of standata entries for transformation parameters:
@@ -36,7 +44,8 @@ Transform can be specified in four modes:
 \item Mode 2 (penalised): I-spline coefficients estimated with smoothness penalty
 \item Mode 4: I-spline basis evaluated on \code{expit(x)} for a bounded, numerically
 stable spline input domain
-\item Mode 3: Piecewise-linear (user-defined interpolation)
+\item Mode 3: Increasing ordered piecewise-linear association
+\item Mode 7: Decreasing ordered piecewise-linear association
 }
 
 Each transformation term (CV_total, CS_total, CV_mean, CS_mean, CV_marker,
@@ -74,7 +83,8 @@ through \code{plogis(x)} and the spline basis is then evaluated on that
 bounded expit-scale input. User-supplied training \code{x} values and
 explicit \code{knots} for these transform types must therefore already be
 specified on the expit scale in \verb{[0, 1]}.
-\item pwlin: x (vector), y (vector)
+\item pwlin: knots (or cutpoints/x) and direction; legacy y is accepted but
+does not determine the fitted ordinates
 }
 }
 
@@ -95,7 +105,7 @@ with \code{degree = 3} by default when omitted.
 \item ispline_expit_penalised (Stan-estimated):
 \code{list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), n_knots = 6, degree = 3, lambda = 1)}
 \item pwlin:
-\code{list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))}
+\code{list(type = "pwlin", knots = c(-2, -1, 0, 1, 2), direction = "increasing")}
 }
 
 Default values used internally:
@@ -103,7 +113,8 @@ Default values used internally:
 \item omitted term -> identity mode (\code{default_mode = 0}),
 \item \code{ispline}: \code{degree = 3} if omitted,
 \item \code{ispline_penalised}: \code{n_knots = 6}, \code{degree = 3}, \code{lambda = 1} if omitted,
-\item \code{pwlin} and \code{functional}: no additional defaults beyond their required fields.
+\item \code{pwlin}: \code{direction = "increasing"} if omitted,
+\item \code{functional}: no additional defaults beyond its required fields.
 }
 
 For \verb{ispline_expit*} declarations, the internal spline basis lives on the

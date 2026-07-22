@@ -209,7 +209,7 @@ survival contributions. Weight columns must be finite and strictly positive.
 
 Transformation for supported association terms
 can be fed to \code{joinme()} in a named list. For example
-\code{list(cv_total = list(type = "functional", expr = ~ log1p(x)), cs_total = list(type = "identity"), corr = list(type = "pwlin", x = c(-2, 0, 2), y = c(0.2, 1, 0.2)), vcov = list(type = "identity"))}
+\code{list(cv_total = list(type = "functional", expr = ~ log1p(x)), cs_total = list(type = "identity"), corr = list(type = "pwlin", knots = c(-2, 0, 2), direction = "increasing"), vcov = list(type = "identity"))}
 
 Transformation parameterisation:
 \itemize{
@@ -236,10 +236,24 @@ about the curve at the tails.
 penalised monotone I-spline on \code{plogis(x)}. This is intended for simulation but it works here too, off-labelly.
 \item \code{list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), n_knots = 6, degree = 3, lambda = 1)}:
 penalised monotone I-spline on \code{plogis(x)} with Stan-estimated coefficients.
-\item \code{list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))}:
-piecewise-linear transform; both \code{x} and \code{y} are required.
-This is intended for simulation but it works here too, off-labelly.
+\item \code{list(type = "pwlin", knots = c(-2, -1, 0, 1, 2), direction = "increasing")}:
+ordered piecewise-linear association estimated jointly in Stan.
 }
+
+For fitted piecewise-linear associations, the knots divide the raw
+association feature into linear intervals. With $K$ knots, Stan estimates
+a $K-1$ simplex. Its cumulative sums give ordered relative association
+ordinates running from zero to one for an increasing curve, or from zero to
+minus one for a decreasing curve. The signed association coefficient
+estimates the total log-hazard span. The first ordinate is anchored at zero
+because a free common ordinate would be confounded with the baseline hazard.
+
+The legacy fitted syntax \code{list(type = "pwlin", x = ..., y = ...)} remains
+accepted. In a fitted model, \code{x} supplies the knots and \code{y} is used only
+to infer direction when \code{direction} is absent; the outcome-like \code{y}
+vector no longer fixes the association. In \code{simulate_joinme()}, legacy
+\code{x} and \code{y} retain their fixed interpolation meaning so existing
+simulation studies remain reproducible.
 
 For monotone spline transforms:
 \itemize{

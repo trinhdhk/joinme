@@ -11,6 +11,7 @@
   *   - Mode 4: Increasing I-spline basis evaluated on inv_logit(x)
   *   - Mode 5: Decreasing raw-scale I-spline = sum(coeff) - Mode 2
   *   - Mode 6: Decreasing expit-scale I-spline = sum(coeff) - Mode 4
+  *   - Mode 7: Decreasing ordered piecewise-linear interpolation
   *
   * Modes 1-3 are fully data-driven, allowing transformations to be updated
   * without recompiling the Stan model.
@@ -27,7 +28,8 @@
   *   3 = piecewise-linear interpolation,
   *   4 = increasing I-spline on inv_logit(x),
   *   5 = decreasing raw-scale I-spline,
-  *   6 = decreasing I-spline on inv_logit(x).
+  *   6 = decreasing I-spline on inv_logit(x),
+  *   7 = decreasing ordered piecewise-linear interpolation.
   * @param bytecode Functional bytecode instructions (for mode 1)
   * @param const_data Functional bytecode constants (for mode 1)
   * @param spline_knots Knot vector (for modes 2-3)
@@ -58,7 +60,7 @@
     } else if (mode == 2) {
       // I-spline basis evaluation (monotone)
       return ispline_eval(x, spline_knots, spline_degree, spline_coeff);
-    } else if (mode == 3) {
+    } else if (mode == 3 || mode == 7) {
       // Piecewise-linear interpolation
       return pwlin_eval(spline_knots, spline_coeff, x);
     } else if (mode == 4) {
@@ -79,7 +81,7 @@
   * @brief Dispatch vector transformation evaluation.
    *
    * @param x Vector of input values
-  * @param mode Transformation mode. Accepted values are 0, 1, 2, 3, 4, 5, or 6 with
+  * @param mode Transformation mode. Accepted values are 0, 1, 2, 3, 4, 5, 6, or 7 with
   *   the same semantics as `apply_transform_scalar`.
   * @param bytecode Functional bytecode instructions (for mode 1)
   * @param const_data Functional bytecode constants (for mode 1)
@@ -111,7 +113,7 @@
     } else if (mode == 2) {
       // I-spline basis evaluation (element-wise)
       return ispline_eval_vec(x, spline_knots, spline_degree, spline_coeff);
-    } else if (mode == 3) {
+    } else if (mode == 3 || mode == 7) {
       // Piecewise-linear interpolation (element-wise)
       return pwlin_eval_vec(spline_knots, spline_coeff, x);
     } else if (mode == 4) {
@@ -132,7 +134,7 @@
   * @brief Dispatch vector transformation evaluation with component-specific coefficients.
    *
    * @param x Vector of input values, one per association component.
-  * @param mode Transformation mode. Accepted values are 0, 1, 2, 3, 4, 5, or 6 with
+  * @param mode Transformation mode. Accepted values are 0, 1, 2, 3, 4, 5, 6, or 7 with
   *   the same semantics as `apply_transform_scalar`.
   * @param bytecode Functional bytecode instructions (for mode 1)
    * @param const_data Functional bytecode constants (for mode 1)
@@ -167,7 +169,7 @@
         out[m] = eval_bytecode_scalar(x[m], bytecode, const_data, iota_intercept, iota_slope, op_iota_intercept_idx, op_iota_slope_idx, (m - 1) * n_iota_intercept, (m - 1) * n_iota_slope);
       }
       return out;
-    } else if (mode == 2 || mode == 3 || mode == 4 || mode == 5 || mode == 6) {
+    } else if (mode == 2 || mode == 3 || mode == 4 || mode == 5 || mode == 6 || mode == 7) {
       for (m in 1:n_comp) {
         out[m] = apply_transform_scalar(
           x[m],

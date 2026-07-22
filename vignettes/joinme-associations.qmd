@@ -197,7 +197,7 @@ When an association component is not selected in `assoc`, its coefficient is pri
 
 # Transform modes
 
-`JoiNMe` supports four transformation modes for association features:
+`joinme` supports the following transformation families for association features:
 
 - **Identity** (`type = "identity"`): no transformation.
 - **Functional** (`type = "functional"`): a user-defined expression converted
@@ -207,7 +207,8 @@ When an association component is not selected in `assoc`, its coefficient is pri
 - **Bounded-domain monotone I-spline** (`type = "ispline_expit"` or
   `"ispline_expit_penalised"`): the same monotone spline machinery, but applied
   to `plogis(x)` rather than directly to `x`.
-- **Piecewise linear** (`type = "pwlin"`): linear interpolation across knots.
+- **Ordered piecewise linear** (`type = "pwlin"`): posterior interpolation
+  across fixed knots with monotone knot ordinates estimated in Stan.
 
 Interpretation note for recovery experiments:
 
@@ -247,10 +248,13 @@ Interpretation note for recovery experiments:
     the spline basis is built on that bounded domain. Supply training `x` and
     explicit `knots` directly on the expit scale in `[0, 1]` so the fitted
     spline domain matches the runtime basis.
-- **Piecewise linear**:
-  - Syntax: `list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))`
-  - Required fields: `x`, `y`.
-  - No additional defaults.
+- **Ordered piecewise linear**:
+  - Syntax: `list(type = "pwlin", knots = c(-2, -1, 0, 1, 2), direction = "increasing")`.
+  - Required field: `knots` (aliases: `cutpoints` and legacy `x`).
+  - Default: `direction = "increasing"`; use `"decreasing"` for a falling
+    transform.
+  - An optional non-negative `lambda` penalises second differences of the
+    ordered knot ordinates; it defaults to zero.
 
 # Functional Transform
 
@@ -372,12 +376,45 @@ transforms <- list(
 
 **When to use**
 
-- You want a monotone transform with smoothing, either anchored by `(x, y)` orestimated jointly in Stan.
+- You want a monotone transform with smoothing, either anchored by `(x, y)` or
+  estimated jointly in Stan.
 - Penalisation avoids overfitting when knot counts are moderate.
 
-# Piecewise-Linear
+# Ordered Piecewise-Linear Association
 
-This is mean for simulation but you can use for fiting as well as a mean to provide some prior the association curve. The transform is defined by a set of knots and corresponding values. The transform is linear between knots and constant outside the knot range. 
+For model fitting, the raw association feature is divided by fixed knots, but
+the association values at those knots are not supplied as an outcome-like
+`y` vector. With \(K\) knots, Stan estimates a \(K-1\) simplex
+\(\boldsymbol{\zeta}\). The relative transform ordinate at knot \(j\) is
+
+$$
+f_j = s \sum_{r=1}^{j-1} \zeta_r, \qquad
+s =
+\begin{cases}
+  1, & \text{increasing}, \\
+  -1, & \text{decreasing}.
+\end{cases}
+$$
+
+Thus \(f_1=0\), \(f_K=s\), and every adjacent difference has the requested
+sign. Linear interpolation is used between knots and the boundary ordinates are
+held constant outside the knot range. The survival contribution is
+\(\alpha f(x)\): \(\alpha\) estimates the total log-hazard span and the simplex
+estimates how that span is distributed across intervals. This follows the
+monotonic-effect separation of magnitude and simplex shape described in the
+[brms monotonic-effects vignette](https://paulbuerkner.com/brms/articles/brms_monotonic.html)
+and implemented by `brms::mo()`.
+
+The `direction` argument orders the standardised transform \(f\). As in the
+`brms` construction, \(\alpha\) remains a signed magnitude parameter, so the
+direction of the realised log-hazard contribution \(\alpha f(x)\) also depends
+on the posterior sign of \(\alpha\).
+
+The zero first ordinate is an identifiability constraint. A common free
+intercept added to every ordinate cannot be distinguished from the log baseline
+hazard, so the reported products \(\alpha f_j\) are relative log-hazard contributions.
+`summary(fit)$tables$piecewise_ordinates` reports their posterior contribution
+and corresponding hazard ratios at every knot.
 
 ```{r  piecewise-linear, eval=FALSE}
 transforms <- list(
@@ -389,11 +426,18 @@ transforms <- list(
   ),
   corr = list(
     type = "pwlin",
-    x = c(-2, -1, 0, 1, 2),
-    y = c(0.2, 0.5, 1, 0.5, 0.2)
+    knots = c(-2, -1, 0, 1, 2),
+    direction = "increasing"
   )
 )
 ```
+
+The former fitted declaration `x = ..., y = ...` remains readable for
+backwards compatibility. Its `x` values become the knots and `y` is used
+only to infer direction when direction is omitted; it does not fix or train the
+fitted association. In contrast, `simulate_joinme()` deliberately keeps the
+old fixed `x`/`y` interpolation so established simulation scenarios are
+unchanged.
 
 
 # Association Diagram

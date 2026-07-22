@@ -156,6 +156,34 @@
   s_corr ~ exponential(1);
   s_vcov ~ exponential(1);
 
+  /**
+   * @brief Exchangeable Dirichlet priors for piecewise-linear increments.
+   *
+   * @details A vector of ones gives a uniform prior over the simplex, so no
+   * interval is preferred before seeing the longitudinal and event data. The
+   * optional second-difference penalty below can add smoothness without
+   * changing the ordering constraint. Existing I-splines retain their latent
+   * increment priors in the shrinkage-family branches below.
+   */
+  if ((tf_mode_cv_tot == 3 || tf_mode_cv_tot == 7) && n_free_spline_cv > 0)
+    pwlin_simplex_cv ~ dirichlet(rep_vector(1, n_free_spline_cv));
+  if ((tf_mode_cs_tot == 3 || tf_mode_cs_tot == 7) && n_free_spline_cs > 0)
+    pwlin_simplex_cs ~ dirichlet(rep_vector(1, n_free_spline_cs));
+  if ((tf_mode_corr == 3 || tf_mode_corr == 7) && n_free_spline_corr > 0)
+    for (m in 1:M_corr)
+      pwlin_simplex_corr[m] ~ dirichlet(rep_vector(1, n_free_spline_corr));
+  if ((tf_mode_vcov == 3 || tf_mode_vcov == 7) && n_free_spline_vcov > 0)
+    for (m in 1:M_vcov)
+      pwlin_simplex_vcov[m] ~ dirichlet(rep_vector(1, n_free_spline_vcov));
+  if ((tf_mode_cv_mean == 3 || tf_mode_cv_mean == 7) && n_free_spline_cv_mean > 0)
+    pwlin_simplex_cv_mean ~ dirichlet(rep_vector(1, n_free_spline_cv_mean));
+  if ((tf_mode_cv_marker == 3 || tf_mode_cv_marker == 7) && n_free_spline_cv_marker > 0)
+    pwlin_simplex_cv_marker ~ dirichlet(rep_vector(1, n_free_spline_cv_marker));
+  if ((tf_mode_cs_mean == 3 || tf_mode_cs_mean == 7) && n_free_spline_cs_mean > 0)
+    pwlin_simplex_cs_mean ~ dirichlet(rep_vector(1, n_free_spline_cs_mean));
+  if ((tf_mode_cs_marker == 3 || tf_mode_cs_marker == 7) && n_free_spline_cs_marker > 0)
+    pwlin_simplex_cs_marker ~ dirichlet(rep_vector(1, n_free_spline_cs_marker));
+
   
   /* Shrinkage family switch for corr weights */
   if (shrinkage == 1) {
@@ -170,20 +198,16 @@
     // if (estimate_marker_weights == 1 && use_marker_weight_assoc == 1)
     z_marker_weights ~ double_exponential(0, 1);
 
-    /* Penalised monotone spline shape priors */
-    // Tight prior on the latent increment logits:
-    // - z = 0 implies equal increments,
-    // - expit(z) gives positive increments summing to 1,
-    // - smaller prior scale keeps the learned shape close to a smooth default
-    //   unless the data clearly support bends.
-    if (n_free_spline_cv > 0) z_spline_cv ~ double_exponential(0, 1);
-    if (n_free_spline_cs > 0) z_spline_cs ~ double_exponential(0, 1);
-    if (n_free_spline_corr > 0) to_vector(z_spline_corr) ~ double_exponential(0, 1);
-    if (n_free_spline_vcov > 0) to_vector(z_spline_vcov) ~ double_exponential(0, 1);
-    if (n_free_spline_cv_mean > 0) z_spline_cv_mean ~ double_exponential(0, 1);
-    if (n_free_spline_cv_marker > 0) z_spline_cv_marker ~ double_exponential(0, 1);
-    if (n_free_spline_cs_mean > 0) z_spline_cs_mean ~ double_exponential(0, 1);
-    if (n_free_spline_cs_marker > 0) z_spline_cs_marker ~ double_exponential(0, 1);
+    /* Penalised monotone I-spline shape priors. */
+    if (tf_mode_cv_tot != 3 && tf_mode_cv_tot != 7 && n_free_spline_cv > 0) z_spline_cv ~ double_exponential(0, 1);
+    if (tf_mode_cs_tot != 3 && tf_mode_cs_tot != 7 && n_free_spline_cs > 0) z_spline_cs ~ double_exponential(0, 1);
+    if (tf_mode_corr != 3 && tf_mode_corr != 7 && n_free_spline_corr > 0) to_vector(z_spline_corr) ~ double_exponential(0, 1);
+    if (tf_mode_vcov != 3 && tf_mode_vcov != 7 && n_free_spline_vcov > 0) to_vector(z_spline_vcov) ~ double_exponential(0, 1);
+    if (tf_mode_cv_mean != 3 && tf_mode_cv_mean != 7 && n_free_spline_cv_mean > 0) z_spline_cv_mean ~ double_exponential(0, 1);
+    if (tf_mode_cv_marker != 3 && tf_mode_cv_marker != 7 && n_free_spline_cv_marker > 0) z_spline_cv_marker ~ double_exponential(0, 1);
+    if (tf_mode_cs_mean != 3 && tf_mode_cs_mean != 7 && n_free_spline_cs_mean > 0) z_spline_cs_mean ~ double_exponential(0, 1);
+    if (tf_mode_cs_marker != 3 && tf_mode_cs_marker != 7 && n_free_spline_cs_marker > 0) z_spline_cs_marker ~ double_exponential(0, 1);
+
     if (estimate_iota_intercept_cv > 0) z_iota_intercept_cv ~ std_normal();
     if (estimate_iota_slope_cv > 0) z_iota_slope_cv ~ std_normal();
     if (estimate_iota_intercept_cs > 0) z_iota_intercept_cs ~ std_normal();
@@ -212,20 +236,16 @@
     // if (estimate_marker_weights == 1 && use_marker_weight_assoc == 1)
     z_marker_weights ~ std_normal();
 
-    /* Penalised monotone spline shape priors */
-    // Tight prior on the latent increment logits:
-    // - z = 0 implies equal increments,
-    // - expit(z) gives positive increments summing to 1,
-    // - smaller prior scale keeps the learned shape close to a smooth default
-    //   unless the data clearly support bends.
-    if (n_free_spline_cv > 0) z_spline_cv ~ std_normal();
-    if (n_free_spline_cs > 0) z_spline_cs ~ std_normal();
-    if (n_free_spline_corr > 0) to_vector(z_spline_corr) ~ std_normal();
-    if (n_free_spline_vcov > 0) to_vector(z_spline_vcov) ~ std_normal();
-    if (n_free_spline_cv_mean > 0) z_spline_cv_mean ~ std_normal();
-    if (n_free_spline_cv_marker > 0) z_spline_cv_marker ~ std_normal();
-    if (n_free_spline_cs_mean > 0) z_spline_cs_mean ~ std_normal();
-    if (n_free_spline_cs_marker > 0) z_spline_cs_marker ~ std_normal();
+    /* Penalised monotone I-spline shape priors. */
+    if (tf_mode_cv_tot != 3 && tf_mode_cv_tot != 7 && n_free_spline_cv > 0) z_spline_cv ~ std_normal();
+    if (tf_mode_cs_tot != 3 && tf_mode_cs_tot != 7 && n_free_spline_cs > 0) z_spline_cs ~ std_normal();
+    if (tf_mode_corr != 3 && tf_mode_corr != 7 && n_free_spline_corr > 0) to_vector(z_spline_corr) ~ std_normal();
+    if (tf_mode_vcov != 3 && tf_mode_vcov != 7 && n_free_spline_vcov > 0) to_vector(z_spline_vcov) ~ std_normal();
+    if (tf_mode_cv_mean != 3 && tf_mode_cv_mean != 7 && n_free_spline_cv_mean > 0) z_spline_cv_mean ~ std_normal();
+    if (tf_mode_cv_marker != 3 && tf_mode_cv_marker != 7 && n_free_spline_cv_marker > 0) z_spline_cv_marker ~ std_normal();
+    if (tf_mode_cs_mean != 3 && tf_mode_cs_mean != 7 && n_free_spline_cs_mean > 0) z_spline_cs_mean ~ std_normal();
+    if (tf_mode_cs_marker != 3 && tf_mode_cs_marker != 7 && n_free_spline_cs_marker > 0) z_spline_cs_marker ~ std_normal();
+
     if (estimate_iota_intercept_cv > 0) z_iota_intercept_cv ~ std_normal();
     if (estimate_iota_slope_cv > 0) z_iota_slope_cv ~ std_normal();
     if (estimate_iota_intercept_cs > 0) z_iota_intercept_cs ~ std_normal();
@@ -254,20 +274,16 @@
     // if (estimate_marker_weights == 1 && use_marker_weight_assoc == 1)
     z_marker_weights ~ student_t(6, 0, 1);
 
-    /* Penalised monotone spline shape priors */
-    // Tight prior on the latent increment logits:
-    // - z = 0 implies equal increments,
-    // - expit(z) gives positive increments summing to 1,
-    // - smaller prior scale keeps the learned shape close to a smooth default
-    //   unless the data clearly support bends.
-    if (n_free_spline_cv > 0) z_spline_cv ~ student_t(6, 0, 1);
-    if (n_free_spline_cs > 0) z_spline_cs ~ student_t(6, 0, 1);
-    if (n_free_spline_corr > 0) to_vector(z_spline_corr) ~ student_t(6, 0, 1);
-    if (n_free_spline_vcov > 0) to_vector(z_spline_vcov) ~ student_t(6, 0, 1);
-    if (n_free_spline_cv_mean > 0) z_spline_cv_mean ~ student_t(6, 0, 1);
-    if (n_free_spline_cv_marker > 0) z_spline_cv_marker ~ student_t(6, 0, 1);
-    if (n_free_spline_cs_mean > 0) z_spline_cs_mean ~ student_t(6, 0, 1);
-    if (n_free_spline_cs_marker > 0) z_spline_cs_marker ~ student_t(6, 0, 1);
+    /* Penalised monotone I-spline shape priors. */
+    if (tf_mode_cv_tot != 3 && tf_mode_cv_tot != 7 && n_free_spline_cv > 0) z_spline_cv ~ student_t(6, 0, 1);
+    if (tf_mode_cs_tot != 3 && tf_mode_cs_tot != 7 && n_free_spline_cs > 0) z_spline_cs ~ student_t(6, 0, 1);
+    if (tf_mode_corr != 3 && tf_mode_corr != 7 && n_free_spline_corr > 0) to_vector(z_spline_corr) ~ student_t(6, 0, 1);
+    if (tf_mode_vcov != 3 && tf_mode_vcov != 7 && n_free_spline_vcov > 0) to_vector(z_spline_vcov) ~ student_t(6, 0, 1);
+    if (tf_mode_cv_mean != 3 && tf_mode_cv_mean != 7 && n_free_spline_cv_mean > 0) z_spline_cv_mean ~ student_t(6, 0, 1);
+    if (tf_mode_cv_marker != 3 && tf_mode_cv_marker != 7 && n_free_spline_cv_marker > 0) z_spline_cv_marker ~ student_t(6, 0, 1);
+    if (tf_mode_cs_mean != 3 && tf_mode_cs_mean != 7 && n_free_spline_cs_mean > 0) z_spline_cs_mean ~ student_t(6, 0, 1);
+    if (tf_mode_cs_marker != 3 && tf_mode_cs_marker != 7 && n_free_spline_cs_marker > 0) z_spline_cs_marker ~ student_t(6, 0, 1);
+
     if (estimate_iota_intercept_cv > 0) z_iota_intercept_cv ~ student_t(6, 0, 1);
     if (estimate_iota_slope_cv > 0) z_iota_slope_cv ~ student_t(6, 0, 1);
     if (estimate_iota_intercept_cs > 0) z_iota_intercept_cs ~ student_t(6, 0, 1);

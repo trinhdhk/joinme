@@ -49,6 +49,9 @@ matrices keyed by association term.
 \item \code{term_map}: data.frame mapping \code{term} to Stan \code{variable}
 \item \code{support}: for \code{what = "association_plot"}, cached model-implied raw
 support ranges used by association plotting.
+\item \code{transform_coeff_draws}: for \code{what = "association_plot"},
+draw-specific fitted I-spline or ordered piecewise-linear ordinates,
+including one matrix per covariance component when applicable.
 }
 }
 \description{

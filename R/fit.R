@@ -61,7 +61,7 @@
 #' can be fed to `joinme()` in a named list. For example
 #' `list(cv_total = list(type = "functional", expr = ~ log1p(x)),
 #'      cs_total = list(type = "identity"),
-#'      corr = list(type = "pwlin", x = c(-2, 0, 2), y = c(0.2, 1, 0.2)),
+#'      corr = list(type = "pwlin", knots = c(-2, 0, 2), direction = "increasing"),
 #'      vcov = list(type = "identity"))`
 #'
 #' Transformation parameterisation:
@@ -88,9 +88,23 @@
 #'   penalised monotone I-spline on `plogis(x)`. This is intended for simulation but it works here too, off-labelly.
 #' - `list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), n_knots = 6, degree = 3, lambda = 1)`:
 #'   penalised monotone I-spline on `plogis(x)` with Stan-estimated coefficients.
-#' - `list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))`:
-#'   piecewise-linear transform; both `x` and `y` are required.
-#'   This is intended for simulation but it works here too, off-labelly.
+#' - `list(type = "pwlin", knots = c(-2, -1, 0, 1, 2), direction = "increasing")`:
+#'   ordered piecewise-linear association estimated jointly in Stan.
+#'
+#' For fitted piecewise-linear associations, the knots divide the raw
+#' association feature into linear intervals. With $K$ knots, Stan estimates
+#' a $K-1$ simplex. Its cumulative sums give ordered relative association
+#' ordinates running from zero to one for an increasing curve, or from zero to
+#' minus one for a decreasing curve. The signed association coefficient
+#' estimates the total log-hazard span. The first ordinate is anchored at zero
+#' because a free common ordinate would be confounded with the baseline hazard.
+#'
+#' The legacy fitted syntax `list(type = "pwlin", x = ..., y = ...)` remains
+#' accepted. In a fitted model, `x` supplies the knots and `y` is used only
+#' to infer direction when `direction` is absent; the outcome-like `y`
+#' vector no longer fixes the association. In `simulate_joinme()`, legacy
+#' `x` and `y` retain their fixed interpolation meaning so existing
+#' simulation studies remain reproducible.
 #'
 #' For monotone spline transforms:
 #' - `type = "ispline"`: provide `knots` and `coeff` directly (plus optional

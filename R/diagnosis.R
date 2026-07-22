@@ -199,6 +199,10 @@ print.JoiNMe_diagnosis <- function(x, max_rows = 20, ...) {
 #' @param seed Random seed for draw subsetting.
 #' @param ... Unused.
 #'
+#' @details The stored pointwise likelihood is evaluated by Stan with the full
+#'   fitted association contribution. This includes the posterior ordinates of
+#'   every ordered piecewise-linear transform; legacy `y` values are not used.
+#'
 #' @return A matrix
 #' @seealso [log_lik()]
 #' @export
@@ -502,6 +506,10 @@ pp_check.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, 
 #' @param type_weights Time-weighting for concordance; passed to `survival::concordance`.
 #' @param ... Additional arguments passed to `predict.JoiNMeFit()`.
 #'
+#' @details Dynamic risks are obtained from `predict.JoiNMeFit()` and therefore
+#'   retain all fitted association structures, including the draw-specific
+#'   ordinates of ordered piecewise-linear transforms.
+#'
 #' @importFrom survival Surv concordance
 #' @return A data frame with time-varying concordance at each landmark time.
 #' @export
@@ -618,9 +626,34 @@ concordance.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NUL
 	out
 }
 
+#' Construct one landmark-specific discrimination risk set
+#'
+#' @description
+#' Obtain posterior mean dynamic risks from the fitted joint model, align them
+#' with event outcomes after a single landmark, and either calculate
+#' time-weighted concordance or return the aligned risk set for another
+#' discrimination functional. The latter path is used by [auc.JoiNMeFit()] so
+#' concordance and AUC share precisely the same dynamic predictions.
+#'
+#' @param object A fitted `JoiNMeFit` object.
+#' @param newdataLong Longitudinal histories used for dynamic prediction.
+#' @param newdataEvent Subject-level event outcomes and covariates.
+#' @param time_start Scalar or named subject-specific landmark times.
+#' @param time_horizon Scalar or named subject-specific horizon times.
+#' @param cause Integer event cause treated as the case event.
+#' @param n_samples Number of posterior draws used by dynamic prediction.
+#' @param seed Integer posterior-subsampling seed.
+#' @param type_weights Time-weighting rule passed to
+#'   [survival::concordance()].
+#' @param ... Additional arguments passed to [predict.JoiNMeFit()].
+#' @param return_risk_set Logical. If `TRUE`, return the aligned subject-level
+#'   risks and outcomes instead of the concordance summary.
+#'
+#' @return A one-row concordance data frame, or, when `return_risk_set = TRUE`,
+#'   the aligned subject-level dynamic-risk data frame.
 #' @keywords internal
 #' @noRd
-.time_varying_concordance_single <- function(object, newdataLong, newdataEvent, time_start, time_horizon, cause, n_samples, seed, type_weights, ...) {
+.time_varying_concordance_single <- function(object, newdataLong, newdataEvent, time_start, time_horizon, cause, n_samples, seed, type_weights, ..., return_risk_set = FALSE) {
 	id_var <- eval(object$call$id_var) %||% "id"
 	time_var <- eval(object$call$time_var) %||% "time"
 	event_vars <- .resolve_event_model_vars(
@@ -727,6 +760,14 @@ concordance.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NUL
 	merge_df$event_window <- as.integer(status == 1 & merge_df$event_time <= merge_df$time_horizon)
 	merge_df$time_window <- pmin(merge_df$event_time, merge_df$time_horizon) - merge_df$time_start
 
+	# The same model-derived risk set underlies concordance and cumulative/dynamic
+	# AUC.  Returning it internally avoids a second prediction and guarantees that
+	# both discrimination summaries use the fitted association transform,
+	# including posterior piecewise-linear ordinates, in precisely the same way.
+	if (isTRUE(return_risk_set)) {
+		return(merge_df)
+	}
+
 	n_cases <- sum(merge_df$event_window == 1, na.rm = TRUE)
 	n_controls <- sum(merge_df$event_window == 0 & merge_df$event_time > merge_df$time_horizon, na.rm = TRUE)
 
@@ -759,6 +800,139 @@ concordance.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NUL
 		n_pairs = comparable_pairs
 	)
 }
+
+# ---- Time-dependent AUC --------------------------------------------------
+
+#' Time-dependent area under the ROC curve
+#'
+#' @description
+#' Estimate the cumulative/dynamic area under the receiver operating
+#' characteristic curve for the survival process at one or more landmark
+#' times.  Cases experience the requested cause after the landmark and by the
+#' horizon; controls remain event-free beyond the horizon.  Subjects censored
+#' before the horizon are excluded because their case/control state is unknown.
+#'
+#' Posterior mean dynamic risks are obtained through `predict.JoiNMeFit()`, so
+#' the calculation automatically uses the complete fitted hazard: baseline
+#' hazard, event covariates, marker weights, and any identity, functional,
+#' monotone-spline, or ordered piecewise-linear association transform.
+#'
+#' @param object A fitted object.  Methods are currently provided for
+#'   `JoiNMeFit`.
+#' @param ... Arguments passed to a class-specific method.
+#'
+#' @return For a `JoiNMeFit`, a data frame with landmark and horizon times,
+#'   cumulative/dynamic AUC, and the numbers of cases, controls, and comparable
+#'   case-control pairs.
+#' @export
+auc <- function(object, ...) {
+	UseMethod("auc")
+}
+
+#' @rdname auc
+#' @param newdataLong Longitudinal evaluation data; defaults to the fitted data.
+#' @param newdataEvent Event evaluation data; defaults to the fitted data.
+#' @param time_start Numeric landmark time or vector of landmark times.
+#' @param time_horizon Numeric horizon time.  It may be scalar or have the same
+#'   length as `time_start`.
+#' @param Dt Positive horizon width used when `time_horizon` is omitted.
+#' @param cause Integer competing-risk cause, with one denoting the primary
+#'   event type.
+#' @param n_samples Number of posterior draws used for dynamic prediction.
+#' @param seed Integer seed used when posterior draws are subsampled.
+#'
+#' @details
+#' For case risks \eqn{r_i} and control risks \eqn{r_j}, the estimator is the
+#' proportion of comparable pairs satisfying \eqn{r_i > r_j}, with half credit
+#' for ties.  This is the empirical cumulative/dynamic AUC.  It does not apply
+#' inverse-probability-of-censoring weights; early-censored subjects are omitted
+#' explicitly and the returned counts make the resulting comparison set clear.
+#'
+#' @export
+auc.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL,
+						  time_start, time_horizon = NULL, Dt = NULL, cause = 1,
+						  n_samples = 200, seed = 123, ...) {
+	assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
+	if (missing(time_start) || !is.numeric(time_start) || !length(time_start) || any(!is.finite(time_start))) {
+		cli::cli_abort("{.arg time_start} must be a finite numeric value or vector.")
+	}
+	if (!is.numeric(cause) || length(cause) != 1L || !is.finite(cause)) {
+		cli::cli_abort("{.arg cause} must be a single finite integer.")
+	}
+	if (is.null(time_horizon)) {
+		if (!is.numeric(Dt) || length(Dt) != 1L || !is.finite(Dt) || Dt <= 0) {
+			cli::cli_abort("Supply {.arg time_horizon}, or a positive scalar {.arg Dt}.")
+		}
+		time_horizon <- time_start + Dt
+	} else {
+		if (!is.numeric(time_horizon) || any(!is.finite(time_horizon)) ||
+				!(length(time_horizon) %in% c(1L, length(time_start)))) {
+			cli::cli_abort("{.arg time_horizon} must be finite and have length one or length(time_start).")
+		}
+		if (length(time_horizon) == 1L) {
+			time_horizon <- rep(time_horizon, length(time_start))
+		}
+	}
+	if (any(time_horizon <= time_start)) {
+		cli::cli_abort("Every {.arg time_horizon} must be greater than its landmark time.")
+	}
+
+	data_in <- .resolve_train_data(object, newdataLong, newdataEvent, purpose = "time-dependent AUC")
+	rows <- lapply(seq_along(time_start), function(i) {
+		risk_set <- .time_varying_concordance_single(
+			object = object,
+			newdataLong = data_in$newdataLong,
+			newdataEvent = data_in$newdataEvent,
+			time_start = time_start[i],
+			time_horizon = time_horizon[i],
+			cause = as.integer(cause),
+			n_samples = n_samples,
+			seed = seed,
+			type_weights = "none",
+			...,
+			return_risk_set = TRUE
+		)
+		if (!all(c("risk", "event_window", "event_time", "time_horizon") %in% names(risk_set))) {
+			return(data.frame(
+				time_start = time_start[i], time_horizon = time_horizon[i],
+				auc = NA_real_, n_cases = 0L, n_controls = 0L, n_pairs = 0L
+			))
+		}
+
+		case_risk <- as.numeric(risk_set$risk[risk_set$event_window == 1L])
+		control_risk <- as.numeric(risk_set$risk[
+			risk_set$event_window == 0L & risk_set$event_time > risk_set$time_horizon
+		])
+		case_risk <- case_risk[is.finite(case_risk)]
+		control_risk <- control_risk[is.finite(control_risk)]
+		n_cases <- length(case_risk)
+		n_controls <- length(control_risk)
+		n_pairs <- n_cases * n_controls
+		auc_value <- if (n_pairs == 0L) NA_real_ else {
+			# The Mann-Whitney rank identity gives the same pairwise probability
+			# as an explicit case-by-control comparison matrix, including half
+			# credit for ties, but uses linear rather than quadratic memory.
+			combined_risk <- c(case_risk, control_risk)
+			case_rank_sum <- sum(rank(combined_risk, ties.method = "average")[seq_len(n_cases)])
+			(case_rank_sum - n_cases * (n_cases + 1) / 2) / n_pairs
+		}
+		data.frame(
+			time_start = time_start[i],
+			time_horizon = time_horizon[i],
+			auc = auc_value,
+			n_cases = n_cases,
+			n_controls = n_controls,
+			n_pairs = n_pairs
+		)
+	})
+	out <- do.call(rbind, rows)
+	class(out) <- c("tvAUC_JoiNMeFit", "data.frame")
+	out
+}
+
+#' @rdname auc
+#' @export
+AUC <- auc
 
 # ---- Stan diagnostics ----------------------------------------------------
 

@@ -46,8 +46,6 @@ Imports:
 Suggests:
     knitr,
     quarto,
-    latex2exp,
-    loo,
     mirai,
     patchwork,
     rmarkdown,

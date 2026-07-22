@@ -35,7 +35,11 @@
 #'   cv_total = "identity",
 #'   corr = ~ -x,
 #'   vcov = "identity",
-#'   cv_marker = list(type = "pwlin", x = c(-1, 0, 1), y = c(0.2, 1, 0.2))
+#'   cv_marker = list(
+#'     type = "pwlin",
+#'     knots = c(-1, 0, 1),
+#'     direction = "increasing"
+#'   )
 #' )
 #' print(tf)
 joinme_tf <- function(..., .validate = TRUE) {
@@ -70,7 +74,8 @@ print.joinme_tf <- function(x, ...) {
       return(paste(type, knot_txt, paste0("degree=", spec$degree %||% 3L), sep = ", "))
     }
     if (identical(type, "pwlin")) {
-      return(paste0(type, ", points=", length(spec$x %||% numeric(0))))
+      direction <- .monotone_direction_label(spec$direction %||% 1L)
+      return(paste0(type, ", knots=", length(spec$knots %||% spec$cutpoints %||% spec$x %||% numeric(0)), ", ", direction))
     }
     type
   }

@@ -120,7 +120,12 @@ required by that type (see \code{build_standata_transforms()}). For covariance-s
 terms, transforms apply either to off-diagonal \code{K} features (\code{corr}) or to the
 combined off-diagonal \code{K} plus subject-specific SD features (\code{vcov}).
 Functional transforms may request fit-only affine-shift parameters through
-\code{intercept = TRUE} and/or \code{slope = TRUE} inside the transform formula.}
+\code{intercept = TRUE} and/or \code{slope = TRUE} inside the transform formula.
+Ordered piecewise-linear fits use
+\code{list(type = "pwlin", knots = ..., direction = "increasing")} (or
+\code{"decreasing"}). Their knot ordinates are estimated from simplex
+increments; legacy \code{x} is accepted as an alias for \code{knots}, while
+legacy \code{y} no longer fixes the fitted curve.}
 
 \item{beta_prior}{Prior specification for longitudinal fixed effects.}
 

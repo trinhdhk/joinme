@@ -1235,12 +1235,14 @@ plot.JoiNMeDynPred <- function(
 #'   contribution is zero-referenced at raw value `0` before multiplying by
 #'   \eqn{\alpha}; `association_metric = "transform"` plots the transform $f(x)$
 #'   alone and therefore omits the association-coefficient sign.
+#'   For fitted piecewise-linear associations, both metrics use the
+#'   draw-specific ordered knot ordinates saved by Stan.
 #' @param ... Unused.
 #'
 #' @return A `ggplot` object, a combined plot, or a named list of plots.
 #' @export
 plot.JoiNMeFit <- function(x,
-                           type = c("rhat", "ess_bulk", "ess_tail", "mcse_mean", "mcse_sd", "running_mean", "running_quantile", "mcmc"),
+                           type = c("rhat", "ess_bulk", "ess_tail", "mcse_mean", "mcse_sd", "running_mean", "running_quantile", "mcmc", "longitudinal", "survival", "cumhaz", "association"),
                            pars = NULL, regex_pars = NULL, draws = 400, seed = 1, max_vars = 4,
                            mcmc_type = c("intervals", "areas", "dens", "dens_overlay", "hist", "trace", "violin", "acf", "rhat", "neff"),
                            quantile_probs = c(0.1, 0.5, 0.9),
@@ -1294,19 +1296,29 @@ plot.JoiNMeFit <- function(x,
     if ("which" %in% names(dots)) {
         type <- dots$which
     }
-    unsupported_arguments <- setdiff(names(dots), "which")
+    association_dot_arguments <- c(
+        "association_term", "association_grid", "association_range",
+        "association_points", "association_metric",
+        "term", "grid", "range", "points", "metric"
+    )
+    unsupported_arguments <- setdiff(names(dots), c("which", association_dot_arguments))
     if (length(unsupported_arguments)) {
         cli::cli_abort(
             "unused argument{?s}: {paste(unsupported_arguments, collapse = ', ')}"
         )
     }
-
     type <- tryCatch(match.arg(unique(as.character(type)), c(diagnostic_types, fitted_types, "mcmc"), several.ok = TRUE), error = function(e) {
         cli::cli_abort(c(
             x = "Unknown {.arg type}: {paste(type, collapse = ', ')}.",
             i = "Use one or more of: {paste(c(diagnostic_types, fitted_types, 'mcmc'), collapse = ', ')}."
         ))
     })
+    association_dots <- dots[intersect(names(dots), association_dot_arguments)]
+    if (length(association_dots) > 0L && !any(type == "association")) {
+        cli::cli_abort(
+            "unused argument{?s}: {paste(names(association_dots), collapse = ', ')}"
+        )
+    }
 
     if (length(type) == 1L && identical(type[[1L]], "mcmc")) {
         return(mcmc_plot(
@@ -1816,6 +1828,23 @@ plot.JoiNMeFit <- function(x,
     p
 }
 
+#' Normalise fitted-association plotting options
+#'
+#' @description
+#' Combine the preferred named `association_options` list with direct arguments
+#' forwarded by `association_plot()`. Aliases are converted to their canonical
+#' names, duplicate declarations are rejected, and numeric grids and ranges are
+#' checked before posterior association curves are evaluated.
+#'
+#' @param association_options Optional named list of association plotting
+#'   options.
+#' @param dots Named direct arguments forwarded through the public plotting
+#'   wrapper.
+#'
+#' @return A canonical named list containing the association term, evaluation
+#'   grid or range, number of points, and requested posterior metric.
+#' @keywords internal
+#' @noRd
 .normalize_JoiNMefit_association_options <- function(association_options = NULL, dots = list()) {
     if (is.null(association_options)) {
         association_options <- list()
@@ -1839,6 +1868,10 @@ plot.JoiNMeFit <- function(x,
         metric = "association_metric"
     )
     valid_names <- c(unname(alias_map), names(alias_map))
+    dot_options <- dots[intersect(names(dots), valid_names)]
+    if (length(dot_options) > 0L) {
+        association_options <- c(association_options, dot_options)
+    }
     unknown <- setdiff(names(association_options), valid_names)
     if (length(unknown) > 0L) {
         cli::cli_abort(c(
@@ -3286,6 +3319,26 @@ plot.JoiNMeFit <- function(x,
     )
 }
 
+#' Reconstruct an association transform over a common grid
+#'
+#' @description
+#' Dispatch to the statistically appropriate evaluator for an identity,
+#' functional, I-spline, or ordered piecewise-linear association. The result is
+#' kept on the transform scale; multiplication by its association coefficient
+#' is performed separately when a log-hazard contribution is requested.
+#'
+#' @param x A fitted `JoiNMeFit` object.
+#' @param term_key Canonical association channel.
+#' @param term Expanded channel/component label.
+#' @param x_grid Numeric raw-feature evaluation grid.
+#' @param n_draws Required number of posterior draws.
+#' @param seed Integer posterior-subsampling seed.
+#' @param data Optional cached association plotting data.
+#'
+#' @return A numeric matrix with posterior draws in rows and grid points in
+#'   columns.
+#' @keywords internal
+#' @noRd
 .association_transform_matrix <- function(x, term_key, term = term_key, x_grid, n_draws, seed = 1, data = NULL) {
     # Resolve the transform specification for the requested channel/component,
     # then route to the lightest-weight evaluator for that transform family.
@@ -3298,8 +3351,9 @@ plot.JoiNMeFit <- function(x,
         return(matrix(rep(as.numeric(x_grid), each = n_draws), nrow = n_draws))
     }
 
-    # Functional and pwlin transforms can be evaluated once on the grid because
-    # they do not depend on draw-specific spline coefficients.
+    # A fixed functional transform can be evaluated once on the grid.  Ordered
+    # piecewise-linear transforms are handled below because every posterior draw
+    # has its own simplex-derived knot ordinates.
     if (identical(tf_type, "functional")) {
         tf_fun <- .make_assoc_transform(tf_spec, term_key)
         iota_draws <- .transform_iota_draws(
@@ -3329,9 +3383,15 @@ plot.JoiNMeFit <- function(x,
     }
 
     if (identical(tf_type, "pwlin")) {
-        tf_fun <- .make_assoc_transform(tf_spec, term_key)
-        vals <- as.numeric(tf_fun(x_grid))
-        return(matrix(rep(vals, each = n_draws), nrow = n_draws))
+        return(.pwlin_transform_matrix(
+            x = x,
+            term_key = term_key,
+            term = term,
+            x_grid = x_grid,
+            n_draws = n_draws,
+            seed = seed,
+            data = data
+        ))
     }
 
     # Spline transforms do depend on posterior coefficient draws, so they need
@@ -3345,6 +3405,107 @@ plot.JoiNMeFit <- function(x,
     tf_fun <- .make_assoc_transform(tf_spec, term_key)
     vals <- as.numeric(tf_fun(x_grid))
     matrix(rep(vals, each = n_draws), nrow = n_draws)
+}
+
+#' Construct a piecewise-linear interpolation basis
+#'
+#' @description
+#' Build the sparse linear weights that map knot ordinates to interpolated
+#' values.  Every row has either one non-zero boundary weight or two non-zero
+#' adjacent-knot weights.  Reusing this basis across posterior draws avoids a
+#' draw-by-grid interpolation loop and makes association plotting scale through
+#' one matrix multiplication.
+#'
+#' @param x_grid Numeric evaluation points on the raw association-feature scale.
+#' @param knots Strictly increasing numeric knot locations.
+#'
+#' @return A numeric matrix with one row per evaluation point and one column per
+#'   knot.  Multiplication by a knot-ordinate vector returns constant-tail,
+#'   linearly interpolated values.
+#' @keywords internal
+#' @noRd
+.pwlin_interpolation_basis <- function(x_grid, knots) {
+    x_grid <- as.numeric(x_grid)
+    knots <- as.numeric(knots)
+    if (length(knots) < 2L || any(!is.finite(knots)) || any(diff(knots) <= 0)) {
+        cli::cli_abort(c(
+            x = "Piecewise-linear plotting requires at least two strictly increasing finite knots.",
+            i = "Refit the model with a valid ordered knot sequence."
+        ))
+    }
+
+    n_grid <- length(x_grid)
+    n_knots <- length(knots)
+    basis <- matrix(0, nrow = n_grid, ncol = n_knots)
+    if (n_grid == 0L) {
+        return(basis)
+    }
+
+    left_tail <- x_grid <= knots[1L]
+    right_tail <- x_grid >= knots[n_knots]
+    basis[left_tail, 1L] <- 1
+    basis[right_tail, n_knots] <- 1
+
+    interior <- which(!(left_tail | right_tail))
+    if (length(interior) > 0L) {
+        left_index <- findInterval(x_grid[interior], knots, rightmost.closed = TRUE)
+        interval_width <- knots[left_index + 1L] - knots[left_index]
+        right_weight <- (x_grid[interior] - knots[left_index]) / interval_width
+        basis[cbind(interior, left_index)] <- 1 - right_weight
+        basis[cbind(interior, left_index + 1L)] <- right_weight
+    }
+    basis
+}
+
+#' Reconstruct posterior piecewise-linear association transforms
+#'
+#' @description
+#' Obtain the draw-specific ordered knot ordinates saved by the fitted Stan
+#' model and interpolate them on a common raw-feature grid.  Covariance-style
+#' channels select the requested component before interpolation.  The returned
+#' matrix is the transform alone; the caller subsequently multiplies it by the
+#' corresponding association coefficient when a log-hazard or hazard metric is
+#' requested.
+#'
+#' @param x A fitted `JoiNMeFit` object.
+#' @param term_key Canonical association channel.
+#' @param term Expanded association label, used to select a `corr` or `vcov`
+#'   component.
+#' @param x_grid Numeric raw-feature grid.
+#' @param n_draws Number of posterior draws required.
+#' @param seed Integer sampling seed used if draws must be retrieved from the
+#'   fitted backend.
+#' @param data Optional cached association plotting data.
+#'
+#' @return A numeric matrix with posterior draws in rows and grid points in
+#'   columns.
+#' @keywords internal
+#' @noRd
+.pwlin_transform_matrix <- function(x, term_key, term = term_key, x_grid, n_draws, seed = 1, data = NULL) {
+    sd <- x$stan_data
+    map <- .assoc_channel_map(term_key)
+    tf_spec <- .transform_spec_for_term(x, term_key, term = term)
+    knots <- as.numeric(sd[[map$knots]] %||% tf_spec$knots %||% tf_spec$cutpoints %||% tf_spec$x)
+    n_coeff <- as.integer(sd[[map$n_coeff]] %||% length(knots))
+    coeff_draws <- .transform_coeff_draws(
+        x = x,
+        eff_prefix = map$eff_prefix,
+        base_coeff = sd[[map$base_coeff]],
+        n_coeff = n_coeff,
+        component_index = if (term_key %in% c("corr", "vcov")) .assoc_component_index(term) else NULL,
+        n_draws = n_draws,
+        seed = seed,
+        data = data,
+        term_key = term_key,
+        term = term
+    )
+    if (ncol(coeff_draws) != length(knots)) {
+        cli::cli_abort(c(
+            x = "Stored piecewise-linear ordinates do not match the fitted knots for {.val {term_key}}.",
+            i = "Refit the model so that every knot has one posterior ordinate."
+        ))
+    }
+    coeff_draws %*% t(.pwlin_interpolation_basis(x_grid, knots))
 }
 
 .ispline_transform_matrix <- function(x, term_key, term = term_key, x_grid, n_draws, seed = 1, data = NULL) {
@@ -3598,6 +3759,27 @@ plot.JoiNMeFit <- function(x,
     c(min(rows$lower, na.rm = TRUE), max(rows$upper, na.rm = TRUE))
 }
 
+#' Build compact posterior data for association plotting
+#'
+#' @description
+#' Extract active association coefficients, fitted transform ordinates,
+#' functional affine shifts, marker weights, and raw-feature support once per
+#' fit. The resulting cache prevents repeated backend extraction and ensures
+#' plotting, summaries, and fitted piecewise-linear ordinates use the same
+#' posterior draws.
+#'
+#' @param fit Fitted Stan backend object.
+#' @param stan_data Canonical fitting data list.
+#' @param config Fitted JoiNMe configuration list.
+#' @param dataLong Original longitudinal data used to determine fallback
+#'   feature support.
+#' @param seed Integer posterior-subsampling seed.
+#'
+#' @return A named list of compact draw matrices, transform specifications,
+#'   support ranges, and a user-facing association term map; `NULL` when no
+#'   association channel is active.
+#' @keywords internal
+#' @noRd
 .build_association_plot_data <- function(fit, stan_data, config, dataLong, seed = 1) {
     assoc_flags <- config$assoc %||% list()
     active_terms <- names(assoc_flags)[vapply(assoc_flags, function(flag) isTRUE(as.logical(flag)), logical(1))]
@@ -3647,7 +3829,7 @@ plot.JoiNMeFit <- function(x,
 
         tf_spec <- data$transform_specs[[term_key]] %||% list(type = "identity")
         tf_type <- .canonicalise_transform_type(tf_spec$type %||% "identity")
-        if (.is_ispline_transform_type(tf_type)) {
+        if (.is_ispline_transform_type(tf_type) || identical(tf_type, "pwlin")) {
             map <- .assoc_channel_map(term_key)
             n_coeff <- as.integer(stan_data[[map$n_coeff]] %||% length(stan_data[[map$base_coeff]] %||% tf_spec$coeff %||% numeric(0)))
             if (n_coeff > 0L) {

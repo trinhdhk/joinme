@@ -173,15 +173,16 @@
   }
 
   /* -------------------- effective spline coefficients for transforms */
-  // For Stan-estimated penalised splines, we estimate only the SHAPE here.
-  // We anchor the transform so:
-  // - the first coefficient is 0,
-  // - the last coefficient is 1,
-  // - all intermediate coefficients are monotone increasing.
-  // This avoids confounding transform scale with the association coefficient.
+  // For every Stan-estimated monotone transform, we estimate only its SHAPE.
+  // The first ordinate is anchored at zero and the absolute span is one. An
+  // increasing I-spline or piecewise-linear curve ends at one; a decreasing
+  // piecewise-linear curve ends at minus one. Decreasing I-spline modes retain
+  // increasing coefficients because their evaluator reflects the basis. This
+  // avoids confounding transform scale with the association coefficient.
   // Implementation detail:
-  // - we build positive increments with `softmax()`,
-  // - those increments sum to 1 exactly,
+  // - piecewise-linear modes sample positive increments directly as a simplex,
+  // - established I-spline modes retain softmax-transformed latent increments,
+  // - in either case the increments sum to 1 exactly,
   // - cumulative sums therefore give a stable unit-span monotone curve
   //   without any divide-by-a-nearly-zero normalisation step.
   vector[n_coeff_cv] coeff_cv_eff = coeff_cv;
@@ -194,48 +195,88 @@
   vector[n_coeff_cs_marker] coeff_cs_marker_eff = coeff_cs_marker;
 
   if (estimate_spline_cv == 1 && n_coeff_cv > 1 && n_free_spline_cv == n_coeff_cv - 1) {
-    vector[n_coeff_cv - 1] delta = softmax(z_spline_cv);
+    vector[n_coeff_cv - 1] delta;
+    if (tf_mode_cv_tot == 3 || tf_mode_cv_tot == 7)
+      delta = pwlin_simplex_cv;
+    else
+      delta = softmax(z_spline_cv);
     coeff_cv_eff[1] = 0;
-    for (j in 2:n_coeff_cv) coeff_cv_eff[j] = coeff_cv_eff[j - 1] + delta[j - 1];
+    for (j in 2:n_coeff_cv)
+      coeff_cv_eff[j] = coeff_cv_eff[j - 1] + ((tf_mode_cv_tot == 7) ? -delta[j - 1] : delta[j - 1]);
   }
   if (estimate_spline_cs == 1 && n_coeff_cs > 1 && n_free_spline_cs == n_coeff_cs - 1) {
-    vector[n_coeff_cs - 1] delta = softmax(z_spline_cs);
+    vector[n_coeff_cs - 1] delta;
+    if (tf_mode_cs_tot == 3 || tf_mode_cs_tot == 7)
+      delta = pwlin_simplex_cs;
+    else
+      delta = softmax(z_spline_cs);
     coeff_cs_eff[1] = 0;
-    for (j in 2:n_coeff_cs) coeff_cs_eff[j] = coeff_cs_eff[j - 1] + delta[j - 1];
+    for (j in 2:n_coeff_cs)
+      coeff_cs_eff[j] = coeff_cs_eff[j - 1] + ((tf_mode_cs_tot == 7) ? -delta[j - 1] : delta[j - 1]);
   }
   if (estimate_spline_corr == 1 && n_coeff_corr > 1 && n_free_spline_corr == n_coeff_corr - 1) {
     for (m in 1:M_corr) {
-      vector[n_coeff_corr - 1] delta = softmax(to_vector(row(z_spline_corr, m)));
+      vector[n_coeff_corr - 1] delta;
+      if (tf_mode_corr == 3 || tf_mode_corr == 7)
+        delta = pwlin_simplex_corr[m];
+      else
+        delta = softmax(to_vector(row(z_spline_corr, m)));
       coeff_corr_eff[m, 1] = 0;
-      for (j in 2:n_coeff_corr) coeff_corr_eff[m, j] = coeff_corr_eff[m, j - 1] + delta[j - 1];
+      for (j in 2:n_coeff_corr)
+        coeff_corr_eff[m, j] = coeff_corr_eff[m, j - 1] + ((tf_mode_corr == 7) ? -delta[j - 1] : delta[j - 1]);
     }
   }
   if (estimate_spline_vcov == 1 && n_coeff_vcov > 1 && n_free_spline_vcov == n_coeff_vcov - 1) {
     for (m in 1:M_vcov) {
-      vector[n_coeff_vcov - 1] delta = softmax(to_vector(row(z_spline_vcov, m)));
+      vector[n_coeff_vcov - 1] delta;
+      if (tf_mode_vcov == 3 || tf_mode_vcov == 7)
+        delta = pwlin_simplex_vcov[m];
+      else
+        delta = softmax(to_vector(row(z_spline_vcov, m)));
       coeff_vcov_eff[m, 1] = 0;
-      for (j in 2:n_coeff_vcov) coeff_vcov_eff[m, j] = coeff_vcov_eff[m, j - 1] + delta[j - 1];
+      for (j in 2:n_coeff_vcov)
+        coeff_vcov_eff[m, j] = coeff_vcov_eff[m, j - 1] + ((tf_mode_vcov == 7) ? -delta[j - 1] : delta[j - 1]);
     }
   }
   if (estimate_spline_cv_mean == 1 && n_coeff_cv_mean > 1 && n_free_spline_cv_mean == n_coeff_cv_mean - 1) {
-    vector[n_coeff_cv_mean - 1] delta = softmax(z_spline_cv_mean);
+    vector[n_coeff_cv_mean - 1] delta;
+    if (tf_mode_cv_mean == 3 || tf_mode_cv_mean == 7)
+      delta = pwlin_simplex_cv_mean;
+    else
+      delta = softmax(z_spline_cv_mean);
     coeff_cv_mean_eff[1] = 0;
-    for (j in 2:n_coeff_cv_mean) coeff_cv_mean_eff[j] = coeff_cv_mean_eff[j - 1] + delta[j - 1];
+    for (j in 2:n_coeff_cv_mean)
+      coeff_cv_mean_eff[j] = coeff_cv_mean_eff[j - 1] + ((tf_mode_cv_mean == 7) ? -delta[j - 1] : delta[j - 1]);
   }
   if (estimate_spline_cv_marker == 1 && n_coeff_cv_marker > 1 && n_free_spline_cv_marker == n_coeff_cv_marker - 1) {
-    vector[n_coeff_cv_marker - 1] delta = softmax(z_spline_cv_marker);
+    vector[n_coeff_cv_marker - 1] delta;
+    if (tf_mode_cv_marker == 3 || tf_mode_cv_marker == 7)
+      delta = pwlin_simplex_cv_marker;
+    else
+      delta = softmax(z_spline_cv_marker);
     coeff_cv_marker_eff[1] = 0;
-    for (j in 2:n_coeff_cv_marker) coeff_cv_marker_eff[j] = coeff_cv_marker_eff[j - 1] + delta[j - 1];
+    for (j in 2:n_coeff_cv_marker)
+      coeff_cv_marker_eff[j] = coeff_cv_marker_eff[j - 1] + ((tf_mode_cv_marker == 7) ? -delta[j - 1] : delta[j - 1]);
   }
   if (estimate_spline_cs_mean == 1 && n_coeff_cs_mean > 1 && n_free_spline_cs_mean == n_coeff_cs_mean - 1) {
-    vector[n_coeff_cs_mean - 1] delta = softmax(z_spline_cs_mean);
+    vector[n_coeff_cs_mean - 1] delta;
+    if (tf_mode_cs_mean == 3 || tf_mode_cs_mean == 7)
+      delta = pwlin_simplex_cs_mean;
+    else
+      delta = softmax(z_spline_cs_mean);
     coeff_cs_mean_eff[1] = 0;
-    for (j in 2:n_coeff_cs_mean) coeff_cs_mean_eff[j] = coeff_cs_mean_eff[j - 1] + delta[j - 1];
+    for (j in 2:n_coeff_cs_mean)
+      coeff_cs_mean_eff[j] = coeff_cs_mean_eff[j - 1] + ((tf_mode_cs_mean == 7) ? -delta[j - 1] : delta[j - 1]);
   }
   if (estimate_spline_cs_marker == 1 && n_coeff_cs_marker > 1 && n_free_spline_cs_marker == n_coeff_cs_marker - 1) {
-    vector[n_coeff_cs_marker - 1] delta = softmax(z_spline_cs_marker);
+    vector[n_coeff_cs_marker - 1] delta;
+    if (tf_mode_cs_marker == 3 || tf_mode_cs_marker == 7)
+      delta = pwlin_simplex_cs_marker;
+    else
+      delta = softmax(z_spline_cs_marker);
     coeff_cs_marker_eff[1] = 0;
-    for (j in 2:n_coeff_cs_marker) coeff_cs_marker_eff[j] = coeff_cs_marker_eff[j - 1] + delta[j - 1];
+    for (j in 2:n_coeff_cs_marker)
+      coeff_cs_marker_eff[j] = coeff_cs_marker_eff[j - 1] + ((tf_mode_cs_marker == 7) ? -delta[j - 1] : delta[j - 1]);
   }
 
   /* -------------------- fit-only affine shift for functional transforms */

@@ -13,7 +13,11 @@
 #' @param include_corr Logical; include covariance summaries.
 #' @param ... Unused.
 #'
-#' @return A `summary_JoiNMeFit` object 
+#' @return A `summary_JoiNMeFit` object. Its `tables` element includes
+#'   posterior association coefficients, transform parameters, and, when an
+#'   ordered piecewise-linear association is active, `piecewise_ordinates`
+#'   containing the relative log-hazard and hazard-ratio contribution at every
+#'   knot.
 #' @export
 summary.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
                            include_corr = TRUE, ...) {
@@ -500,6 +504,13 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
 
   transform_specs <- cfg$transforms_spec %||% object$call$transforms
   transform_formulas <- .transform_formulas_from_specs(transform_specs, sd = sd)
+  piecewise_ordinates <- .summarise_pwlin_ordinates(
+    object = object,
+    transform_specs = transform_specs,
+    draws = draws,
+    seed = seed,
+    digits = digits
+  )
 
   if (!is.null(id_marker_cov_tables) && !is.null(id_marker_cov_tables$regression)) {
     id_marker_cov_tables$regression <- .label_covariance_summary_table(
@@ -531,6 +542,7 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
       survival_process = s_surv,
       assoc = s_a,
       transform_parameters = transform_params,
+      piecewise_ordinates = piecewise_ordinates,
       distributional = s_d,
       distributional_regression = s_dr,
       corr = corr_tables,
@@ -550,6 +562,128 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
 
   object$cache_set(cache_key, summary_obj)
   summary_obj
+}
+
+#' Summarise fitted piecewise-linear log-hazard ordinates
+#'
+#' @description
+#' Reconstruct each ordered piecewise-linear transform at its knots and combine
+#' it draw by draw with the corresponding association coefficient. The result
+#' is the posterior relative log-hazard contribution at every knot, together
+#' with its hazard-ratio representation. The first ordinate is the zero
+#' reference imposed for identifiability with the baseline hazard.
+#'
+#' @param object A fitted JoiNMeFit object.
+#' @param transform_specs Named association transform specifications.
+#' @param draws Optional posterior draw count.
+#' @param seed Integer seed used when draws are subsampled.
+#' @param digits Number of decimal places used in the returned table.
+#'
+#' @return A data frame with channel/component, knot number and location,
+#'   direction, and posterior summaries on relative log-hazard and hazard-ratio
+#'   scales; NULL when no active fitted piecewise-linear transform is present.
+#' @keywords internal
+#' @noRd
+.summarise_pwlin_ordinates <- function(object, transform_specs, draws = NULL, seed = 1, digits = 3) {
+  if (is.null(transform_specs) || !length(transform_specs)) {
+    return(NULL)
+  }
+  pwlin_channels <- names(transform_specs)[vapply(transform_specs, function(spec) {
+    identical(.canonicalise_transform_type(spec$type %||% "identity"), "pwlin")
+  }, logical(1))]
+  if (!length(pwlin_channels)) {
+    return(NULL)
+  }
+
+  plot_data <- tryCatch(.get_association_plot_data(object, seed = seed), error = function(e) NULL)
+  if (is.null(plot_data)) {
+    return(NULL)
+  }
+  available_terms <- unique(as.character(plot_data$term_map$term %||% character(0)))
+  available_terms <- available_terms[!grepl("^weight:\\s", available_terms)]
+  rows <- list()
+
+  for (channel in pwlin_channels) {
+    channel_terms <- available_terms[
+      available_terms == channel | startsWith(available_terms, paste0(channel, "["))
+    ]
+    if (!length(channel_terms)) {
+      next
+    }
+    map <- .assoc_channel_map(channel)
+    knots <- as.numeric(
+      object$stan_data[[map$knots]] %||%
+        transform_specs[[channel]]$knots %||%
+        transform_specs[[channel]]$cutpoints %||%
+        transform_specs[[channel]]$x
+    )
+    if (length(knots) < 2L) {
+      next
+    }
+
+    mode_name <- paste0("tf_mode_", .resolve_transform_term(channel)$mode_suffix)
+    direction <- .monotone_direction_label(
+      transform_specs[[channel]]$direction %||%
+        if (as.integer(object$stan_data[[mode_name]] %||% 3L) == 7L) -1L else 1L
+    )
+    for (term in channel_terms) {
+      alpha <- tryCatch(
+        .assoc_coeff_draws(object, term = term, data = plot_data, seed = seed),
+        error = function(e) NULL
+      )
+      if (is.null(alpha) || !length(alpha)) {
+        next
+      }
+      transform_at_knots <- tryCatch(
+        .association_transform_matrix(
+          object,
+          term_key = channel,
+          term = term,
+          x_grid = knots,
+          n_draws = length(alpha),
+          seed = seed,
+          data = plot_data
+        ),
+        error = function(e) NULL
+      )
+      if (is.null(transform_at_knots) || nrow(transform_at_knots) != length(alpha)) {
+        next
+      }
+
+      draw_index <- seq_along(alpha)
+      if (!is.null(draws) && length(draw_index) > draws) {
+        set.seed(seed)
+        draw_index <- sample(draw_index, draws)
+      }
+      alpha <- alpha[draw_index]
+      transform_at_knots <- transform_at_knots[draw_index, , drop = FALSE]
+      log_hazard <- transform_at_knots * alpha
+      q <- t(apply(
+        log_hazard,
+        2L,
+        stats::quantile,
+        probs = c(0.025, 0.975),
+        names = FALSE,
+        na.rm = TRUE
+      ))
+      estimate <- colMeans(log_hazard)
+      rows[[length(rows) + 1L]] <- data.frame(
+        channel = term,
+        ordinate = seq_along(knots),
+        knot = knots,
+        direction = direction,
+        Estimate = round(estimate, digits),
+        Est.Error = round(apply(log_hazard, 2L, stats::sd), digits),
+        Q2.5 = round(q[, 1L], digits),
+        Q97.5 = round(q[, 2L], digits),
+        Hazard.Ratio = round(exp(estimate), digits),
+        HR.Q2.5 = round(exp(q[, 1L]), digits),
+        HR.Q97.5 = round(exp(q[, 2L]), digits),
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+  if (!length(rows)) NULL else do.call(rbind, rows)
 }
 
 #' @importFrom brms posterior_summary

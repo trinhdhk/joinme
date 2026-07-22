@@ -82,6 +82,11 @@
 #'   combined off-diagonal `K` plus subject-specific SD features (`vcov`).
 #'   Functional transforms may request fit-only affine-shift parameters through
 #'   `intercept = TRUE` and/or `slope = TRUE` inside the transform formula.
+#'   Ordered piecewise-linear fits use
+#'   `list(type = "pwlin", knots = ..., direction = "increasing")` (or
+#'   `"decreasing"`). Their knot ordinates are estimated from simplex
+#'   increments; legacy `x` is accepted as an alias for `knots`, while
+#'   legacy `y` no longer fixes the fitted curve.
 #' @param beta_prior Prior specification for longitudinal fixed effects.
 #' @param alpha_prior Prior specification for association parameters.
 #' @param iota_prior Prior specification for fit-only affine-shift intercept and

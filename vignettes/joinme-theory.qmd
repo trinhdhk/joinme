@@ -45,7 +45,7 @@ The survival component links risk to summaries of the longitudinal trajectories,
 most notably the current value (CV), current slope (CS), and a variance summary
 of the marker-by-subject covariance structure through correlation-style (`corr`)
 and covariance-style (`vcov`) channels. Association summaries can be
-transformed by user-defined monotone splines, piecewise linear rules, or functional
+transformed by user-defined monotone splines, ordered piecewise-linear rules, or functional
 bytecode expressions. Estimation is performed with Hamiltonian Monte Carlo in Stan,
 and the main likelihood is evaluated with reduce_sum for within-chain parallelism.
 
@@ -263,7 +263,8 @@ geometry for hierarchical association parameters.
 
 Crucially, `JoiNMe` supports non-linear transformations of these terms via the
 `transforms` argument. Available transformation modes include identity, a
-functional bytecode evaluator, monotone I-splines, and piecewise linear rules.
+functional bytecode evaluator, monotone I-splines, and ordered piecewise-linear
+rules whose knot ordinates are learned from simplex increments.
 
 For clarity, denote the raw summaries at time $t$ as
 $\text{CV}_\text{tot}(t)$, $\text{CV}_\text{mean}(t)$, $\text{CV}_\text{marker}(t)$,
@@ -277,7 +278,7 @@ $$
 $$
 
 Each $g(\cdot)$ is determined by the transformation mode and its inputs
-(bytecode, spline knots, or piecewise linear knots).
+(bytecode, spline knots, or ordered piecewise-linear knots).
 
 For `corr` and `vcov`, the transformed summary is time-constant for a fixed
 subject because it depends only on that subject's covariance-regression

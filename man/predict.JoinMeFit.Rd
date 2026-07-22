@@ -173,5 +173,10 @@ allowing independent control of prediction Monte Carlo size.
 \item Evaluate longitudinal and survival quantities on requested future grids.
 \item Pool draws to form marginal predictive summaries and intervals.
 }
+
+Dynamic prediction passes the fitted, draw-specific transform ordinates to
+Stan. Ordered piecewise-linear associations therefore use the same posterior
+curve as the fitted event model and never reconstruct a curve from legacy
+user-supplied \code{y} values.
 }
 \keyword{internal}

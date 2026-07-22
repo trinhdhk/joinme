@@ -71,15 +71,39 @@
   /* marker-weight perturbations (global across ids) */
   vector[D * estimate_marker_weights * use_marker_weight_assoc * n_marker_weight_sets] z_marker_weights; // latent signed perturbations for shared or term-specific weight structures
 
-  /* Stan-estimated monotone spline increments for association transforms */
-  vector[n_free_spline_cv] z_spline_cv;               // free increments for total CV spline
-  vector[n_free_spline_cs] z_spline_cs;               // free increments for total CS spline
-  matrix[M_corr, n_free_spline_corr] z_spline_corr;   // free increments for corr spline by component
-  matrix[M_vcov, n_free_spline_vcov] z_spline_vcov;   // free increments for vcov spline by component
-  vector[n_free_spline_cv_mean] z_spline_cv_mean;     // free increments for mean CV spline
-  vector[n_free_spline_cv_marker] z_spline_cv_marker; // free increments for marker CV spline
-  vector[n_free_spline_cs_mean] z_spline_cs_mean;     // free increments for mean CS spline
-  vector[n_free_spline_cs_marker] z_spline_cs_marker; // free increments for marker CS spline
+  /**
+   * @brief Latent increments for Stan-estimated monotone I-splines.
+   *
+   * @details These parameters preserve the established I-spline
+   * parameterisation and its shrinkage-family prior.  Piecewise-linear modes
+   * omit them because those modes use the explicit simplexes declared below.
+   */
+  vector[(tf_mode_cv_tot == 3 || tf_mode_cv_tot == 7) ? 0 : n_free_spline_cv] z_spline_cv;
+  vector[(tf_mode_cs_tot == 3 || tf_mode_cs_tot == 7) ? 0 : n_free_spline_cs] z_spline_cs;
+  matrix[M_corr, (tf_mode_corr == 3 || tf_mode_corr == 7) ? 0 : n_free_spline_corr] z_spline_corr;
+  matrix[M_vcov, (tf_mode_vcov == 3 || tf_mode_vcov == 7) ? 0 : n_free_spline_vcov] z_spline_vcov;
+  vector[(tf_mode_cv_mean == 3 || tf_mode_cv_mean == 7) ? 0 : n_free_spline_cv_mean] z_spline_cv_mean;
+  vector[(tf_mode_cv_marker == 3 || tf_mode_cv_marker == 7) ? 0 : n_free_spline_cv_marker] z_spline_cv_marker;
+  vector[(tf_mode_cs_mean == 3 || tf_mode_cs_mean == 7) ? 0 : n_free_spline_cs_mean] z_spline_cs_mean;
+  vector[(tf_mode_cs_marker == 3 || tf_mode_cs_marker == 7) ? 0 : n_free_spline_cs_marker] z_spline_cs_marker;
+
+  /**
+   * @brief Simplex increments for ordered piecewise-linear associations.
+   *
+   * @details For K ordinates, a K-1 simplex allocates the unit association span
+   * between adjacent knots. Cumulative sums in transformed parameters recover
+   * the ordered ordinates. An inactive channel has a one-element simplex,
+   * which has no free parameter and permits one compiled model to cover every
+   * transform choice without changing existing I-spline parameters.
+   */
+  simplex[(tf_mode_cv_tot == 3 || tf_mode_cv_tot == 7) ? n_free_spline_cv : 1] pwlin_simplex_cv;
+  simplex[(tf_mode_cs_tot == 3 || tf_mode_cs_tot == 7) ? n_free_spline_cs : 1] pwlin_simplex_cs;
+  array[M_corr] simplex[(tf_mode_corr == 3 || tf_mode_corr == 7) ? n_free_spline_corr : 1] pwlin_simplex_corr;
+  array[M_vcov] simplex[(tf_mode_vcov == 3 || tf_mode_vcov == 7) ? n_free_spline_vcov : 1] pwlin_simplex_vcov;
+  simplex[(tf_mode_cv_mean == 3 || tf_mode_cv_mean == 7) ? n_free_spline_cv_mean : 1] pwlin_simplex_cv_mean;
+  simplex[(tf_mode_cv_marker == 3 || tf_mode_cv_marker == 7) ? n_free_spline_cv_marker : 1] pwlin_simplex_cv_marker;
+  simplex[(tf_mode_cs_mean == 3 || tf_mode_cs_mean == 7) ? n_free_spline_cs_mean : 1] pwlin_simplex_cs_mean;
+  simplex[(tf_mode_cs_marker == 3 || tf_mode_cs_marker == 7) ? n_free_spline_cs_marker : 1] pwlin_simplex_cs_marker;
 
   /* fit-only affine-shift parameters for functional transforms */
   vector[estimate_iota_intercept_cv] z_iota_intercept_cv;

@@ -220,6 +220,101 @@
   }
 }
 
+#' Build a Stan-estimated ordered piecewise-linear specification
+#'
+#' @description
+#' Convert a user-facing piecewise-linear declaration into the fixed knot
+#' locations and estimation metadata required by Stan.  The knot ordinates are
+#' deliberately not taken from an observed outcome vector.  Instead, the first
+#' ordinate is anchored at zero and the remaining ordinates are reconstructed
+#' from the cumulative sum of a simplex with `K - 1` elements.  The final
+#' ordinate is consequently `1` for an increasing curve and `-1` for a
+#' decreasing curve.  The association coefficient supplies the posterior
+#' log-hazard span, while the simplex supplies the relative allocation of that
+#' span between adjacent knots.
+#'
+#' Anchoring the first ordinate is statistically necessary: adding a common
+#' constant to every ordinate would be indistinguishable from changing the log
+#' baseline hazard after multiplication by the association coefficient. Thus,
+#' fitted transform ordinates are anchored relative association ordinates;
+#' their products with the association coefficient are relative log-hazard
+#' contributions rather than separate baseline-hazard intercepts.
+#'
+#' The modern API uses `knots` (or the synonymous `cutpoints`) and `direction`.
+#' The former `x`/`y` API remains accepted for fitted models.  In that legacy
+#' form, `x` supplies the knots and `y` is used only to infer the direction when
+#' `direction` is omitted; it never fixes the fitted association curve.  The
+#' simulation implementation intentionally retains its former fixed `x`/`y`
+#' interpolation semantics.
+#'
+#' @param spec Named piecewise-linear transform specification.  Recognised
+#'   fields are `knots`, `cutpoints`, `x`, `y`, `direction`, and `lambda`.
+#'   `lambda` is an optional non-negative second-difference penalty applied to
+#'   the reconstructed ordinates; its default is zero because the simplex
+#'   already regularises the finite-dimensional shape.
+#'
+#' @return A canonical transform specification containing sorted knots, a
+#'   direction code, an anchored coefficient template, and Stan estimation
+#'   metadata.
+#' @keywords internal
+#' @noRd
+.make_stan_pwlin_transform <- function(spec) {
+  knots <- spec$knots %||% spec$cutpoints %||% spec$x
+  if (is.null(knots)) {
+    cli::cli_abort(c(
+      x = "Fitted piecewise-linear associations require {.arg knots} (or legacy {.arg x}).",
+      i = "For example, use list(type = 'pwlin', knots = c(-2, -1, 0, 1, 2), direction = 'increasing')."
+    ))
+  }
+  knots <- as.numeric(knots)
+  if (length(knots) < 2L || any(!is.finite(knots)) || any(diff(knots) <= 0)) {
+    cli::cli_abort(c(
+      x = "{.arg knots} must be a strictly increasing finite vector with at least two values.",
+      i = "Each adjacent pair defines one linear association interval."
+    ))
+  }
+
+  legacy_y <- spec$y
+  if (!is.null(legacy_y)) {
+    legacy_y <- as.numeric(legacy_y)
+    if (length(legacy_y) != length(knots) || any(!is.finite(legacy_y))) {
+      cli::cli_abort(c(
+        x = "Legacy {.arg y} must be finite and have one value per knot.",
+        i = "The values no longer fix a fitted curve; omit y and state direction explicitly for new analyses."
+      ))
+    }
+  }
+
+  inferred_direction <- if (is.null(legacy_y)) "increasing" else {
+    .infer_monotone_direction(knots, legacy_y)
+  }
+  direction <- .resolve_monotone_direction(spec$direction, default = inferred_direction)
+
+  lambda <- spec$lambda %||% 0
+  if (!is.numeric(lambda) || length(lambda) != 1L || !is.finite(lambda) || lambda < 0) {
+    cli::cli_abort(c(
+      x = "{.arg lambda} must be a non-negative numeric scalar.",
+      i = "Use zero to omit the optional second-difference penalty."
+    ))
+  }
+  lambda <- as.numeric(lambda)
+
+  n_knots <- length(knots)
+  list(
+    type = "pwlin",
+    knots = knots,
+    x = knots,
+    legacy_y = legacy_y,
+    direction = .monotone_direction_label(direction),
+    spline_direction = direction,
+    coeff = seq(0, direction, length.out = n_knots),
+    degree = 1L,
+    estimate_spline = 1L,
+    lambda_spline = lambda,
+    n_free_spline = as.integer(n_knots - 1L)
+  )
+}
+
 #' Transform Specification Helper
 #'
 #' Provides utilities to build and manage transformation specifications
@@ -233,7 +328,8 @@
 #'   - Mode 2 (penalised): I-spline coefficients estimated with smoothness penalty
 #'   - Mode 4: I-spline basis evaluated on `expit(x)` for a bounded, numerically
 #'     stable spline input domain
-#'   - Mode 3: Piecewise-linear (user-defined interpolation)
+#'   - Mode 3: Increasing ordered piecewise-linear association
+#'   - Mode 7: Decreasing ordered piecewise-linear association
 #'
 #' Each transformation term (CV_total, CS_total, CV_mean, CS_mean, CV_marker,
 #' CS_marker, corr, vcov) can have its own independent specification, enabling
@@ -246,6 +342,12 @@
 #' @param transform_list List with elements cv_total, cs_total, cv_mean, cs_mean,
 #'   cv_marker, cs_marker, corr, vcov, each specifying a transformation. See details.
 #' @param default_mode Default transformation mode if not specified.
+#' @param n_corr_components Optional non-negative number of correlation
+#'   components. It determines the row count of component-specific coefficient
+#'   matrices.
+#' @param n_vcov_components Optional non-negative number of covariance
+#'   components. It determines the row count of component-specific coefficient
+#'   matrices.
 #'
 #' @details
 #' Each element of transform_list should be a list with:
@@ -267,7 +369,8 @@
 #'       bounded expit-scale input. User-supplied training `x` values and
 #'       explicit `knots` for these transform types must therefore already be
 #'       specified on the expit scale in `[0, 1]`.
-#'     - pwlin: x (vector), y (vector)
+#'     - pwlin: knots (or cutpoints/x) and direction; legacy y is accepted but
+#'       does not determine the fitted ordinates
 #'
 #' Defaults and minimal examples:
 #'   - identity (default if term omitted): `list(type = "identity")`
@@ -285,13 +388,14 @@
 #'   - ispline_expit_penalised (Stan-estimated):
 #'     `list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), n_knots = 6, degree = 3, lambda = 1)`
 #'   - pwlin:
-#'     `list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))`
+#'     `list(type = "pwlin", knots = c(-2, -1, 0, 1, 2), direction = "increasing")`
 #'
 #' Default values used internally:
 #'   - omitted term -> identity mode (`default_mode = 0`),
 #'   - `ispline`: `degree = 3` if omitted,
 #'   - `ispline_penalised`: `n_knots = 6`, `degree = 3`, `lambda = 1` if omitted,
-#'   - `pwlin` and `functional`: no additional defaults beyond their required fields.
+#'   - `pwlin`: `direction = "increasing"` if omitted,
+#'   - `functional`: no additional defaults beyond its required fields.
 #'
 #' For `ispline_expit*` declarations, the internal spline basis lives on the
 #' bounded interval $(0, 1)$ after applying `plogis()` to the raw association
@@ -452,20 +556,29 @@ build_standata_transforms <- function(
         standata[[paste0("lambda_spline_", short_suffix)]] <- as.numeric(spec$lambda_spline %||% 0.0)
         standata[[paste0("n_free_spline_", short_suffix)]] <- as.integer(spec$n_free_spline %||% 0L)
       } else if (spec$type == "pwlin") {
-        standata[[paste0("tf_mode_", mode_suffix)]] <- 3
-        standata[[paste0("n_knots_", short_suffix)]] <- length(spec$x)
-        standata[[paste0("knots_", short_suffix)]] <- spec$x
-        standata[[paste0("n_coeff_", short_suffix)]] <- length(spec$y)
+        # A fitted piecewise-linear curve learns its ordered ordinates in Stan.
+        # User-supplied y values from the former API are never treated as
+        # observed responses.  They are retained only for direction inference
+        # by .make_stan_pwlin_transform().
+        spec <- .make_stan_pwlin_transform(spec)
+        standata[[paste0("tf_mode_", mode_suffix)]] <- if (spec$spline_direction < 0L) 7 else 3
+        standata[[paste0("n_knots_", short_suffix)]] <- length(spec$knots)
+        standata[[paste0("knots_", short_suffix)]] <- spec$knots
+        standata[[paste0("n_coeff_", short_suffix)]] <- length(spec$coeff)
         standata[[paste0("coeff_", short_suffix)]] <- if (term_name %in% c("corr", "vcov")) {
           matrix(
-            rep(as.numeric(spec$y), times = n_components),
+            rep(as.numeric(spec$coeff), times = n_components),
             nrow = n_components,
-            ncol = length(spec$y),
+            ncol = length(spec$coeff),
             byrow = TRUE
           )
         } else {
-          spec$y
+          spec$coeff
         }
+        standata[[paste0("spline_degree_", short_suffix)]] <- 1L
+        standata[[paste0("estimate_spline_", short_suffix)]] <- 1L
+        standata[[paste0("lambda_spline_", short_suffix)]] <- spec$lambda_spline
+        standata[[paste0("n_free_spline_", short_suffix)]] <- spec$n_free_spline
       } else {
         cli::cli_abort(c(
           x = "Unknown transformation type: {spec$type}.",
@@ -528,7 +641,7 @@ validate_transforms <- function(standata) {
       functional_ops <- standata[[paste0("functional_ops_", short_suffix)]]
       const_data <- standata[[paste0("const_data_", short_suffix)]]
       verify_bytecode(functional_ops, const_data)
-    } else if (mode %in% c(2, 3, 4)) {
+    } else if (mode %in% c(2, 3, 4, 5, 6, 7)) {
       # Spline validation
       knots <- standata[[paste0("knots_", short_suffix)]]
       coeff <- standata[[paste0("coeff_", short_suffix)]]
@@ -544,14 +657,14 @@ validate_transforms <- function(standata) {
       if (any(diff(knots) <= 0)) {
         cli::cli_abort(c(x = "Knots not strictly increasing for {short_suffix}.", i = "Ensure knots are sorted and unique."))
       }
-      if (mode == 4 && any(knots < 0 | knots > 1)) {
+      if (mode %in% c(4, 6) && any(knots < 0 | knots > 1)) {
         cli::cli_abort(c(
           x = "Expit-spline knots must lie in [0, 1] for {short_suffix}.",
           i = "Provide explicit expit-scale knots, or provide expit-scale x values so knots can be derived from them."
         ))
       }
       
-      if (mode == 2) {
+      if (mode %in% c(2, 4, 5, 6)) {
         # I-spline: coeff length should match knot/degree conventions.
         degree <- standata[[paste0("spline_degree_", short_suffix)]]
         expected_len_a <- length(knots) + degree
@@ -562,6 +675,12 @@ validate_transforms <- function(standata) {
             i = "Expected {expected_len_a} or {expected_len_b} coefficients, got {coeff_len}."
           ))
         }
+      }
+      if (mode %in% c(3, 7) && coeff_len != length(knots)) {
+        cli::cli_abort(c(
+          x = "Piecewise-linear coefficient count mismatch for {short_suffix}.",
+          i = "Expected one relative association ordinate per knot."
+        ))
       }
     }
   }
@@ -587,8 +706,8 @@ validate_transforms <- function(standata) {
 #' # Example 2: Piecewise-linear
 #' spec_cs <- list(
 #'   type = "pwlin",
-#'   x = c(-2, -1, 0, 1, 2),
-#'   y = c(0.1, 0.3, 1.0, 0.3, 0.1)  # smooth bump
+#'   knots = c(-2, -1, 0, 1, 2),
+#'   direction = "increasing"
 #' )
 #'
 #' # Example 3: I-spline (monotonic)
@@ -643,7 +762,7 @@ validate_transforms <- function(standata) {
 #'   cs_total = spec_cs,
 #'   corr = spec_corr
 #' )
-#' standata_tf <- build_standata_transforms(transforms)
+#' standata_tf <- joinme:::build_standata_transforms(transforms)
 example_transform_spec <- function() {
   help('example_transform_spec')
 }
@@ -708,9 +827,8 @@ penalised_ispline_transform <- function(
   .make_penalised_ispline_transform(spec)
 }
 
-#' @keywords internal
-#' @noRd
 #' @rdname penalised_ispline_transform
+#' @param ... Arguments passed to [penalised_ispline_transform()].
 #' @export
 # American alias for `penalised_ispline_transform()`.
 penalized_ispline_transform <- function(...) {

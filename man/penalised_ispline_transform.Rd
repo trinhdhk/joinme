@@ -2,6 +2,7 @@
 % Please edit documentation in R/standata_transforms.R
 \name{penalised_ispline_transform}
 \alias{penalised_ispline_transform}
+\alias{penalized_ispline_transform}
 \title{Penalised Monotone I-spline Transform Spec}
 \usage{
 penalised_ispline_transform(
@@ -15,6 +16,8 @@ penalised_ispline_transform(
   weights = NULL,
   diff_order = 2
 )
+
+penalized_ispline_transform(...)
 }
 \arguments{
 \item{x}{Numeric vector of input values on the raw feature scale to transform.}
@@ -39,6 +42,8 @@ supplied \verb{(x, y)} pairs.}
 \item{weights}{Optional non-negative weights (same length as x).}
 
 \item{diff_order}{Integer difference order for penalty (default 2).}
+
+\item{...}{Arguments passed to \code{\link[=penalised_ispline_transform]{penalised_ispline_transform()}}.}
 }
 \value{
 A list suitable for \code{build_standata_transforms()}.

@@ -47,3 +47,8 @@ A data frame with time-varying concordance at each landmark time.
 \description{
 Time-varying concordance for the survival component
 }
+\details{
+Dynamic risks are obtained from \code{predict.JoiNMeFit()} and therefore
+retain all fitted association structures, including the draw-specific
+ordinates of ordered piecewise-linear transforms.
+}
