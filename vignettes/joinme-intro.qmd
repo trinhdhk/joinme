@@ -119,15 +119,12 @@ returns coefficients on the original time scale.
 ### Step 1: Load packages and set a reproducible seed
 
 ```{r setup}
-if (requireNamespace("pkgload", quietly = TRUE)) {
-  repo_root <- normalizePath("..", mustWork = FALSE)
-  if (file.exists(file.path(repo_root, "DESCRIPTION"))) {
-    pkgload::load_all(repo_root, quiet = TRUE, compile = FALSE)
+if (!require('joinme', quietly = TRUE)) {
+  if (requireNamespace("devtools", quietly = TRUE) && file.exists(file.path(repo_root, "DESCRIPTION"))) {
+    devtools::load_all(repo_root, quiet = TRUE)
   } else {
-    library(joinme)
+    try(base::attachNamespace("joinme"), silent = TRUE)
   }
-} else {
-  library(joinme)
 }
 library(survival)
 

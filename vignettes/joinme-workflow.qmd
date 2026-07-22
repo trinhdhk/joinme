@@ -29,10 +29,12 @@ knitr::opts_chunk$set(
 options(width = 100)
 # Ensure the package is available for the vignette to run if possible
 repo_root <- normalizePath(if (dir.exists("R")) "." else "..")
-if (requireNamespace("devtools", quietly = TRUE) && file.exists(file.path(repo_root, "DESCRIPTION"))) {
-  devtools::load_all(repo_root, quiet = TRUE)
-} else {
-  try(base::attachNamespace("joinme"), silent = TRUE)
+if (!require('joinme', quietly = TRUE)) {
+  if (requireNamespace("devtools", quietly = TRUE) && file.exists(file.path(repo_root, "DESCRIPTION"))) {
+    devtools::load_all(repo_root, quiet = TRUE)
+  } else {
+    try(base::attachNamespace("joinme"), silent = TRUE)
+  }
 }
 library(dplyr)
 library(ggplot2)

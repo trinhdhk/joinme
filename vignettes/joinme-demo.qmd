@@ -28,10 +28,12 @@ options(width = 80)
 
 library(dplyr)
 repo_root <- normalizePath(if (dir.exists("R")) "." else "..", mustWork = FALSE)
-if (requireNamespace("devtools", quietly = TRUE) && file.exists(file.path(repo_root, "DESCRIPTION"))) {
-  devtools::load_all(repo_root, quiet = TRUE)
-} else {
-  try(base::attachNamespace("joinme"), silent = TRUE)
+if (!require('joinme', quietly = TRUE)) {
+  if (requireNamespace("devtools", quietly = TRUE) && file.exists(file.path(repo_root, "DESCRIPTION"))) {
+    devtools::load_all(repo_root, quiet = TRUE)
+  } else {
+    try(base::attachNamespace("joinme"), silent = TRUE)
+  }
 }
 
 options(stan_preferred_engine = "cmdstanr")

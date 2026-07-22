@@ -25,8 +25,12 @@ knitr::opts_chunk$set(
   fig.height = 4
 )
 options(width = 80)
-if (requireNamespace("joinme", quietly = TRUE)) {
-  library(joinme)
+if (!require('joinme', quietly = TRUE)) {
+  if (requireNamespace("devtools", quietly = TRUE) && file.exists(file.path(repo_root, "DESCRIPTION"))) {
+    devtools::load_all(repo_root, quiet = TRUE)
+  } else {
+    try(base::attachNamespace("joinme"), silent = TRUE)
+  }
 }
 library(dplyr)
 ```
