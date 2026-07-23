@@ -19,6 +19,7 @@ joinme(
   fixed_marker_weights = FALSE,
   shared_marker_weights = TRUE,
   basehaz = joinme_basehaz(),
+  fit = TRUE,
   seed = NULL,
   ...
 )
@@ -121,7 +122,12 @@ distributional regression.
 \item{families}{Marker-specific family specification (optional).
 Can be a character vector of family names aligned to marker order, or a
 list of \code{jm_family(...)} entries with per-marker links.
-Supported links/inverse-links: \code{identity}, \code{log}, \code{logit}, \code{probit}, \code{exp}.}
+Supported named forward links are \code{identity}, \code{log}, \code{logit}, \code{probit},
+and \code{exp}; \code{jm_family()} also accepts an invertible formula link or a
+directly specified inverse-link formula. In formula syntax,
+\code{inv_Phi}/\code{qnorm}/\code{probit} denote the standard normal quantile and
+\code{Phi}/\code{pnorm} denote the standard normal CDF. Thus a probit forward link
+is inverted to \code{Phi} before fitting.}
 
 \item{transforms}{Transformation specifications for association terms.
 Prefer declaring them with \code{joinme_tf(...)}; raw named lists remain
@@ -146,6 +152,10 @@ When \code{marker_weights} is a named list, use names \code{cv_total}, \code{cs_
 
 \item{basehaz}{An object of class \code{joinme_basehaz} created by \code{joinme_basehaz()}.
 This controls the baseline hazard parameterisation and spline basis. See \code{?joinme_basehaz} for details.}
+
+\item{fit}{logical; if TRUE, the model is fitted and a \code{JoiNMeFit} object is returned. If FALSE, only the Stan data list is returned.}
+
+\item{seed}{Optional random seed for reproducibility.}
 
 \item{...}{Additional args passed to joinme_standata().}
 }

@@ -253,11 +253,23 @@ make_conditions <- function(x, ...) {
   brms::make_conditions(x = x, ...)
 }
 
+#' Functions admitting fitted affine shifts in functional transforms
+#'
+#' @description
+#' Lists nonlinear operations for which `joinme_tf()` may estimate an
+#' operation-specific intercept or slope before applying the transformation.
+#' Both directions of the standard normal transformation are included:
+#' `Phi`/`pnorm` for the CDF and `inv_Phi`/`qnorm`/`probit` for the quantile.
+#'
+#' @return Character vector of accepted, lower-case parser names.
+#' @keywords internal
+#' @noRd
 .fit_affine_shift_supported_functions <- function() {
   c(
     "log", "exp", "sqrt", "inv_logit", "sigmoid", "expit", "softmax",
     "logit", "rec", "sin", "cos", "tan", "abs", "sinh", "cosh", "tanh",
-    "asinh", "acosh", "atanh", "softplus", "log1p_exp", "cbrt", "probit", "power"
+    "asinh", "acosh", "atanh", "softplus", "log1p_exp", "cbrt", "phi",
+    "pnorm", "inv_phi", "qnorm", "probit", "power"
   )
 }
 

@@ -36,7 +36,7 @@ joinme_standata(
   quadrature_nodes = NULL,
   vcov_diag_link = c("softplus", "exp"),
   tau_fixed = NULL,
-  seed = NULL
+  seed = .Random.seed[[1]]
 )
 }
 \arguments{
@@ -112,7 +112,12 @@ together with the subject-specific standard deviations.}
 \item{families}{Optional marker-specific family specification. Can be
 character family names or \code{jm_family(...)} entries with per-marker links.
 If NULL, all markers use Gaussian responses with identity link.
-Supported links/inverse-links: \code{identity}, \code{log}, \code{logit}, \code{probit}, \code{exp}.}
+Supported named forward links are \code{identity}, \code{log}, \code{logit}, \code{probit},
+and \code{exp}; \code{jm_family()} also accepts an invertible formula link or a
+directly specified inverse-link formula. In formula syntax,
+\code{inv_Phi}/\code{qnorm}/\code{probit} denote the standard normal quantile and
+\code{Phi}/\code{pnorm} denote the standard normal CDF. Thus a probit forward link
+is inverted to \code{Phi} before Stan data are constructed.}
 
 \item{transforms}{Optional list specifying transformations for association terms.
 Each element (cv_total, cs_total, corr, vcov) is a list with a \code{type} and fields

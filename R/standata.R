@@ -74,7 +74,12 @@
 #' @param families Optional marker-specific family specification. Can be
 #'   character family names or `jm_family(...)` entries with per-marker links.
 #'   If NULL, all markers use Gaussian responses with identity link.
-#'   Supported links/inverse-links: `identity`, `log`, `logit`, `probit`, `exp`.
+#'   Supported named forward links are `identity`, `log`, `logit`, `probit`,
+#'   and `exp`; `jm_family()` also accepts an invertible formula link or a
+#'   directly specified inverse-link formula. In formula syntax,
+#'   `inv_Phi`/`qnorm`/`probit` denote the standard normal quantile and
+#'   `Phi`/`pnorm` denote the standard normal CDF. Thus a probit forward link
+#'   is inverted to `Phi` before Stan data are constructed.
 #' @param transforms Optional list specifying transformations for association terms.
 #'   Each element (cv_total, cs_total, corr, vcov) is a list with a `type` and fields
 #'   required by that type (see `build_standata_transforms()`). For covariance-style
@@ -166,7 +171,7 @@ joinme_standata <- function(
   quadrature_nodes = NULL,
   vcov_diag_link = c("softplus", "exp"),
   tau_fixed = NULL,
-  seed = NULL
+  seed = .Random.seed[[1]]
 ) {
   assertthat::assert_that(is.data.frame(dataLong), msg = "dataLong must be a data.frame")
   assertthat::assert_that(is.data.frame(dataEvent), msg = "dataEvent must be a data.frame")
@@ -629,29 +634,29 @@ joinme_standata <- function(
   re_kappa <- .pad_re_terms(.build_dist_re_terms(dist_formulas$kappa, dl), nrow(dl))
   re_tau <- .pad_re_terms(.build_dist_re_terms(dist_formulas$tau, dl), nrow(dl))
 
-  fixed_blueprint <- .make_model_matrix_blueprint(
+  fixed_template <- .make_model_matrix_template(
     fixed_rhs,
     dl,
     boundary_var = time_var,
     boundary_values = c(0, 1)
   )
   id_rhs_list <- .bar_terms_to_rhs_list(bars[id_idx])
-  id_blueprints <- lapply(id_rhs_list, function(rhs) {
-    .make_model_matrix_blueprint(rhs, dl, boundary_var = time_var, boundary_values = c(0, 1))
+  id_templates <- lapply(id_rhs_list, function(rhs) {
+    .make_model_matrix_template(rhs, dl, boundary_var = time_var, boundary_values = c(0, 1))
   })
-  mk_blueprints <- lapply(mk_rhs_list, function(rhs) {
-    .make_model_matrix_blueprint(rhs, dl, boundary_var = time_var, boundary_values = c(0, 1))
+  mk_templates <- lapply(mk_rhs_list, function(rhs) {
+    .make_model_matrix_template(rhs, dl, boundary_var = time_var, boundary_values = c(0, 1))
   })
-  idm_blueprints <- lapply(idm_rhs_list, function(rhs) {
-    .make_model_matrix_blueprint(rhs, dl, boundary_var = time_var, boundary_values = c(0, 1))
+  idm_templates <- lapply(idm_rhs_list, function(rhs) {
+    .make_model_matrix_template(rhs, dl, boundary_var = time_var, boundary_values = c(0, 1))
   })
 
-  X_obs <- .mm(fixed_blueprint, dl)
+  X_obs <- .mm(fixed_template, dl)
   P <- ncol(X_obs)
 
   # id block
   # - always required (subject random effects)
-  Z_id_obs <- do.call(cbind, lapply(id_blueprints, function(rhs) .mm(rhs, dl)))
+  Z_id_obs <- do.call(cbind, lapply(id_templates, function(rhs) .mm(rhs, dl)))
   R_id <- ncol(Z_id_obs)
 
   # marker-only optional
@@ -661,7 +666,7 @@ joinme_standata <- function(
     R_mk <- mk0$R_mk
     Z_mk_obs <- mk0$Z_mk_obs
   } else {
-    Z_mk_obs <- do.call(cbind, lapply(mk_blueprints, function(rhs) .mm(rhs, dl)))
+    Z_mk_obs <- do.call(cbind, lapply(mk_templates, function(rhs) .mm(rhs, dl)))
     R_mk <- ncol(Z_mk_obs)
   }
 
@@ -671,7 +676,7 @@ joinme_standata <- function(
     Z_idm_obs <- matrix(0.0, nrow(dl), 0)
     Q_idm <- 0L
   } else {
-    Z_idm_obs <- do.call(cbind, lapply(idm_blueprints, function(rhs) .mm(rhs, dl)))
+    Z_idm_obs <- do.call(cbind, lapply(idm_templates, function(rhs) .mm(rhs, dl)))
     Q_idm <- ncol(Z_idm_obs)
   }
 
@@ -796,6 +801,12 @@ joinme_standata <- function(
   centered <- .center_baseline(Bs_event_raw, Bs_gk_raw)
   Bs_event_c <- centered$Bs_event_c
   Bs_gk_c <- centered$Bs_gk_c
+  # Retain the exact offsets subtracted from non-constant basis columns.  The
+  # dynamic-prediction program must apply these same offsets to its quadrature
+  # basis; recomputing them from a different spline type changes both the
+  # baseline-hazard dimension and its interpretation.
+  basehaz_col_means <- colMeans(Bs_event_raw - Bs_event_c)
+  basehaz_cols <- colnames(Bs_event_raw) %||% paste0("basis_", seq_len(Kbs))
   # Association designs at GK and event times
   S_now <- S_event
   S_fwd <- pmin(S_event + eps_fd, 1)
@@ -806,15 +817,15 @@ joinme_standata <- function(
   de_fwd[[time_var]] <- S_fwd
 
   # Mean designs
-  X_gk_now <- .eval_rhs_list_on_times(list(fixed_blueprint), dataEvent, time_var, u_now)
-  X_gk_fwd <- .eval_rhs_list_on_times(list(fixed_blueprint), dataEvent, time_var, u_fwd)
-  X_event_now <- .mm(fixed_blueprint, de_now)
-  X_event_fwd <- .mm(fixed_blueprint, de_fwd)
+  X_gk_now <- .eval_rhs_list_on_times(list(fixed_template), dataEvent, time_var, u_now)
+  X_gk_fwd <- .eval_rhs_list_on_times(list(fixed_template), dataEvent, time_var, u_fwd)
+  X_event_now <- .mm(fixed_template, de_now)
+  X_event_fwd <- .mm(fixed_template, de_fwd)
 
-  Z_id_gk_now <- .eval_rhs_list_on_times(id_blueprints, dataEvent, time_var, u_now)
-  Z_id_gk_fwd <- .eval_rhs_list_on_times(id_blueprints, dataEvent, time_var, u_fwd)
-  Z_id_event_now <- .eval_rhs_list_at_event(id_blueprints, dataEvent, time_var, S_now)
-  Z_id_event_fwd <- .eval_rhs_list_at_event(id_blueprints, dataEvent, time_var, S_fwd)
+  Z_id_gk_now <- .eval_rhs_list_on_times(id_templates, dataEvent, time_var, u_now)
+  Z_id_gk_fwd <- .eval_rhs_list_on_times(id_templates, dataEvent, time_var, u_fwd)
+  Z_id_event_now <- .eval_rhs_list_at_event(id_templates, dataEvent, time_var, S_now)
+  Z_id_event_fwd <- .eval_rhs_list_at_event(id_templates, dataEvent, time_var, S_fwd)
 
   # Marker-only designs (optional)
   if (R_mk == 0) {
@@ -824,17 +835,17 @@ joinme_standata <- function(
     Z_mk_event_now <- mk0$Z_mk_event_now
     Z_mk_event_fwd <- mk0$Z_mk_event_fwd
   } else {
-    Z_mk_gk_now <- .eval_rhs_list_on_times(mk_blueprints, dataEvent, time_var, u_now)
-    Z_mk_gk_fwd <- .eval_rhs_list_on_times(mk_blueprints, dataEvent, time_var, u_fwd)
-    Z_mk_event_now <- .eval_rhs_list_at_event(mk_blueprints, dataEvent, time_var, S_now)
-    Z_mk_event_fwd <- .eval_rhs_list_at_event(mk_blueprints, dataEvent, time_var, S_fwd)
+    Z_mk_gk_now <- .eval_rhs_list_on_times(mk_templates, dataEvent, time_var, u_now)
+    Z_mk_gk_fwd <- .eval_rhs_list_on_times(mk_templates, dataEvent, time_var, u_fwd)
+    Z_mk_event_now <- .eval_rhs_list_at_event(mk_templates, dataEvent, time_var, S_now)
+    Z_mk_event_fwd <- .eval_rhs_list_at_event(mk_templates, dataEvent, time_var, S_fwd)
   }
 
   # Marker-by-id designs
-  Z_idm_gk_now <- .eval_rhs_list_on_times(idm_blueprints, dataEvent, time_var, u_now)
-  Z_idm_gk_fwd <- .eval_rhs_list_on_times(idm_blueprints, dataEvent, time_var, u_fwd)
-  Z_idm_event_now <- .eval_rhs_list_at_event(idm_blueprints, dataEvent, time_var, S_now)
-  Z_idm_event_fwd <- .eval_rhs_list_at_event(idm_blueprints, dataEvent, time_var, S_fwd)
+  Z_idm_gk_now <- .eval_rhs_list_on_times(idm_templates, dataEvent, time_var, u_now)
+  Z_idm_gk_fwd <- .eval_rhs_list_on_times(idm_templates, dataEvent, time_var, u_fwd)
+  Z_idm_event_now <- .eval_rhs_list_at_event(idm_templates, dataEvent, time_var, S_now)
+  Z_idm_event_fwd <- .eval_rhs_list_at_event(idm_templates, dataEvent, time_var, S_fwd)
 
   # Association flags
   af <- .parse_assoc(assoc)
@@ -860,10 +871,10 @@ joinme_standata <- function(
     zmk_cols = zmk_cols,
     zidm_cols = zidm_cols,
     time_var = time_var,
-    fixed_design = fixed_blueprint,
-    id_design = id_blueprints,
-    marker_design = mk_blueprints,
-    idm_design = idm_blueprints
+    fixed_design = fixed_template,
+    id_design = id_templates,
+    marker_design = mk_templates,
+    idm_design = idm_templates
   )
 
   # Prior scales (align to P)
@@ -1137,11 +1148,11 @@ joinme_standata <- function(
     zid_cols = zid_cols,
     zmk_cols = zmk_cols,
     zidm_cols = zidm_cols,
-    design_blueprints = list(
-      fixed = fixed_blueprint,
-      id = id_blueprints,
-      marker = mk_blueprints,
-      idm = idm_blueprints
+    design_templates = list(
+      fixed = fixed_template,
+      id = id_templates,
+      marker = mk_templates,
+      idm = idm_templates
     ),
     time_var = time_var,
     marker_levels = marker_levels,
@@ -1184,6 +1195,9 @@ joinme_standata <- function(
     basehaz_n_knots = basehaz_n_knots,
     basehaz_knots = basehaz_knots,
     basehaz_degree = basehaz_degree,
+    basehaz_formula = if (basehaz == "formula") basehaz_formula else NULL,
+    basehaz_col_means = as.numeric(basehaz_col_means),
+    basehaz_cols = as.character(basehaz_cols),
     Bs_obj = if (basehaz != "formula") Bs_obj else NULL,
     dist_cols = list(
       sigma = dist_sigma$cols,

@@ -13,7 +13,7 @@ mcmc_plot(
   regex = FALSE,
   fixed = FALSE,
   draws = NULL,
-  seed = 1,
+  seed = .Random.seed[[1]],
   ...
 )
 }

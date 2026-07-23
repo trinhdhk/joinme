@@ -491,217 +491,786 @@ pp_check.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, 
 
 # ---- Concordance ----------------------------------------------------------
 
-#' Time-varying concordance for the survival component
+#' Identify one finite value within a subject
 #'
-#' @rdname concordance.JoiNMeFit
-#' @param object A fitted object of class `JoiNMeFit`.
-#' @param newdataLong Longitudinal data for evaluation (defaults to training data).
-#' @param newdataEvent Event data for evaluation (defaults to training data).
-#' @param time_start Numeric landmark time(s) or a column name in `newdataEvent`.
-#' @param time_horizon Numeric horizon time(s) or a column name in `newdataEvent`.
-#' @param Dt Numeric horizon width; used when `time_horizon` is not supplied.
-#' @param cause Integer; cause index for competing risks (default 1).
-#' @param n_samples Number of posterior draws for prediction (default 200).
-#' @param seed Random seed for draw subsetting.
-#' @param type_weights Time-weighting for concordance; passed to `survival::concordance`.
-#' @param ... Additional arguments passed to `predict.JoiNMeFit()`.
+#' @description
+#' Return the unique finite value in a vector, or `NA_real_` when no such value
+#' exists or values vary.  This small helper permits `tapply()` to validate
+#' interval-split time columns without defining functions inside the mapping
+#' routine.
 #'
-#' @details Dynamic risks are obtained from `predict.JoiNMeFit()` and therefore
-#'   retain all fitted association structures, including the draw-specific
-#'   ordinates of ordered piecewise-linear transforms.
+#' @param x Numeric vector observed within one subject.
 #'
-#' @importFrom survival Surv concordance
-#' @return A data frame with time-varying concordance at each landmark time.
-#' @export
-concordance.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, time_start,
-                                  time_horizon = NULL, Dt = NULL, cause = 1, n_samples = 200,
-                                  seed = 123, type_weights = "none", ...) {
-	assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
-	if (missing(time_start)) {
-		cli::cli_abort("{.arg time_start} is required for time-varying concordance.")
-	}
-	data_in <- .resolve_train_data(object, newdataLong, newdataEvent, purpose = "time-varying concordance")
-	newdataLong <- data_in$newdataLong
-	newdataEvent <- data_in$newdataEvent
+#' @return One numeric value or `NA_real_`.
+#' @keywords internal
+#' @noRd
+.constant_finite_value <- function(x) {
+	x <- as.numeric(x)
+	values <- unique(x[is.finite(x)])
+	if (length(values) == 1L) values else NA_real_
+}
 
-	if (!is.numeric(cause) || length(cause) != 1) {
-		cli::cli_abort("{.arg cause} must be a single integer.")
-	}
+#' Construct one dense dynamic-prediction time grid
+#'
+#' @param start Numeric landmark time.
+#' @param horizon Numeric prediction horizon greater than `start`.
+#'
+#' @return A numeric vector of 50 equally spaced times including both bounds.
+#' @keywords internal
+#' @noRd
+.discrimination_time_grid <- function(start, horizon) {
+	seq(as.numeric(start), as.numeric(horizon), length.out = 50L)
+}
 
-	id_var <- eval(object$call$id_var) %||% "id"
-	time_var <- eval(object$call$time_var) %||% "time"
+#' Determine the default horizon for dynamic discrimination
+#'
+#' @description
+#' Use the fitted time support when the caller omits both `time_horizon` and
+#' `Dt`.  Fitted objects ordinarily retain `tmax`; the maximum observed event
+#' or censoring time is a compatibility fallback for older objects.
+#'
+#' @param object A fitted `JoiNMeFit` object.
+#' @param data_event Event-process data used when fitted time metadata are not
+#'   available.
+#'
+#' @return One positive finite numeric horizon on the original time scale.
+#' @keywords internal
+#' @noRd
+.default_discrimination_horizon <- function(object, data_event) {
+	horizon <- object$tmax %||% object$config$tmax %||% object$stan_data$tmax
+	if (is.numeric(horizon) && length(horizon) == 1L &&
+			is.finite(horizon) && horizon > 0) {
+		return(as.numeric(horizon))
+	}
 	event_vars <- .resolve_event_model_vars(
 		formulaEvent = object$formulaEvent,
-		dataEvent = newdataEvent,
-		context = "concordance.JoiNMeFit()"
+		dataEvent = data_event,
+		context = "dynamic discrimination"
 	)
-	event_time <- as.numeric(event_vars$event_time)
-	event_status <- event_vars$event_status
+	horizon <- max(as.numeric(event_vars$event_time), na.rm = TRUE)
+	if (!is.finite(horizon) || horizon <= 0) {
+		cli::cli_abort("Could not determine a positive default prediction horizon from the fitted data.")
+	}
+	horizon
+}
 
-	if (!(id_var %in% names(newdataEvent))) {
-		cli::cli_abort("{.arg newdataEvent} must include id column {id_var}.")
+#' Validate a concordance time-weighting rule
+#'
+#' @param type_weights Character rule requested by the user.  `"none"` is the
+#'   JoiNMe spelling of the unweighted `"n"` estimator.
+#'
+#' @return A character value accepted by the `timewt` argument of
+#'   [survival::concordance()].
+#' @keywords internal
+#' @noRd
+.concordance_time_weight <- function(type_weights) {
+	valid_weights <- c("none", "n", "S", "S/G", "n/G2", "I")
+	if (!is.character(type_weights) || length(type_weights) != 1L ||
+			!(type_weights %in% valid_weights)) {
+		cli::cli_abort("{.arg type_weights} must be one of {.val {valid_weights}}.")
 	}
-	if (length(event_time) != nrow(newdataEvent) || length(event_status) != nrow(newdataEvent)) {
-		cli::cli_abort("Could not derive event time/status vectors aligned to {.arg newdataEvent}.")
-	}
-	if (!(id_var %in% names(newdataLong)) || !(time_var %in% names(newdataLong))) {
-		cli::cli_abort("{.arg newdataLong} must include id and time columns used in the model.")
-	}
+	if (identical(type_weights, "none")) "n" else type_weights
+}
 
-	ids <- unique(newdataEvent[[id_var]])
-	ids <- ids[!is.na(ids)]
-	if (length(ids) == 0) {
-		cli::cli_abort("No subjects found in {.arg newdataEvent}.")
-	}
+#' Construct a subject-indexed landmark or horizon vector
+#'
+#' @description
+#' Convert one of the time specifications accepted by the discrimination
+#' methods into a finite numeric vector indexed by subject identifier.  A
+#' scalar is repeated across subjects, a named vector is matched by subject,
+#' and a character value identifies a column in the event data.  Keeping this
+#' conversion in one helper ensures that concordance and AUC apply identical
+#' subject alignment rules.
+#'
+#' @param value Numeric time specification or the name of a column in
+#'   `data_event`.
+#' @param ids Vector of distinct subject identifiers, in the required output
+#'   order.
+#' @param data_event Event-process data containing `id_var` and, when needed,
+#'   the requested time column.
+#' @param id_var Character name of the subject identifier column.
+#' @param argument Character argument label used in diagnostic messages.
+#'
+#' @return A finite numeric vector with one element per subject and names equal
+#'   to `as.character(ids)`.
+#' @keywords internal
+#' @noRd
+.subject_time_map <- function(value, ids, data_event, id_var, argument) {
+	id_keys <- as.character(ids)
 
-	build_time_map <- function(val, label) {
-		if (is.character(val)) {
-			if (length(val) != 1) {
-				cli::cli_abort("{label} must be a single column name when character.")
-			}
-			if (!(val %in% names(newdataEvent))) {
-				cli::cli_abort("{label} column {val} not found in newdataEvent.")
-			}
-			return(stats::setNames(as.numeric(newdataEvent[[val]]), newdataEvent[[id_var]]))
+	if (is.character(value)) {
+		if (length(value) != 1L || is.na(value)) {
+			cli::cli_abort("{.arg {argument}} must name one column in {.arg newdataEvent}.")
 		}
-		if (!is.numeric(val)) {
-			cli::cli_abort("{label} must be numeric or a column name.")
+		if (!(value %in% names(data_event))) {
+			cli::cli_abort("Column {.val {value}} named by {.arg {argument}} was not found in {.arg newdataEvent}.")
 		}
-		if (length(val) == 1) {
-			return(stats::setNames(rep(as.numeric(val), length(ids)), ids))
+		if (!is.numeric(data_event[[value]])) {
+			cli::cli_abort("Column {.val {value}} named by {.arg {argument}} must be numeric.")
 		}
-		if (!is.null(names(val))) {
-			return(stats::setNames(as.numeric(val), names(val)))
-		}
-		if (length(val) == length(ids)) {
-			return(stats::setNames(as.numeric(val), ids))
-		}
-		NULL
-	}
-
-	use_grid <- is.numeric(time_start) && length(time_start) > 1 && is.null(names(time_start))
-	if (use_grid) {
-		time_start_grid <- as.numeric(time_start)
-		if (!is.null(time_horizon) && length(time_horizon) > 1 && length(time_horizon) != length(time_start_grid)) {
-			cli::cli_abort("{.arg time_horizon} must be length 1 or the same length as {.arg time_start}.")
-		}
-		if (is.null(time_horizon) && is.null(Dt)) {
-			cli::cli_abort("Provide {.arg time_horizon} or {.arg Dt} when {.arg time_start} is a vector.")
-		}
-		results <- lapply(seq_along(time_start_grid), function(i) {
-			th <- if (!is.null(time_horizon)) {
-				if (length(time_horizon) == 1) time_horizon else time_horizon[i]
-			} else {
-				time_start_grid[i] + Dt
-			}
-			.time_varying_concordance_single(object, newdataLong, newdataEvent, time_start_grid[i], th, cause, n_samples, seed, type_weights, ...)
-		})
-		out <- do.call(rbind, results)
-		class(out) <- c("tvConcordance_JoiNMeFit", "data.frame")
-		return(out)
-	}
-
-	time_start_map <- build_time_map(time_start, "time_start")
-	if (is.null(time_start_map)) {
-		cli::cli_abort("{.arg time_start} must be scalar, per-subject, or a column name.")
-	}
-
-	if (is.null(time_horizon) && is.null(Dt)) {
-		cli::cli_abort("Provide {.arg time_horizon} or {.arg Dt}.")
-	}
-	if (!is.null(time_horizon)) {
-		time_horizon_map <- build_time_map(time_horizon, "time_horizon")
-		if (is.null(time_horizon_map)) {
-			cli::cli_abort("{.arg time_horizon} must be scalar, per-subject, or a column name.")
+		# Event data may contain several counting-process intervals per subject.
+		# The first match is sufficient only when the time declaration is constant
+		# within subject, so check that condition explicitly below.
+		row_keys <- as.character(data_event[[id_var]])
+		mapped <- as.numeric(data_event[[value]][match(id_keys, row_keys)])
+		if (anyDuplicated(row_keys)) {
+			group_range <- tapply(
+				as.numeric(data_event[[value]]), row_keys, .constant_finite_value
+			)
+			mapped <- as.numeric(group_range[id_keys])
 		}
 	} else {
-		if (!is.numeric(Dt) || length(Dt) != 1) {
-			cli::cli_abort("{.arg Dt} must be a single numeric value.")
+		if (!is.numeric(value) || !length(value)) {
+			cli::cli_abort("{.arg {argument}} must be numeric or name a column in {.arg newdataEvent}.")
 		}
-		time_horizon_map <- time_start_map + as.numeric(Dt)
+		if (length(value) == 1L) {
+			mapped <- rep(as.numeric(value), length(ids))
+		} else if (!is.null(names(value))) {
+			if (anyDuplicated(names(value))) {
+				cli::cli_abort("Names in {.arg {argument}} must be unique subject identifiers.")
+			}
+			mapped <- as.numeric(value[match(id_keys, names(value))])
+		} else if (length(value) == length(ids)) {
+			mapped <- as.numeric(value)
+		} else {
+			cli::cli_abort("{.arg {argument}} must be scalar, named by subject, or contain one value per subject.")
+		}
 	}
 
-	out <- .time_varying_concordance_single(object, newdataLong, newdataEvent, time_start_map, time_horizon_map, cause, n_samples, seed, type_weights, ...)
-	class(out) <- c("tvConcordance_JoiNMeFit", "data.frame")
+	if (length(mapped) != length(ids) || any(!is.finite(mapped))) {
+		cli::cli_abort(c(
+			x = "{.arg {argument}} could not be matched to a finite time for every subject.",
+			i = "Check subject names and, for a column specification, use one constant value within each subject."
+		))
+	}
+	stats::setNames(mapped, id_keys)
+}
+
+#' Reduce event-process rows to one observed outcome per subject
+#'
+#' @description
+#' Resolve the survival response, order counting-process intervals by their
+#' endpoints, and retain the final interval for each subject.  This produces
+#' the subject-level failure or censoring outcome required by dynamic
+#' discrimination estimators without multiplying subjects that have
+#' interval-split covariates.
+#'
+#' @param formula_event Survival model formula fitted by `joinme()`.
+#' @param data_event Event-process evaluation data.
+#' @param id_var Character name of the subject identifier column.
+#' @param context Character label used in diagnostic messages.
+#'
+#' @return A data frame with one row per subject and columns `event_time`,
+#'   `event_status`, and `event_type`, in addition to the identifier column.
+#' @keywords internal
+#' @noRd
+.subject_event_outcomes <- function(formula_event, data_event, id_var,
+									context = "concordance.JoiNMeFit()") {
+	if (!(id_var %in% names(data_event)) || anyNA(data_event[[id_var]])) {
+		cli::cli_abort("{context}: {.arg newdataEvent} must contain a non-missing subject identifier in {.field {id_var}}.")
+	}
+	event_vars <- .resolve_event_model_vars(
+		formulaEvent = formula_event,
+		dataEvent = data_event,
+		context = context
+	)
+	if (!(event_vars$surv_type %in% c("right", "counting"))) {
+		cli::cli_abort(c(
+			x = "{context}: survival discrimination currently requires right-censored or counting-process outcomes.",
+			i = "Left- and interval-censored outcomes require a censoring-specific discrimination estimator."
+		))
+	}
+
+	outcome <- data.frame(
+		.__id = data_event[[id_var]],
+		.__event_start = as.numeric(event_vars$event_start),
+		event_time = as.numeric(event_vars$event_time),
+		event_status = event_vars$event_status,
+		stringsAsFactors = FALSE
+	)
+	# In counting-process form the terminal interval contains the observed
+	# subject outcome.  Ordering before de-duplication makes the result invariant
+	# to the incoming row order.
+	ord <- order(outcome$.__id, outcome$event_time, outcome$.__event_start)
+	outcome <- outcome[ord, , drop = FALSE]
+	outcome <- outcome[!duplicated(as.character(outcome$.__id), fromLast = TRUE), , drop = FALSE]
+	decoded <- .derive_event_outcomes(outcome$event_status, context = context)
+	outcome$event_status <- decoded$d_event
+	outcome$event_type <- decoded$event_type
+	outcome$.__event_start <- NULL
+	names(outcome)[names(outcome) == ".__id"] <- id_var
+	rownames(outcome) <- NULL
+	outcome
+}
+
+#' Concordance of conditional survival predictions
+#'
+#' @description
+#' Estimates a single, follow-up-wide concordance index from the conditional
+#' survival curves of a fitted joint model.  The estimator follows the
+#' survival-curve ordering of Antolini and colleagues: when subject \eqn{i}
+#' experiences the event before subject \eqn{j}, their pair is concordant when
+#' \eqn{\widehat S_i(r_i) < \widehat S_j(r_i)}, where \eqn{r_i} is the observed
+#' residual event time and both curves are evaluated at that same residual
+#' time.
+#'
+#' @param object A fitted object of class `JoiNMeFit`.
+#' @param newdataLong Longitudinal evaluation data.  The fitted longitudinal
+#'   data are used when this and `newdataEvent` are both omitted.
+#' @param newdataEvent Event-process evaluation data.  The fitted event data
+#'   are used when this and `newdataLong` are both omitted.
+#' @param time_start Optional conditioning time.  A scalar applies to every
+#'   subject; a named numeric vector is matched by subject identifier; and a
+#'   character scalar names a subject-constant column in `newdataEvent`.  When
+#'   omitted, each subject's latest longitudinal measurement strictly before
+#'   their observed event or censoring time is used.
+#' @param cause Positive integer identifying the event cause of interest.
+#'   Other observed causes are treated as censoring at their event times.
+#' @param predict_control Named list for prediction configuration.
+#' @param seed Integer seed used when posterior draws are subsampled.
+#' @param type_weights Character event-time weighting rule.  `"none"` and
+#'   `"n"` give Harrell's pair weighting.  `"S"`, `"S/G"`, `"n/G2"` (Uno's
+#'   weighting), and `"I"` have the meanings used by
+#'   [survival::concordance()].
+#' @param ... Additional arguments passed to [predict.JoiNMeFit()].
+#'
+#' @details
+#' Residual follow-up is measured from the conditioning time:
+#' \eqn{R_i=T_i-T_{0i}}.  Conditional survival is one at residual time zero.
+#' For every observed event at \eqn{R_i}, the method compares subject \eqn{i}
+#' with subjects known to have survived beyond \eqn{R_i}.  A subject censored
+#' before \eqn{R_i} is not comparable; a subject censored exactly at
+#' \eqn{R_i} is known to be event-free at that time and remains comparable.
+#' Thus premature censoring is never interpreted as exceptionally long
+#' survival.
+#'
+#' The censoring and event-time weights are obtained from
+#' [survival::concordance()].  Under the usual independent-censoring
+#' assumption, `"n/G2"` reduces sensitivity to the censoring distribution by
+#' applying Uno's inverse-censoring weighting.  No method can recover the
+#' ordering of a pair whose event-time order was not observed without further
+#' assumptions.
+#'
+#' The comparison deliberately evaluates both predicted curves at the earlier
+#' event time.  Evaluating each subject's curve at their own observed outcome
+#' time and then ranking those values would use the response to construct the
+#' predictor and can produce optimistically biased concordance.
+#'
+#' Dynamic predictions contain the complete fitted event model, including
+#' baseline hazard, event covariates, latent longitudinal trajectories, and
+#' every identity, functional, monotone-spline, or ordered piecewise-linear
+#' association.  Consequently no separate piecewise-linear approximation is
+#' made by this method.
+#'
+#' @return A one-row data frame with the concordance estimate, weighted counts
+#'   of concordant, discordant, and predictor-tied pairs, total comparison
+#'   weight `n_pairs`, and the numbers of analysed subjects and cause-specific
+#'   events.
+#' @references
+#' Antolini L, Boracchi P, Biganzoli E (2005). A time-dependent discrimination
+#' index for survival data. *Statistics in Medicine*, 24, 3927--3944.
+#' \doi{10.1002/sim.2427}.
+#' @seealso [auc.JoiNMeFit()], [predict.JoiNMeFit()], [survival::concordance()]
+#' @importFrom survival Surv concordance
+#' @export
+concordance.JoiNMeFit <- function(object, newdataLong = NULL,
+								  newdataEvent = NULL, time_start = NULL,
+								  cause = 1,
+								  predict_control = list(n_samples = 200, n_pred_draws = 20),
+									seed = .Random.seed[[1]], 
+								  type_weights = "none", ...) {
+	assertthat::assert_that(
+		inherits(object, "JoiNMeFit"),
+		msg = "Object must be a JoiNMeFit instance."
+	)
+	
+	if (!is.numeric(cause) || length(cause) != 1L || !is.finite(cause) ||
+			cause < 1 || cause != as.integer(cause)) {
+		cli::cli_abort("{.arg cause} must be a single positive integer.")
+	}
+	.concordance_time_weight(type_weights)
+
+	data_in <- .resolve_train_data(
+		object, newdataLong, newdataEvent,
+		purpose = "conditional-survival concordance"
+	)
+	curves <- .concordance_survival_curves(
+		object = object,
+		newdataLong = data_in$newdataLong,
+		newdataEvent = data_in$newdataEvent,
+		time_start = time_start,
+		cause = as.integer(cause),
+		predict_control = predict_control,
+		seed = seed,
+		...
+	)
+	out <- .concordance_from_survival_curves(
+		outcomes = curves$outcomes,
+		survival = curves$survival,
+		type_weights = type_weights
+	)
+	class(out) <- c("concordance_JoiNMeFit", "data.frame")
 	out
 }
 
-#' Construct one landmark-specific discrimination risk set
+#' Determine the final pre-outcome longitudinal measurement
 #'
 #' @description
-#' Obtain posterior mean dynamic risks from the fitted joint model, align them
-#' with event outcomes after a single landmark, and either calculate
-#' time-weighted concordance or return the aligned risk set for another
-#' discrimination functional. The latter path is used by [auc.JoiNMeFit()] so
-#' concordance and AUC share precisely the same dynamic predictions.
+#' Finds one conditioning time per event-record subject.  Measurements at the
+#' event or censoring time are excluded so the prognostic history precedes the
+#' outcome used to assess it.
+#'
+#' @param ids Subject identifiers in event-outcome order.
+#' @param event_time Numeric observed event or censoring times aligned with
+#'   `ids`.
+#' @param data_long Longitudinal data containing identifier and time columns.
+#' @param id_var,time_var Character column names.
+#'
+#' @return A named numeric vector aligned with `ids`; subjects without a
+#'   pre-outcome measurement receive `NA_real_`.
+#' @keywords internal
+#' @noRd
+.last_preoutcome_measurement <- function(ids, event_time, data_long,
+										 id_var, time_var) {
+	id_keys <- as.character(ids)
+	event_map <- stats::setNames(as.numeric(event_time), id_keys)
+	long_keys <- as.character(data_long[[id_var]])
+	long_times <- as.numeric(data_long[[time_var]])
+	subject_end <- as.numeric(event_map[long_keys])
+	tolerance <- sqrt(.Machine$double.eps) * pmax(1, abs(subject_end))
+	keep <- !is.na(long_keys) & is.finite(long_times) & is.finite(subject_end) &
+		long_times < subject_end - tolerance
+	if (!any(keep)) {
+		return(stats::setNames(rep(NA_real_, length(ids)), id_keys))
+	}
+
+	candidates <- data.frame(
+		id = long_keys[keep],
+		time = long_times[keep],
+		stringsAsFactors = FALSE
+	)
+	candidates <- candidates[order(candidates$id, candidates$time), , drop = FALSE]
+	candidates <- candidates[
+		!duplicated(candidates$id, fromLast = TRUE),
+		,
+		drop = FALSE
+	]
+	landmark <- candidates$time[match(id_keys, candidates$id)]
+	stats::setNames(as.numeric(landmark), id_keys)
+}
+
+#' Build one exact residual-time prediction grid
+#'
+#' @param landmark Absolute conditioning time for one subject.
+#' @param residual_end Observed residual event or censoring time for that
+#'   subject.
+#' @param event_residuals Distinct residual times of cause-specific events.
+#'
+#' @return A sorted numeric vector of absolute prediction times.  It contains
+#'   every event residual time at which the subject can enter a comparison and
+#'   a regular grid for stable curve interpolation.
+#' @keywords internal
+#' @noRd
+.concordance_prediction_grid <- function(landmark, residual_end,
+										 event_residuals) {
+	relevant_events <- event_residuals[
+		event_residuals >= 0 & event_residuals <= residual_end
+	]
+	regular_grid <- seq(0, residual_end, length.out = 50L)
+	landmark + sort(unique(c(0, regular_grid, relevant_events, residual_end)))
+}
+
+#' Predict conditional survival curves required by concordance
+#'
+#' @description
+#' Aligns terminal event outcomes, derives valid subject-specific landmarks,
+#' restricts longitudinal histories to information available at those
+#' landmarks, and predicts survival at every residual event time needed by a
+#' comparable pair.
+#'
+#' @inheritParams concordance.JoiNMeFit
+#'
+#' @return A list with `outcomes`, a subject-level analysis data frame, and
+#'   `survival`, a matrix whose rows are distinct residual event times and
+#'   whose columns follow the subject order in `outcomes`.
+#' @keywords internal
+#' @noRd
+.concordance_survival_curves <- function(object, newdataLong, newdataEvent,
+										 time_start, cause, predict_control,
+										 seed, ...) {
+	id_var <- eval(object$call$id_var) %||% "id"
+	time_var <- eval(object$call$time_var) %||% "time"
+	if (!(id_var %in% names(newdataLong)) ||
+			!(time_var %in% names(newdataLong))) {
+		cli::cli_abort("{.arg newdataLong} must contain the fitted identifier and time columns.")
+	}
+
+	outcomes <- .subject_event_outcomes(
+		formula_event = object$formulaEvent,
+		data_event = newdataEvent,
+		id_var = id_var,
+		context = "concordance.JoiNMeFit()"
+	)
+	ids <- outcomes[[id_var]]
+	id_keys <- as.character(ids)
+	if (is.null(time_start)) {
+		landmark <- .last_preoutcome_measurement(
+			ids = ids,
+			event_time = outcomes$event_time,
+			data_long = newdataLong,
+			id_var = id_var,
+			time_var = time_var
+		)
+	} else {
+		landmark <- .subject_time_map(
+			time_start, ids, newdataEvent, id_var, "time_start"
+		)
+	}
+
+	eligible <- is.finite(landmark) & is.finite(outcomes$event_time) &
+		outcomes$event_time > landmark
+	if (sum(eligible) < 2L) {
+		cli::cli_abort(c(
+			x = "Fewer than two subjects have positive follow-up after a valid conditioning time.",
+			i = "Supply earlier {.arg time_start} values or check the longitudinal observation times."
+		))
+	}
+	outcomes <- outcomes[eligible, , drop = FALSE]
+	landmark <- landmark[eligible]
+	ids <- outcomes[[id_var]]
+	id_keys <- as.character(ids)
+	names(landmark) <- id_keys
+	outcomes$time_start <- as.numeric(landmark)
+	outcomes$residual_time <- outcomes$event_time - outcomes$time_start
+	outcomes$cause_event <- as.integer(
+		outcomes$event_status == 1L & outcomes$event_type == cause
+	)
+	if (!any(outcomes$cause_event == 1L)) {
+		cli::cli_abort("No observed events match the requested {.arg cause}.")
+	}
+
+	# Only measurements available by the chosen landmark may inform the
+	# conditional random-effects distribution.  This prevents measurements
+	# recorded after the prognostic origin from leaking into the survival curve.
+	long_keys <- as.character(newdataLong[[id_var]])
+	long_landmark <- as.numeric(landmark[long_keys])
+	keep_history <- is.finite(long_landmark) &
+		is.finite(newdataLong[[time_var]]) &
+		newdataLong[[time_var]] <= long_landmark
+	history <- newdataLong[keep_history, , drop = FALSE]
+	history_ids <- unique(as.character(history[[id_var]]))
+	has_history <- id_keys %in% history_ids
+	if (!all(has_history)) {
+		outcomes <- outcomes[has_history, , drop = FALSE]
+		landmark <- landmark[has_history]
+		ids <- outcomes[[id_var]]
+		id_keys <- as.character(ids)
+		history <- history[as.character(history[[id_var]]) %in% id_keys, , drop = FALSE]
+	}
+	if (nrow(outcomes) < 2L || !any(outcomes$cause_event == 1L)) {
+		cli::cli_abort("Insufficient longitudinal histories remain for concordance estimation.")
+	}
+
+	event_residuals <- sort(unique(
+		outcomes$residual_time[outcomes$cause_event == 1L]
+	))
+	times_map <- Map(
+		.concordance_prediction_grid,
+		as.numeric(outcomes$time_start),
+		as.numeric(outcomes$residual_time),
+		MoreArgs = list(event_residuals = event_residuals)
+	)
+	names(times_map) <- id_keys
+	landmark <- stats::setNames(as.numeric(outcomes$time_start), id_keys)
+	event_keys <- as.character(newdataEvent[[id_var]])
+	prediction_event <- newdataEvent[event_keys %in% id_keys, , drop = FALSE]
+
+	prediction <- predict(
+		object,
+		newdataLong = history,
+		newdataEvent = prediction_event,
+		process = "event",
+		times = times_map,
+		time_start = landmark,
+		control = predict_control,
+		seed = seed,
+		...
+	)
+	survival_df <- prediction$predictions$survival
+	if (is.null(survival_df) || nrow(survival_df) == 0L) {
+		cli::cli_abort("No conditional survival predictions were returned for concordance.")
+	}
+	survival_matrix <- .concordance_survival_matrix(
+		survival_df = survival_df,
+		ids = ids,
+		landmark = landmark,
+		event_residuals = event_residuals
+	)
+	list(outcomes = outcomes, survival = survival_matrix)
+}
+
+#' Align predicted curves on residual event times
+#'
+#' @description
+#' Interpolates each posterior mean survival curve only within its predicted
+#' support.  Exact event times were inserted in the prediction grid, so
+#' interpolation ordinarily reproduces a stored ordinate; it also protects
+#' against harmless floating-point changes during time scaling.
+#'
+#' @param survival_df Prediction summary with columns `id`, `time`, and
+#'   `Survival`.
+#' @param ids Subject identifiers in analysis order.
+#' @param landmark Named absolute conditioning times.
+#' @param event_residuals Sorted distinct cause-specific residual event times.
+#'
+#' @return Numeric matrix indexed by residual event time and subject.
+#' @keywords internal
+#' @noRd
+.concordance_survival_matrix <- function(survival_df, ids, landmark,
+										 event_residuals) {
+	required <- c("id", "time", "Survival")
+	if (!all(required %in% names(survival_df))) {
+		cli::cli_abort("Conditional survival predictions lack required columns.")
+	}
+	id_keys <- as.character(ids)
+	out <- matrix(
+		NA_real_,
+		nrow = length(event_residuals),
+		ncol = length(ids),
+		dimnames = list(as.character(event_residuals), id_keys)
+	)
+	prediction_keys <- as.character(survival_df$id)
+	for (j in seq_along(ids)) {
+		rows <- prediction_keys == id_keys[[j]] &
+			is.finite(survival_df$time) &
+			is.finite(survival_df$Survival)
+		if (!any(rows)) {
+			next
+		}
+		residual_grid <- as.numeric(survival_df$time[rows]) -
+			as.numeric(landmark[[id_keys[[j]]]])
+		ord <- order(residual_grid)
+		out[, j] <- stats::approx(
+			x = residual_grid[ord],
+			y = as.numeric(survival_df$Survival[rows])[ord],
+			xout = event_residuals,
+			method = "linear",
+			rule = 1,
+			ties = mean
+		)$y
+	}
+	out
+}
+
+#' Recover event-specific comparison weights from `survival`
+#'
+#' @description
+#' Calls [survival::concordance()] with an arbitrary fixed ordering solely to
+#' obtain its documented event-time weights.  Dividing the returned time
+#' weight by the risk-set size gives the weight of each pair formed by that
+#' event.  The arbitrary predictor cannot affect these weights.
+#'
+#' @param outcomes Subject-level data containing `residual_time` and
+#'   `cause_event`.
+#' @param type_weights JoiNMe concordance weighting declaration.
+#'
+#' @return Numeric vector aligned with rows of `outcomes`; non-event rows have
+#'   zero weight.
+#' @keywords internal
+#' @noRd
+.concordance_event_weights <- function(outcomes, type_weights) {
+	timewt <- .concordance_time_weight(type_weights)
+	weight_data <- data.frame(
+		residual_time = outcomes$residual_time,
+		cause_event = outcomes$cause_event,
+		working_score = seq_len(nrow(outcomes))
+	)
+	rownames(weight_data) <- as.character(seq_len(nrow(weight_data)))
+	engine <- survival::concordance(
+		survival::Surv(residual_time, cause_event) ~ working_score,
+		data = weight_data,
+		timewt = timewt,
+		ranks = TRUE
+	)
+	weights <- numeric(nrow(outcomes))
+	if (is.null(engine$ranks) || nrow(engine$ranks) == 0L) {
+		return(weights)
+	}
+	ranks <- engine$ranks
+	# survival currently simplifies a single event's rank table to one column
+	# with statistics in the rows.  Restore the ordinary one-row layout before
+	# aligning the event.  This also keeps the method stable across survival
+	# releases that preserve or drop this dimension.
+	required_rank_columns <- c("time", "rank", "timewt", "casewt")
+	if (!all(required_rank_columns %in% names(ranks)) &&
+			all(required_rank_columns %in% rownames(ranks))) {
+		ranks <- as.data.frame(t(as.matrix(ranks)), stringsAsFactors = FALSE)
+	}
+	if (!all(c("time", "timewt") %in% names(ranks))) {
+		cli::cli_abort("The concordance weighting engine returned an unrecognised rank table.")
+	}
+
+	event_rows <- suppressWarnings(as.integer(rownames(ranks)))
+	valid_rows <- is.finite(event_rows) &
+		event_rows >= 1L & event_rows <= nrow(outcomes)
+	if (!all(valid_rows)) {
+		# When row names are unavailable, match only observed event rows.  A
+		# censoring observation may share the same time and must not receive the
+		# event's comparison weight.
+		event_candidates <- which(outcomes$cause_event == 1L)
+		event_rows <- event_candidates[
+			match(ranks$time, outcomes$residual_time[event_candidates])
+		]
+		valid_rows <- !is.na(event_rows) & is.finite(event_rows)
+	}
+	risk_size <- vapply(
+		ranks$time,
+		function(event_time) sum(outcomes$residual_time >= event_time),
+		numeric(1)
+	)
+	pair_weight <- ranks$timewt / risk_size
+	weights[event_rows[valid_rows]] <- pair_weight[valid_rows]
+	weights
+}
+
+#' Calculate survival-curve concordance over all observable pairs
+#'
+#' @description
+#' At each cause-specific event, compares the event subject's survival
+#' probability with every subject whose residual failure time is known to be
+#' later.  The implementation stores survival only on distinct event times and
+#' visits each observable pair once, avoiding a three-dimensional subject by
+#' subject by time array.
+#'
+#' @param outcomes Subject-level outcome data returned by
+#'   `.concordance_survival_curves()`.
+#' @param survival Matrix returned by `.concordance_survival_matrix()`.
+#' @param type_weights Concordance event-time weighting rule.
+#'
+#' @return One-row data frame containing the concordance estimate and weighted
+#'   comparison counts.
+#' @keywords internal
+#' @noRd
+.concordance_from_survival_curves <- function(outcomes, survival,
+											  type_weights = "none") {
+	required <- c("residual_time", "cause_event")
+	if (!all(required %in% names(outcomes))) {
+		cli::cli_abort("Concordance outcomes lack residual time or event status.")
+	}
+	event_weights <- .concordance_event_weights(outcomes, type_weights)
+	concordant <- 0
+	discordant <- 0
+	tied <- 0
+
+	event_rows <- which(outcomes$cause_event == 1L & event_weights > 0)
+	for (i in event_rows) {
+		event_time <- outcomes$residual_time[[i]]
+		time_row <- match(as.character(event_time), rownames(survival))
+		if (is.na(time_row) || !is.finite(survival[time_row, i])) {
+			next
+		}
+		# Censoring at the event time implies survival strictly beyond that
+		# time.  Failures tied at the same time do not have an observable order.
+		comparator <- outcomes$residual_time > event_time |
+			(outcomes$residual_time == event_time &
+				outcomes$cause_event == 0L)
+		comparator[[i]] <- FALSE
+		comparator <- comparator & is.finite(survival[time_row, ])
+		if (!any(comparator)) {
+			next
+		}
+
+		difference <- survival[time_row, comparator] - survival[time_row, i]
+		weight <- event_weights[[i]]
+		concordant <- concordant + weight * sum(difference > 0)
+		discordant <- discordant + weight * sum(difference < 0)
+		tied <- tied + weight * sum(difference == 0)
+	}
+
+	n_pairs <- concordant + discordant + tied
+	estimate <- if (n_pairs > 0) {
+		(concordant + 0.5 * tied) / n_pairs
+	} else {
+		NA_real_
+	}
+	data.frame(
+		concordance = estimate,
+		concordant = concordant,
+		discordant = discordant,
+		tied = tied,
+		n_pairs = n_pairs,
+		n_subjects = nrow(outcomes),
+		n_events = sum(outcomes$cause_event == 1L)
+	)
+}
+
+#' Build a landmark-specific dynamic discrimination risk set
+#'
+#' @description
+#' Obtain posterior mean conditional survival probabilities from the fitted
+#' joint model and align them with one terminal event outcome per subject.  The
+#' resulting data are the statistical input for cumulative/dynamic AUC.
 #'
 #' @param object A fitted `JoiNMeFit` object.
 #' @param newdataLong Longitudinal histories used for dynamic prediction.
-#' @param newdataEvent Subject-level event outcomes and covariates.
+#' @param newdataEvent Event-process outcomes and covariates.
 #' @param time_start Scalar or named subject-specific landmark times.
 #' @param time_horizon Scalar or named subject-specific horizon times.
-#' @param cause Integer event cause treated as the case event.
+#' @param cause Integer event cause treated as the failure of interest.
 #' @param n_samples Number of posterior draws used by dynamic prediction.
 #' @param seed Integer posterior-subsampling seed.
-#' @param type_weights Time-weighting rule passed to
-#'   [survival::concordance()].
 #' @param ... Additional arguments passed to [predict.JoiNMeFit()].
-#' @param return_risk_set Logical. If `TRUE`, return the aligned subject-level
-#'   risks and outcomes instead of the concordance summary.
 #'
-#' @return A one-row concordance data frame, or, when `return_risk_set = TRUE`,
-#'   the aligned subject-level dynamic-risk data frame.
+#' @return A subject-level data frame containing conditional event risk,
+#'   follow-up from the landmark, the cause-specific event indicator, and the
+#'   observed event or censoring outcome.
 #' @keywords internal
 #' @noRd
-.time_varying_concordance_single <- function(object, newdataLong, newdataEvent, time_start, time_horizon, cause, n_samples, seed, type_weights, ..., return_risk_set = FALSE) {
+.dynamic_discrimination_risk_set <- function(object, newdataLong, newdataEvent,
+												 time_start, time_horizon, cause,
+												 n_samples, seed, ...) {
 	id_var <- eval(object$call$id_var) %||% "id"
 	time_var <- eval(object$call$time_var) %||% "time"
-	event_vars <- .resolve_event_model_vars(
-		formulaEvent = object$formulaEvent,
-		dataEvent = newdataEvent,
-		context = "concordance.JoiNMeFit()"
+	event_df <- .subject_event_outcomes(
+		formula_event = object$formulaEvent,
+		data_event = newdataEvent,
+		id_var = id_var,
+		context = "auc.JoiNMeFit()"
 	)
-	event_time <- as.numeric(event_vars$event_time)
-	event_status <- event_vars$event_status
-
-	ids <- unique(newdataEvent[[id_var]])
-	ids <- ids[!is.na(ids)]
-
-	if (length(time_start) == 1 && !is.null(names(time_start))) time_start <- unname(time_start)
-	if (length(time_horizon) == 1 && !is.null(names(time_horizon))) time_horizon <- unname(time_horizon)
-
-	  if (length(time_start) == 1) {
-			time_start_map <- stats::setNames(rep(as.numeric(time_start), length(ids)), ids)
-	} else {
-			time_start_map <- time_start
-	}
-	if (length(time_horizon) == 1) {
-			time_horizon_map <- stats::setNames(rep(as.numeric(time_horizon), length(ids)), ids)
-	} else {
-			time_horizon_map <- time_horizon
+	ids <- event_df[[id_var]]
+	id_keys <- as.character(ids)
+	time_start_map <- .subject_time_map(
+		time_start, ids, newdataEvent, id_var, "time_start"
+	)
+	time_horizon_map <- .subject_time_map(
+		time_horizon, ids, newdataEvent, id_var, "time_horizon"
+	)
+	if (any(time_horizon_map <= time_start_map)) {
+		cli::cli_abort("{.arg time_horizon} must be greater than {.arg time_start} for every subject.")
 	}
 
-		if (any(time_horizon_map <= time_start_map, na.rm = TRUE)) {
-		cli::cli_abort("{.arg time_horizon} must be greater than {.arg time_start} for all subjects.")
+	# A direct indexed comparison avoids constructing and recombining one data
+	# frame per subject.  This is material for repeated landmark calculations,
+	# while preserving every longitudinal record observed by its landmark.
+	long_keys <- as.character(newdataLong[[id_var]])
+	long_landmark <- as.numeric(time_start_map[long_keys])
+	keep_history <- is.finite(long_landmark) &
+		is.finite(newdataLong[[time_var]]) &
+		newdataLong[[time_var]] <= long_landmark
+	newdataLong <- newdataLong[keep_history, , drop = FALSE]
+	if (nrow(newdataLong) == 0L) {
+		cli::cli_abort("No longitudinal history is available at or before the landmark time(s).")
 	}
 
-	# Restrict histories to each subject's landmark time
-	dL_split <- split(newdataLong, newdataLong[[id_var]])
-	dL_filtered <- lapply(names(dL_split), function(id) {
-		dd <- dL_split[[id]]
-		dd[dd[[time_var]] <= time_start_map[[id]], , drop = FALSE]
-	})
-	newdataLong <- do.call(rbind, dL_filtered)
-	if (is.null(newdataLong) || nrow(newdataLong) == 0) {
-		cli::cli_abort("No longitudinal history available at or before the landmark time(s).")
-	}
-
-	# Prepare per-subject time grids
-	times_map <- stats::setNames(lapply(ids, function(id) {
-		t_start_i <- as.numeric(time_start_map[[id]])
-		t_horizon_i <- as.numeric(time_horizon_map[[id]])
-		seq(t_start_i, t_horizon_i, length.out = 50L)
-	}), ids)
+	# Fifty points preserve the established prediction behaviour and include the
+	# requested horizon exactly.  The same dense survival grid is therefore used
+	# by discrimination summaries and ordinary dynamic prediction plots.
+	times_map <- Map(
+		.discrimination_time_grid,
+		as.numeric(time_start_map[id_keys]),
+		as.numeric(time_horizon_map[id_keys])
+	)
+	names(times_map) <- id_keys
 
 	pred <- predict(
 		object,
@@ -714,91 +1283,47 @@ concordance.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NUL
 		seed = seed,
 		...
 	)
-
 	surv_df <- pred$predictions$survival
-	if (is.null(surv_df) || nrow(surv_df) == 0) {
-		cli::cli_abort("No survival predictions returned for time-varying concordance.")
+	if (is.null(surv_df) || nrow(surv_df) == 0L) {
+		cli::cli_abort("No survival predictions were returned for time-varying discrimination.")
 	}
 
-	key_df <- data.frame(
-		id = ids,
-		time_horizon = as.numeric(time_horizon_map[ids]),
-		stringsAsFactors = FALSE
-	)
-	colnames(key_df)[1] <- id_var
-
-	merge_df <- merge(key_df, surv_df, by.x = id_var, by.y = "id", all.x = TRUE)
-	merge_df <- merge_df[abs(merge_df$time - merge_df$time_horizon) <= sqrt(.Machine$double.eps), , drop = FALSE]
-	if (nrow(merge_df) == 0) {
+	# Match each prediction row to its requested subject-specific horizon.  The
+	# relative tolerance protects against harmless floating-point rounding in a
+	# generated time grid without admitting a neighbouring grid point.
+	pred_keys <- as.character(surv_df$id)
+	pred_horizon <- as.numeric(time_horizon_map[pred_keys])
+	tolerance <- sqrt(.Machine$double.eps) * pmax(1, abs(pred_horizon))
+	at_horizon <- is.finite(pred_horizon) & is.finite(surv_df$time) &
+		abs(surv_df$time - pred_horizon) <= tolerance
+	surv_horizon <- surv_df[at_horizon, , drop = FALSE]
+	pred_index <- match(id_keys, as.character(surv_horizon$id))
+	if (all(is.na(pred_index))) {
 		cli::cli_abort("Failed to align survival predictions at the requested horizon.")
 	}
 
-	merge_df$risk <- 1 - merge_df$Survival
-
-	event_df <- data.frame(
-		event_time = as.numeric(event_time),
-		event_status = event_status,
-		stringsAsFactors = FALSE
+	risk_set <- event_df
+	risk_set$time_start <- as.numeric(time_start_map[id_keys])
+	risk_set$time_horizon <- as.numeric(time_horizon_map[id_keys])
+	risk_set$risk <- 1 - as.numeric(surv_horizon$Survival[pred_index])
+	# A competing event is a censoring observation for a cause-specific C-index.
+	# Censoring occurs at its observed time, rather than at the prediction
+	# horizon, so it contributes only comparisons that were still observable.
+	cause_event <- risk_set$event_status == 1L & risk_set$event_type == cause
+	risk_set$event_window <- as.integer(
+		cause_event & risk_set$event_time <= risk_set$time_horizon
 	)
-	event_df[[id_var]] <- newdataEvent[[id_var]]
-	event_df <- event_df[, c(id_var, "event_time", "event_status"), drop = FALSE]
-	event_decoded <- .derive_event_outcomes(event_df$event_status, context = "concordance.JoiNMeFit()")
-	event_df$event_status <- event_decoded$d_event
-	event_df$event_type <- event_decoded$event_type
-	merge_df <- merge(merge_df, event_df, by = id_var, all.x = TRUE)
-	merge_df$time_start <- as.numeric(time_start_map[merge_df[[id_var]]])
-
-	merge_df <- merge_df[merge_df$event_time > merge_df$time_start, , drop = FALSE]
-	if (nrow(merge_df) == 0) {
-		return(data.frame(time_start = as.numeric(time_start)[1], time_horizon = as.numeric(time_horizon)[1],
-			concordance = NA_real_, n_cases = 0, n_controls = 0, n_pairs = 0))
-	}
-
-	status <- as.integer(merge_df$event_status)
-	status <- ifelse(status == 1 & merge_df$event_type == cause, 1L, 0L)
-
-	merge_df$event_window <- as.integer(status == 1 & merge_df$event_time <= merge_df$time_horizon)
-	merge_df$time_window <- pmin(merge_df$event_time, merge_df$time_horizon) - merge_df$time_start
-
-	# The same model-derived risk set underlies concordance and cumulative/dynamic
-	# AUC.  Returning it internally avoids a second prediction and guarantees that
-	# both discrimination summaries use the fitted association transform,
-	# including posterior piecewise-linear ordinates, in precisely the same way.
-	if (isTRUE(return_risk_set)) {
-		return(merge_df)
-	}
-
-	n_cases <- sum(merge_df$event_window == 1, na.rm = TRUE)
-	n_controls <- sum(merge_df$event_window == 0 & merge_df$event_time > merge_df$time_horizon, na.rm = TRUE)
-
-	if (n_cases == 0 || n_controls == 0) {
-		return(data.frame(time_start = as.numeric(time_start)[1], time_horizon = as.numeric(time_horizon)[1],
-			concordance = NA_real_, n_cases = n_cases, n_controls = n_controls, n_pairs = 0))
-	}
-
-	concord_data <- merge_df[merge_df$event_time > merge_df$time_start, , drop = FALSE]
-
-	weight_map <- list(none = "n")
-	timewt <- weight_map[[type_weights]] %||% type_weights
-
-	conc <- survival::concordance(
-		survival::Surv(concord_data$time_window, concord_data$event_window) ~ concord_data$risk,
-		timewt = timewt
-	)
-	comparable_pairs <- if (!is.null(conc$count)) {
-		sum(as.numeric(conc$count), na.rm = TRUE)
-	} else {
-		NA_real_
-	}
-
-	data.frame(
-		time_start = as.numeric(time_start)[1],
-		time_horizon = as.numeric(time_horizon)[1],
-		concordance = conc$concordance,
-		n_cases = n_cases,
-		n_controls = n_controls,
-		n_pairs = comparable_pairs
-	)
+	risk_set$time_window <- pmin(risk_set$event_time, risk_set$time_horizon) -
+		risk_set$time_start
+	# Dynamic prediction is conditional on survival beyond the landmark.  Remove
+	# subjects whose outcome was already known at or before that time.
+	risk_set <- risk_set[
+		is.finite(risk_set$event_time) & risk_set$event_time > risk_set$time_start,
+		,
+		drop = FALSE
+	]
+	rownames(risk_set) <- NULL
+	risk_set
 }
 
 # ---- Time-dependent AUC --------------------------------------------------
@@ -829,12 +1354,74 @@ auc <- function(object, ...) {
 	UseMethod("auc")
 }
 
+#' Calculate cumulative/dynamic AUC from an aligned risk set
+#'
+#' @description
+#' Compare posterior mean risks for cases observed by the horizon with risks
+#' for controls known to remain event-free beyond the horizon.  The
+#' Mann--Whitney rank identity gives half credit to tied risks and avoids
+#' allocating the full case-by-control comparison matrix.
+#'
+#' @param risk_set Subject-level output from
+#'   `.dynamic_discrimination_risk_set()`.
+#' @param time_start Numeric landmark used to label the result.
+#' @param time_horizon Numeric horizon used to label the result.
+#'
+#' @return A one-row data frame containing AUC and its case, control, and pair
+#'   counts.
+#' @keywords internal
+#' @noRd
+.auc_from_risk_set <- function(risk_set, time_start, time_horizon) {
+	required <- c("risk", "event_window", "event_time", "time_horizon")
+	if (!all(required %in% names(risk_set))) {
+		return(data.frame(
+			time_start = time_start,
+			time_horizon = time_horizon,
+			auc = NA_real_,
+			n_cases = 0L,
+			n_controls = 0L,
+			n_pairs = 0L
+		))
+	}
+
+	case_risk <- as.numeric(risk_set$risk[risk_set$event_window == 1L])
+	control_risk <- as.numeric(risk_set$risk[
+		risk_set$event_window == 0L & risk_set$event_time > risk_set$time_horizon
+	])
+	case_risk <- case_risk[is.finite(case_risk)]
+	control_risk <- control_risk[is.finite(control_risk)]
+	n_cases <- length(case_risk)
+	n_controls <- length(control_risk)
+	n_pairs <- n_cases * n_controls
+	auc_value <- NA_real_
+	if (n_pairs > 0L) {
+		# The first n_cases ranks belong to cases.  Subtracting their minimum
+		# possible rank sum leaves the number of control risks below a case risk,
+		# with average ranks contributing one half for a tied case-control pair.
+		combined_risk <- c(case_risk, control_risk)
+		case_rank_sum <- sum(
+			rank(combined_risk, ties.method = "average")[seq_len(n_cases)]
+		)
+		auc_value <- (case_rank_sum - n_cases * (n_cases + 1) / 2) / n_pairs
+	}
+	data.frame(
+		time_start = time_start,
+		time_horizon = time_horizon,
+		auc = auc_value,
+		n_cases = n_cases,
+		n_controls = n_controls,
+		n_pairs = n_pairs
+	)
+}
+
 #' @rdname auc
 #' @param newdataLong Longitudinal evaluation data; defaults to the fitted data.
 #' @param newdataEvent Event evaluation data; defaults to the fitted data.
-#' @param time_start Numeric landmark time or vector of landmark times.
+#' @param time_start Numeric landmark time or vector of landmark times.  The
+#'   default is zero.
 #' @param time_horizon Numeric horizon time.  It may be scalar or have the same
-#'   length as `time_start`.
+#'   length as `time_start`.  When both `time_horizon` and `Dt` are omitted,
+#'   the fitted maximum time is used.
 #' @param Dt Positive horizon width used when `time_horizon` is omitted.
 #' @param cause Integer competing-risk cause, with one denoting the primary
 #'   event type.
@@ -850,20 +1437,29 @@ auc <- function(object, ...) {
 #'
 #' @export
 auc.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL,
-						  time_start, time_horizon = NULL, Dt = NULL, cause = 1,
+						  time_start = 0, time_horizon = NULL, Dt = NULL, cause = 1,
 						  n_samples = 200, seed = 123, ...) {
 	assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
-	if (missing(time_start) || !is.numeric(time_start) || !length(time_start) || any(!is.finite(time_start))) {
+	if (!is.numeric(time_start) || !length(time_start) || any(!is.finite(time_start))) {
 		cli::cli_abort("{.arg time_start} must be a finite numeric value or vector.")
 	}
-	if (!is.numeric(cause) || length(cause) != 1L || !is.finite(cause)) {
-		cli::cli_abort("{.arg cause} must be a single finite integer.")
+	if (!is.numeric(cause) || length(cause) != 1L || !is.finite(cause) ||
+			cause < 1 || cause != as.integer(cause)) {
+		cli::cli_abort("{.arg cause} must be a single positive integer.")
 	}
+	data_in <- .resolve_train_data(object, newdataLong, newdataEvent, purpose = "time-dependent AUC")
 	if (is.null(time_horizon)) {
-		if (!is.numeric(Dt) || length(Dt) != 1L || !is.finite(Dt) || Dt <= 0) {
-			cli::cli_abort("Supply {.arg time_horizon}, or a positive scalar {.arg Dt}.")
+		if (is.null(Dt)) {
+			time_horizon <- rep(
+				.default_discrimination_horizon(object, data_in$newdataEvent),
+				length(time_start)
+			)
+		} else {
+			if (!is.numeric(Dt) || length(Dt) != 1L || !is.finite(Dt) || Dt <= 0) {
+				cli::cli_abort("{.arg Dt} must be a positive finite scalar.")
+			}
+			time_horizon <- time_start + Dt
 		}
-		time_horizon <- time_start + Dt
 	} else {
 		if (!is.numeric(time_horizon) || any(!is.finite(time_horizon)) ||
 				!(length(time_horizon) %in% c(1L, length(time_start)))) {
@@ -877,9 +1473,8 @@ auc.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL,
 		cli::cli_abort("Every {.arg time_horizon} must be greater than its landmark time.")
 	}
 
-	data_in <- .resolve_train_data(object, newdataLong, newdataEvent, purpose = "time-dependent AUC")
 	rows <- lapply(seq_along(time_start), function(i) {
-		risk_set <- .time_varying_concordance_single(
+		risk_set <- .dynamic_discrimination_risk_set(
 			object = object,
 			newdataLong = data_in$newdataLong,
 			newdataEvent = data_in$newdataEvent,
@@ -888,41 +1483,12 @@ auc.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL,
 			cause = as.integer(cause),
 			n_samples = n_samples,
 			seed = seed,
-			type_weights = "none",
-			...,
-			return_risk_set = TRUE
+			...
 		)
-		if (!all(c("risk", "event_window", "event_time", "time_horizon") %in% names(risk_set))) {
-			return(data.frame(
-				time_start = time_start[i], time_horizon = time_horizon[i],
-				auc = NA_real_, n_cases = 0L, n_controls = 0L, n_pairs = 0L
-			))
-		}
-
-		case_risk <- as.numeric(risk_set$risk[risk_set$event_window == 1L])
-		control_risk <- as.numeric(risk_set$risk[
-			risk_set$event_window == 0L & risk_set$event_time > risk_set$time_horizon
-		])
-		case_risk <- case_risk[is.finite(case_risk)]
-		control_risk <- control_risk[is.finite(control_risk)]
-		n_cases <- length(case_risk)
-		n_controls <- length(control_risk)
-		n_pairs <- n_cases * n_controls
-		auc_value <- if (n_pairs == 0L) NA_real_ else {
-			# The Mann-Whitney rank identity gives the same pairwise probability
-			# as an explicit case-by-control comparison matrix, including half
-			# credit for ties, but uses linear rather than quadratic memory.
-			combined_risk <- c(case_risk, control_risk)
-			case_rank_sum <- sum(rank(combined_risk, ties.method = "average")[seq_len(n_cases)])
-			(case_rank_sum - n_cases * (n_cases + 1) / 2) / n_pairs
-		}
-		data.frame(
+		.auc_from_risk_set(
+			risk_set = risk_set,
 			time_start = time_start[i],
-			time_horizon = time_horizon[i],
-			auc = auc_value,
-			n_cases = n_cases,
-			n_controls = n_controls,
-			n_pairs = n_pairs
+			time_horizon = time_horizon[i]
 		)
 	})
 	out <- do.call(rbind, rows)

@@ -758,7 +758,7 @@ gk_quadrature <- function(nodes = 15L) {
   # Always return double matrices for Stan compatibility
   data <- as.data.frame(data)
   rownames(data) <- NULL
-  if (.is_model_matrix_blueprint(formula)) {
+  if (.is_model_matrix_template(formula)) {
     terms_obj <- formula$terms
     mf <- stats::model.frame(
       terms_obj,
@@ -778,17 +778,17 @@ gk_quadrature <- function(nodes = 15L) {
   X
 }
 
-#' Detect stored model-matrix blueprint objects
+#' Detect stored model-matrix template objects
 #' @keywords internal
 #' @noRd
-.is_model_matrix_blueprint <- function(x) {
+.is_model_matrix_template <- function(x) {
   is.list(x) && inherits(x, "JoiNMe_mm") && !is.null(x$terms)
 }
 
-#' Build a reusable model-matrix blueprint
+#' Build a reusable model-matrix template
 #' @keywords internal
 #' @noRd
-.make_model_matrix_blueprint <- function(formula,
+.make_model_matrix_template <- function(formula,
                                          data,
                                          boundary_var = NULL,
                                          boundary_values = NULL) {
@@ -819,14 +819,14 @@ gk_quadrature <- function(nodes = 15L) {
   )
 }
 
-#' Build reusable blueprints for an RHS formula list
+#' Build reusable templates for an RHS formula list
 #' @keywords internal
 #' @noRd
-.make_rhs_blueprints <- function(rhs_list, data) {
+.make_rhs_templates <- function(rhs_list, data) {
   if (length(rhs_list) == 0L) {
     return(list())
   }
-  lapply(rhs_list, function(rhs) .make_model_matrix_blueprint(rhs, data = data))
+  lapply(rhs_list, function(rhs) .make_model_matrix_template(rhs, data = data))
 }
 
 #' Detect raw linear time terms from model.matrix term labels
@@ -869,17 +869,17 @@ gk_quadrature <- function(nodes = 15L) {
 #' Detect coefficient indices that need original-time rescaling
 #' @keywords internal
 #' @noRd
-.time_rescale_idx_from_blueprint <- function(blueprint, time_var) {
-  if (!.is_model_matrix_blueprint(blueprint)) {
+.time_rescale_idx_from_template <- function(template, time_var) {
+  if (!.is_model_matrix_template(template)) {
     return(integer(0))
   }
 
-  assign_idx <- as.integer(blueprint$assign %||% integer(0))
+  assign_idx <- as.integer(template$assign %||% integer(0))
   if (length(assign_idx) == 0L) {
     return(integer(0))
   }
 
-  term_labels <- attr(blueprint$terms, "term.labels") %||% character(0)
+  term_labels <- attr(template$terms, "term.labels") %||% character(0)
   keep <- vapply(assign_idx, function(idx) {
     if (!is.finite(idx) || idx < 1L || idx > length(term_labels)) {
       return(FALSE)
@@ -889,22 +889,22 @@ gk_quadrature <- function(nodes = 15L) {
   which(keep)
 }
 
-#' Flatten time-rescale indices across a blueprint list
+#' Flatten time-rescale indices across a template list
 #' @keywords internal
 #' @noRd
-.time_rescale_idx_from_blueprint_list <- function(blueprints, time_var) {
-  if (length(blueprints) == 0L) {
+.time_rescale_idx_from_template_list <- function(templates, time_var) {
+  if (length(templates) == 0L) {
     return(integer(0))
   }
 
   out <- integer(0)
   offset <- 0L
-  for (blueprint in blueprints) {
-    local_idx <- .time_rescale_idx_from_blueprint(blueprint, time_var = time_var)
+  for (template in templates) {
+    local_idx <- .time_rescale_idx_from_template(template, time_var = time_var)
     if (length(local_idx) > 0L) {
       out <- c(out, offset + local_idx)
     }
-    offset <- offset + length(blueprint$columns %||% character(0))
+    offset <- offset + length(template$columns %||% character(0))
   }
   as.integer(out)
 }
@@ -1753,7 +1753,10 @@ gk_quadrature <- function(nodes = 15L) {
 
 #' Validate transform flags
 #'
-#' Transform codes: 0 id, 1 exp, 2 log, 3 inv_logit, 4 probit, 5 sqrt, 6 cbrt.
+#' Transform codes: 0 identity, 1 exponential, 2 logarithm, 3 inverse
+#' logit, 4 standard normal CDF (`Phi`), 5 square root, and 6 cube root.
+#' The legacy flag table does not encode the probit quantile; new
+#' transformations use functional-bytecode instruction 27 for `inv_Phi`.
 #' Restrictions: log and sqrt are restricted to cv_mean (legacy constraint).
 #'
 #' @keywords internal
@@ -1766,7 +1769,8 @@ gk_quadrature <- function(nodes = 15L) {
     exp = 1L,
     log = 2L,
     inv_logit = 3L,
-    probit = 4L,
+    phi = 4L,
+    pnorm = 4L,
     sqrt = 5L,
     cbrt = 6L
   )
@@ -2235,13 +2239,13 @@ gk_quadrature <- function(nodes = 15L) {
                                       id_design = NULL,
                                       marker_design = NULL,
                                       idm_design = NULL) {
-  has_blueprints <- !is.null(fixed_design) || !is.null(id_design) || !is.null(marker_design) || !is.null(idm_design)
+  has_templates <- !is.null(fixed_design) || !is.null(id_design) || !is.null(marker_design) || !is.null(idm_design)
 
-  if (has_blueprints) {
-    idx_beta <- .time_rescale_idx_from_blueprint(fixed_design, time_var = time_var)
-    idx_uid <- .time_rescale_idx_from_blueprint_list(id_design %||% list(), time_var = time_var)
-    idx_vmk <- .time_rescale_idx_from_blueprint_list(marker_design %||% list(), time_var = time_var)
-    idx_idm <- .time_rescale_idx_from_blueprint_list(idm_design %||% list(), time_var = time_var)
+  if (has_templates) {
+    idx_beta <- .time_rescale_idx_from_template(fixed_design, time_var = time_var)
+    idx_uid <- .time_rescale_idx_from_template_list(id_design %||% list(), time_var = time_var)
+    idx_vmk <- .time_rescale_idx_from_template_list(marker_design %||% list(), time_var = time_var)
+    idx_idm <- .time_rescale_idx_from_template_list(idm_design %||% list(), time_var = time_var)
   } else {
     idx_beta <- .detect_time_cols(x_cols, time_var)
     idx_uid <- .detect_time_cols(zid_cols, time_var)
@@ -2431,7 +2435,7 @@ gk_quadrature <- function(nodes = 15L) {
 #' @keywords internal
 #' @noRd
 .tf_name <- function(code) {
-  map <- c("identity", "exp", "log", "inv_logit", "probit", "sqrt", "cbrt")
+  map <- c("identity", "exp", "log", "inv_logit", "Phi", "sqrt", "cbrt")
   if (code >= 0 && code <= 6) map[code + 1] else "unknown"
 }
 

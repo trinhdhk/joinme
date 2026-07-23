@@ -2,7 +2,7 @@
 #'
 #' @description
 #' Refits a JoiNMe model using the stored call, with optional updates to formulas,
-#' data, and control arguments. This mirrors the pattern used by brms::update.
+#' data, and control arguments.
 #'
 #' @param object A JoiNMe fit object.
 #' @param formulaLong Optional updated longitudinal formula. Use an update formula
@@ -18,10 +18,13 @@
 #' @param families Optional updated families specification.
 #' @param transforms Optional updated transforms specification.
 #' @param priors Optional updated priors list.
+#' @param .env Optional environment for evaluating the updated call. 
+#' If NULL, the parent frame is used. When failed, the environment of the original formulaLong is used.
 #' @param ... Additional arguments passed to `joinme()`.
 #'
 #' @return A refitted JoiNMe object.
 #' @method update JoiNMeFit
+#' @seealso [update()]
 #' @export
 update.JoiNMeFit <- function(
   object,
@@ -36,10 +39,9 @@ update.JoiNMeFit <- function(
   families = NULL,
   transforms = NULL,
   priors = NULL,
+  .env = NULL,
   ...
 ) {
-  assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
-
   call_obj <- object$call
   if (is.null(call_obj) || !is.call(call_obj)) {
     call_obj <- call("JoiNMe")
@@ -134,5 +136,11 @@ update.JoiNMeFit <- function(
     cli::cli_abort("{.arg dataEvent} must be supplied when it is not available in the stored call.")
   }
 
-  eval(call_obj, parent.frame())
+  if (is.null(.env)) {
+    .env <- parent.frame()
+  }
+  tryCatch(eval(call_obj, .env), 
+    error = function(...){
+        eval(call_obj, environment(object$call$formulaLong))
+  })
 }

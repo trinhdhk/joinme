@@ -162,7 +162,12 @@ This method provides high accuracy with relatively few function evaluations comp
 `joinme` supports association transforms in several families:
 
 - **Identity**: no transformation.
-- **Functional bytecode**: a small translation program supporting basic arithmetic and standard mathematical functions, compiled from a user-supplied expression: `+`, `-`, `*`, `/`, `log`, `exp`, `sqrt`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`, and power functions.
+- **Functional bytecode**: a small translation program supporting basic
+  arithmetic and standard mathematical functions, compiled from a
+  user-supplied expression: `+`, `-`, `*`, `/`, `log`, `exp`, `sqrt`,
+  trigonometric and hyperbolic functions, power functions, the standard normal
+  CDF (`Phi`, `pnorm`), and the standard normal quantile (`inv_Phi`, `qnorm`,
+  `probit`).
 - **Monotone I-spline**: smooth monotone mapping with user-supplied knots and coefficients.
 - **Ordered piecewise linear**: fixed knots with posterior monotone ordinates
   reconstructed from cumulative simplex increments.
@@ -195,7 +200,9 @@ The functional bytecode evaluator implements the following operations:
 - 22: ACOSH
 - 23: ATANH
 - 24: SOFTPLUS
-- 25: CBRT 
+- 25: CBRT
+- 26: PHI, the standard normal CDF
+- 27: INV_PHI, the standard normal quantile or probit function
 -->
 
 ## Parallelisation

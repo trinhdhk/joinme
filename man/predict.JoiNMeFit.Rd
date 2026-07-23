@@ -21,7 +21,7 @@
   tmax = NULL,
   ci_levels = c(0.5, 0.95),
   control = list(),
-  seed = 123,
+  seed = .Random.seed[[1]],
   ...
 )
 
@@ -178,5 +178,11 @@ Dynamic prediction passes the fitted, draw-specific transform ordinates to
 Stan. Ordered piecewise-linear associations therefore use the same posterior
 curve as the fitted event model and never reconstruct a curve from legacy
 user-supplied \code{y} values.
+
+The baseline-hazard basis is likewise inherited from fitting.  Prediction
+reuses the retained B-spline or natural-spline object, or the retained
+baseline formula, together with the original column-centring constants.
+This guarantees that the quadrature arrays have the same number and meaning
+of baseline-hazard columns as the fitted Stan parameters.
 }
 \keyword{internal}

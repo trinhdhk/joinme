@@ -184,7 +184,7 @@ test_that("time-dependent AUC uses the shared dynamic-risk path", {
     .resolve_train_data = function(object, newdataLong, newdataEvent, purpose) {
       list(newdataLong = data.frame(id = 1:4), newdataEvent = data.frame(id = 1:4))
     },
-    .time_varying_concordance_single = function(...) {
+    .dynamic_discrimination_risk_set = function(...) {
       data.frame(
         risk = c(0.8, 0.6, 0.4, 0.6),
         event_window = c(1L, 1L, 0L, 0L),

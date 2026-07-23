@@ -14,14 +14,22 @@
 #' - Root: sqrt, cbrt
 #' - Exponential transformations: log, exp, 
 #' - Trigonometric functions: sin, cos, tan, abs, sinh, cosh, tanh, asinh, acosh, atanh
-#' - Common links: inv_logit (softmax, SoftMax), logit, sigmoid, expit, softplus (log1p_exp)
+#' - Common links: inv_logit (softmax, SoftMax), logit, sigmoid, expit,
+#'   softplus (log1p_exp), `Phi`/`pnorm`, and
+#'   `inv_Phi`/`qnorm`/`probit`
 #' - Reciprocal: 1/x or rec(x)
 #'
 #' @param expr A formula (e.g. `~ x + 2`), quosure, quoted expression, or character string to parse.
+#' @param iota_nodes Optional internal description of transformation-specific
+#'   affine shifts. Each declared node identifies whether an intercept, slope,
+#'   or both are estimated for one nonlinear operation.
 #'
 #' @note
-#' Functional bytecode is a vector of operation codes (0-25) paired with a vector of
+#' Functional bytecode is a vector of operation codes (0-27) paired with a vector of
 #' constant values. Constants are embedded using PUSH_CONST operations.
+#' `Phi` denotes the standard normal cumulative distribution function, whereas
+#' `inv_Phi` and `probit` denote its quantile function. They are deliberately
+#' assigned different instructions because their domains and ranges differ.
 #'
 #' @section Functional Bytecode Reference:
 #' \describe{
@@ -51,7 +59,9 @@
 #'   \item{23}{ATANH: Pop a; push atanh(a)}
 #'   \item{24}{SOFTPLUS: Pop a; push log1p_exp(a)}
 #'   \item{25}{CBRT: Pop a; push cbrt(a)}
-#'   \item{26}{PROBIT: Pop a; push Phi(a)}
+#'   \item{26}{PHI: Pop a; push the standard normal CDF \eqn{\Phi(a)}}
+#'   \item{27}{INV_PHI: Pop a; push the standard normal quantile
+#'     \eqn{\Phi^{-1}(a)}}
 #' }
 #'
 #' @examples
@@ -64,6 +74,10 @@
 #'
 #' # Complex: f(x) = (log(sqrt(x + 1/inv_logit(3*x - 3))))^2
 #' bc <- parse_transform_expr(~ (log(sqrt(x + 1/inv_logit(3*x - 3))))^2)
+#'
+#' # The normal CDF and its quantile use separate instructions
+#' phi_bc <- parse_transform_expr(~ Phi(x))
+#' probit_bc <- parse_transform_expr(~ inv_Phi(x))
 #'
 #' @export
 # 
@@ -105,6 +119,300 @@ parse_transform_expr <- function(expr, iota_nodes = NULL) {
     n_iota_intercept = max(c(0L, result$op_iota_intercept_idx)),
     n_iota_slope = max(c(0L, result$op_iota_slope_idx))
   )
+}
+
+#' Invert a one-to-one transformation expression
+#'
+#' @description
+#' Derives the algebraic inverse of a transformation written as a one-sided
+#' formula in `x`.  The result is another one-sided formula and can therefore
+#' be passed directly to [parse_transform_expr()].  JoiNMe uses this function
+#' when `link` is supplied as a formula to [joinme_family()].
+#'
+#' Inversion proceeds from the outermost operation towards `x`.  Composed
+#' transformations are consequently reversed in the correct order.  For
+#' example, `~ log(2 * x + 1)` becomes `~ (exp(x) - 1) / 2`.
+#'
+#' The supported one-to-one elementary pairs are `log`/`exp`,
+#' `logit`/`inv_logit`, `Phi`/`inv_Phi` (with `pnorm`/`qnorm` and
+#' `probit` aliases), `sinh`/`asinh`,
+#' `tanh`/`atanh`, reciprocal, `sqrt`/square, and `cbrt`/cube.  Addition,
+#' subtraction, multiplication, division, and powers by a finite non-zero
+#' constant are also supported.  Arithmetic branches that do not contain `x`
+#' must reduce to numeric constants.  Even integer powers are rejected because
+#' they are not one-to-one on the real line; a deliberately restricted-domain
+#' inverse can instead be declared explicitly through `inv_link`.
+#'
+#' Expressions containing `x` more than once, or globally non-injective
+#' operations such as `abs`, `sin`, `cos`, and `cosh`, are rejected.  This is
+#' deliberate: silently selecting one branch would not define a valid
+#' inverse-link over the full response domain.
+#'
+#' @param expr A one-sided formula, quosure, quoted expression, or character
+#'   string containing exactly one occurrence of `x`.
+#'
+#' @return A one-sided formula whose right-hand side is the algebraic inverse
+#'   transformation, expressed in `x`.
+#' @examples
+#' invert_transform_expr(~ log(x))
+#' invert_transform_expr(~ log(2 * x + 1))
+#' invert_transform_expr(~ x^3)
+#' @export
+invert_transform_expr <- function(expr) {
+  node <- .coerce_transform_expr(expr)
+  n_x <- .transform_x_count(node)
+  if (n_x != 1L) {
+    cli::cli_abort(c(
+      x = "A formula link must contain {.code x} exactly once.",
+      i = "The supplied expression contains {n_x} occurrences."
+    ))
+  }
+
+  inverse <- .invert_transform_node(node, quote(x))
+  environment <- if (inherits(expr, "formula")) environment(expr) else parent.frame()
+  rlang::new_formula(lhs = NULL, rhs = inverse, env = environment)
+}
+
+#' Count occurrences of the transformation variable
+#'
+#' @param node An R language object forming part of a transformation
+#'   expression.
+#'
+#' @return A non-negative integer count of symbols named `x`.
+#' @keywords internal
+#' @noRd
+.transform_x_count <- function(node) {
+  if (is.name(node)) {
+    return(as.integer(identical(as.character(node), "x")))
+  }
+  if (!is.call(node)) {
+    return(0L)
+  }
+  sum(vapply(as.list(node)[-1L], .transform_x_count, integer(1)))
+}
+
+#' Reduce an `x`-free arithmetic branch to a numeric constant
+#'
+#' @description
+#' Evaluates only literal numeric arithmetic needed while solving a formula
+#' link.  Arbitrary R evaluation is intentionally excluded so inversion is
+#' deterministic and does not depend on objects in a caller's environment.
+#'
+#' @param node An `x`-free arithmetic expression.
+#'
+#' @return One finite numeric scalar.
+#' @keywords internal
+#' @noRd
+.transform_constant_value <- function(node) {
+  if (is.numeric(node) && length(node) == 1L && is.finite(node)) {
+    return(as.numeric(node))
+  }
+  if (!is.call(node)) {
+    cli::cli_abort("Non-numeric constants are not supported in a formula link.")
+  }
+
+  operator <- as.character(node[[1L]])
+  arguments <- as.list(node)[-1L]
+  if (operator %in% c("+", "-") && length(arguments) == 1L) {
+    value <- .transform_constant_value(arguments[[1L]])
+    return(if (operator == "-") -value else value)
+  }
+  if (!(operator %in% c("+", "-", "*", "/", "^")) ||
+      length(arguments) != 2L) {
+    cli::cli_abort("Constant branches in a formula link may use only numeric arithmetic.")
+  }
+
+  left <- .transform_constant_value(arguments[[1L]])
+  right <- .transform_constant_value(arguments[[2L]])
+  value <- switch(
+    operator,
+    "+" = left + right,
+    "-" = left - right,
+    "*" = left * right,
+    "/" = left / right,
+    "^" = left^right
+  )
+  if (length(value) != 1L || !is.finite(value)) {
+    cli::cli_abort("A constant branch in the formula link does not have a finite value.")
+  }
+  as.numeric(value)
+}
+
+#' Construct a binary transformation call
+#'
+#' @param operator Character arithmetic operator.
+#' @param left,right Language objects or numeric constants.
+#'
+#' @return An unevaluated R call.
+#' @keywords internal
+#' @noRd
+.transform_binary_call <- function(operator, left, right) {
+  as.call(list(as.name(operator), left, right))
+}
+
+#' Solve one transformation expression for its input
+#'
+#' @description
+#' Recursively solves `node = value` for the unique occurrence of `x`.
+#' Each recursion removes one outer operation and passes the transformed
+#' right-hand side inwards.  This produces the reverse composition required
+#' for an inverse link without evaluating user-supplied code.
+#'
+#' @param node Current branch of the forward transformation.
+#' @param value Language object representing the current right-hand side.
+#'
+#' @return A language object expressing the original `x` in terms of `value`.
+#' @keywords internal
+#' @noRd
+.invert_transform_node <- function(node, value) {
+  if (is.name(node) && identical(as.character(node), "x")) {
+    return(value)
+  }
+  if (!is.call(node)) {
+    cli::cli_abort("Could not isolate {.code x} in the formula link.")
+  }
+
+  operator <- tolower(as.character(node[[1L]]))
+  arguments <- as.list(node)[-1L]
+
+  if (operator == "(" && length(arguments) == 1L) {
+    return(.invert_transform_node(arguments[[1L]], value))
+  }
+  if (operator %in% c("+", "-") && length(arguments) == 1L) {
+    next_value <- if (operator == "-") {
+      .transform_binary_call("-", 0, value)
+    } else {
+      value
+    }
+    return(.invert_transform_node(arguments[[1L]], next_value))
+  }
+
+  inverse_function <- switch(
+    operator,
+    log = "exp",
+    exp = "log",
+    logit = "inv_logit",
+    inv_logit = "logit",
+    sigmoid = "logit",
+    expit = "logit",
+    softmax = "logit",
+    phi = "inv_Phi",
+    pnorm = "qnorm",
+    inv_phi = "Phi",
+    qnorm = "pnorm",
+    probit = "Phi",
+    sinh = "asinh",
+    asinh = "sinh",
+    tanh = "atanh",
+    atanh = "tanh",
+    rec = "rec",
+    NULL
+  )
+  if (!is.null(inverse_function)) {
+    if (length(arguments) != 1L) {
+      cli::cli_abort("Function {.fn {operator}} must have one argument in a formula link.")
+    }
+    return(.invert_transform_node(
+      arguments[[1L]],
+      as.call(list(as.name(inverse_function), value))
+    ))
+  }
+
+  if (operator %in% c("sqrt", "cbrt", "softplus", "log1p_exp")) {
+    if (length(arguments) != 1L) {
+      cli::cli_abort("Function {.fn {operator}} must have one argument in a formula link.")
+    }
+    next_value <- switch(
+      operator,
+      sqrt = .transform_binary_call("^", value, 2),
+      cbrt = .transform_binary_call("^", value, 3),
+      softplus = as.call(list(
+        as.name("log"),
+        .transform_binary_call("-", as.call(list(as.name("exp"), value)), 1)
+      )),
+      log1p_exp = as.call(list(
+        as.name("log"),
+        .transform_binary_call("-", as.call(list(as.name("exp"), value)), 1)
+      ))
+    )
+    return(.invert_transform_node(arguments[[1L]], next_value))
+  }
+
+  if (operator == "power") {
+    operator <- "^"
+  }
+  if (operator %in% c("+", "-", "*", "/", "^") &&
+      length(arguments) == 2L) {
+    left_count <- .transform_x_count(arguments[[1L]])
+    right_count <- .transform_x_count(arguments[[2L]])
+    if (left_count + right_count != 1L) {
+      cli::cli_abort("Each arithmetic operation in a formula link must have exactly one branch containing {.code x}.")
+    }
+
+    if (left_count == 1L) {
+      constant <- .transform_constant_value(arguments[[2L]])
+      next_value <- switch(
+        operator,
+        "+" = .transform_binary_call("-", value, constant),
+        "-" = .transform_binary_call("+", value, constant),
+        "*" = {
+          if (constant == 0) cli::cli_abort("Multiplication by zero is not invertible.")
+          .transform_binary_call("/", value, constant)
+        },
+        "/" = {
+          if (constant == 0) cli::cli_abort("Division by zero is not a valid link.")
+          .transform_binary_call("*", value, constant)
+        },
+        "^" = {
+          if (constant == 0) cli::cli_abort("A zero power is not invertible.")
+          if (constant > 0 && constant == round(constant) &&
+              as.integer(constant) %% 2L == 0L) {
+            cli::cli_abort(c(
+              x = "An even integer power is not one-to-one on the real line.",
+              i = "Supply {.arg inv_link} directly only when a scientifically justified restricted domain is intended."
+            ))
+          }
+          if (constant == 3) {
+            as.call(list(as.name("cbrt"), value))
+          } else {
+            .transform_binary_call("^", value, 1 / constant)
+          }
+        }
+      )
+      return(.invert_transform_node(arguments[[1L]], next_value))
+    }
+
+    constant <- .transform_constant_value(arguments[[1L]])
+    next_value <- switch(
+      operator,
+      "+" = .transform_binary_call("-", value, constant),
+      "-" = .transform_binary_call("-", constant, value),
+      "*" = {
+        if (constant == 0) cli::cli_abort("Multiplication by zero is not invertible.")
+        .transform_binary_call("/", value, constant)
+      },
+      "/" = {
+        if (constant == 0) cli::cli_abort("A zero numerator is not invertible.")
+        .transform_binary_call("/", constant, value)
+      },
+      "^" = {
+        if (constant <= 0 || constant == 1) {
+          cli::cli_abort("A constant power base must be positive and different from one.")
+        }
+        .transform_binary_call(
+          "/",
+          as.call(list(as.name("log"), value)),
+          log(constant)
+        )
+      }
+    )
+    return(.invert_transform_node(arguments[[2L]], next_value))
+  }
+
+  cli::cli_abort(c(
+    x = "Function or operation {.fn {operator}} is not invertible.",
+    i = "Use a one-to-one composition of supported arithmetic and link functions, or supply {.arg inv_link} directly."
+  ))
 }
 
 #' @keywords internal
@@ -318,6 +626,7 @@ parse_transform_expr <- function(expr, iota_nodes = NULL) {
   
   op <- tolower(op)
 
+  normal_ops <- .bytecode_normal_ops()
   func_op_id <- switch(op,
     log = 6L,
     exp = 7L,
@@ -341,7 +650,11 @@ parse_transform_expr <- function(expr, iota_nodes = NULL) {
     softplus = 24L,
     log1p_exp = 24L,
     cbrt = 25L,
-    probit = 26L,
+    phi = unname(normal_ops[["PHI"]]),
+    pnorm = unname(normal_ops[["PHI"]]),
+    inv_phi = unname(normal_ops[["INV_PHI"]]),
+    qnorm = unname(normal_ops[["INV_PHI"]]),
+    probit = unname(normal_ops[["INV_PHI"]]),
     NULL
   )
   if (!is.null(func_op_id)) {
@@ -377,16 +690,47 @@ parse_transform_expr <- function(expr, iota_nodes = NULL) {
   
   cli::cli_abort(c(
     x = "Unsupported function in transform expression: {op}.",
-    i = "Supported functions: log, exp, sqrt, inv_logit, logit, probit, sigmoid, expit, softmax, softplus, log1p_exp, cbrt, power, rec, sin, cos, tan, abs, sinh, cosh, tanh, asinh, acosh, atanh."
+    i = "Supported functions: log, exp, sqrt, inv_logit, logit, Phi, pnorm, inv_Phi, qnorm, probit, sigmoid, expit, softmax, softplus, log1p_exp, cbrt, power, rec, sin, cos, tan, abs, sinh, cosh, tanh, asinh, acosh, atanh."
   ))
 }
 
-#' Verify functional bytecode for basic sanity (stack under/overflow, etc.)
+#' Standard-normal bytecode instruction identifiers
+#'
+#' @description
+#' Provides the single R-side definition of the two standard-normal
+#' transformation instructions. `PHI` maps a real-valued variate to a
+#' probability through the standard normal cumulative distribution function.
+#' `INV_PHI` maps a probability to its standard normal quantile. Keeping these
+#' identifiers together prevents the forward probit link from being confused
+#' with its inverse link.
+#'
+#' @return A named integer vector with elements `PHI = 26L` and
+#'   `INV_PHI = 27L`.
+#' @keywords internal
+#' @noRd
+.bytecode_normal_ops <- function() {
+  c(PHI = 26L, INV_PHI = 27L)
+}
+
+#' Verify functional bytecode stack behaviour
+#'
+#' @description
+#' Visits the instruction stream without evaluating numerical values. The
+#' verifier checks that each unary or binary operation has enough operands,
+#' that every constant instruction has a corresponding value, that every
+#' instruction is recognised, and that exactly one result remains.
+#'
+#' @param bytecode Integer bytecode sequence.
+#' @param const_data Numeric constants consumed successively by `PUSH_CONST`.
+#'
+#' @return `TRUE` invisibly when the program is structurally valid; otherwise
+#'   an error is raised.
 #' @keywords internal
 #' @noRd
 verify_bytecode <- function(bytecode, const_data) {
   stack_height <- 0
   const_idx <- 0
+  unary_ops <- .bytecode_unary_ops()
 
   for (op in bytecode) {
     if (op == 0) {
@@ -399,13 +743,15 @@ verify_bytecode <- function(bytecode, const_data) {
         stop("Functional bytecode references more constants than provided")
       }
       stack_height <- stack_height + 1
-    } else if (op %in% c(6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26)) {
+    } else if (op %in% unary_ops) {
       # Unary operations
       if (stack_height < 1) stop("Stack underflow: unary operation")
     } else if (op %in% c(2, 3, 4, 5, 12)) {
       # Binary operations
       if (stack_height < 2) stop("Stack underflow: binary operation")
       stack_height <- stack_height - 1
+    } else {
+      stop("Unknown functional bytecode instruction: ", op)
     }
   }
 
@@ -413,11 +759,24 @@ verify_bytecode <- function(bytecode, const_data) {
     stop(paste("Final stack height is", stack_height, "; expected 1"))
   }
 
-  return(TRUE)
+  invisible(TRUE)
 }
 
+#' Enumerate unary bytecode instructions
+#'
+#' @description
+#' Returns the operation identifiers that consume one stack value and replace
+#' it with one transformed value. The same list is used by validation and by
+#' legacy one-operation program normalisation.
+#'
+#' @return Integer vector of unary operation identifiers.
+#' @keywords internal
+#' @noRd
 .bytecode_unary_ops <- function() {
-  c(6L, 7L, 8L, 9L, 10L, 11L, 13L, 14L, 15L, 16L, 17L, 18L, 19L, 20L, 21L, 22L, 23L, 24L, 25L, 26L)
+  c(
+    6L, 7L, 8L, 9L, 10L, 11L, 13L, 14L, 15L, 16L, 17L, 18L, 19L,
+    20L, 21L, 22L, 23L, 24L, 25L, unname(.bytecode_normal_ops())
+  )
 }
 
 #' Evaluate bytecode for a scalar input
@@ -430,6 +789,14 @@ verify_bytecode <- function(bytecode, const_data) {
 #' @param x Numeric scalar input.
 #' @param bytecode Integer bytecode sequence.
 #' @param const_data Numeric constants consumed by `PUSH_CONST` instructions.
+#' @param iota_intercepts Numeric affine intercepts referenced by individual
+#'   nonlinear instructions.
+#' @param iota_slopes Numeric affine slopes referenced by individual nonlinear
+#'   instructions.
+#' @param op_iota_intercept_idx Integer instruction-aligned indices into
+#'   `iota_intercepts`; zero means no fitted intercept.
+#' @param op_iota_slope_idx Integer instruction-aligned indices into
+#'   `iota_slopes`; zero means no fitted slope.
 #'
 #' @return Numeric scalar result.
 #' @keywords internal
@@ -454,6 +821,7 @@ eval_bytecode_scalar <- function(
   constants <- program$const_data
   intercept_idx <- program$op_iota_intercept_idx
   slope_idx <- program$op_iota_slope_idx
+  normal_ops <- .bytecode_normal_ops()
 
   # Identity behaviour for empty programs keeps backward compatibility.
   if (length(code) == 0L) {
@@ -535,8 +903,10 @@ eval_bytecode_scalar <- function(
     } else if (op == 25L) {
       a <- resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx)
       stack[length(stack)] <- sign(a) * abs(a)^(1 / 3)
-    } else if (op == 26L) {
+    } else if (op == normal_ops[["PHI"]]) {
       stack[length(stack)] <- stats::pnorm(resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx))
+    } else if (op == normal_ops[["INV_PHI"]]) {
+      stack[length(stack)] <- stats::qnorm(resolve_iota_shift(stack[length(stack)], op_intercept_idx, op_slope_idx))
     } else {
       cli::cli_abort("Unknown transform bytecode instruction: {op}.")
     }
@@ -544,6 +914,47 @@ eval_bytecode_scalar <- function(
 
   # Step 4: return final stack top as the transformation output.
   stack[length(stack)]
+}
+
+#' Evaluate a canonical bytecode program without scalar dispatch
+#'
+#' @description
+#' Recognises the most frequent one-operation transformations and evaluates
+#' them directly on a numeric vector. This avoids repeatedly normalising and
+#' verifying the same program for every observation. The shortcut is used only
+#' when the program has no constants or fitted affine shifts; all other
+#' programs retain the general stack evaluator.
+#'
+#' @param x Numeric vector.
+#' @param program Normalised bytecode program returned by
+#'   `.normalize_bytecode_program()`.
+#'
+#' @return A numeric vector for a recognised canonical program, or `NULL` when
+#'   the general evaluator is required.
+#' @keywords internal
+#' @noRd
+.eval_canonical_bytecode_vector <- function(x, program) {
+  code <- as.integer(program$bytecode)
+  if (length(program$const_data) > 0L ||
+      any(program$op_iota_intercept_idx > 0L) ||
+      any(program$op_iota_slope_idx > 0L)) {
+    return(NULL)
+  }
+
+  x <- as.numeric(x)
+  if (identical(code, 0L)) return(x)
+  if (identical(code, c(0L, 6L))) return(log(x))
+  if (identical(code, c(0L, 7L))) return(exp(x))
+  if (identical(code, c(0L, 9L))) return(stats::plogis(x))
+
+  normal_ops <- .bytecode_normal_ops()
+  if (identical(code, c(0L, unname(normal_ops[["PHI"]])))) {
+    return(stats::pnorm(x))
+  }
+  if (identical(code, c(0L, unname(normal_ops[["INV_PHI"]])))) {
+    return(stats::qnorm(x))
+  }
+  NULL
 }
 
 #' Evaluate bytecode for vector inputs
@@ -554,6 +965,12 @@ eval_bytecode_scalar <- function(
 #' @param x Numeric vector input.
 #' @param bytecode Integer bytecode sequence.
 #' @param const_data Numeric constants consumed by `PUSH_CONST` instructions.
+#' @param iota_intercepts Numeric affine intercepts referenced by nonlinear
+#'   instructions.
+#' @param iota_slopes Numeric affine slopes referenced by nonlinear
+#'   instructions.
+#' @param op_iota_intercept_idx Integer instruction-aligned intercept indices.
+#' @param op_iota_slope_idx Integer instruction-aligned slope indices.
 #'
 #' @return Numeric vector result.
 #' @keywords internal
@@ -573,6 +990,10 @@ eval_bytecode_vector <- function(
     op_iota_intercept_idx = op_iota_intercept_idx,
     op_iota_slope_idx = op_iota_slope_idx
   )
+  canonical <- .eval_canonical_bytecode_vector(x, program)
+  if (!is.null(canonical)) {
+    return(canonical)
+  }
   vapply(
     as.numeric(x),
     eval_bytecode_scalar,

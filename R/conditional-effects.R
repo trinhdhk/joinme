@@ -952,23 +952,32 @@ print.JoiNMeConditionalEffects <- function(x, ...) {
     if (!length(columns)) next
     eta <- linear_predictor[, columns, drop = FALSE]
     link_code <- as.integer(stan_data$link_long[[marker_number]] %||% 1L)
-    if (link_code == 1L) {
-      expected_response[, columns] <- eta
-    } else if (link_code %in% c(2L, 5L)) {
-      expected_response[, columns] <- exp(eta)
-    } else if (link_code == 3L) {
-      expected_response[, columns] <- stats::plogis(eta)
-    } else if (link_code == 4L) {
-      expected_response[, columns] <- stats::pnorm(eta)
+    operation_count <- as.integer(
+      stan_data$inv_link_n_ops[[marker_number]] %||% 0L
+    )
+    constant_count <- as.integer(
+      stan_data$inv_link_n_const[[marker_number]] %||% 0L
+    )
+    bytecode <- if (operation_count > 0L) {
+      as.integer(
+        stan_data$inv_link_ops[marker_number, seq_len(operation_count)]
+      )
     } else {
-      operation_count <- as.integer(stan_data$inv_link_n_ops[[marker_number]] %||% 0L)
-      constant_count <- as.integer(stan_data$inv_link_n_const[[marker_number]] %||% 0L)
-      bytecode <- if (operation_count > 0L) as.integer(stan_data$inv_link_ops[marker_number, seq_len(operation_count)]) else integer(0)
-      constants <- if (constant_count > 0L) as.numeric(stan_data$inv_link_const[marker_number, seq_len(constant_count)]) else numeric(0)
-      for (column in columns) {
-        expected_response[, column] <- eval_bytecode_vector(linear_predictor[, column], bytecode = bytecode, const_data = constants)
-      }
+      integer(0)
     }
+    constants <- if (constant_count > 0L) {
+      as.numeric(
+        stan_data$inv_link_const[marker_number, seq_len(constant_count)]
+      )
+    } else {
+      numeric(0)
+    }
+    expected_response[, columns] <- .apply_inverse_link_matrix(
+      eta = eta,
+      link_code = link_code,
+      bytecode = bytecode,
+      const_data = constants
+    )
   }
   expected_response
 }

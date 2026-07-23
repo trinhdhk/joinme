@@ -8,6 +8,10 @@ parse_transform_expr(expr, iota_nodes = NULL)
 }
 \arguments{
 \item{expr}{A formula (e.g. \code{~ x + 2}), quosure, quoted expression, or character string to parse.}
+
+\item{iota_nodes}{Optional internal description of transformation-specific
+affine shifts. Each declared node identifies whether an intercept, slope,
+or both are estimated for one nonlinear operation.}
 }
 \description{
 The \code{parse_transform_expr} function takes a formula, quosure, quoted expression,
@@ -21,7 +25,9 @@ Supported operations:
 \item Root: sqrt, cbrt
 \item Exponential transformations: log, exp,
 \item Trigonometric functions: sin, cos, tan, abs, sinh, cosh, tanh, asinh, acosh, atanh
-\item Common links: inv_logit (softmax, SoftMax), logit, sigmoid, expit, softplus (log1p_exp)
+\item Common links: inv_logit (softmax, SoftMax), logit, sigmoid, expit,
+softplus (log1p_exp), \code{Phi}/\code{pnorm}, and
+\code{inv_Phi}/\code{qnorm}/\code{probit}
 \item Reciprocal: 1/x or rec(x)
 }
 }
@@ -30,8 +36,11 @@ Provides R utilities to parse user-friendly transformation expressions
 and generate functional bytecode for Stan's arbitrary transformation evaluator.
 }
 \note{
-Functional bytecode is a vector of operation codes (0-25) paired with a vector of
+Functional bytecode is a vector of operation codes (0-27) paired with a vector of
 constant values. Constants are embedded using PUSH_CONST operations.
+\code{Phi} denotes the standard normal cumulative distribution function, whereas
+\code{inv_Phi} and \code{probit} denote its quantile function. They are deliberately
+assigned different instructions because their domains and ranges differ.
 }
 \section{Functional Bytecode Reference}{
 
@@ -62,7 +71,9 @@ constant values. Constants are embedded using PUSH_CONST operations.
 \item{23}{ATANH: Pop a; push atanh(a)}
 \item{24}{SOFTPLUS: Pop a; push log1p_exp(a)}
 \item{25}{CBRT: Pop a; push cbrt(a)}
-\item{26}{PROBIT: Pop a; push Phi(a)}
+\item{26}{PHI: Pop a; push the standard normal CDF \eqn{\Phi(a)}}
+\item{27}{INV_PHI: Pop a; push the standard normal quantile
+\eqn{\Phi^{-1}(a)}}
 }
 }
 
@@ -76,5 +87,9 @@ bc <- parse_transform_expr(~ log(x + 1))
 
 # Complex: f(x) = (log(sqrt(x + 1/inv_logit(3*x - 3))))^2
 bc <- parse_transform_expr(~ (log(sqrt(x + 1/inv_logit(3*x - 3))))^2)
+
+# The normal CDF and its quantile use separate instructions
+phi_bc <- parse_transform_expr(~ Phi(x))
+probit_bc <- parse_transform_expr(~ inv_Phi(x))
 
 }

@@ -25,7 +25,7 @@
  *   - 1: identity
  *   - 2: log
  *   - 3: inv_logit
- *   - 4: probit (Phi)
+ *   - 4: Phi, the inverse of the probit link
  *   - 5: exp
  *
  * The recognizer is intentionally conservative. It only returns a nonzero code
@@ -95,7 +95,8 @@ int make_canonical_link(
  *  23: ATANH
  *  24: LOG1P_EXP
  *  25: CBRT
- *  26: PROBIT (Phi)
+ *  26: PHI (standard normal cumulative distribution function)
+ *  27: INV_PHI (standard normal quantile; the probit function)
  */
 real inv_link_bytecode(
   real eta,

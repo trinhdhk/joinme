@@ -17,6 +17,7 @@
   families = NULL,
   transforms = NULL,
   priors = NULL,
+  .env = NULL,
   ...
 )
 }
@@ -47,6 +48,9 @@ names on the LHS (e.g., \code{sigma ~ 1 + time}).}
 
 \item{priors}{Optional updated priors list.}
 
+\item{.env}{Optional environment for evaluating the updated call.
+If NULL, the parent frame is used. When failed, the environment of the original formulaLong is used.}
+
 \item{...}{Additional arguments passed to \code{joinme()}.}
 }
 \value{
@@ -54,5 +58,8 @@ A refitted JoiNMe object.
 }
 \description{
 Refits a JoiNMe model using the stored call, with optional updates to formulas,
-data, and control arguments. This mirrors the pattern used by brms::update.
+data, and control arguments.
+}
+\seealso{
+\code{\link[=update]{update()}}
 }

@@ -155,7 +155,11 @@
   if (is.null(draws)) draws <- object$config$draws_default
   all_vars <- tryCatch(posterior::variables(.get_draws_obj(fit)), error = function(e) character(0))
 
-  beta_map <- .fixed_effect_var_map(sd = sd, all_vars = all_vars)
+  beta_map <- .fixed_effect_var_map(
+    sd = sd,
+    all_vars = all_vars,
+    term_labels = .fit_design_term_labels(object, what = "fixef", n_terms = sd$P)
+  )
   beta_vars <- as.character(beta_map$variable)
   beta_terms <- as.character(beta_map$term)
 
@@ -602,7 +606,8 @@ fixef.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary 
     s$term <- beta_map$term[idx]
     s$term[is.na(s$term)] <- s$variable[is.na(s$term)]
   } else {
-    s$term <- if (!is.null(sd$x_cols) && length(sd$x_cols) == nrow(s)) sd$x_cols else s$variable
+    recovered_terms <- .fit_design_term_labels(object, what = "fixef", n_terms = nrow(s))
+    s$term <- if (length(recovered_terms) == nrow(s)) recovered_terms else s$variable
   }
   out <- s[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
 

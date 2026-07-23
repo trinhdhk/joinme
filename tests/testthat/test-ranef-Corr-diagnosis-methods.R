@@ -249,41 +249,27 @@ test_that("diagnosis.JoiNMeFit exposes summary and parameter diagnostics from su
   expect_equal(dg$summary$value[dg$summary$metric == "n_terms_total"], 2)
 })
 
-test_that("concordance.JoiNMeFit reports the concordance engine pair count", {
+test_that("concordance.JoiNMeFit retains ordered piecewise-linear associations", {
   testthat::local_mocked_bindings(
-    predict.JoiNMeFit = function(object, newdataLong, newdataEvent, process, times, time_start,
-                                 control, seed, ...) {
-      expect_equal(length(times[[1]]), 50L)
-      expect_equal(unname(times[[1]][1]), 1)
-      expect_equal(unname(utils::tail(times[[1]], 1)), 2)
-      joinme::JoiNMeDynPred$new(
-        predictions = list(
-          survival = data.frame(
-            id = c(1, 2),
-            time = c(2, 2),
-            Survival = c(0.2, 0.8),
-            stringsAsFactors = FALSE
-          )
+    .concordance_survival_curves = function(
+        object, newdataLong, newdataEvent, time_start, cause,
+        n_samples, seed, ...) {
+      expect_identical(object$config$transforms_spec$cv_total$type, "pwlin")
+      expect_null(object$config$transforms_spec$cv_total$y)
+      expect_equal(time_start, 1)
+      list(
+        outcomes = data.frame(
+          residual_time = c(0.5, 2),
+          cause_event = c(1L, 0L)
         ),
-        quantiles = list(),
-        draws = list(),
-        data = list(longitudinal = newdataLong, event = newdataEvent),
-        metadata = list(id_var = "id", time_var = "time", marker_var = "marker", response_var = "y"),
-        call = quote(predict(fit_obj)),
-        tmax = 2,
-        n_samples = if (is.null(control$n_samples)) 10 else control$n_samples
+        survival = matrix(
+          c(0.2, 0.8),
+          nrow = 1,
+          dimnames = list("0.5", c("1", "2"))
+        )
       )
     },
     .package = "joinme"
-  )
-  testthat::local_mocked_bindings(
-    concordance = function(object, ...) {
-      list(
-        concordance = 0.75,
-        count = c(concordant = 2, discordant = 1, tied.x = 0, tied.y = 0, tied.xy = 0)
-      )
-    },
-    .package = "survival"
   )
 
   fit <- joinme::JoiNMeFit$new(
@@ -292,7 +278,14 @@ test_that("concordance.JoiNMeFit reports the concordance engine pair count", {
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
     formulaVCov = NULL,
-    config = list(transforms = list(), transforms_spec = list()),
+    config = list(
+      transforms = list(),
+      transforms_spec = list(cv_total = list(
+        type = "pwlin",
+        knots = c(-1, 0, 1),
+        direction = "increasing"
+      ))
+    ),
     call = quote(joinme::joinme(formulaLong = y ~ 1 + time)),
     tmax = 2,
     dataLong = data.frame(id = c(1, 1, 2, 2), time = c(0, 1, 0, 1), marker = "m1", y = c(1, 2, 1.5, 2.5)),
@@ -302,50 +295,35 @@ test_that("concordance.JoiNMeFit reports the concordance engine pair count", {
   out <- concordance(
     fit,
     time_start = 1,
-    time_horizon = 2,
     n_samples = 5,
     seed = 1
   )
 
-  expect_equal(out$n_cases, 1)
-  expect_equal(out$n_controls, 1)
-  expect_equal(out$n_pairs, 3)
-  expect_equal(out$concordance, 0.75)
+  expect_equal(out$n_events, 1)
+  expect_equal(out$n_subjects, 2)
+  expect_equal(out$n_pairs, 1)
+  expect_equal(out$concordance, 1)
 })
 
-test_that("concordance.JoiNMeFit also reports pair counts with split marker weights", {
+test_that("concordance.JoiNMeFit supports split marker-weight fits", {
   testthat::local_mocked_bindings(
-    predict.JoiNMeFit = function(object, newdataLong, newdataEvent, process, times, time_start,
-                                 control, seed, ...) {
-      expect_equal(length(times[[1]]), 50L)
-      joinme::JoiNMeDynPred$new(
-        predictions = list(
-          survival = data.frame(
-            id = c(1, 2),
-            time = c(2, 2),
-            Survival = c(0.25, 0.75),
-            stringsAsFactors = FALSE
-          )
+    .concordance_survival_curves = function(
+        object, newdataLong, newdataEvent, time_start, cause,
+        n_samples, seed, ...) {
+      expect_identical(object$stan_data$shared_marker_weights, 0L)
+      list(
+        outcomes = data.frame(
+          residual_time = c(0.5, 2),
+          cause_event = c(1L, 0L)
         ),
-        quantiles = list(),
-        draws = list(),
-        data = list(longitudinal = newdataLong, event = newdataEvent),
-        metadata = list(id_var = "id", time_var = "time", marker_var = "marker", response_var = "y"),
-        call = quote(predict(fit_obj)),
-        tmax = 2,
-        n_samples = if (is.null(control$n_samples)) 10 else control$n_samples
+        survival = matrix(
+          c(0.25, 0.75),
+          nrow = 1,
+          dimnames = list("0.5", c("1", "2"))
+        )
       )
     },
     .package = "joinme"
-  )
-  testthat::local_mocked_bindings(
-    concordance = function(object, ...) {
-      list(
-        concordance = 0.6,
-        count = c(concordant = 3, discordant = 2, tied.x = 0, tied.y = 0, tied.xy = 0)
-      )
-    },
-    .package = "survival"
   )
 
   fit <- joinme::JoiNMeFit$new(
@@ -364,13 +342,10 @@ test_that("concordance.JoiNMeFit also reports pair counts with split marker weig
   out <- concordance(
     fit,
     time_start = 1,
-    time_horizon = 2,
     n_samples = 5,
     seed = 1
   )
 
-  expect_equal(out$n_cases, 1)
-  expect_equal(out$n_controls, 1)
-  expect_equal(out$n_pairs, 5)
-  expect_equal(out$concordance, 0.6)
+  expect_equal(out$n_pairs, 1)
+  expect_equal(out$concordance, 1)
 })

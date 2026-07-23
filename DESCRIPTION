@@ -1,13 +1,13 @@
 Package: joinme
 Type: Package
-Title: Joint Nested Mixed-Effects (JoiNMe) Model for Multivariate Longitudinal and Survival Data
+Title: Joint Nested Mixed-effects (JoiNMe) Model for Multivariate Longitudinal and Survival Data
 Version: 0.0.1.2608
 Author: Trinh Dong <trinh.dong@ncl.ac.uk>
 Maintainer: Trinh Dong <trinh.dong@ncl.ac.uk>
 Description: Bayesian joint models linking multivariate longitudinal markers with
     time-to-event outcomes using Stan. Supports mixed families, association
     transforms, covariance regression, and dynamic prediction.
-URL: https://trinhdhk.github.io/joinme, https://trinhdhk.github.io/joinme/
+URL: https://trinhdhk.github.io/joinme
 License: GPL-3
 Encoding: UTF-8
 LazyData: true

@@ -19,7 +19,7 @@
 #'   containing the relative log-hazard and hazard-ratio contribution at every
 #'   knot.
 #' @export
-summary.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
+summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], digits = 3,
                            include_corr = TRUE, ...) {
 
   fit <- object$fit
@@ -31,8 +31,15 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
                           msg = "draws must be NULL or a positive number.")
   assertthat::assert_that(is.numeric(digits) && digits >= 0, msg = "digits must be non-negative.")
 
-  cache_key <- paste0("summary_draws=", draws, "_digits=", digits, "_corr=", as.integer(include_corr))
-  # Cache by draw count + digits to avoid repeat summaries
+  # The version marker prevents a summary cached under the former raw-name
+  # translation from masking the corrected statistical term labels.
+  cache_key <- paste0(
+    "summary_draws=", draws,
+    "_seed=", seed,
+    "_digits=", digits,
+    "_corr=", as.integer(include_corr)
+  )
+  # Cache by every argument that changes the selected draws or reported table.
   cached <- object$cache_get(cache_key)
   if (!is.null(cached)) return(cached)
 
@@ -502,7 +509,8 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3,
     NULL
   }
 
-  transform_specs <- cfg$transforms_spec %||% object$call$transforms
+#   browser()
+  transform_specs <- cfg$transform_spec %||% object$call$transforms
   transform_formulas <- .transform_formulas_from_specs(transform_specs, sd = sd)
   piecewise_ordinates <- .summarise_pwlin_ordinates(
     object = object,

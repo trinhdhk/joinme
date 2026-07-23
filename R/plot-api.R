@@ -132,7 +132,7 @@ mcmc_plot <- function(object,
                       regex = FALSE,
                       fixed = FALSE,
                       draws = NULL,
-                      seed = 1,
+                      seed = .Random.seed[[1]],
                       ...) {
   if (!inherits(object, c("JoiNMeFit", "JoiNMeDynPred"))) {
     cli::cli_abort("{.arg object} must inherit from JoiNMeFit or JoiNMeDynPred.")

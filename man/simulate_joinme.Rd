@@ -20,7 +20,7 @@ simulate_joinme(
   left_truncation_max = 0,
   truncate_longitudinal_before_entry = TRUE,
   ...,
-  seed = 42,
+  seed = .Random.seed[[1]],
   covariate_formulas = list(x1 ~ rnorm(n_id), x2 ~ rnorm(n_id)),
   marker_weights = NULL,
   shared_marker_weights = TRUE,
@@ -102,7 +102,9 @@ Simulation applies \code{cv_total} and \code{cv_marker} transforms at marker lev
 weighted averaging (aligned with fit/predict Stan semantics).
 Functional transforms support arithmetic and common nonlinear functions,
 including \code{inv_logit}/\code{expit}/\code{sigmoid}, \code{exp}, \code{log}, \code{sqrt}, \code{power},
-\code{cbrt}, \code{softplus}/\code{log1p_exp}, trigonometric and hyperbolic functions.
+\code{cbrt}, \code{softplus}/\code{log1p_exp}, trigonometric and hyperbolic functions,
+the standard normal CDF (\code{Phi}, \code{pnorm}), and the standard normal
+quantile (\code{inv_Phi}, \code{qnorm}, \code{probit}).
 
 Quick parameterisation reference:
 \itemize{
@@ -151,7 +153,12 @@ it does not estimate spline coefficients jointly inside Stan.}
 
 \item{n_id}{Number of subjects.}
 
-\item{families}{Family specification input (vector or list).}
+\item{families}{Marker-specific family names.
+Use \code{jm_family()} entries to supply custom \code{link}/\code{inv_link} expressions.
+A named probit link applies \code{Phi} as its inverse link. In formula
+expressions, \code{Phi}/\code{pnorm} are the standard normal CDF and
+\code{inv_Phi}/\code{qnorm}/\code{probit} are the standard normal quantile. Simulation
+evaluates the same bytecode instructions as fitting and prediction.}
 
 \item{marker_levels}{Optional marker names; defaults to \code{m1}, \code{m2}, ...}
 
@@ -175,7 +182,9 @@ each subject receives a sampled entry in
 is active (\code{left_truncation_max > 0}), longitudinal rows observed before the
 sampled entry time are removed.}
 
-\item{...}{Additional arguments passed to fun.}
+\item{...}{Additional unused compatibility arguments. Legacy observation-count
+inputs are ignored; the number of scheduled observations is inferred from
+\code{times_obs}.}
 
 \item{seed}{RNG seed.}
 
@@ -374,14 +383,6 @@ from the main \code{seed} for reproducible simulations.}
 
 \item{id_var, marker_var, time_var, y_var, event_time_var, event_var}{Column names aligned
 with \code{joinme_standata()} defaults.}
-
-\item{fun}{Function to apply.}
-
-\item{x}{Numeric vector on link scale.}
-
-\item{inv_link_bc}{Parsed inverse-link bytecode.}
-
-\item{D}{Number of markers.}
 }
 \value{
 A list containing \code{dataLong}, \code{dataEvent}, \code{truth} (also available as
@@ -392,12 +393,6 @@ its resolved coefficients are also in \code{truth$stan_fit$bs_gamma_c}.
 Hazard-scale association coefficients are stored as \code{alpha_cv_total},
 \code{alpha_cs_total}, \code{alpha_cv_mean}, \code{alpha_cs_mean}, \code{alpha_corr}, and
 \code{alpha_vcov}, matching the fitted posterior output names.
-
-List of results.
-
-Numeric vector on response scale.
-
-List with family codes, link names, and inverse-link bytecode per marker.
 }
 \description{
 Simulator for \code{JoiNMe} that mirrors the fitting syntax as closely as
@@ -449,4 +444,3 @@ sim_tv <- simulate_joinme(
 )
 }
 }
-\keyword{internal}

@@ -228,7 +228,12 @@
 #' @param families Marker-specific family specification (optional).
 #'   Can be a character vector of family names aligned to marker order, or a
 #'   list of `jm_family(...)` entries with per-marker links.
-#'   Supported links/inverse-links: `identity`, `log`, `logit`, `probit`, `exp`.
+#'   Supported named forward links are `identity`, `log`, `logit`, `probit`,
+#'   and `exp`; `jm_family()` also accepts an invertible formula link or a
+#'   directly specified inverse-link formula. In formula syntax,
+#'   `inv_Phi`/`qnorm`/`probit` denote the standard normal quantile and
+#'   `Phi`/`pnorm` denote the standard normal CDF. Thus a probit forward link
+#'   is inverted to `Phi` before fitting.
 #' @param transforms Transformation specifications for association terms.
 #'   Prefer declaring them with `joinme_tf(...)`; raw named lists remain
 #'   supported. Fit-time functional transforms may also request a free affine
@@ -249,6 +254,8 @@
 #'   `cv_marker`, and `cs_marker`.
 #' @param basehaz An object of class `joinme_basehaz` created by `joinme_basehaz()`.
 #' This controls the baseline hazard parameterisation and spline basis. See `?joinme_basehaz` for details.
+#' @param fit logical; if TRUE, the model is fitted and a `JoiNMeFit` object is returned. If FALSE, only the Stan data list is returned.
+#' @param seed Optional random seed for reproducibility.
 #' @param ... Additional args passed to joinme_standata().
 #'
 #' @examples
@@ -284,6 +291,7 @@ joinme <- function(
   fixed_marker_weights = FALSE,
   shared_marker_weights = TRUE,
   basehaz = joinme_basehaz(),
+  fit = TRUE,
   seed = NULL,
   ...
 ) {
@@ -293,7 +301,10 @@ joinme <- function(
       i = "Provide list(threads_per_chain=..., grainsize=..., adapt_delta=..., max_treedepth=...)."
     ))
   }
-  transforms <- unclass(.normalise_joinme_tf_input(transforms, validate = FALSE))
+  transforms <- unclass(.normalise_joinme_tf_input(
+    transforms,
+    validate = FALSE
+  ))
   priors <- unclass(.joinme_priors_(priors, validate = TRUE))
 
   if (length(control) > 0 && is.null(names(control))) {
@@ -310,7 +321,7 @@ joinme <- function(
   quadrature_nodes <- control$quadrature_nodes %||% NULL
   formulaVCov <- .resolve_vcov_formula(
     formulaVCov = formulaVCov,
-    default = ~ 1,
+    default = ~1,
     context = "joinme()"
   )
   assertthat::assert_that(
@@ -320,35 +331,41 @@ joinme <- function(
 
   arg_list <- list(...)
   arg_list <- arg_list[names(arg_list) %in% names(formals(joinme_standata))]
-  arg_list <- modifyList(arg_list, list(
-    formulaLong = formulaLong,
-    dataLong = dataLong,
-    formulaEvent = formulaEvent,
-    dataEvent = dataEvent,
-    formulaVCov = formulaVCov,
-    formulaDist = formulaDist,
-    families = families,
-    transforms = transforms,
-    beta_prior = priors$beta,
-    alpha_prior = priors$alpha,
-    iota_prior = priors$iota,
-    lkj_prior = priors$lkj,
-    fixed_marker_weights = fixed_marker_weights,
-    shared_marker_weights = shared_marker_weights,
-    quadrature_nodes = quadrature_nodes,
-    vcov_diag_link = vcov_diag_link,
-    tau_fixed = tau_fixed,
-    basehaz = basehaz$type,
-    basehaz_n_knots = basehaz$n_knots,
-    basehaz_knots = basehaz$knots,
-    basehaz_degree = basehaz$degree,
-    basehaz_formula = basehaz$formula,
-    seed = seed
-  ))
+  arg_list <- modifyList(
+    arg_list,
+    list(
+      formulaLong = formulaLong,
+      dataLong = dataLong,
+      formulaEvent = formulaEvent,
+      dataEvent = dataEvent,
+      formulaVCov = formulaVCov,
+      formulaDist = formulaDist,
+      families = families,
+      transforms = transforms,
+      beta_prior = priors$beta,
+      alpha_prior = priors$alpha,
+      iota_prior = priors$iota,
+      lkj_prior = priors$lkj,
+      fixed_marker_weights = fixed_marker_weights,
+      shared_marker_weights = shared_marker_weights,
+      quadrature_nodes = quadrature_nodes,
+      vcov_diag_link = vcov_diag_link,
+      tau_fixed = tau_fixed,
+      basehaz = basehaz$type,
+      basehaz_n_knots = basehaz$n_knots,
+      basehaz_knots = basehaz$knots,
+      basehaz_degree = basehaz$degree,
+      basehaz_formula = basehaz$formula,
+      seed = seed
+    )
+  )
   sd <- do.call(joinme_standata, arg_list)
 
   # Threading: honor explicit control overrides, fall back to mc.cores or 1
-  threads_per_chain <- control$threads_per_chain %||% control$threads %||% control$mc.cores %||% 1L
+  threads_per_chain <- control$threads_per_chain %||%
+    control$threads %||%
+    control$mc.cores %||%
+    1L
   if (!is.numeric(threads_per_chain) || length(threads_per_chain) != 1) {
     cli::cli_abort(c(
       x = "{.arg control$threads_per_chain} must be a single numeric value.",
@@ -446,7 +463,11 @@ joinme <- function(
   sd_stan$tf_compositions <- NULL
   sd_stan$basehaz <- NULL
   sd_stan$n_knots <- NULL
+  sd_stan$basehaz_n_knots <- NULL
+  sd_stan$basehaz_knots <- NULL
   sd_stan$basehaz_degree <- NULL
+  sd_stan$basehaz_formula <- NULL
+  sd_stan$basehaz_col_means <- NULL
   sd_stan$basehaz_cols <- NULL
   sd_stan$Bs_obj <- NULL
   sd_stan$dist_cols <- NULL
@@ -478,21 +499,33 @@ joinme <- function(
 
   # Coerce arrays/vectors consistently for both cmdstanr and rstan
   sd_stan <- .coerce_rstan_dist_arrays(sd_stan)
-  sd_stan <- .coerce_rstan_vectors(sd_stan, c(
-    "beta_scale",
-    "const_data_cv",
-    "const_data_cs",
-    "const_data_corr",
-    "const_data_vcov",
-    "const_data_cv_mean",
-    "const_data_cv_marker",
-    "const_data_cs_mean",
-    "const_data_cs_marker"
-  ))
+  sd_stan <- .coerce_rstan_vectors(
+    sd_stan,
+    c(
+      "beta_scale",
+      "const_data_cv",
+      "const_data_cs",
+      "const_data_corr",
+      "const_data_vcov",
+      "const_data_cv_mean",
+      "const_data_cv_marker",
+      "const_data_cs_mean",
+      "const_data_cs_marker"
+    )
+  )
 
   has_nonstan_metadata <- function(x) {
-    if (is.null(x)) return(FALSE)
-    if (is.character(x) || is.factor(x) || is.language(x) || inherits(x, c("formula", "call"))) return(TRUE)
+    if (is.null(x)) {
+      return(FALSE)
+    }
+    if (
+      is.character(x) ||
+        is.factor(x) ||
+        is.language(x) ||
+        inherits(x, c("formula", "call"))
+    ) {
+      return(TRUE)
+    }
     if (is.list(x) && !is.data.frame(x)) {
       return(any(vapply(x, has_nonstan_metadata, logical(1))))
     }
@@ -503,7 +536,11 @@ joinme <- function(
 
   allowed_data <- if (engine == "cmdstanr") {
     vars <- tryCatch(mod$variables(), error = function(e) NULL)
-    if (!is.null(vars$data)) names(vars$data) %||% character(0) else character(0)
+    if (!is.null(vars$data)) {
+      names(vars$data) %||% character(0)
+    } else {
+      character(0)
+    }
   } else {
     .stan_data_names(stan_file)
   }
@@ -534,17 +571,22 @@ joinme <- function(
     init = 1,
     refresh = 100
   )
-  sample_control <- control[setdiff(names(control), c(
-    "engine",
-    "threads_per_chain",
-    "threads",
-    "mc.cores",
-    "grainsize",
-    "quadrature_nodes",
-    "force_recompile"
-  ))]
+  sample_control <- control[setdiff(
+    names(control),
+    c(
+      "engine",
+      "threads_per_chain",
+      "threads",
+      "mc.cores",
+      "grainsize",
+      "quadrature_nodes",
+      "force_recompile"
+    )
+  )]
   args <- modifyList(defaults, sample_control)
-  chains_val <- args$parallel_chains %||% args$chains %||% defaults$parallel_chains
+  chains_val <- args$parallel_chains %||%
+    args$chains %||%
+    defaults$parallel_chains
   args$parallel_chains <- chains_val
   args$chains <- chains_val
   args$threads_per_chain <- threads_per_chain
@@ -554,12 +596,14 @@ joinme <- function(
   if (engine == "cmdstanr") {
     allowed <- names(formals(mod$sample))
     args <- args[names(args) %in% allowed]
-    fit <- do.call(mod$sample, args)
-    fit <- .import_cmdstanr_fit(fit)
   } else {
     control_list <- list()
-    if (!is.null(args$adapt_delta)) control_list$adapt_delta <- args$adapt_delta
-    if (!is.null(args$max_treedepth)) control_list$max_treedepth <- args$max_treedepth
+    if (!is.null(args$adapt_delta)) {
+      control_list$adapt_delta <- args$adapt_delta
+    }
+    if (!is.null(args$max_treedepth)) {
+      control_list$max_treedepth <- args$max_treedepth
+    }
     iter_warmup <- args$iter_warmup %||% defaults$iter_warmup
     iter_sampling <- args$iter_sampling %||% defaults$iter_sampling
     iter_total <- iter_warmup + iter_sampling
@@ -572,103 +616,40 @@ joinme <- function(
       seed = args$seed %||% defaults$seed,
       refresh = args$refresh %||% defaults$refresh,
       open_progress = FALSE,
-      cores = min(args$chains %||% 1, parallel::detectCores(logical = FALSE) %||% 1)
+      cores = min(
+        args$chains %||% 1,
+        parallel::detectCores(logical = FALSE) %||% 1
+      )
     )
     if (length(control_list) > 0) rstan_args$control <- control_list
-    # Rstan returns warnings about NA in Rhat which is untrue. Can easily work out with diagnosis tho so let's suppress it for now.
-    fit <- suppressWarnings(do.call(rstan::sampling, rstan_args))
   }
 
-  cfg <- list(
-    family_long = sd$family_long,
-    family_link = sd$link_long,
-    family_link_names = sd$link_names,
-    family_inv_link_n_ops = sd$inv_link_n_ops,
-    family_inv_link_ops = sd$inv_link_ops,
-    family_inv_link_n_const = sd$inv_link_n_const,
-    family_inv_link_const = sd$inv_link_const,
-    assoc = c(
-      cv_total = sd$assoc_cv_total,
-      cv_mean = sd$assoc_cv_mean,
-      cv_marker = sd$assoc_cv_marker,
-      cs_total = sd$assoc_cs_total,
-      cs_mean = sd$assoc_cs_mean,
-      cs_marker = sd$assoc_cs_marker,
-      corr = sd$assoc_corr,
-      vcov = sd$assoc_vcov
-    ),
-    transforms = list(
-      tf_mode_cv_tot = sd$tf_mode_cv_tot,
-      tf_mode_cs_tot = sd$tf_mode_cs_tot,
-      tf_mode_cv_mean = sd$tf_mode_cv_mean,
-      tf_mode_cs_mean = sd$tf_mode_cs_mean,
-      tf_mode_cv_marker = sd$tf_mode_cv_marker,
-      tf_mode_cs_marker = sd$tf_mode_cs_marker,
-      tf_mode_corr = sd$tf_mode_corr,
-      tf_mode_vcov = sd$tf_mode_vcov
-    ),
-    transforms_spec = transforms,
-    dist = list(
-      dist_cols = sd$dist_cols,
-      dist_re_terms = sd$dist_re_terms,
-      dist_formulas = sd$dist_formulas
-    ),
-    indep = c(
-      id = sd$indep_id_re,
-      marker = sd$indep_marker_re,
-      idmarker_cov = sd$indep_idmarker_cov
-    ),
-    allow_marker_crosscorr = sd$allow_marker_crosscorr,
-    shrinkage = sd$shrinkage,
-    dims = c(n_id = sd$n_id, N = sd$N, D = sd$D, P = sd$P, R_id = sd$R_id, R_mk = sd$R_mk, Q_idm = sd$Q_idm),
-    draws_default = draws,
-    threads_per_chain = threads_per_chain,
-    # tmax_internal = sd$tmax,
-    time_indices = list(
-      idx_time_beta = sd$idx_time_beta,
-      idx_time_uid = sd$idx_time_uid,
-      idx_time_vmk = sd$idx_time_vmk,
-      idx_time_idm = sd$idx_time_idm
-    ),
-    marker_weights = sd$marker_weights,
-    fixed_marker_weights = sd$fixed_marker_weights,
-    basehaz = sd$basehaz,
-    n_knots = sd$n_knots,
-    basehaz_degree = sd$basehaz_degree,
-    K_event = sd$K_event,
-    surv_type = sd$surv_type,
-    event_censor_types_present = sd$event_censor_types_present,
-    vcov_diag_link = sd$vcov_diag_link,
-    use_tau_fixed = sd$use_tau_fixed,
-    tau_fixed = sd$tau_fixed
-  )
-  cfg$engine <- engine
-
-  fit_obj <- JoiNMeFit$new(
-    fit = fit,
-    stan_data = sd,
-    formulaLong = formulaLong,
-    formulaEvent = formulaEvent,
-    formulaVCov = formulaVCov,
-    config = cfg,
-    call = match.call(),
-    tmax = sd$tmax,
-    dataLong = dataLong,
-    dataEvent = dataEvent
-  )
-
-  # Store a compact, self-contained plotting bundle so association plots remain
-  # usable even when cmdstanr CSV outputs are no longer available.
-  fit_obj$config$association_plot_payload <- tryCatch(
-    .build_JoiNMefit_association_plot_payload(
-      fit = fit,
-      stan_data = sd,
-      config = fit_obj$config,
+  call <- match.call()
+  jm_sd <-
+    JoiNMeStanData$new(
+      formulaLong = formulaLong,
+      formulaEvent = formulaEvent,
+      formulaVCov = formulaVCov,
+      parent_call = call,
       dataLong = dataLong,
-      seed = args$seed %||% defaults$seed
-    ),
-    error = function(e) NULL
-  )
+      dataEvent = dataEvent,
+      transforms = transforms,
+      draws = draws,
+      threads_per_chain = threads_per_chain,
+      # Retain the complete model description for posterior reporting.  The
+      # sampling arguments already contain `sd_stan`, which is the numeric
+      # subset accepted by Stan.  Keeping the unabridged `sd` here preserves
+      # design-column labels, marker labels, family labels, and baseline-hazard
+      # metadata needed to translate fitted parameters into statistical terms.
+      stan_data = sd,
+      stan_mod = mod,
+      stan_engine = engine,
+      stan_args = if (engine == "cmdstanr") args else rstan_args
+    )
+  # If no fitting is requested, return the prepared Stan data list, program sample args
+  if (!fit) {
+    return(jm_sd)
+  }
 
-  fit_obj
+  jm_sd$sample()
 }

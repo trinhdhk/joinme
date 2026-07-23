@@ -5,7 +5,14 @@
 \alias{posterior_summary.JoiNMeFit}
 \title{Summary of a JoiNMe object}
 \usage{
-\method{summary}{JoiNMeFit}(object, draws = NULL, seed = 1, digits = 3, include_corr = TRUE, ...)
+\method{summary}{JoiNMeFit}(
+  object,
+  draws = NULL,
+  seed = .Random.seed[[1]],
+  digits = 3,
+  include_corr = TRUE,
+  ...
+)
 
 \method{posterior_summary}{JoiNMeFit}(object, ...)
 }

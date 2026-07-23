@@ -35,7 +35,7 @@
   array[D] int<lower=0, upper=5> link_long; // 0 custom VM; 1 identity, 2 log, 3 logit, 4 probit, 5 exp
   int<lower=1> max_inv_link_ops;
   array[D] int<lower=0> inv_link_n_ops;
-  array[D, max_inv_link_ops] int<lower=0, upper=26> inv_link_ops;
+  array[D, max_inv_link_ops] int<lower=0, upper=27> inv_link_ops;
   int<lower=1> max_inv_link_const;
   array[D] int<lower=0> inv_link_n_const;
   matrix[D, max_inv_link_const] inv_link_const;
@@ -263,56 +263,56 @@
 
   /* Functional bytecode specifications */
   int<lower=0> n_functional_ops_cv;         // op count for total CV
-  array[n_functional_ops_cv] int<lower=0, upper=26> functional_ops_cv; // bytecode stream
+  array[n_functional_ops_cv] int<lower=0, upper=27> functional_ops_cv; // bytecode stream
   array[n_functional_ops_cv] int<lower=0, upper=estimate_iota_intercept_cv> functional_iota_intercept_idx_cv;
   array[n_functional_ops_cv] int<lower=0, upper=estimate_iota_slope_cv> functional_iota_slope_idx_cv;
   int<lower=0> n_const_cv;                  // constants used by CV bytecode
   vector[n_const_cv] const_data_cv;         // constants used by CV bytecode
 
   int<lower=0> n_functional_ops_cs;         // op count for total CS
-  array[n_functional_ops_cs] int<lower=0, upper=26> functional_ops_cs; // bytecode stream
+  array[n_functional_ops_cs] int<lower=0, upper=27> functional_ops_cs; // bytecode stream
   array[n_functional_ops_cs] int<lower=0, upper=estimate_iota_intercept_cs> functional_iota_intercept_idx_cs;
   array[n_functional_ops_cs] int<lower=0, upper=estimate_iota_slope_cs> functional_iota_slope_idx_cs;
   int<lower=0> n_const_cs;                  // constants used by CS bytecode
   vector[n_const_cs] const_data_cs;         // constants used by CS bytecode
 
   int<lower=0> n_functional_ops_corr;       // op count for corr
-  array[n_functional_ops_corr] int<lower=0, upper=26> functional_ops_corr; // bytecode stream
+  array[n_functional_ops_corr] int<lower=0, upper=27> functional_ops_corr; // bytecode stream
   array[n_functional_ops_corr] int<lower=0, upper=estimate_iota_intercept_corr> functional_iota_intercept_idx_corr;
   array[n_functional_ops_corr] int<lower=0, upper=estimate_iota_slope_corr> functional_iota_slope_idx_corr;
   int<lower=0> n_const_corr;                // constants used by corr bytecode
   vector[n_const_corr] const_data_corr;     // constants used by corr bytecode
 
   int<lower=0> n_functional_ops_vcov;       // op count for vcov
-  array[n_functional_ops_vcov] int<lower=0, upper=26> functional_ops_vcov; // bytecode stream
+  array[n_functional_ops_vcov] int<lower=0, upper=27> functional_ops_vcov; // bytecode stream
   array[n_functional_ops_vcov] int<lower=0, upper=estimate_iota_intercept_vcov> functional_iota_intercept_idx_vcov;
   array[n_functional_ops_vcov] int<lower=0, upper=estimate_iota_slope_vcov> functional_iota_slope_idx_vcov;
   int<lower=0> n_const_vcov;                // constants used by vcov bytecode
   vector[n_const_vcov] const_data_vcov;     // constants used by vcov bytecode
 
   int<lower=0> n_functional_ops_cv_mean;    // op count for mean CV
-  array[n_functional_ops_cv_mean] int<lower=0, upper=26> functional_ops_cv_mean; // bytecode stream
+  array[n_functional_ops_cv_mean] int<lower=0, upper=27> functional_ops_cv_mean; // bytecode stream
   array[n_functional_ops_cv_mean] int<lower=0, upper=estimate_iota_intercept_cv_mean> functional_iota_intercept_idx_cv_mean;
   array[n_functional_ops_cv_mean] int<lower=0, upper=estimate_iota_slope_cv_mean> functional_iota_slope_idx_cv_mean;
   int<lower=0> n_const_cv_mean;             // constants used by mean CV bytecode
   vector[n_const_cv_mean] const_data_cv_mean; // constants used by mean CV bytecode
 
   int<lower=0> n_functional_ops_cv_marker;  // op count for marker CV
-  array[n_functional_ops_cv_marker] int<lower=0, upper=26> functional_ops_cv_marker; // bytecode stream
+  array[n_functional_ops_cv_marker] int<lower=0, upper=27> functional_ops_cv_marker; // bytecode stream
   array[n_functional_ops_cv_marker] int<lower=0, upper=estimate_iota_intercept_cv_marker> functional_iota_intercept_idx_cv_marker;
   array[n_functional_ops_cv_marker] int<lower=0, upper=estimate_iota_slope_cv_marker> functional_iota_slope_idx_cv_marker;
   int<lower=0> n_const_cv_marker;           // constants used by marker CV bytecode
   vector[n_const_cv_marker] const_data_cv_marker; // constants used by marker CV bytecode
 
   int<lower=0> n_functional_ops_cs_mean;    // op count for mean CS
-  array[n_functional_ops_cs_mean] int<lower=0, upper=26> functional_ops_cs_mean; // bytecode stream
+  array[n_functional_ops_cs_mean] int<lower=0, upper=27> functional_ops_cs_mean; // bytecode stream
   array[n_functional_ops_cs_mean] int<lower=0, upper=estimate_iota_intercept_cs_mean> functional_iota_intercept_idx_cs_mean;
   array[n_functional_ops_cs_mean] int<lower=0, upper=estimate_iota_slope_cs_mean> functional_iota_slope_idx_cs_mean;
   int<lower=0> n_const_cs_mean;             // constants used by mean CS bytecode
   vector[n_const_cs_mean] const_data_cs_mean; // constants used by mean CS bytecode
 
   int<lower=0> n_functional_ops_cs_marker;  // op count for marker CS
-  array[n_functional_ops_cs_marker] int<lower=0, upper=26> functional_ops_cs_marker; // bytecode stream
+  array[n_functional_ops_cs_marker] int<lower=0, upper=27> functional_ops_cs_marker; // bytecode stream
   array[n_functional_ops_cs_marker] int<lower=0, upper=estimate_iota_intercept_cs_marker> functional_iota_intercept_idx_cs_marker;
   array[n_functional_ops_cs_marker] int<lower=0, upper=estimate_iota_slope_cs_marker> functional_iota_slope_idx_cs_marker;
   int<lower=0> n_const_cs_marker;           // constants used by marker CS bytecode

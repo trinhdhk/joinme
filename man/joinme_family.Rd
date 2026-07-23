@@ -12,10 +12,16 @@ jm_family(name, link = NULL, inv_link = NULL)
 \arguments{
 \item{name}{Character scalar family name, e.g. \code{"student_t"}, \code{"bernoulli"}.}
 
-\item{link}{Optional character scalar naming the inverse-link.}
+\item{link}{Optional character scalar naming a forward link, or a one-sided
+formula defining a forward link in \code{x}, for example \code{~ log(x + 1)}.
+Formula links must be one-to-one compositions that can be inverted
+algebraically by \code{\link[=invert_transform_expr]{invert_transform_expr()}}.}
 
-\item{inv_link}{Optional one-sided formula \code{~ ...} or expression string using \code{x}
-(e.g. \code{~ exp(x)}, \code{~ inv_logit(x)}, \code{~ probit(x)}).}
+\item{inv_link}{Optional one-sided formula \code{~ ...} or expression string
+using \code{x} (e.g. \code{~ exp(x)}, \code{~ inv_logit(x)}, or \code{~ Phi(x)}).
+\code{Phi} is the standard normal CDF and is the inverse link for a probit
+model. In contrast, \code{inv_Phi}, \code{qnorm}, and \code{probit} denote the standard
+normal quantile function.}
 }
 \value{
 Object of class \code{"JoiNMe_family_spec"}.
@@ -24,16 +30,30 @@ Object of class \code{"JoiNMe_family_spec"}.
 Creates a family specification object for \code{joinme(..., families = ...)} with an
 optional custom longitudinal link (or inverse-link) per marker family.
 
-This helper is intentionally small and explicit: it stores only canonical family
-name plus a supported inverse-link choice that can be passed to Stan as compact
-integer link codes.
+Character values supplied through \code{link} name the \emph{forward} link
+\eqn{g(\mu)}.  Formula values supplied through \code{link} are inverted
+symbolically and then compiled by the same functional bytecode evaluator
+used for custom association transformations.  In contrast, \code{inv_link}
+directly specifies \eqn{g^{-1}(\eta)}.
 
-Supported links / inverse-links:
-\itemize{
-\item \code{"identity"} : \eqn{g^{-1}(x)=x}
-\item \code{"log"}      : \eqn{g^{-1}(x)=\log(x)}
-\item \code{"logit"}    : \eqn{g^{-1}(x)=\operatorname{logit}^{-1}(x)}
-\item \code{"probit"}   : \eqn{g^{-1}(x)=\Phi(x)}
-\item \code{"exp"}      : \eqn{g^{-1}(x)=\exp(x)}
+The named forward links and their inverse links are:
+\describe{
+\item{\code{"identity"}}{\eqn{g(\mu)=\mu} and
+\eqn{g^{-1}(\eta)=\eta}.}
+\item{\code{"log"}}{\eqn{g(\mu)=\log(\mu)} and
+\eqn{g^{-1}(\eta)=\exp(\eta)}.}
+\item{\code{"logit"}}{\eqn{g(\mu)=\operatorname{logit}(\mu)} and
+\eqn{g^{-1}(\eta)=\operatorname{logit}^{-1}(\eta)}.}
+\item{\code{"probit"}}{\eqn{g(\mu)=\Phi^{-1}(\mu)} and
+\eqn{g^{-1}(\eta)=\Phi(\eta)}.}
+\item{\code{"exp"}}{\eqn{g(\mu)=\exp(\mu)} and
+\eqn{g^{-1}(\eta)=\log(\eta)}.}
 }
+}
+\examples{
+jm_family("poisson", link = "log")
+jm_family("poisson", link = ~ log(x))
+jm_family("bernoulli", inv_link = ~ inv_logit(x))
+jm_family("bernoulli", link = ~ inv_Phi(x))
+jm_family("bernoulli", inv_link = ~ Phi(x))
 }

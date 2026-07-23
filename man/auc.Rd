@@ -12,7 +12,7 @@ auc(object, ...)
   object,
   newdataLong = NULL,
   newdataEvent = NULL,
-  time_start,
+  time_start = 0,
   time_horizon = NULL,
   Dt = NULL,
   cause = 1,
@@ -33,10 +33,12 @@ AUC(object, ...)
 
 \item{newdataEvent}{Event evaluation data; defaults to the fitted data.}
 
-\item{time_start}{Numeric landmark time or vector of landmark times.}
+\item{time_start}{Numeric landmark time or vector of landmark times.  The
+default is zero.}
 
 \item{time_horizon}{Numeric horizon time.  It may be scalar or have the same
-length as \code{time_start}.}
+length as \code{time_start}.  When both \code{time_horizon} and \code{Dt} are omitted,
+the fitted maximum time is used.}
 
 \item{Dt}{Positive horizon width used when \code{time_horizon} is omitted.}
 

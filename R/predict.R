@@ -123,6 +123,12 @@ NULL
 #' curve as the fitted event model and never reconstruct a curve from legacy
 #' user-supplied `y` values.
 #'
+#' The baseline-hazard basis is likewise inherited from fitting.  Prediction
+#' reuses the retained B-spline or natural-spline object, or the retained
+#' baseline formula, together with the original column-centring constants.
+#' This guarantees that the quadrature arrays have the same number and meaning
+#' of baseline-hazard columns as the fitted Stan parameters.
+#'
 #' @export
 predict.JoiNMeFit <- function(object,
                            newdataLong,
@@ -136,7 +142,7 @@ predict.JoiNMeFit <- function(object,
                            tmax = NULL,
                            ci_levels = c(0.5, 0.95),
                            control = list(),
-                           seed = 123,
+                           seed = .Random.seed[[1]],
                            ...) {
     if (!inherits(object, "JoiNMeFit")) {
         cli::cli_abort(c(
@@ -159,8 +165,6 @@ predict.JoiNMeFit <- function(object,
     # 1. Recover Metadata
     meta <- .recover_metadata(object, tmax)
     tmax_val <- meta$tmax
-    knots <- meta$knots
-    col_means <- meta$col_means
 
     time_horizon_val <- if (is.null(time_horizon)) tmax_val else time_horizon
     if (!is.numeric(time_horizon_val) || length(time_horizon_val) != 1 ||
@@ -568,11 +572,10 @@ predict.JoiNMeFit <- function(object,
             # - assemble subject-specific data list for Stan
             grainsize_data <- grainsize
             sd_pred <- .prepare_subject_standata(
-                dE, dL, object, tmax_val, knots, col_means,
+                dE, dL, object, tmax_val, meta$basehaz,
                 t_cond, t_grid, t_surv_grid,
                 forms, draws_list, grainsize_data,
-                control = control,
-                degree = meta$degree
+                control = control
             )
             # Ensure time index arrays are preserved for cmdstanr JSON (avoid auto-unbox)
             sd_pred <- .coerce_rstan_time_indices(sd_pred)
@@ -1261,11 +1264,114 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
     draws_list
 }
 
-.recover_metadata <- function(object, tmax_arg) {
-    tmax <- tmax_arg
-    if (is.null(tmax)) {
-        tmax <- object$config$tmax %||% object$stan_data$tmax
+#' Recover a baseline-hazard declaration from the original model call
+#'
+#' @description
+#' Evaluate a directly recorded `joinme_basehaz()` call when an older fitted
+#' object does not yet contain the formula in its stored configuration.  A
+#' declaration supplied through a transient local symbol cannot be recovered
+#' reliably and therefore returns `NULL`; newer fits store the declaration
+#' explicitly and do not require this compatibility path.
+#'
+#' @param object A fitted `JoiNMeFit` object.
+#'
+#' @return A `joinme_basehaz` object or `NULL`.
+#' @keywords internal
+#' @noRd
+.recover_called_basehaz <- function(object) {
+    basehaz_call <- object$call$basehaz
+    if (is.null(basehaz_call)) {
+        return(NULL)
     }
+    recovered <- try(eval(basehaz_call, envir = parent.frame()), silent = TRUE)
+    if (inherits(recovered, "try-error") || !inherits(recovered, "joinme_basehaz")) {
+        return(NULL)
+    }
+    recovered
+}
+
+#' Evaluate the fitted baseline-hazard basis at scaled times
+#'
+#' @description
+#' Use the exact spline object retained during model fitting whenever it is
+#' available.  This preserves B-spline and natural-spline attributes, boundary
+#' knots, internal knots, degree, and column count.  Formula baselines are
+#' evaluated on a subject-level event-data template using the same model-matrix
+#' helper as fitting.  The final dimension check prevents a malformed basis
+#' from reaching Stan array assignment.
+#'
+#' @param object A fitted `JoiNMeFit` object.
+#' @param scaled_time Numeric times on the fitted `[0, 1]` scale.
+#' @param basehaz Named baseline-hazard metadata returned by
+#'   `.recover_metadata()`.
+#' @param data_event Optional event-data template.  It is required for a
+#'   formula baseline and ignored for a spline baseline.
+#'
+#' @return A numeric matrix with `length(scaled_time)` rows and the fitted
+#'   number of baseline-hazard columns.
+#' @keywords internal
+#' @noRd
+.evaluate_fitted_basehaz_basis <- function(object, scaled_time, basehaz,
+                                            data_event = NULL) {
+    scaled_time <- as.numeric(scaled_time)
+    basis_object <- basehaz$basis_object
+    if (!is.null(basis_object)) {
+        basis <- as.matrix(predict(basis_object, newx = scaled_time))
+    } else if (basehaz$type %in% c("bs", "ns")) {
+        basis <- as.matrix(.make_basehaz_basis(
+            x = scaled_time,
+            basis = basehaz$type,
+            knots = basehaz$knots,
+            degree = basehaz$degree,
+            boundary = c(0, 1)
+        ))
+    } else {
+        if (is.null(basehaz$formula) || is.null(data_event) || nrow(data_event) == 0L) {
+            cli::cli_abort(c(
+                x = "The fitted formula baseline hazard cannot be reconstructed for dynamic prediction.",
+                i = "Refit the model so its baseline-hazard formula is retained in the fitted object."
+            ))
+        }
+        id_var <- eval(object$call$id_var) %||% "id"
+        time_var <- eval(object$call$time_var) %||% "time"
+        template <- data_event[rep(1L, length(scaled_time)), , drop = FALSE]
+        template[[time_var]] <- scaled_time
+        if (id_var %in% names(template)) {
+            template[[id_var]] <- data_event[[id_var]][1L]
+        }
+        basis <- as.matrix(.mm(basehaz$formula, template))
+    }
+
+    expected_dim <- c(length(scaled_time), as.integer(object$stan_data$Kbs))
+    if (!identical(dim(basis), expected_dim)) {
+        cli::cli_abort(c(
+            x = "Dynamic prediction produced an incompatible baseline-hazard basis.",
+            i = "The fitted basis has {expected_dim[2]} columns, but prediction produced {ncol(basis)}.",
+            i = "Check that the fitted baseline-hazard type and knot metadata are present."
+        ))
+    }
+    basis
+}
+
+#' Recover time-scaling and baseline-hazard prediction metadata
+#'
+#' @description
+#' Reconstruct the minimal metadata required for dynamic prediction from the
+#' fitted object.  The fitted baseline basis and centring constants take
+#' precedence over reconstruction so prediction uses exactly the same hazard
+#' parameterisation as model fitting.
+#'
+#' @param object A fitted `JoiNMeFit` object.
+#' @param tmax_arg Optional positive time-scaling constant supplied to
+#'   `predict.JoiNMeFit()`.
+#'
+#' @return A named list containing `tmax` and a `basehaz` list with type,
+#'   knots, degree, formula, fitted basis object, and centring constants.
+#' @keywords internal
+#' @noRd
+.recover_metadata <- function(object, tmax_arg) {
+    stan_data <- object$stan_data
+    tmax <- tmax_arg %||% object$config$tmax %||% stan_data$tmax
     if (is.null(tmax)) {
         cli::cli_warn(c(
             x = "{.arg tmax} not provided or found; assuming 1.0.",
@@ -1274,51 +1380,64 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         tmax <- 1.0
     }
 
-    S_event <- object$stan_data$S_event
-    n_knots <- object$config$n_knots %||% eval(object$call$n_knots) %||% 5
-    degree <- object$config$basehaz_degree %||% eval(object$call$basehaz_degree) %||% 3
-    basehaz_type <- object$config$basehaz %||% eval(object$call$basehaz) %||% "bs"
+    called_basehaz <- .recover_called_basehaz(object)
+    basehaz_type <- stan_data$basehaz %||% object$config$basehaz %||%
+        called_basehaz$type %||% "bs"
+    degree <- stan_data$basehaz_degree %||% object$config$basehaz_degree %||%
+        called_basehaz$degree %||% 3L
+    basis_object <- stan_data$Bs_obj %||% object$config$Bs_obj
+    basehaz_formula <- stan_data$basehaz_formula %||%
+        object$config$basehaz_formula %||% called_basehaz$formula
 
-    probs <- (seq_len(n_knots)) / (n_knots + 1)
-    knots <- as.numeric(quantile(S_event, probs = probs, names = FALSE, type = 7))
-    knots <- unique(pmin(pmax(knots, 1e-6), 1 - 1e-6))
-
-    # Compute col_means using the stored basis object if available (best practice)
-    # This avoids ill-conditioned basis warnings from reconstructing on training data
-    if (!is.null(object$config$Bs_obj)) {
-        # Use the stored spline basis object from training
-        B_raw <- as.matrix(predict(object$config$Bs_obj, newx = S_event))
-    } else {
-        # Fallback: reconstruct basis (suppress warnings about boundary knots)
-        if (basehaz_type == "bs") {
-            B_raw <- suppressWarnings(
-                splines::bs(S_event, knots = knots, Boundary.knots = c(0, 1), degree = degree, intercept = TRUE)
-            )
-        } else if (basehaz_type == "ns") {
-            B_raw <- suppressWarnings(
-                splines::ns(S_event, knots = knots, Boundary.knots = c(0, 1), intercept = TRUE)
-            )
-        } else {
-            # formula or other
-            B_raw <- object$stan_data$Bs_event_c
+    knots <- NULL
+    if (!is.null(basis_object)) {
+        knots <- as.numeric(attr(basis_object, "knots"))
+    }
+    if (is.null(knots) || !length(knots)) {
+        knots_unscaled <- stan_data$basehaz_knots %||%
+            object$config$basehaz_knots %||% called_basehaz$knots
+        if (!is.null(knots_unscaled)) {
+            knots <- unique(as.numeric(knots_unscaled) / as.numeric(tmax))
         }
     }
-
-    if (ncol(B_raw) != object$stan_data$Kbs) {
-        stop(sprintf(
-            "Could not recover baseline hazard basis. Training Kbs=%d, but prediction basis has %d columns. Ensure n_knots and degree are consistent.",
-            object$stan_data$Kbs, ncol(B_raw)
+    if ((is.null(knots) || !length(knots)) && basehaz_type %in% c("bs", "ns")) {
+        n_knots <- stan_data$basehaz_n_knots %||%
+            object$config$basehaz_n_knots %||% object$config$n_knots %||%
+            called_basehaz$n_knots %||% 5L
+        probabilities <- seq_len(as.integer(n_knots)) / (as.integer(n_knots) + 1)
+        knots <- as.numeric(stats::quantile(
+            stan_data$S_event,
+            probs = probabilities,
+            names = FALSE,
+            type = 7
         ))
+        knots <- unique(pmin(pmax(knots, 1e-6), 1 - 1e-6))
     }
 
-    col_means <- colMeans(B_raw - object$stan_data$Bs_event_c)
-
-    list(
-        tmax = tmax,
+    basehaz <- list(
+        type = basehaz_type,
         knots = knots,
-        col_means = col_means,
-        degree = degree
+        degree = as.integer(degree),
+        formula = basehaz_formula,
+        basis_object = basis_object,
+        col_means = stan_data$basehaz_col_means %||% object$config$basehaz_col_means
     )
+    if (is.null(basehaz$col_means)) {
+        training_basis <- .evaluate_fitted_basehaz_basis(
+            object = object,
+            scaled_time = stan_data$S_event,
+            basehaz = basehaz,
+            data_event = object$dataEvent
+        )
+        basehaz$col_means <- colMeans(training_basis - stan_data$Bs_event_c)
+    }
+    basehaz$col_means <- as.numeric(basehaz$col_means)
+    if (length(basehaz$col_means) != stan_data$Kbs ||
+            any(!is.finite(basehaz$col_means))) {
+        cli::cli_abort("Stored baseline-hazard centring constants are incompatible with the fitted basis.")
+    }
+
+    list(tmax = as.numeric(tmax), basehaz = basehaz)
 }
 
 .parse_formulas <- function(object) {
@@ -1711,18 +1830,47 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
     )
 }
 
-.prepare_subject_standata <- function(dE, dL, object, tmax, knots, col_means, t_cond, t_grid, t_surv_grid, forms, draws_list, grainsize = NULL, control = NULL, degree = NULL) {
+#' Construct subject-level Stan data for dynamic prediction
+#'
+#' @description
+#' Scale one subject's observed history, construct longitudinal and survival
+#' design matrices, evaluate the fitted baseline-hazard and association bases
+#' at conditioning and prediction quadrature nodes, and combine these quantities
+#' with posterior parameter draws for the dynamic-prediction Stan program.
+#'
+#' @param dE One-row event-data frame for the subject.
+#' @param dL Longitudinal history for the subject up to the conditioning time.
+#' @param object Fitted `JoiNMeFit` object.
+#' @param tmax Positive time-scaling constant used during fitting.
+#' @param basehaz Named fitted baseline-hazard metadata returned by
+#'   `.recover_metadata()`.
+#' @param t_cond Numeric conditioning time on the original time scale.
+#' @param t_grid Numeric longitudinal prediction grid on the original scale.
+#' @param t_surv_grid Numeric survival prediction grid on the original scale.
+#' @param forms Named list of fitted longitudinal, event, covariance, and
+#'   distributional formulas.
+#' @param draws_list Named posterior parameter arrays used by dynamic Stan.
+#' @param grainsize Optional positive reduce-sum grain size.
+#' @param control Named dynamic-prediction control list.
+#'
+#' @return A named list satisfying the data declaration of the dynamic-
+#'   prediction Stan program for one subject.
+#' @keywords internal
+#' @noRd
+.prepare_subject_standata <- function(dE, dL, object, tmax, basehaz, t_cond,
+                                      t_grid, t_surv_grid, forms, draws_list,
+                                      grainsize = NULL, control = NULL) {
     id_var <- eval(object$call$id_var) %||% "id"
     time_var <- eval(object$call$time_var) %||% "time"
     marker_var <- eval(object$call$marker_var) %||% "marker"
 
     sd <- object$stan_data
-    blueprints <- sd$design_blueprints %||% list()
+    templates <- sd$design_templates %||% list()
 
     dL[[time_var]] <- dL[[time_var]] / tmax
     T_cond_scaled <- t_cond / tmax
 
-    if (!.is_model_matrix_blueprint(blueprints$fixed)) {
+    if (!.is_model_matrix_template(templates$fixed)) {
         f_exp <- reformulas::expandDoubleVerts(forms$formulaLong)
         bars <- reformulas::findbars(f_exp)
         f_fix <- reformulas::nobars(f_exp)
@@ -1735,10 +1883,10 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         marker_designs <- nested$mk_rhs_list
         idm_designs <- nested$idm_rhs_list
     } else {
-        fixed_rhs <- blueprints$fixed
-        id_designs <- blueprints$id %||% list()
-        marker_designs <- blueprints$marker %||% list()
-        idm_designs <- blueprints$idm %||% list()
+        fixed_rhs <- templates$fixed
+        id_designs <- templates$id %||% list()
+        marker_designs <- templates$marker %||% list()
+        idm_designs <- templates$idm %||% list()
     }
 
     mat_fixed_obs <- .mm(fixed_rhs, dL)
@@ -1819,14 +1967,13 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
     mat_marker_gk_cond_fwd <- if (length(marker_designs) > 0) .eval_on_times(marker_designs, u_cond_fwd) else matrix(0, n_gk, sd$R_mk)
     mat_marker_id_gk_cond_fwd <- if (length(idm_designs) > 0) .eval_on_times(idm_designs, u_cond_fwd) else matrix(0, n_gk, sd$Q_idm)
 
-    if (!is.null(object$config$Bs_obj)) {
-        bs_basis <- as.matrix(predict(object$config$Bs_obj, newx = u_cond))
-    } else {
-        # Fallback for formula-based or if Bs_obj missing
-        degree_val <- degree %||% 3
-        bs_basis <- .make_basehaz_basis(u_cond, basis = "bs", knots = knots, degree = degree_val, boundary = c(0, 1))
-    }
-    mat_basis_gk_cond <- sweep(bs_basis, 2, col_means, "-")
+    bs_basis <- .evaluate_fitted_basehaz_basis(
+        object = object,
+        scaled_time = u_cond,
+        basehaz = basehaz,
+        data_event = dE
+    )
+    mat_basis_gk_cond <- sweep(bs_basis, 2, basehaz$col_means, "-")
 
     # Validate marker levels in newdataLong against fitted marker levels.
     #
@@ -1941,13 +2088,15 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
             us <- ts * gk_nodes
             us_f <- us + sd$eps_fd
 
-            if (!is.null(object$config$Bs_obj)) {
-                bs <- as.matrix(predict(object$config$Bs_obj, newx = us))
-            } else {
-                degree_val <- degree %||% 3
-                bs <- .make_basehaz_basis(us, basis = "bs", knots = knots, degree = degree_val, boundary = c(0, 1))
-            }
-            mat_basis_gk_surv[s, , ] <- sweep(bs, 2, col_means, "-")
+            bs <- .evaluate_fitted_basehaz_basis(
+                object = object,
+                scaled_time = us,
+                basehaz = basehaz,
+                data_event = dE
+            )
+            mat_basis_gk_surv[s, , ] <- sweep(
+                bs, 2, basehaz$col_means, "-"
+            )
             mat_fixed_gk_surv[s, , ] <- .eval_on_times(list(fixed_rhs), us)
             mat_id_gk_surv[s, , ] <- if (length(id_designs) > 0) .eval_on_times(id_designs, us) else matrix(0, n_gk, sd$R_id)
             mat_marker_gk_surv[s, , ] <- if (length(marker_designs) > 0) .eval_on_times(marker_designs, us) else matrix(0, n_gk, sd$R_mk)

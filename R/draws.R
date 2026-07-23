@@ -16,14 +16,14 @@
 #'
 #' Fitted-object draw arrays are cached inside the underlying R6 container after
 #' the first request so later summaries, diagnostics, and plotting methods can
-#' reuse the same renamed draw payload without re-reading the backend fit.
+#' reuse the same renamed draw collection without re-reading the backend fit.
 #'
 #' Use `draws()` when you want:
 #' - one posterior object containing renamed variables,
 #' - `posterior::subset_draws()` and regex-style variable filtering,
 #' - `bayesplot` directly, similar to [mcmc_plot()],
 #' - a standard draws array/matrix/data frame rather than a component-specific
-#'   extraction payload.
+#'   extraction result.
 #' - `as.array` is a shorthand for `draws(format = "draws_array")`.
 #'
 #' Use [extract()] instead when you want:
@@ -44,7 +44,10 @@
 #'   posterior variables), `"basehaz"`, or `"baseline_hazard"`.
 #' @param format Output format. Supported values are `"draws_array"`,
 #'   `"draws_matrix"`, and `"draws_df"`.
-#' @param ... Unused.
+#' @param x A fitted `JoiNMeFit` or dynamic-prediction `JoiNMeDynPred` object
+#'   passed to the corresponding `as.array()` method.
+#' @param ... Additional arguments forwarded from `as.array()` to [draws()];
+#'   otherwise unused.
 #'
 #' @return A posterior draw object in the requested format. The result is a
 #'   `posterior`-compatible object with renamed variables, suitable for
@@ -72,7 +75,15 @@ draws <- function(object, ...) {
   leftover <- setdiff(all_vars, map$variable)
   p <- as.integer(object$stan_data$P %||% 0L)
   if (p > 0L) {
-    fixed_map <- .fixed_effect_var_map(sd = object$stan_data, all_vars = all_vars)
+    fixed_map <- .fixed_effect_var_map(
+      sd = object$stan_data,
+      all_vars = all_vars,
+      term_labels = .fit_design_term_labels(
+        object,
+        what = "fixef",
+        n_terms = object$stan_data$P
+      )
+    )
     chosen_fixed <- as.character(fixed_map$variable)
     if (length(chosen_fixed) > 0L) {
       beta_raw <- paste0("beta[", seq_len(p), "]")
@@ -141,6 +152,9 @@ draws <- function(object, ...) {
 #' @keywords internal
 #' @noRd
 .fit_cached_draws_array <- function(object) {
+  # Version the cache because fitted objects are mutable R6 objects and can
+  # survive a package reload. An earlier cached array may therefore contain
+  # raw Stan names even after the renaming rules have been corrected.
   cache_key <- "renamed_draws_array"
   cached <- object$cache_get(cache_key)
   if (!is.null(cached)) {

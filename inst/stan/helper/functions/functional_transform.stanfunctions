@@ -34,7 +34,8 @@
  *  23: ATANH         (pop a; push atanh(a))
  *  24: SOFTPLUS      (pop a; push log1p_exp(a))
  *  25: CBRT          (pop a; push cbrt(a))
- *  26: PROBIT        (pop a; push Phi(a))
+ *  26: PHI           (pop a; push standard normal CDF Phi(a))
+ *  27: INV_PHI       (pop a; push standard normal quantile inv_Phi(a))
  *
  * Usage:
  *   bytecode   : integer array of bytecode instructions
@@ -51,7 +52,7 @@
   * @brief Functional bytecode evaluator for scalar inputs.
   *
   * @param x Input value
-  * @param bytecode Array of bytecode instructions. Accepted instruction IDs are 0-26 as
+  * @param bytecode Array of bytecode instructions. Accepted instruction IDs are 0-27 as
   *   enumerated in the file-level description.
   * @param const_data Vector of constant values for PUSH_CONST operations
   * @return Scalar result of bytecode evaluation
@@ -92,7 +93,7 @@
 
       // Backward compatibility for legacy unary programs encoded without an
       // explicit PUSH_X, e.g. [SOFTPLUS] instead of [PUSH_X, SOFTPLUS].
-      if (stack_ptr == 0 && (op == 6 || op == 7 || op == 8 || op == 9 || op == 10 || op == 11 || op == 13 || op == 14 || op == 15 || op == 16 || op == 17 || op == 18 || op == 19 || op == 20 || op == 21 || op == 22 || op == 23 || op == 24 || op == 25 || op == 26)) {
+      if (stack_ptr == 0 && (op == 6 || op == 7 || op == 8 || op == 9 || op == 10 || op == 11 || op == 13 || op == 14 || op == 15 || op == 16 || op == 17 || op == 18 || op == 19 || op == 20 || op == 21 || op == 22 || op == 23 || op == 24 || op == 25 || op == 26 || op == 27)) {
         stack_ptr += 1;
         stack[stack_ptr] = x;
       }
@@ -189,8 +190,11 @@
         // CBRT
         stack[stack_ptr] = cbrt(apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset));
       } else if (op == 26) {
-        // PROBIT
+        // PHI: standard normal cumulative distribution function.
         stack[stack_ptr] = Phi(apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset));
+      } else if (op == 27) {
+        // INV_PHI (probit): standard normal quantile function.
+        stack[stack_ptr] = inv_Phi(apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset));
       }
     }
 
@@ -199,9 +203,14 @@
 
   /**
   * @brief Functional bytecode evaluator for vector inputs (element-wise).
+  *
+  * Canonical PHI and INV_PHI programs without fitted affine shifts use the
+  * vectorised Stan Math functions directly. Other programs are evaluated by
+  * the scalar interpreter so arbitrary compositions retain identical
+  * instruction semantics.
    *
    * @param x Vector of input values
-  * @param bytecode Array of bytecode instructions. Accepted instruction IDs are 0-26 as
+  * @param bytecode Array of bytecode instructions. Accepted instruction IDs are 0-27 as
   *   enumerated in the file-level description.
    * @param const_data Vector of constant values for PUSH_CONST operations
    * @return Vector result of bytecode evaluation applied element-wise
@@ -219,6 +228,18 @@
   ) {
     int n = num_elements(x);
     vector[n] result;
+
+    // The standard normal operations are common in probit models and
+    // association transforms. When no fitted affine shift modifies the
+    // operation, use Stan Math's vectorised implementation rather than
+    // dispatching the scalar stack evaluator once per element.
+    if (size(bytecode) == 2
+        && bytecode[1] == 0
+        && op_iota_intercept_idx[2] == 0
+        && op_iota_slope_idx[2] == 0) {
+      if (bytecode[2] == 26) return Phi(x);
+      if (bytecode[2] == 27) return inv_Phi(x);
+    }
 
     for (i in 1:n) {
       // Apply scalar evaluator element-wise

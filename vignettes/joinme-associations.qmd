@@ -34,6 +34,10 @@ It also explains how those association terms propagate into the public summary,
 draw-extraction, and plotting APIs so the same labels are used consistently in
 tables, MCMC plots, and fitted association curves.
 
+Their propagation into conditional survival curves and the resulting
+concordance and time-dependent AUC estimands is documented in the
+[dedicated discrimination vignette](joinme-discrimination.html).
+
 Association transforms apply to all supported longitudinal families (including
 double_exponential, skew_double_exponential, beta, and cumulative_logit) and to
 competing-risk survival models.
@@ -209,6 +213,13 @@ When an association component is not selected in `assoc`, its coefficient is pri
   to `plogis(x)` rather than directly to `x`.
 - **Ordered piecewise linear** (`type = "pwlin"`): posterior interpolation
   across fixed knots with monotone knot ordinates estimated in Stan.
+
+The standard normal CDF and quantile have separate functional instructions.
+`Phi(x)` and `pnorm(x)` compile to instruction 26 and return
+\(\Phi(x)\in(0,1)\). `inv_Phi(x)`, `qnorm(x)`, and `probit(x)` compile to
+instruction 27 and return \(\Phi^{-1}(x)\), requiring an input in \((0,1)\).
+This distinction is preserved in fitting, dynamic prediction, conditional
+effects, and simulation.
 
 Interpretation note for recovery experiments:
 

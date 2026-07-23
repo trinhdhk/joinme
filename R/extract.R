@@ -22,9 +22,89 @@ extract <- function(object, ...) {
   UseMethod("extract")
 }
 
+#' Recover model-matrix column labels for posterior reporting
+#'
+#' @description
+#' Returns the statistical term labels associated with one fitted design
+#' matrix. Current fitted objects store these labels in `stan_data`. Objects
+#' created by an earlier fitting route may contain only the numeric Stan data,
+#' because character metadata were removed before sampling. For those objects,
+#' this helper reconstructs the same fixed-effect or event-process model matrix
+#' from the recorded formula and observed data.
+#'
+#' Reconstruction is deliberately restricted to column names. Posterior values
+#' are never recalculated, and the observed data are not modified. Consequently,
+#' the helper can repair presentation of an existing fit without changing its
+#' posterior distribution.
+#'
+#' @param object A fitted `JoiNMeFit` object.
+#' @param what Design matrix to label: `"fixef"` for the longitudinal
+#'   population-level design or `"gamma_w"` for the event-process design.
+#' @param n_terms Expected number of columns in the fitted design.
+#'
+#' @return A character vector of length `n_terms`. Stored model-matrix labels
+#'   are preferred; formula-derived labels are used when stored labels are
+#'   absent; stable indexed labels are the final fallback.
 #' @keywords internal
 #' @noRd
-.fixed_effect_var_map <- function(sd, all_vars) {
+.fit_design_term_labels <- function(object, what = c("fixef", "gamma_w"), n_terms) {
+  what <- match.arg(what)
+  n_terms <- as.integer(n_terms %||% 0L)
+  if (n_terms < 1L) {
+    return(character(0))
+  }
+
+  # Labels saved when the design matrix was constructed are authoritative:
+  # they include factor contrasts, interactions, and basis-function columns in
+  # precisely the order used by Stan.
+  stored_name <- if (identical(what, "fixef")) "x_cols" else "w_cols"
+  stored <- as.character(object$stan_data[[stored_name]] %||% character(0))
+  if (length(stored) == n_terms && all(!is.na(stored)) && all(nzchar(stored))) {
+    return(stored)
+  }
+
+  # Older fitted objects may lack character metadata. Reconstruct only the
+  # design-column vocabulary from the formula and original data. Scaling the
+  # time variable changes values but not ordinary model-matrix column names.
+  recovered <- tryCatch({
+    if (identical(what, "fixef")) {
+      expanded <- reformulas::expandDoubleVerts(object$formulaLong)
+      fixed_formula <- reformulas::nobars(expanded)
+      fixed_rhs <- stats::update(fixed_formula, . ~ .)
+      fixed_rhs[[2L]] <- NULL
+      colnames(stats::model.matrix(fixed_rhs, data = object$dataLong))
+    } else {
+      colnames(.mm_event(object$formulaEvent, object$dataEvent))
+    }
+  }, error = function(e) character(0))
+
+  recovered <- as.character(recovered %||% character(0))
+  if (length(recovered) == n_terms && all(!is.na(recovered)) && all(nzchar(recovered))) {
+    return(recovered)
+  }
+
+  prefix <- if (identical(what, "fixef")) "beta_" else "w_"
+  paste0(prefix, seq_len(n_terms))
+}
+
+#' Map longitudinal fixed-effect variables to statistical terms
+#'
+#' @description
+#' Selects the posterior coefficient representation on the original time scale
+#' and pairs every selected Stan variable with its model-matrix term. The
+#' original-scale `beta` coefficients are preferred over `beta_scaled` whenever
+#' both are present.
+#'
+#' @param sd Stan data and fitted-model metadata.
+#' @param all_vars Character vector of available posterior variables.
+#' @param term_labels Optional model-matrix labels aligned with the `P`
+#'   longitudinal fixed-effect columns.
+#'
+#' @return A two-column data frame containing friendly `term` labels and raw
+#'   posterior `variable` names.
+#' @keywords internal
+#' @noRd
+.fixed_effect_var_map <- function(sd, all_vars, term_labels = NULL) {
   p <- as.integer(sd$P %||% 0L)
   if (p <= 0L) {
     return(data.frame(term = character(0), variable = character(0), stringsAsFactors = FALSE))
@@ -46,7 +126,7 @@ extract <- function(object, ...) {
   }
 
   idx <- suppressWarnings(as.integer(sub("^.*\\[(\\d+)\\]$", "\\1", chosen)))
-  term_labels <- as.character(sd$x_cols %||% paste0("beta_", seq_len(p)))
+  term_labels <- as.character(term_labels %||% sd$x_cols %||% paste0("beta_", seq_len(p)))
   if (length(term_labels) < max(idx, na.rm = TRUE)) {
     term_labels <- c(term_labels, paste0("beta_", seq.int(length(term_labels) + 1L, max(idx, na.rm = TRUE))))
   }
@@ -95,15 +175,24 @@ extract <- function(object, ...) {
   map <- data.frame(term = character(0), variable = character(0), stringsAsFactors = FALSE)
 
   if (what == "fixef") {
-    map <- .fixed_effect_var_map(sd = sd, all_vars = all_vars)
+    fixed_terms <- .fit_design_term_labels(object, what = "fixef", n_terms = sd$P)
+    map <- .fixed_effect_var_map(
+      sd = sd,
+      all_vars = all_vars,
+      term_labels = fixed_terms
+    )
   } else if (what == "gamma_w") {
-    g_vars <- paste0("gamma_w[", seq_len(sd$p_w %||% 0L), "]")
+    p_w <- as.integer(sd$p_w %||% 0L)
+    if (p_w < 1L) {
+      return(map)
+    }
+    g_vars <- paste0("gamma_w[", seq_len(p_w), "]")
     g_vars <- g_vars[g_vars %in% all_vars]
     if (length(g_vars) == 0L) {
       k_event <- sd$K_event %||% 1L
       g_vars <- as.vector(outer(
         seq_len(k_event),
-        seq_len(sd$p_w %||% 0L),
+        seq_len(p_w),
         function(k, j) paste0("gamma_w[", k, ",", j, "]")
       ))
       g_vars <- g_vars[g_vars %in% all_vars]
@@ -113,7 +202,7 @@ extract <- function(object, ...) {
       k_idx <- vapply(var_idx, function(x) if (length(x) >= 2L) as.integer(x[2]) else NA_integer_, integer(1))
       j_idx <- vapply(var_idx, function(x) if (length(x) >= 3L && nzchar(x[3])) as.integer(x[3]) else as.integer(x[2]), integer(1))
       k_event <- sd$K_event %||% 1L
-      g_terms <- sd$w_cols %||% g_vars
+      g_terms <- .fit_design_term_labels(object, what = "gamma_w", n_terms = sd$p_w)
       if (length(g_terms) < max(j_idx %||% 0L, 0L)) {
         g_terms <- c(g_terms, paste0("w_", seq.int(length(g_terms) + 1L, max(j_idx))))
       }
@@ -221,7 +310,7 @@ extract <- function(object, ...) {
     }
     beta_vars <- beta_vars[beta_vars %in% all_vars]
     if (length(beta_vars) > 0) {
-      beta_terms <- sd$x_cols %||% beta_vars
+      beta_terms <- .fit_design_term_labels(object, what = "fixef", n_terms = sd$P)
       if (length(beta_terms) != length(beta_vars)) beta_terms <- beta_vars
       map_rows[[length(map_rows) + 1L]] <- data.frame(
         term = paste0("beta_scaled: ", as.character(beta_terms)),

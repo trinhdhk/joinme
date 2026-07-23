@@ -38,7 +38,8 @@ draws(object, ...)
 \arguments{
 \item{object}{A supported JoiNMe object.}
 
-\item{...}{Unused.}
+\item{...}{Additional arguments forwarded from \code{as.array()} to \code{\link[=draws]{draws()}};
+otherwise unused.}
 
 \item{variables}{Optional character vector selecting variables after
 relabelling.}
@@ -55,6 +56,9 @@ posterior variables), \code{"basehaz"}, or \code{"baseline_hazard"}.}
 
 \item{format}{Output format. Supported values are \code{"draws_array"},
 \code{"draws_matrix"}, and \code{"draws_df"}.}
+
+\item{x}{A fitted \code{JoiNMeFit} or dynamic-prediction \code{JoiNMeDynPred} object
+passed to the corresponding \code{as.array()} method.}
 }
 \value{
 A posterior draw object in the requested format. The result is a
@@ -78,7 +82,7 @@ draws object with explicit id, scale, marker, and time labels.
 
 Fitted-object draw arrays are cached inside the underlying R6 container after
 the first request so later summaries, diagnostics, and plotting methods can
-reuse the same renamed draw payload without re-reading the backend fit.
+reuse the same renamed draw collection without re-reading the backend fit.
 
 Use \code{draws()} when you want:
 \itemize{
@@ -86,7 +90,7 @@ Use \code{draws()} when you want:
 \item \code{posterior::subset_draws()} and regex-style variable filtering,
 \item \code{bayesplot} directly, similar to \code{\link[=mcmc_plot]{mcmc_plot()}},
 \item a standard draws array/matrix/data frame rather than a component-specific
-extraction payload.
+extraction result.
 \item \code{as.array} is a shorthand for \code{draws(format = "draws_array")}.
 }
 

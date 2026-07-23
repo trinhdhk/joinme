@@ -2178,14 +2178,14 @@ plot.JoiNMeFit <- function(x,
     scaled_data <- longitudinal_evaluation_data
     scaled_data[[time_variable]] <- as.numeric(scaled_data[[time_variable]]) / time_scale
 
-    # Step 2: Recover the stored model-matrix blueprints. For older fitted
+    # Step 2: Recover the stored model-matrix templates. For older fitted
     # objects, reconstruct the same fixed and random-effect formula components.
-    blueprints <- stan_data$design_blueprints %||% list()
-    if (.is_model_matrix_blueprint(blueprints$fixed)) {
-        fixed_design <- blueprints$fixed
-        subject_designs <- blueprints$id %||% list()
-        marker_designs <- blueprints$marker %||% list()
-        subject_marker_designs <- blueprints$idm %||% list()
+    templates <- stan_data$design_templates %||% list()
+    if (.is_model_matrix_template(templates$fixed)) {
+        fixed_design <- templates$fixed
+        subject_designs <- templates$id %||% list()
+        marker_designs <- templates$marker %||% list()
+        subject_marker_designs <- templates$idm %||% list()
     } else {
         expanded_formula <- reformulas::expandDoubleVerts(fitted_model$formulaLong)
         random_terms <- reformulas::findbars(expanded_formula)
@@ -2239,7 +2239,7 @@ plot.JoiNMeFit <- function(x,
     if (!identical(unname(observed_columns), unname(expected_columns))) {
         cli::cli_abort(c(
             x = "The longitudinal trajectory design does not match the fitted coefficient dimensions.",
-            i = "Refit the model to retain model-matrix blueprints for smooth fitted trajectories."
+            i = "Refit the model to retain model-matrix templates for smooth fitted trajectories."
         ))
     }
 
@@ -2440,23 +2440,24 @@ plot.JoiNMeFit <- function(x,
                 if (length(idx_d) == 0L) next
                 link_d <- as.integer(sd$link_long[d] %||% 1L)
                 eta_d <- eta_mat[, idx_d, drop = FALSE]
-                if (link_d == 1L) {
-                    epred_mat[, idx_d] <- eta_d
-                } else if (link_d == 2L || link_d == 5L) {
-                    epred_mat[, idx_d] <- exp(eta_d)
-                } else if (link_d == 3L) {
-                    epred_mat[, idx_d] <- stats::plogis(eta_d)
-                } else if (link_d == 4L) {
-                    epred_mat[, idx_d] <- stats::pnorm(eta_d)
+                n_ops <- as.integer(sd$inv_link_n_ops[d] %||% 0L)
+                n_const <- as.integer(sd$inv_link_n_const[d] %||% 0L)
+                bytecode <- if (n_ops > 0L) {
+                    as.integer(sd$inv_link_ops[d, seq_len(n_ops)])
                 } else {
-                    n_ops <- as.integer(sd$inv_link_n_ops[d] %||% 0L)
-                    n_const <- as.integer(sd$inv_link_n_const[d] %||% 0L)
-                    bytecode <- if (n_ops > 0L) as.integer(sd$inv_link_ops[d, seq_len(n_ops)]) else integer(0)
-                    const_data <- if (n_const > 0L) as.numeric(sd$inv_link_const[d, seq_len(n_const)]) else numeric(0)
-                    for (j in seq_along(idx_d)) {
-                        epred_mat[, idx_d[j]] <- eval_bytecode_vector(eta_d[, j], bytecode = bytecode, const_data = const_data)
-                    }
+                    integer(0)
                 }
+                const_data <- if (n_const > 0L) {
+                    as.numeric(sd$inv_link_const[d, seq_len(n_const)])
+                } else {
+                    numeric(0)
+                }
+                epred_mat[, idx_d] <- .apply_inverse_link_matrix(
+                    eta = eta_d,
+                    link_code = link_d,
+                    bytecode = bytecode,
+                    const_data = const_data
+                )
             }
         }
 
@@ -2948,7 +2949,7 @@ plot.JoiNMeFit <- function(x,
 .transform_specs <- function(x) {
     # Keep transform lookup centralized because some fits store the resolved
     # transform spec in config while others only retain the original call.
-    x$config$transforms_spec %||% x$call$transforms %||% list()
+    x$config$transforms_spec %||% list()
 }
 
 .assoc_component_index <- function(term) {

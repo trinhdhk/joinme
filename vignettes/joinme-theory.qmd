@@ -266,6 +266,13 @@ Crucially, `JoiNMe` supports non-linear transformations of these terms via the
 functional bytecode evaluator, monotone I-splines, and ordered piecewise-linear
 rules whose knot ordinates are learned from simplex increments.
 
+Within functional bytecode, the standard normal distribution function and its
+inverse are not interchangeable. Instruction 26 evaluates
+\(\Phi(x)\), corresponding to `Phi(x)` or `pnorm(x)`. Instruction 27 evaluates
+\(\Phi^{-1}(p)\), corresponding to `inv_Phi(p)`, `qnorm(p)`, or
+`probit(p)`. A named probit longitudinal link uses the latter as its forward
+link and the former as its inverse link.
+
 For clarity, denote the raw summaries at time $t$ as
 $\text{CV}_\text{tot}(t)$, $\text{CV}_\text{mean}(t)$, $\text{CV}_\text{marker}(t)$,
 and their slope counterparts. The transformed summaries take the form

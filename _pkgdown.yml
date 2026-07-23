@@ -1,9 +1,15 @@
 url: https://trinhdhk.github.io/joinme/
+repo:
+  url:
+    home: https://github.com/trinhdhk/joinme/
+    source: https://github.com/trinhdhk/joinme/blob/master/
+    issue: https://github.com/trinhdhk/joinme/issues/
 template:
   bootstrap: 5
   bootswatch: sandstone
   light-switch: true
   toc: true
+  math-rendering: katex
   
 ignore:
 - vignettes/*_files
@@ -11,7 +17,7 @@ ignore:
 - vignettes/_quarto_out
 - vignettes/.quarto
 home:
-  title: JoiNMe
+  title: joinme
   description: Bayesian Joint Nested Mixed-Effects (JoiNMe) models for multivariate longitudinal
     and survival data.
 articles:
@@ -22,6 +28,7 @@ articles:
 - title: Modelling
   contents:
   - joinme-workflow
+  - joinme-discrimination
   - joinme-associations
   - joinme-model
   - joinme-theory

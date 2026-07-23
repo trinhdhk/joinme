@@ -1,5 +1,5 @@
 ---
-title: "Introduction to JoiNMe"
+title: "Introduction to Joint Nested Mixed Effects Models"
 output-dir: ../docs/articles
 format:
   html:

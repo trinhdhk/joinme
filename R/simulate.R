@@ -144,7 +144,7 @@ simulate_joinme_joint_student_t_cvtotal <- function(
   n_id = 50,
   D = 10,
   n_t = 10,
-  seed = 42,
+  seed = .Random.seed[[1]],
   include_marker_only = TRUE,
   Q_idm = 2,
   R_id = 2,
@@ -444,7 +444,9 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   weighted averaging (aligned with fit/predict Stan semantics).
 #'   Functional transforms support arithmetic and common nonlinear functions,
 #'   including `inv_logit`/`expit`/`sigmoid`, `exp`, `log`, `sqrt`, `power`,
-#'   `cbrt`, `softplus`/`log1p_exp`, trigonometric and hyperbolic functions.
+#'   `cbrt`, `softplus`/`log1p_exp`, trigonometric and hyperbolic functions,
+#'   the standard normal CDF (`Phi`, `pnorm`), and the standard normal
+#'   quantile (`inv_Phi`, `qnorm`, `probit`).
 #'
 #'   Quick parameterisation reference:
 #'   - `list(type = "identity")` or omitted term: identity transform (default).
@@ -510,6 +512,10 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #' @param n_id Number of subjects.
 #' @param families Marker-specific family names.
 #'   Use `jm_family()` entries to supply custom `link`/`inv_link` expressions.
+#'   A named probit link applies `Phi` as its inverse link. In formula
+#'   expressions, `Phi`/`pnorm` are the standard normal CDF and
+#'   `inv_Phi`/`qnorm`/`probit` are the standard normal quantile. Simulation
+#'   evaluates the same bytecode instructions as fitting and prediction.
 #' @param marker_levels Optional marker names; defaults to `m1`, `m2`, ...
 #' @param times_obs Scheduled observation time grid used for every `(id, marker)`
 #'   before optional visit-time jitter and post-event censoring are applied.
@@ -725,7 +731,7 @@ simulate_joinme <- function(
   left_truncation_max = 0,
   truncate_longitudinal_before_entry = TRUE,
   ...,
-  seed = 42,
+  seed = .Random.seed[[1]],
   covariate_formulas = list(
     x1 ~ rnorm(n_id),
     x2 ~ rnorm(n_id)
@@ -886,7 +892,15 @@ simulate_joinme <- function(
     constants <- as.numeric(const_data %||% numeric(0))
     if (length(code) == 0L) return(as.numeric(x))
 
-    unary_ops <- c(6L, 7L, 8L, 9L, 10L, 11L, 13L, 14L, 15L, 16L, 17L, 18L, 19L, 20L, 21L, 22L, 23L, 24L, 25L, 26L)
+    # Instructions 26 and 27 are deliberately distinct. PHI maps a real
+    # variate to its standard normal cumulative probability, whereas INV_PHI
+    # maps a probability to its standard normal quantile. The explicit local
+    # list is retained because this evaluator is serialised to independent
+    # simulation workers.
+    unary_ops <- c(
+      6L, 7L, 8L, 9L, 10L, 11L, 13L, 14L, 15L, 16L, 17L, 18L, 19L,
+      20L, 21L, 22L, 23L, 24L, 25L, 26L, 27L
+    )
     if (code[[1]] %in% unary_ops) {
       code <- c(0L, code)
     }
@@ -954,7 +968,11 @@ simulate_joinme <- function(
         a <- stack[length(stack)]
         stack[length(stack)] <- sign(a) * abs(a)^(1 / 3)
       } else if (op == 26L) {
+        # PHI: standard normal cumulative distribution function.
         stack[length(stack)] <- stats::pnorm(stack[length(stack)])
+      } else if (op == 27L) {
+        # INV_PHI (probit): standard normal quantile function.
+        stack[length(stack)] <- stats::qnorm(stack[length(stack)])
       } else {
         cli::cli_abort("Unknown transform bytecode instruction: {op}.")
       }
@@ -968,10 +986,11 @@ simulate_joinme <- function(
     vapply(as.numeric(x), .sim_eval_bytecode_scalar, numeric(1), bytecode = code, const_data = constants)
   }
 
-  #' @param x Vector of inputs to process.
-  #' @param fun Function to apply.
-  #' @param ... Additional arguments passed to fun.
-  #' @return List of results.
+  # Apply one simulation function over a list, using deterministic worker
+  # seeds when parallel simulation is enabled.
+  #
+  # x: list of inputs; fun: simulation function; ...: additional arguments.
+  # Returns a list aligned with x.
   .sim_parallel_lapply <- function(x, fun, ...) {
     # Parallel map with mirai; falls back to serial when mirai is disabled.
     # Each job sets a deterministic seed derived from the main seed.
@@ -1397,10 +1416,8 @@ simulate_joinme <- function(
     )
   }
 
-  #' @keywords internal
-  #' @param x Numeric vector on link scale.
-  #' @param inv_link_bc Parsed inverse-link bytecode.
-  #' @return Numeric vector on response scale.
+  # Apply parsed inverse-link bytecode to a numeric vector on the link scale.
+  # The result is a numeric vector on the response scale.
   .sim_apply_inv_link_bc <- function(x, inv_link_bc) {
     # Apply a parsed inverse-link bytecode using the shared interpreter.
     .sim_eval_bytecode_vector(
@@ -1410,10 +1427,10 @@ simulate_joinme <- function(
     )
   }
 
-  #' @keywords internal
-  #' @param families Family specification input (vector or list).
-  #' @param D Number of markers.
-  #' @return List with family codes, link names, and inverse-link bytecode per marker.
+  # Normalise vector or list family declarations to one specification per
+  # marker. Probit forward links use inv_Phi and their inverse links use Phi;
+  # qnorm and pnorm are the corresponding R-style aliases. The returned list
+  # contains family codes, link names, and inverse-link bytecode.
   .sim_parse_family_specs <- function(families, D) {
     # Normalise family/link specs to a per-marker list of bytecode maps.
     if (length(families) == 1L && !is.list(families)) {
@@ -2075,33 +2092,33 @@ simulate_joinme <- function(
   prototype[[marker_var]] <- factor(marker_levels, levels = marker_levels)
   prototype[[time_var]] <- rep(0.5, D)
 
-  fixed_blueprint <- .make_model_matrix_blueprint(
+  fixed_template <- .make_model_matrix_template(
     fixed_rhs,
     prototype,
     boundary_var = time_var,
     boundary_values = c(0, 1)
   )
-  id_blueprints <- lapply(id_rhs_list, function(rhs) {
-    .make_model_matrix_blueprint(rhs, prototype, boundary_var = time_var, boundary_values = c(0, 1))
+  id_templates <- lapply(id_rhs_list, function(rhs) {
+    .make_model_matrix_template(rhs, prototype, boundary_var = time_var, boundary_values = c(0, 1))
   })
-  mk_blueprints <- lapply(mk_rhs_list, function(rhs) {
-    .make_model_matrix_blueprint(rhs, prototype, boundary_var = time_var, boundary_values = c(0, 1))
+  mk_templates <- lapply(mk_rhs_list, function(rhs) {
+    .make_model_matrix_template(rhs, prototype, boundary_var = time_var, boundary_values = c(0, 1))
   })
-  idm_blueprints <- lapply(idm_rhs_list, function(rhs) {
-    .make_model_matrix_blueprint(rhs, prototype, boundary_var = time_var, boundary_values = c(0, 1))
+  idm_templates <- lapply(idm_rhs_list, function(rhs) {
+    .make_model_matrix_template(rhs, prototype, boundary_var = time_var, boundary_values = c(0, 1))
   })
 
-  X_proto <- .mm(fixed_blueprint, prototype)
-  Z_id_proto <- .sim_rhs_matrix(id_blueprints, prototype)
-  Z_mk_proto <- .sim_rhs_matrix(mk_blueprints, prototype)
-  Z_idm_proto <- .sim_rhs_matrix(idm_blueprints, prototype)
+  X_proto <- .mm(fixed_template, prototype)
+  Z_id_proto <- .sim_rhs_matrix(id_templates, prototype)
+  Z_mk_proto <- .sim_rhs_matrix(mk_templates, prototype)
+  Z_idm_proto <- .sim_rhs_matrix(idm_templates, prototype)
 
   time_meta <- .make_time_index_metadata(
     time_var = time_var,
-    fixed_design = fixed_blueprint,
-    id_design = id_blueprints,
-    marker_design = mk_blueprints,
-    idm_design = idm_blueprints
+    fixed_design = fixed_template,
+    id_design = id_templates,
+    marker_design = mk_templates,
+    idm_design = idm_templates
   )
   idx_time_beta <- time_meta$idx_time_beta
   idx_time_uid <- time_meta$idx_time_uid
@@ -2789,10 +2806,10 @@ simulate_joinme <- function(
     row_df <- assoc_row_template[[i]]
     row_df[[time_var]] <- t / time_scale_internal
 
-    x_fix <- .mm(fixed_blueprint, row_df)
-    z_id <- .sim_rhs_matrix(id_blueprints, row_df)
-    z_mk <- .sim_rhs_matrix(mk_blueprints, row_df)
-    z_idm <- .sim_rhs_matrix(idm_blueprints, row_df)
+    x_fix <- .mm(fixed_template, row_df)
+    z_id <- .sim_rhs_matrix(id_templates, row_df)
+    z_mk <- .sim_rhs_matrix(mk_templates, row_df)
+    z_idm <- .sim_rhs_matrix(idm_templates, row_df)
 
     fixed_part <- if (ncol(x_fix) > 0) as.numeric(x_fix %*% beta_long_internal) else rep(0, D)
     id_part <- if (ncol(z_id) > 0) as.numeric(z_id %*% re_id[i, ]) else rep(0, D)
@@ -3194,10 +3211,10 @@ simulate_joinme <- function(
   # ---- Mean structure from model matrices and sampled random effects
   dataLong_scaled <- dataLong
   dataLong_scaled[[time_var]] <- dataLong_scaled[[time_var]] / time_scale_internal
-  X_long <- .mm(fixed_blueprint, dataLong_scaled)
-  Z_id_long <- .sim_rhs_matrix(id_blueprints, dataLong_scaled)
-  Z_mk_long <- .sim_rhs_matrix(mk_blueprints, dataLong_scaled)
-  Z_idm_long <- .sim_rhs_matrix(idm_blueprints, dataLong_scaled)
+  X_long <- .mm(fixed_template, dataLong_scaled)
+  Z_id_long <- .sim_rhs_matrix(id_templates, dataLong_scaled)
+  Z_mk_long <- .sim_rhs_matrix(mk_templates, dataLong_scaled)
+  Z_idm_long <- .sim_rhs_matrix(idm_templates, dataLong_scaled)
 
   id_index <- match(as.character(dataLong[[id_var]]), as.character(dataEvent[[id_var]]))
   marker_index <- match(as.character(dataLong[[marker_var]]), marker_levels)

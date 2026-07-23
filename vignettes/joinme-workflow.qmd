@@ -109,6 +109,9 @@ sim <- simulate_joinme(
 
 # Gauss-Kronrod nodes/weights are fixed in Stan; `quadrature_nodes` selects
 # the node count used to build the design matrices in R.
+#
+# For a probit marker, use link = "probit" or link = ~ inv_Phi(x).
+# A direct inverse-link declaration instead uses inv_link = ~ Phi(x).
 
 # `truth$marker_weights` is the effective base + latent value used in the hazard.
 # The decomposition is available as marker_weights_base/marker_weights_latent.
@@ -216,7 +219,7 @@ control <- list(
   adapt_delta = 0.90,   # Increase if divergences occur
   max_treedepth = 12
 )
-if (engine == "cmdstanr") control$init <- 0
+
 
 fit <- joinme(
   dataLong = dataLong,
@@ -328,11 +331,42 @@ preds <- tryCatch(
 head(preds$predictions$survival)
 ```
 
-`concordance(fit, ...)` now evaluates dynamic prediction on a dense per-subject
-survival grid between the landmark and the requested horizon. This keeps the
-discrimination calculation aligned with the same prediction machinery used by
-the fitted plotting helpers and avoids the instability that can arise from
-endpoint-only event prediction.
+`concordance(fit)` is a follow-up-wide survival-curve concordance rather than an
+AUC at a selected horizon. By default, residual follow-up for subject \(i\)
+starts at their final longitudinal measurement strictly before the observed
+event or censoring time, \(T_{0i}\). For an event at residual time
+\(r_i=T_i-T_{0i}\), the event subject is compared with every subject known to
+survive longer. The pair is concordant when
+\(\widehat S_i(r_i)<\widehat S_j(r_i)\): both conditional survival curves are
+evaluated at the same earlier event time. This is the survival-curve
+concordance proposed by Antolini and colleagues and does not use the outcome
+time to construct a fixed subject score.
+
+Premature censoring is handled through observability. A subject censored before
+\(r_i\) is not comparable with that event; censoring at \(r_i\) establishes
+survival through that time and remains comparable. `type_weights = "n/G2"`
+requests Uno's inverse-censoring weighting through `survival::concordance()`.
+Fitted monotone splines and ordered piecewise-linear associations enter every
+conditional curve through their posterior ordinates, exactly as in
+`predict()`.
+
+`auc(fit, ...)` retains the horizon-specific estimand. At landmark \(s\) and
+horizon \(t\), it compares cumulative risk
+\(1-S_i(t\mid s)\) between cases observed by \(t\) and controls known to remain
+event-free beyond \(t\). Subjects censored earlier have unknown case/control
+status and are omitted. Dynamic prediction for both methods reuses the exact
+fitted B-spline, natural-spline, or formula baseline-hazard basis, including
+its original centring constants.
+
+The estimands, censoring rules, event-time weighting, computational steps, and
+reporting recommendations are derived in the
+[dedicated discrimination vignette](joinme-discrimination.html).
+
+```{r discrimination-example, eval=FALSE}
+concordance(fit)
+concordance(fit, time_start = 2, type_weights = "n/G2")
+auc(fit, time_start = 2, time_horizon = 5)
+```
 
 Finally, we visualise the predicted survival curve. The shaded area represents the 95% credible interval, accounting for uncertainty in both the parameters and the random effects.
 
