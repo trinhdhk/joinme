@@ -137,7 +137,7 @@ NULL
 #' Resolve cache directory for compiled Stan models
 #'
 #' @description
-#' Creates a dedicated cache directory under the user's R cache root, then
+#' Creates a cache directory under the user's R cache root, then
 #' returns its absolute path. This is the single source of truth for cached
 #' CmdStanR and RStan compiled objects.
 #'

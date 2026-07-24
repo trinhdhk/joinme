@@ -864,6 +864,7 @@ It is not a repeated-measures sample from one common AUC.
 
 ```{r validation-example}
 validation_c <- concordance(
+cIndex <- concordance(
   fit,
   newdataLong = validation_long,
   newdataEvent = validation_event,
