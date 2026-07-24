@@ -79,7 +79,10 @@
 #'   directly specified inverse-link formula. In formula syntax,
 #'   `inv_Phi`/`qnorm`/`probit` denote the standard normal quantile and
 #'   `Phi`/`pnorm` denote the standard normal CDF. Thus a probit forward link
-#'   is inverted to `Phi` before Stan data are constructed.
+#'   is inverted to `Phi` before Stan data are constructed. A skew-Laplace
+#'   marker may additionally fix its quantile/asymmetry parameter with
+#'   `jm_family("skew_laplace", tau = 0.8)`. Fixed values must lie strictly
+#'   between zero and one and are carried separately for each marker.
 #' @param transforms Optional list specifying transformations for association terms.
 #'   Each element (cv_total, cs_total, corr, vcov) is a list with a `type` and fields
 #'   required by that type (see `build_standata_transforms()`). For covariance-style
@@ -129,10 +132,6 @@
 #'   Only the node count is passed to Stan; GK nodes/weights are fixed in Stan.
 #' @param vcov_diag_link Link for the subject-specific standard deviation regression:
 #'   "softplus" or "exp".
-#' @param tau_fixed Optional fixed quantile/asymmetry parameter for the skew
-#'   double exponential family. It must lie strictly between zero and one; the
-#'   value \eqn{0.5} gives the symmetric double exponential distribution. It
-#'   cannot be combined with a \code{tau} distributional regression.
 #' @param seed Optional random seed for deterministic components of standata.
 #' @export
 # File overview:
@@ -170,7 +169,6 @@ joinme_standata <- function(
   tau_spline = 0.4,
   quadrature_nodes = NULL,
   vcov_diag_link = c("softplus", "exp"),
-  tau_fixed = NULL,
   seed = .Random.seed[[1]]
 ) {
   assertthat::assert_that(is.data.frame(dataLong), msg = "dataLong must be a data.frame")
@@ -461,7 +459,7 @@ joinme_standata <- function(
   # - link_codes drive family-specific inverse-link mapping in Stan
   if (!is.null(families)) {
     # Treat a single family spec object/list as scalar and recycle to D markers.
-    if (inherits(families, "JoiNMe_family_spec") || (is.list(families) && !is.null(families$family))) {
+    if (.is_single_family_spec(families)) {
       families <- rep(list(families), D)
     }
     # If only length 1, duplicate to all markers
@@ -476,6 +474,8 @@ joinme_standata <- function(
     inv_link_ops <- family_spec$inv_link_ops
     inv_link_n_const <- as.integer(family_spec$inv_link_n_const)
     inv_link_const <- family_spec$inv_link_const
+    use_tau_fixed <- as.integer(family_spec$use_tau_fixed)
+    tau_fixed_value <- as.numeric(family_spec$tau_fixed)
     max_inv_link_ops <- ncol(inv_link_ops)
     max_inv_link_const <- ncol(inv_link_const)
   } else {
@@ -489,6 +489,8 @@ joinme_standata <- function(
     max_inv_link_const <- max(inv_link_n_const, 1L)
     inv_link_ops <- matrix(0L, nrow = D, ncol = max_inv_link_ops)
     inv_link_const <- matrix(0.0, nrow = D, ncol = max_inv_link_const)
+    use_tau_fixed <- integer(D)
+    tau_fixed_value <- rep.int(0.5, D)
     for (d in seq_len(D)) {
       if (inv_link_n_ops[d] > 0L) {
         inv_link_ops[d, seq_len(inv_link_n_ops[d])] <- as.integer(inv_link_specs[[d]]$bytecode)
@@ -500,83 +502,45 @@ joinme_standata <- function(
   }
 
   family_names <- vapply(family_codes, .family_code_to_name, character(1))
+  fixed_tau <- .normalise_fixed_tau_by_marker(
+    use_tau_fixed = use_tau_fixed,
+    tau_fixed = tau_fixed_value,
+    family_codes = family_codes
+  )
+  use_tau_fixed <- fixed_tau$use_tau_fixed
+  tau_fixed_value <- fixed_tau$tau_fixed
 
-  # Family-level distributional parameter indexing.
-  #
-  # Goal:
-  # - for each distributional parameter (sigma, nu, phi, alpha, kappa,
-  #   tau), build one shared parameter per unique family that requires it,
-  # - map each marker to its family-level parameter index,
-  # - use index 0 for markers/families that do not use that parameter.
-  .build_family_param_index <- function(param_name) {
-    need_param <- vapply(family_codes, function(fc) {
-      param_name %in% .family_distrib_params(fc)
-    }, logical(1))
-    fam_codes <- sort(unique(as.integer(family_codes[need_param])))
-    map <- integer(D)
-    if (length(fam_codes) > 0) {
-      for (d in seq_len(D)) {
-        if (need_param[d]) {
-          map[d] <- match(as.integer(family_codes[d]), fam_codes)
-        }
-      }
-    }
-    list(
-      n = as.integer(length(fam_codes)),
-      marker_to = as.integer(map),
-      family_codes = as.integer(fam_codes),
-      family_names = if (length(fam_codes) > 0) {
-        vapply(fam_codes, .family_code_to_name, character(1))
-      } else {
-        character(0)
-      }
-    )
-  }
-
-  fam_sigma <- .build_family_param_index("sigma")
-  fam_nu <- .build_family_param_index("nu")
-  fam_phi <- .build_family_param_index("phi")
-  fam_alpha <- .build_family_param_index("alpha")
-  fam_kappa <- .build_family_param_index("kappa")
-  fam_tau <- .build_family_param_index("tau")
+  # Construct one shared parameter per family where estimation is required.
+  # A fixed marker-specific tau is excluded from this indexing because its
+  # family declaration already supplies the likelihood value.
+  fam_sigma <- .build_family_parameter_index(family_codes, "sigma")
+  fam_nu <- .build_family_parameter_index(family_codes, "nu")
+  fam_phi <- .build_family_parameter_index(family_codes, "phi")
+  fam_alpha <- .build_family_parameter_index(family_codes, "alpha")
+  fam_kappa <- .build_family_parameter_index(family_codes, "kappa")
+  fam_tau <- .build_family_parameter_index(
+    family_codes,
+    "tau",
+    eligible = use_tau_fixed == 0L
+  )
 
   vcov_diag_link_code <- if (vcov_diag_link == "exp") 1L else 0L
 
-  use_tau_fixed <- 0L
-  tau_fixed_value <- 0.5
-  if (!is.null(tau_fixed)) {
-    if (!is.numeric(tau_fixed) || length(tau_fixed) != 1 || !is.finite(tau_fixed)) {
-      cli::cli_abort(c(
-        x = "{.arg tau_fixed} must be a single finite numeric value.",
-        i = "Provide a number strictly between 0 and 1."
-      ))
-    }
-    tau_fixed_value <- as.numeric(tau_fixed)
-    if (tau_fixed_value <= 0 || tau_fixed_value >= 1) {
-      cli::cli_abort(c(
-        x = "{.arg tau_fixed} must be between 0 and 1.",
-        i = "Provide a number strictly between 0 and 1."
-      ))
-    }
-    if (any(family_codes == 9L)) {
-      use_tau_fixed <- 1L
-    } else {
-      cli::cli_warn(c(
-        x = "{.arg tau_fixed} is ignored because no skew_double_exponential family is present.",
-        i = "Remove {.arg tau_fixed} or include the skew_double_exponential family."
-      ))
-    }
-  }
-  
   dist_formulas <- .normalize_formula_dist(formulaDist)
 
-  # A fixed tau and a tau regression describe competing quantile/asymmetry
-  # models. Require exactly one specification so the posterior never contains
-  # regression coefficients that are disconnected from the likelihood.
-  if (use_tau_fixed == 1L && !is.null(dist_formulas$tau)) {
+  # A tau regression remains meaningful when at least one skew-Laplace marker
+  # estimates tau. Reject it only when every such marker has a family-level
+  # fixed value, which would leave all tau-regression coefficients absent from
+  # the longitudinal likelihood.
+  skew_laplace_marker <- family_codes == 9L
+  if (
+    !is.null(dist_formulas$tau) &&
+      any(skew_laplace_marker) &&
+      all(use_tau_fixed[skew_laplace_marker] == 1L)
+  ) {
     cli::cli_abort(c(
-      x = "Specify either {.arg tau_fixed} or a {.code tau ~ ...} distributional regression, not both.",
-      i = "Remove {.arg tau_fixed} to estimate tau, or remove the tau formula to keep it fixed."
+      x = "The {.code tau ~ ...} distributional regression has no estimated skew-Laplace marker.",
+      i = "Remove the tau regression or omit {.arg tau} from at least one skew-Laplace family specification."
     ))
   }
 

@@ -279,8 +279,8 @@ for (k in 1 : n_draws) {
       // Step 1: use the fixed quantile/asymmetry parameter when requested.
       // Step 2: otherwise propagate the draw-specific regression or family
       // value into posterior predictive outcome sampling.
-      real tau = use_tau_fixed == 1
-                 ? tau_fixed
+      real tau = use_tau_fixed[d] == 1
+                 ? tau_fixed[d]
                  : ((P_tau > 0)
                     ? inv_logit(dot_product(X_tau_pred[n], beta_tau[k]))
                     : tau_family[k][marker_to_tau_family[d]]);

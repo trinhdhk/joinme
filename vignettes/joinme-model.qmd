@@ -60,6 +60,13 @@ $$
 y_{ijk} \sim \mathcal{D}(\eta_{id}(t_{ijk}), \sigma_y, \nu)
 $$
 
+For a skew-Laplace marker, the ancillary quantile parameter satisfies
+\(0<\tau_d<1\). It may be estimated, modelled by a distributional regression,
+or fixed in that marker's family declaration with
+`jm_family("skew_laplace", tau = value)`. The fixed value is indexed by marker
+throughout fitting, pointwise log-likelihood evaluation, and dynamic
+prediction; \(\tau_d=0.5\) denotes the symmetric Laplace case.
+
 The linear predictor $\eta_{id}(t)$ is decomposed into fixed effects and random effects components. A key feature of `JoiNMe` is the flexible random effects structure:
 
 $$

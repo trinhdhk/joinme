@@ -4,13 +4,16 @@
 #' Helper functions for specifying mixed families per marker and transformation compositions.
 #'
 #' @name family_utils
+#' @noRd
 NULL
 
 #' JoiNMe longitudinal family specification
 #'
 #' @description
-#' Creates a family specification object for `joinme(..., families = ...)` with an
-#' optional custom longitudinal link (or inverse-link) per marker family.
+#' Creates a marker-specific family specification for
+#' `joinme(..., families = ...)`. A specification may define a custom
+#' longitudinal link (or inverse link) and, for the skew-Laplace family, a
+#' fixed quantile parameter.
 #'
 #' Character values supplied through `link` name the *forward* link
 #' \eqn{g(\mu)}.  Formula values supplied through `link` are inverted
@@ -39,9 +42,13 @@ NULL
 #'   algebraically by [invert_transform_expr()].
 #' @param inv_link Optional one-sided formula `~ ...` or expression string
 #'   using `x` (e.g. `~ exp(x)`, `~ inv_logit(x)`, or `~ Phi(x)`).
-#'   `Phi` is the standard normal CDF and is the inverse link for a probit
-#'   model. In contrast, `inv_Phi`, `qnorm`, and `probit` denote the standard
-#'   normal quantile function.
+#' @param tau Optional fixed quantile/asymmetry parameter for
+#'   `"skew_laplace"` or `"skew_double_exponential"`. It must be a finite
+#'   scalar strictly between zero and one. Under Stan's quantile
+#'   parameterisation, `tau = 0.5` is the symmetric Laplace distribution.
+#'   Values zero and one are excluded because they yield a degenerate,
+#'   non-normalisable limiting distribution. When omitted, `tau` is estimated
+#'   from a distributional regression or as a family-level parameter.
 #'
 #' @return Object of class `"JoiNMe_family_spec"`.
 #' @examples
@@ -50,11 +57,17 @@ NULL
 #' jm_family("bernoulli", inv_link = ~ inv_logit(x))
 #' jm_family("bernoulli", link = ~ inv_Phi(x))
 #' jm_family("bernoulli", inv_link = ~ Phi(x))
+#' jm_family("skew_laplace", tau = 0.8)
 #' @aliases jm_family
 #' @export
-joinme_family <- function(name, link = NULL, inv_link = NULL) {
+joinme_family <- function(name, link = NULL, inv_link = NULL, tau = NULL) {
   fam_code <- .parse_family(name)
   fam_name <- .family_code_to_name(fam_code)
+  tau_fixed <- .validate_family_tau(
+    tau = tau,
+    family_code = fam_code,
+    context = "jm_family()"
+  )
 
   if (!is.null(link) && !is.null(inv_link)) {
     cli::cli_abort(c(
@@ -84,7 +97,8 @@ joinme_family <- function(name, link = NULL, inv_link = NULL) {
     list(
       family = fam_name,
       link = link_name,
-      inv_link = inv_link_bc
+      inv_link = inv_link_bc,
+      tau = tau_fixed
     ),
     class = "JoiNMe_family_spec"
   )
@@ -93,6 +107,147 @@ joinme_family <- function(name, link = NULL, inv_link = NULL) {
 #' @rdname joinme_family
 #' @export
 jm_family <- joinme_family
+
+#' Validate a fixed skew-Laplace quantile parameter
+#'
+#' @description
+#' Validates the marker-specific constant used as the quantile/asymmetry
+#' parameter of Stan's skew double exponential distribution. The validation is
+#' centralised so formal `JoiNMe_family_spec` objects and compatible list-style
+#' declarations obey identical statistical constraints.
+#'
+#' @param tau Optional numeric value supplied in a family declaration.
+#' @param family_code Integer longitudinal-family code.
+#' @param context Character description of the calling family declaration,
+#'   used to produce a precise diagnostic.
+#'
+#' @return `NA_real_` when `tau` is absent; otherwise the validated numeric
+#'   scalar.
+#' @keywords internal
+#' @noRd
+.validate_family_tau <- function(tau, family_code, context = "family specification") {
+  if (
+    is.null(tau) ||
+      (is.numeric(tau) && length(tau) == 1L && is.na(tau))
+  ) {
+    return(NA_real_)
+  }
+
+  if (!identical(as.integer(family_code), 9L)) {
+    cli::cli_abort(c(
+      x = "{.arg tau} is only defined for the skew-Laplace family in {context}.",
+      i = "Use {.code jm_family('skew_laplace', tau = 0.5)}, or remove {.arg tau}."
+    ))
+  }
+
+  if (!is.numeric(tau) || length(tau) != 1L || !is.finite(tau)) {
+    cli::cli_abort(c(
+      x = "{.arg tau} in {context} must be one finite numeric value.",
+      i = "Provide a quantile strictly between zero and one."
+    ))
+  }
+
+  tau <- as.numeric(tau)
+  if (tau <= 0 || tau >= 1) {
+    cli::cli_abort(c(
+      x = "{.arg tau} in {context} must lie strictly between zero and one.",
+      i = "{.code tau = 1} is not a valid skew-Laplace distribution; {.code tau = 0.5} is symmetric."
+    ))
+  }
+
+  tau
+}
+
+#' Normalise fixed skew-Laplace metadata by marker
+#'
+#' @description
+#' Produces the marker-aligned fixed-`tau` vectors required by fitting and
+#' dynamic prediction. Scalar values from older fitted objects are recycled so
+#' that saved models remain usable after the family API became marker-specific.
+#' Flags are cleared for non-skew-Laplace markers because `tau` has no
+#' likelihood interpretation for those response families.
+#'
+#' @param use_tau_fixed Integer or logical flag, either scalar or one value per
+#'   marker.
+#' @param tau_fixed Numeric fixed value, either scalar or one value per marker.
+#' @param family_codes Integer family code for each marker.
+#'
+#' @return A list with integer `use_tau_fixed` and numeric `tau_fixed`, each
+#'   having one element per marker.
+#' @keywords internal
+#' @noRd
+.normalise_fixed_tau_by_marker <- function(
+  use_tau_fixed,
+  tau_fixed,
+  family_codes
+) {
+  family_codes <- as.integer(family_codes)
+  n_markers <- length(family_codes)
+  if (n_markers == 0L) {
+    return(list(use_tau_fixed = integer(0), tau_fixed = numeric(0)))
+  }
+
+  use_tau_fixed <- as.integer(use_tau_fixed %||% 0L)
+  tau_fixed <- as.numeric(tau_fixed %||% 0.5)
+  if (length(use_tau_fixed) == 1L) {
+    use_tau_fixed <- rep.int(use_tau_fixed, n_markers)
+  }
+  if (length(tau_fixed) == 1L) {
+    tau_fixed <- rep.int(tau_fixed, n_markers)
+  }
+  if (length(use_tau_fixed) != n_markers || length(tau_fixed) != n_markers) {
+    cli::cli_abort(c(
+      x = "Fixed skew-Laplace metadata is not aligned with the fitted markers.",
+      i = "Refit the model or supply one fixed-tau flag and value per marker."
+    ))
+  }
+  if (anyNA(use_tau_fixed) || any(!use_tau_fixed %in% c(0L, 1L))) {
+    cli::cli_abort("Fixed skew-Laplace flags must be zero or one.")
+  }
+
+  not_skew_laplace <- is.na(family_codes) | family_codes != 9L
+  use_tau_fixed[not_skew_laplace] <- 0L
+  fixed_index <- which(use_tau_fixed == 1L)
+  if (
+    length(fixed_index) > 0L &&
+      (
+        any(!is.finite(tau_fixed[fixed_index])) ||
+          any(tau_fixed[fixed_index] <= 0) ||
+          any(tau_fixed[fixed_index] >= 1)
+      )
+  ) {
+    cli::cli_abort(
+      "Every fixed skew-Laplace tau must lie strictly between zero and one."
+    )
+  }
+
+  # Stan requires a valid bounded value even where the flag is zero. The
+  # symmetric value is a neutral placeholder and is never read by the
+  # likelihood for an estimated marker.
+  tau_fixed[use_tau_fixed == 0L] <- 0.5
+  list(
+    use_tau_fixed = as.integer(use_tau_fixed),
+    tau_fixed = as.numeric(tau_fixed)
+  )
+}
+
+#' Identify a scalar family specification
+#'
+#' @description
+#' Distinguishes one structured family declaration from a list containing
+#' several marker-specific declarations. This distinction is required because
+#' a `JoiNMe_family_spec` is itself represented as a list.
+#'
+#' @param x An object supplied through a `families` argument.
+#'
+#' @return `TRUE` when `x` is one formal or compatible list-style family
+#'   specification; otherwise `FALSE`.
+#' @keywords internal
+#' @noRd
+.is_single_family_spec <- function(x) {
+  inherits(x, "JoiNMe_family_spec") ||
+    (is.list(x) && !is.null(x$family))
+}
 
 #' Normalise a named forward link
 #'
@@ -190,7 +345,7 @@ jm_family <- joinme_family
 #' @description
 #' Character links are translated through the canonical link table.  A formula
 #' is treated as a forward link \eqn{g(x)}, inverted symbolically, and compiled
-#' to functional bytecode.  
+#' to functional bytecode.
 #'
 #' @param link A supported character link name or an invertible one-sided
 #'   formula in `x`.
@@ -301,7 +456,7 @@ jm_family <- joinme_family
 #' @param bc A functional-bytecode specification.
 #' @param context Character description of the family declaration used in the
 #'   warning.
-#' @param mode Character scalar `"warning"` or `"error"` 
+#' @param mode Character scalar `"warning"` or `"error"`.
 #'
 #' @return `NULL`, invisibly.  A warning is issued when canonical recognition
 #'   and numerical monotonicity checks do not support a one-to-one map.
@@ -464,7 +619,8 @@ jm_family <- joinme_family
 #' @param x One marker-specific family declaration.
 #'
 #' @return A list containing integer `family_code`, canonical or missing
-#'   `link_name`, and compiled `inv_link_bc`.
+#'   `link_name`, compiled `inv_link_bc`, and `tau_fixed`, where the latter is
+#'   `NA_real_` unless a fixed skew-Laplace quantile was requested.
 #' @keywords internal
 #' @noRd
 .extract_family_and_link <- function(x) {
@@ -477,10 +633,16 @@ jm_family <- joinme_family
       )
     }
     link_name <- .canonical_link_from_inv_link_bc(inv_link_bc)
+    tau_fixed <- .validate_family_tau(
+      tau = x$tau,
+      family_code = fam_code,
+      context = "JoiNMe family specification"
+    )
     return(list(
       family_code = as.integer(fam_code),
       link_name = link_name,
-      inv_link_bc = inv_link_bc
+      inv_link_bc = inv_link_bc,
+      tau_fixed = tau_fixed
     ))
   }
 
@@ -506,10 +668,16 @@ jm_family <- joinme_family
       )
     }
     link_name <- .canonical_link_from_inv_link_bc(inv_link_bc)
+    tau_fixed <- .validate_family_tau(
+      tau = x$tau,
+      family_code = fam_code,
+      context = "list-style family specification"
+    )
     return(list(
       family_code = as.integer(fam_code),
       link_name = link_name,
-      inv_link_bc = inv_link_bc
+      inv_link_bc = inv_link_bc,
+      tau_fixed = tau_fixed
     ))
   }
 
@@ -518,7 +686,8 @@ jm_family <- joinme_family
   list(
     family_code = as.integer(fam_code),
     link_name = .canonical_link_from_inv_link_bc(inv_link_bc),
-    inv_link_bc = inv_link_bc
+    inv_link_bc = inv_link_bc,
+    tau_fixed = NA_real_
   )
 }
 
@@ -692,13 +861,18 @@ jm_family <- joinme_family
 #' @param marker_var Name of marker column
 #' @param y_var Name of outcome column
 #'
-#' @return Integer vector of family codes (length D)
+#' @return A list containing marker-aligned family and inverse-link metadata,
+#'   together with `use_tau_fixed` and `tau_fixed` vectors. The fixed-`tau`
+#'   flag is one only for skew-Laplace markers whose family declaration
+#'   supplies a constant quantile.
 #' @keywords internal
 #' @noRd
 .validate_family_list <- function(families, D, dataLong, marker_var, y_var) {
   # Validate per-marker families against observed data
-  # Convert to list if single value
-  if (length(families) == 1 && !is.list(families)) {
+  # Convert a scalar character or structured declaration to a marker list.
+  if (.is_single_family_spec(families)) {
+    families <- rep(list(families), D)
+  } else if (length(families) == 1 && !is.list(families)) {
     families <- rep(list(families), D)
   } else if (!is.list(families)) {
     families <- as.list(families)
@@ -718,6 +892,8 @@ jm_family <- joinme_family
   link_names <- rep(NA_character_, D)
   link_codes <- integer(D)
   inv_link_specs <- vector("list", D)
+  tau_fixed <- rep.int(0.5, D)
+  use_tau_fixed <- integer(D)
   for (d in seq_along(families)) {
     spec_d <- .extract_family_and_link(families[[d]])
     family_codes[d] <- as.integer(spec_d$family_code)
@@ -727,6 +903,10 @@ jm_family <- joinme_family
       0L
     } else {
       .link_code_from_name(spec_d$link_name)
+    }
+    if (!is.na(spec_d$tau_fixed)) {
+      use_tau_fixed[d] <- 1L
+      tau_fixed[d] <- as.numeric(spec_d$tau_fixed)
     }
   }
 
@@ -789,7 +969,9 @@ jm_family <- joinme_family
     inv_link_n_ops = inv_link_n_ops,
     inv_link_ops = inv_link_ops,
     inv_link_n_const = inv_link_n_const,
-    inv_link_const = inv_link_const
+    inv_link_const = inv_link_const,
+    use_tau_fixed = as.integer(use_tau_fixed),
+    tau_fixed = as.numeric(tau_fixed)
   )
 }
 
@@ -814,6 +996,67 @@ jm_family <- joinme_family
     "10" = c("kappa"), # beta (precision)
     "11" = c(), # cumulative_logit (cutpoints)
     stop("Unknown family code: ", family)
+  )
+}
+
+#' Build marker-to-family indexing for a distributional parameter
+#'
+#' @description
+#' Identifies the distinct response families that require one distributional
+#' parameter and maps each eligible marker to the corresponding family-level
+#' parameter. A marker receives index zero when its family does not use the
+#' parameter or when a marker-specific fixed value replaces estimation.
+#'
+#' @param family_codes Integer family code for every longitudinal marker.
+#' @param parameter Character scalar naming a supported distributional
+#'   parameter.
+#' @param eligible Optional logical vector aligned with `family_codes`. `FALSE`
+#'   excludes a marker from family-level estimation even when its family
+#'   ordinarily requires the parameter.
+#'
+#' @return A list containing the number of estimated family-level parameters,
+#'   the marker-to-parameter index, and the corresponding family codes and
+#'   names.
+#' @keywords internal
+#' @noRd
+.build_family_parameter_index <- function(family_codes, parameter, eligible = NULL) {
+  family_codes <- as.integer(family_codes)
+  n_markers <- length(family_codes)
+  if (is.null(eligible)) {
+    eligible <- rep.int(TRUE, n_markers)
+  }
+  if (!is.logical(eligible) || length(eligible) != n_markers || anyNA(eligible)) {
+    cli::cli_abort(c(
+      x = "{.arg eligible} must contain one non-missing logical value per marker.",
+      i = "Align eligibility with the marker-specific family vector."
+    ))
+  }
+
+  requires_parameter <- vapply(
+    family_codes,
+    function(family_code) parameter %in% .family_distrib_params(family_code),
+    logical(1)
+  )
+  estimate_parameter <- requires_parameter & eligible
+  parameter_families <- sort(unique(family_codes[estimate_parameter]))
+
+  marker_to_family <- integer(n_markers)
+  if (length(parameter_families) > 0L) {
+    marker_to_family[estimate_parameter] <- match(
+      family_codes[estimate_parameter],
+      parameter_families
+    )
+  }
+
+  list(
+    n = as.integer(length(parameter_families)),
+    marker_to = as.integer(marker_to_family),
+    family_codes = as.integer(parameter_families),
+    family_names = if (length(parameter_families) > 0L) {
+      vapply(parameter_families, .family_code_to_name, character(1))
+    } else {
+      character(0)
+    }
   )
 }
 

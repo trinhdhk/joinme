@@ -122,8 +122,8 @@
   array[n_marker_types] int<lower=0, upper=n_family_tau> marker_to_tau_family;
   // int<lower=0, upper=1> flag_resid_dim;                      // sigma dimension flag
   int<lower=0, upper=1> vcov_diag_link;                      // 0 softplus, 1 exp
-  int<lower=0, upper=1> use_tau_fixed;                   // 1 use fixed tau
-  real<lower=0, upper=1> tau_fixed;                      // fixed tau value
+  array[n_marker_types] int<lower=0, upper=1> use_tau_fixed; // marker-specific fixed-tau flags
+  vector<lower=0, upper=1>[n_marker_types] tau_fixed;        // marker-specific fixed quantiles
 
   array[n_draws] vector[n_fixed_effects] beta_fixed;          // fixed effects per draw
   array[n_draws] vector[n_random_id] tau_id;                  // id RE scales per draw

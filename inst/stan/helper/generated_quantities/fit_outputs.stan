@@ -207,8 +207,8 @@
       // Step 1: preserve a fixed quantile/asymmetry parameter in pointwise
       // likelihood quantities exactly as it is preserved in the model block.
       // Step 2: otherwise evaluate the fitted regression or family-level value.
-      real tau = use_tau_fixed == 1
-                 ? tau_fixed
+      real tau = use_tau_fixed[d] == 1
+                 ? tau_fixed[d]
                  : ((P_tau > 0 || n_re_tau > 0)
                     ? inv_logit(eta_tau)
                     : tau_family[marker_to_tau_family[d]]);

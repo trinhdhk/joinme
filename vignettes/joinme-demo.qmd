@@ -49,9 +49,11 @@ For the methodological background, see the theory vignette in [joinme-theory.htm
 This demo covers mixed families (including double_exponential, skew_double_exponential,
 beta, and cumulative_logit) and competing-risk survival via event type columns.
 
-For skew_double_exponential, you can fix the quantile parameter with
-`control = list(tau_fixed = 0.2)` to model a specific quantile. If no
-skew_double_exponential family is present, the control is ignored with a warning.
+For a skew-double-exponential marker, fix its quantile parameter in the family
+declaration, for example `jm_family("skew_laplace", tau = 0.2)`. This is a
+marker-specific statistical assumption rather than a sampling control. The
+parameter must lie strictly between zero and one; `tau = 0.5` is symmetric,
+whereas the endpoints zero and one are degenerate limits and are rejected.
 
 ```{r seed}
 set.seed(123)
@@ -75,6 +77,21 @@ A character or formula supplied to `link` defines the forward link and JoiNMe
 compiles its algebraic inverse; `inv_link` directly defines the inverse link.
 Thus `link = "log"` and `link = ~ log(x)` both apply `exp(eta)` on the response
 scale. This affects both `epred` and `predict` scales in dynamic prediction.
+
+The same family declaration carries a fixed skew-Laplace quantile when needed:
+
+```{r fixed-skew-laplace-tau, eval=FALSE}
+families_skew <- list(
+  jm_family("gaussian"),
+  jm_family("skew_laplace", tau = 0.8)
+)
+```
+
+When `tau` is omitted, JoiNMe estimates it from a `tau ~ ...` distributional
+regression when supplied, and otherwise estimates a family-level constant.
+`simulate_joinme()` follows the same marker-specific selection: a fixed
+family value takes precedence for that marker, while other markers retain
+their distributional regression or shared `family_params` value.
 
 For a probit model, the forward link is the standard normal quantile,
 \(g(\mu)=\Phi^{-1}(\mu)\), and the inverse link is the standard normal CDF,
