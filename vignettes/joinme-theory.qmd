@@ -273,20 +273,6 @@ inverse are not interchangeable. Instruction 26 evaluates
 `probit(p)`. A named probit longitudinal link uses the latter as its forward
 link and the former as its inverse link.
 
-For clarity, denote the raw summaries at time $t$ as
-$\text{CV}_\text{tot}(t)$, $\text{CV}_\text{mean}(t)$, $\text{CV}_\text{marker}(t)$,
-and their slope counterparts. The transformed summaries take the form
-
-$$
-	ilde{\text{CV}}_\text{tot}(t) = g_{\text{CV,tot}}(\text{CV}_\text{tot}(t)), \quad
-	ilde{\text{CS}}_\text{tot}(t) = g_{\text{CS,tot}}(\text{CS}_\text{tot}(t)), \quad
-	ilde{\text{CORR}} = g_{\text{CORR}}(\text{CORR}), \quad
-	ilde{\text{VCOV}} = g_{\text{VCOV}}(\text{VCOV}).
-$$
-
-Each $g(\cdot)$ is determined by the transformation mode and its inputs
-(bytecode, spline knots, or ordered piecewise-linear knots).
-
 For `corr` and `vcov`, the transformed summary is time-constant for a fixed
 subject because it depends only on that subject's covariance-regression
 Cholesky factor. The implemented likelihood therefore computes the transformed

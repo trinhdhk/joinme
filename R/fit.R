@@ -99,12 +99,6 @@
 #' estimates the total log-hazard span. The first ordinate is anchored at zero
 #' because a free common ordinate would be confounded with the baseline hazard.
 #'
-#' The legacy fitted syntax `list(type = "pwlin", x = ..., y = ...)` remains
-#' accepted. In a fitted model, `x` supplies the knots and `y` is used only
-#' to infer direction when `direction` is absent; the outcome-like `y`
-#' vector no longer fixes the association. In `simulate_joinme()`, legacy
-#' `x` and `y` retain their fixed interpolation meaning so existing
-#' simulation studies remain reproducible.
 #'
 #' For monotone spline transforms:
 #' - `type = "ispline"`: provide `knots` and `coeff` directly (plus optional

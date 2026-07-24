@@ -258,13 +258,6 @@ minus one for a decreasing curve. The signed association coefficient
 estimates the total log-hazard span. The first ordinate is anchored at zero
 because a free common ordinate would be confounded with the baseline hazard.
 
-The legacy fitted syntax \code{list(type = "pwlin", x = ..., y = ...)} remains
-accepted. In a fitted model, \code{x} supplies the knots and \code{y} is used only
-to infer direction when \code{direction} is absent; the outcome-like \code{y}
-vector no longer fixes the association. In \code{simulate_joinme()}, legacy
-\code{x} and \code{y} retain their fixed interpolation meaning so existing
-simulation studies remain reproducible.
-
 For monotone spline transforms:
 \itemize{
 \item \code{type = "ispline"}: provide \code{knots} and \code{coeff} directly (plus optional

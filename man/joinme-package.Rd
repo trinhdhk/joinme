@@ -21,6 +21,7 @@ Stan Development Team (NA). RStan: the R interface to Stan. R package version 2.
 Useful links:
 \itemize{
   \item \url{https://trinhdhk.github.io/joinme}
+  \item \url{https://trinhdhk.github.io/joinme/}
 }
 
 }

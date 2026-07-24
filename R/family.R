@@ -530,7 +530,6 @@ jm_family <- joinme_family
 .parse_family <- function(family) {
   # Map human-readable family names to Stan integer codes
   family <- tolower(as.character(family))
-
   # Handle vector input
   if (length(family) > 1) {
     return(sapply(family, .parse_family))
@@ -579,7 +578,6 @@ jm_family <- joinme_family
 .family_code_to_name <- function(fam) {
   # Map Stan integer codes to canonical family names
   fam <- as.integer(fam)
-
   # Handle vector input
   if (length(fam) > 1) {
     return(sapply(fam, .family_code_to_name))
@@ -610,7 +608,6 @@ jm_family <- joinme_family
 .validate_family_outcome <- function(family, y_range, name = "y") {
   # Validate observed outcome ranges by family requirements
   fam_name <- .family_code_to_name(family)
-
   if (family %in% c(1, 2, 7, 8, 9)) {
     # Gaussian, student_t, skew normal, double exponential, skew double exponential: any real
     return(TRUE)
@@ -976,7 +973,6 @@ jm_family <- joinme_family
   } else {
     priors$iota_scale <- 1.0
   }
-
   # LKJ prior (correlation)
   if (!is.null(lkj_prior)) {
     priors$lkj_eta <- as.numeric(lkj_prior)

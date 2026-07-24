@@ -1789,10 +1789,6 @@ auc.JoiNMeFit <- function(
 	out
 }
 
-#' @rdname auc
-#' @export
-AUC <- auc
-
 # ---- Stan diagnostics ----------------------------------------------------
 
 #' Stan diagnostics for JoiNMe models

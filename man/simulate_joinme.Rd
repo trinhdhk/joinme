@@ -182,9 +182,7 @@ each subject receives a sampled entry in
 is active (\code{left_truncation_max > 0}), longitudinal rows observed before the
 sampled entry time are removed.}
 
-\item{...}{Additional unused compatibility arguments. Legacy observation-count
-inputs are ignored; the number of scheduled observations is inferred from
-\code{times_obs}.}
+\item{...}{Additional arguments passed to fun.}
 
 \item{seed}{RNG seed.}
 
@@ -383,6 +381,12 @@ from the main \code{seed} for reproducible simulations.}
 
 \item{id_var, marker_var, time_var, y_var, event_time_var, event_var}{Column names aligned
 with \code{joinme_standata()} defaults.}
+
+\item{fun}{Function to apply.}
+
+\item{x}{Numeric vector on link scale.}
+
+\item{inv_link_bc}{Parsed inverse-link bytecode.}
 }
 \value{
 A list containing \code{dataLong}, \code{dataEvent}, \code{truth} (also available as
@@ -393,6 +397,10 @@ its resolved coefficients are also in \code{truth$stan_fit$bs_gamma_c}.
 Hazard-scale association coefficients are stored as \code{alpha_cv_total},
 \code{alpha_cs_total}, \code{alpha_cv_mean}, \code{alpha_cs_mean}, \code{alpha_corr}, and
 \code{alpha_vcov}, matching the fitted posterior output names.
+
+List of results.
+
+Numeric vector on response scale.
 }
 \description{
 Simulator for \code{JoiNMe} that mirrors the fitting syntax as closely as
@@ -444,3 +452,4 @@ sim_tv <- simulate_joinme(
 )
 }
 }
+\keyword{internal}

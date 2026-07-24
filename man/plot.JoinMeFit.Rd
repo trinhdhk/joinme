@@ -150,9 +150,7 @@ requested interval.
 the fitted model. For covariance-style channels (\code{corr}, \code{vcov}) this
 contribution is zero-referenced at raw value \code{0} before multiplying by
 \eqn{\alpha}; \code{association_metric = "transform"} plots the transform $f(x)$
-alone and therefore omits the association-coefficient sign.
-For fitted piecewise-linear associations, both metrics use the
-draw-specific ordered knot ordinates saved by Stan.}
+alone and therefore omits the association-coefficient sign.}
 
 \item{...}{Unused.}
 }

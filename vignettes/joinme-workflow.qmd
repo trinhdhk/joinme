@@ -213,13 +213,12 @@ engine <- if (has_cmdstan) "cmdstanr" else "rstan"
 control <- list(
   engine = engine,
   chains = 1,           # Use 4 chains for publication
-  iter_warmup = 200,    # Typically 1000+
-  iter_sampling = 200,  # Typically 1000+
+  iter_warmup = 100,    # Typically 1000+
+  iter_sampling = 100,  # Typically 1000+
   parallel_chains = 1,
-  adapt_delta = 0.90,   # Increase if divergences occur
+  adapt_delta = 0.8,   # Increase if divergences occur
   max_treedepth = 12
 )
-
 
 fit <- joinme(
   dataLong = dataLong,

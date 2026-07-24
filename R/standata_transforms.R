@@ -324,7 +324,7 @@
 #' Transform can be specified in four modes:
 #'   - Mode 0: Identity (no transformation)
 #'   - Mode 1: Functional (arbitrary nested functions via parser)
-#'   - Mode 2: I-spline basis (monotonic, smooth)
+#'   - Mode 2: I-spline basis (monotonic spline)
 #'   - Mode 2 (penalised): I-spline coefficients estimated with smoothness penalty
 #'   - Mode 4: I-spline basis evaluated on `expit(x)` for a bounded, numerically
 #'     stable spline input domain
@@ -506,7 +506,7 @@ build_standata_transforms <- function(
       } else if (.is_ispline_transform_type(spec$type)) {
         if (spec$type %in% c("ispline_penalised", "pmonospline", "pmono", "ispline_expit_penalised")) {
           # Two supported semantics:
-          # 1) legacy plug-in mode: user supplies x/y and we fit coefficients in R,
+          # 1) plug-in mode: user supplies x/y and we fit coefficients in R,
           # 2) Stan-estimated mode: user omits y and Stan estimates spline shape
           #    with a smoothness penalty controlled by lambda.
           # The branch taken here determines whether alpha recovery should be
@@ -830,7 +830,6 @@ penalised_ispline_transform <- function(
 #' @rdname penalised_ispline_transform
 #' @param ... Arguments passed to [penalised_ispline_transform()].
 #' @export
-# American alias for `penalised_ispline_transform()`.
 penalized_ispline_transform <- function(...) {
   penalised_ispline_transform(...)
 }

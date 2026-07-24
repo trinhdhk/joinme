@@ -986,11 +986,10 @@ simulate_joinme <- function(
     vapply(as.numeric(x), .sim_eval_bytecode_scalar, numeric(1), bytecode = code, const_data = constants)
   }
 
-  # Apply one simulation function over a list, using deterministic worker
-  # seeds when parallel simulation is enabled.
-  #
-  # x: list of inputs; fun: simulation function; ...: additional arguments.
-  # Returns a list aligned with x.
+  #' @param x Vector of inputs to process.
+  #' @param fun Function to apply.
+  #' @param ... Additional arguments passed to fun.
+  #' @return List of results.
   .sim_parallel_lapply <- function(x, fun, ...) {
     # Parallel map with mirai; falls back to serial when mirai is disabled.
     # Each job sets a deterministic seed derived from the main seed.
@@ -1416,8 +1415,10 @@ simulate_joinme <- function(
     )
   }
 
-  # Apply parsed inverse-link bytecode to a numeric vector on the link scale.
-  # The result is a numeric vector on the response scale.
+  #' @keywords internal
+  #' @param x Numeric vector on link scale.
+  #' @param inv_link_bc Parsed inverse-link bytecode.
+  #' @return Numeric vector on response scale.
   .sim_apply_inv_link_bc <- function(x, inv_link_bc) {
     # Apply a parsed inverse-link bytecode using the shared interpreter.
     .sim_eval_bytecode_vector(

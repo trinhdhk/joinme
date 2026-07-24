@@ -150,12 +150,6 @@ marker history and conditioning time and therefore remain the estimand of
 \code{\link[=predict.JoiNMeFit]{predict.JoiNMeFit()}}. Keeping these two estimands separate prevents a table
 of baseline covariate effects from being mislabeled as subject-specific
 dynamic prediction.
-
-Any fitted association contribution, including an ordered piecewise-linear
-contribution, is held at its model-implied posterior value. It is neither
-discarded nor recalculated from a legacy \code{y} vector; it cancels from the
-event-covariate contrasts reported here because those contrasts deliberately
-isolate \code{formulaEvent}.
 }
 \examples{
 \dontrun{

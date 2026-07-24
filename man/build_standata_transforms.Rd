@@ -40,7 +40,7 @@ Transform can be specified in four modes:
 \itemize{
 \item Mode 0: Identity (no transformation)
 \item Mode 1: Functional (arbitrary nested functions via parser)
-\item Mode 2: I-spline basis (monotonic, smooth)
+\item Mode 2: I-spline basis (monotonic spline)
 \item Mode 2 (penalised): I-spline coefficients estimated with smoothness penalty
 \item Mode 4: I-spline basis evaluated on \code{expit(x)} for a bounded, numerically
 stable spline input domain

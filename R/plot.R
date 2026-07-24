@@ -1235,8 +1235,6 @@ plot.JoiNMeDynPred <- function(
 #'   contribution is zero-referenced at raw value `0` before multiplying by
 #'   \eqn{\alpha}; `association_metric = "transform"` plots the transform $f(x)$
 #'   alone and therefore omits the association-coefficient sign.
-#'   For fitted piecewise-linear associations, both metrics use the
-#'   draw-specific ordered knot ordinates saved by Stan.
 #' @param ... Unused.
 #'
 #' @return A `ggplot` object, a combined plot, or a named list of plots.
@@ -2949,7 +2947,7 @@ plot.JoiNMeFit <- function(x,
 .transform_specs <- function(x) {
     # Keep transform lookup centralized because some fits store the resolved
     # transform spec in config while others only retain the original call.
-    x$config$transforms_spec %||% list()
+    x$config$transforms_spec %||% x$call$transforms %||% list()
 }
 
 .assoc_component_index <- function(term) {

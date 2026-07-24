@@ -2,7 +2,6 @@
 % Please edit documentation in R/standata_transforms.R
 \name{penalised_ispline_transform}
 \alias{penalised_ispline_transform}
-\alias{penalized_ispline_transform}
 \title{Penalised Monotone I-spline Transform Spec}
 \usage{
 penalised_ispline_transform(
@@ -16,8 +15,6 @@ penalised_ispline_transform(
   weights = NULL,
   diff_order = 2
 )
-
-penalized_ispline_transform(...)
 }
 \arguments{
 \item{x}{Numeric vector of input values on the raw feature scale to transform.}
