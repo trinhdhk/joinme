@@ -311,7 +311,7 @@ joinme <- function(
   # - sd: prepared Stan data list with all dimensions and transforms
   vcov_diag_link <- control$vcov_diag_link %||% "softplus"
   quadrature_nodes <- control$quadrature_nodes %||% NULL
-  formulaVCov <- .resolve_vcov_formula(
+  formulaVCov <- .get_vcov_formula(
     formulaVCov = formulaVCov,
     default = ~1,
     context = "joinme()"
@@ -414,7 +414,7 @@ joinme <- function(
     threaded = TRUE
   )
 
-  engine <- .resolve_stan_engine(control$engine)
+  engine <- .get_stan_engine(control$engine)
   if (engine == "rstan") {
     old_stan_thread <- getOption("stan.thread")
     options(stan.thread = threads_per_chain)

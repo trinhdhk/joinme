@@ -33,7 +33,7 @@ suppressPackageStartupMessages({
 #' @return Character scalar naming the resolved response column.
 #' @keywords internal
 #' @noRd
-.resolve_response_var <- function(formulaLong, dataLong, context = "JoiNMe") {
+.get_response_var <- function(formulaLong, dataLong, context = "JoiNMe") {
   if (!inherits(formulaLong, "formula") || length(formulaLong) < 3) {
     cli::cli_abort(c(
       x = "{context}: {.arg formulaLong} must be a two-sided formula with a response on the left-hand side.",
@@ -71,7 +71,7 @@ suppressPackageStartupMessages({
 #'   `d_event_exact`, `d_event_any`, `event_censor_type`, and `surv_type`.
 #' @keywords internal
 #' @noRd
-.resolve_event_model_vars <- function(formulaEvent, dataEvent, context = "JoiNMe") {
+.get_event_model_vars <- function(formulaEvent, dataEvent, context = "JoiNMe") {
   if (!inherits(formulaEvent, "formula") || length(formulaEvent) < 3) {
     cli::cli_abort(c(
       x = "{context}: {.arg formulaEvent} must be a two-sided survival formula.",
@@ -278,7 +278,7 @@ suppressPackageStartupMessages({
 #' @return A formula for the subject-level covariance regression.
 #' @keywords internal
 #' @noRd
-.resolve_vcov_formula <- function(formulaVCov = NULL,
+.get_vcov_formula <- function(formulaVCov = NULL,
                                   default = ~ 1,
                                   context = "JoiNMe") {
   chosen <- formulaVCov %||% default
@@ -419,12 +419,12 @@ suppressPackageStartupMessages({
 #'
 #' @export
 gk_quadrature <- function(nodes = 15L) {
-  spec <- .resolve_gk_request(nodes = nodes)
+  spec <- .get_gk_request(nodes = nodes)
   .gk_single_panel(rule = spec$rule)
 }
 
 #' @keywords internal
-.resolve_gk_request <- function(nodes = 15L) {
+.get_gk_request <- function(nodes = 15L) {
   supported_single <- c(7L, 15L, 31L, 41L, 51L, 61L)
 
   nodes <- as.integer(nodes)
@@ -2022,7 +2022,7 @@ gk_quadrature <- function(nodes = 15L) {
 #'
 #' @keywords internal
 #' @noRd
-.resolve_re_independence <- function(formulaLong, marker_var, id_var) {
+.get_re_independence <- function(formulaLong, marker_var, id_var) {
   # Collect random-effects terms with their operator and context so that
   # nested marker-by-id specifications can be distinguished from top-level id blocks.
   .collect_re_terms <- function(expr, context = NULL) {
@@ -2285,7 +2285,7 @@ gk_quadrature <- function(nodes = 15L) {
 #' Resolve Stan engine
 #' @keywords internal
 #' @noRd
-.resolve_stan_engine <- function(engine = NULL) {
+.get_stan_engine <- function(engine = NULL) {
   resolved <- engine %||% getOption("stan_preferred_engine", "cmdstanr")
   resolved <- tolower(as.character(resolved))
   if (!resolved %in% c("cmdstanr", "rstan")) {

@@ -25,6 +25,7 @@ Imports:
     ggplot2,
     latex2exp,
     loo,
+    JMbayes2,
     matrixStats,
     methods,
     posterior,

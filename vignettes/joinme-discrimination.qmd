@@ -1,5 +1,5 @@
 ---
-title: "Discrimination analysis: Concordance and Time-dependent AUC"
+title: "Discrimination analysis: concordance, time-dependent ROC curves, and AUC"
 subtitle: "Statistical estimands, censoring rules, computation, and interpretation"
 output-dir: ../docs/articles
 format:
@@ -42,10 +42,11 @@ The two public functions answer different scientific questions:
 - `concordance()` asks whether the fitted **conditional survival curves order
   observed failure times correctly over the available follow-up**. It returns
   one follow-up-wide index.
-- `auc()` asks whether the fitted **conditional event risk at a specified
-  horizon separates cases from controls at a chosen landmark**. It returns one
-  cumulative/dynamic area under the receiver operating characteristic curve
-  for every requested landmark--horizon combination.
+- `tvROC()` asks how the fitted **conditional event risk at a specified
+  horizon separates cases from controls at a chosen landmark** over all
+  classification thresholds. `tvAUC()` integrates that receiver operating
+  characteristic curve and returns one cumulative/dynamic area for every
+  requested landmark--horizon combination.
 
 These are measures of **discrimination**, not calibration. A model may order
 subjects correctly while systematically overestimating or underestimating
@@ -53,9 +54,9 @@ their absolute risks. Conversely, well-calibrated group averages do not imply
 that individual subjects are ordered well.
 
 This distinction is the reason that `concordance()` does not require
-`time_horizon` or `Dt`, whereas `auc()` does. Supplying a horizon changes the
-scientific question from follow-up-wide concordance to horizon-specific
-classification.
+`time_horizon` or `Dt`, whereas `tvROC()` and `tvAUC()` do. Supplying a
+horizon changes the scientific question from follow-up-wide concordance to
+horizon-specific classification.
 
 ## One prediction pathway, two estimands
 
@@ -70,7 +71,7 @@ flowchart LR
     B --> C["Choose landmark and retain<br/>history observed by that time"]
     C --> D["Predict posterior mean<br/>conditional survival"]
     D --> E["Concordance:<br/>compare curves at each<br/>observable event time"]
-    D --> F["AUC:<br/>compare risks at one<br/>specified horizon"]
+    D --> F["tvROC/tvAUC:<br/>classify risks at one<br/>specified horizon"]
 ```
 
 The shared prediction pathway is important: a difference between the two
@@ -195,7 +196,7 @@ risk score. They call `predict.JoiNMeFit()` and inherit:
 For an ordered piecewise-linear association, the ordered ordinates generated
 by the simplex and cumulative sum enter the hazard at every quadrature and
 prediction time. No separate approximation or unconstrained coefficient is
-introduced by `concordance()` or `auc()`.
+introduced by `concordance()`, `tvROC()`, or `tvAUC()`.
 
 # Follow-up-wide survival-curve concordance
 
@@ -433,10 +434,10 @@ not part of the stable user interface.
 2. checks that `cause` is a single positive integer;
 3. asks `.concordance_time_weight()` to validate and translate
    `type_weights`;
-4. calls `.resolve_train_data()`; and
+4. calls `.get_train_data()`; and
 5. passes the aligned data to `.concordance_survival_curves()`.
 
-`.resolve_train_data()` uses the stored fitting data only when both
+`.get_train_data()` uses the stored fitting data only when both
 `newdataLong` and `newdataEvent` are omitted. If either new data set is
 provided, both are required. This prevents an accidental mixture of validation
 longitudinal histories with training event outcomes, or the converse.
@@ -600,205 +601,412 @@ The result contains:
 With non-unit event weighting, the first four pair-count columns are weighted
 amounts and need not be integers.
 
-# Cumulative/dynamic time-dependent AUC
+# Cumulative/dynamic time-dependent ROC analysis
 
-## The estimand
+## Landmark population and horizon status
 
-Choose a common landmark $s$ and horizon $t>s$. For a subject known to be
-event-free at $s$, define posterior mean conditional risk
+Choose a common landmark $s$ and horizon $t>s$. The relevant population
+contains subjects known to be event-free at $s$ and having longitudinal
+history available by $s$. For such a subject, define posterior mean
+conditional survival and event risk by
 
 $$
-\widehat r_i(s,t)
+\widehat S_i(s,t)
 =
-1-\widehat S_i(t-s\mid s).
+\Pr(T_i^\ast>t\mid T_i^\ast>s,\mathcal H_i(s),\mathbf X_i,
+\mathcal D_{\mathrm{fit}})
 $$
 
-JoiNMe uses the cumulative/dynamic case and control definitions:
+and
+
+$$
+\widehat r_i(s,t)=1-\widehat S_i(s,t).
+$$
+
+JoiNMe follows the cumulative/dynamic convention used by `JMbayes2::tvROC()`.
+The prediction window excludes the conditioning instant and includes its
+horizon, $(s,t]$:
 
 $$
 D_i(s,t)
 =
 \begin{cases}
 1,
-& T_i\in(s,t],\ \delta_i=1,\ K_i=\texttt{cause},
-\\
+& s<T_i\leq t,\ \delta_i=1,\ K_i=\texttt{cause},\\
 0,
-& T_i>t,
-\\
+& T_i>t,\\
 \text{unknown},
-& \text{otherwise}.
+& s<T_i\leq t\ \text{without an observed event of the requested cause}.
 \end{cases}
 $$
 
-Thus:
+An observed requested-cause event in the window is a case. A subject known to
+remain under observation without that cause through the horizon is a dynamic
+control. Administrative censoring or a competing event before the horizon
+leaves the requested-cause status at the horizon unknown. Outcomes at or
+before the landmark are excluded because dynamic prediction conditions on
+survival beyond the landmark.
 
-- a **case** experiences the cause of interest after the landmark and by the
-  horizon;
-- a **control** is observed to remain event-free beyond the horizon;
-- a subject censored in $(s,t]$ has unknown case/control status and is
-  omitted;
-- a competing event in $(s,t]$ is treated as cause-specific censoring and is
-  omitted; and
-- a subject whose outcome occurred at or before $s$ is outside the dynamic
-  risk set.
+The boundary convention is important at tied recorded times. A requested
+event recorded exactly at $t$ is a case for the interval ending at $t$,
+whereas a subject must be observed beyond $t$ to be a control. Users should
+choose time units and horizons before analysis rather than move a horizon
+after seeing the recorded event times.
 
-For $n_1$ cases and $n_0$ controls, the empirical cumulative/dynamic AUC is
+## ROC thresholds, sensitivity, and false-positive fraction
+
+The implementation places 101 thresholds
+
+$$
+c_\ell\in\{0,0.01,\ldots,1\}.
+$$
+
+It follows the JMbayes2 representation and applies thresholds to conditional
+survival. Subject $i$ is classified as a predicted case at threshold $c$ when
+
+$$
+A_i(c)=\mathbb I\{\widehat S_i(s,t)<c\}.
+$$
+
+This is equivalent to classifying on risk with threshold $1-c$, but using
+survival gives the same orientation and stored fields as a JMbayes2 `tvROC`
+object. As $c$ increases, both sensitivity and the false-positive fraction
+are non-decreasing.
+
+Let $w_i^{(1)}$ and $w_i^{(0)}$ be the case and control weights described
+below. The estimated true-positive and false-positive fractions are
+
+$$
+\widehat{\operatorname{TP}}(c)
+=
+\frac{\sum_i w_i^{(1)}A_i(c)}
+{\sum_i w_i^{(1)}}
+$$
+
+and
+
+$$
+\widehat{\operatorname{FP}}(c)
+=
+\frac{\sum_i w_i^{(0)}A_i(c)}
+{\sum_i w_i^{(0)}}.
+$$
+
+The ROC curve is the ordered set
+$\{(\widehat{\operatorname{FP}}(c_\ell),
+\widehat{\operatorname{TP}}(c_\ell))\}_{\ell=1}^{101}$.
+
+## Model-based treatment of premature censoring
+
+With `type_weights = "model-based"`, observed horizon status is represented
+directly and unknown status is replaced by its fitted expectation:
+
+$$
+w_i^{(1)}
+=
+\begin{cases}
+1, & D_i=1,\\
+0, & D_i=0,\\
+\widehat r_i(s,t), & D_i\ \text{unknown},
+\end{cases}
+\qquad
+w_i^{(0)}=1-w_i^{(1)}.
+$$
+
+Thus an early-censored subject is not declared a case or a control. Instead,
+the subject contributes fractionally to both groups according to their
+predicted event probability at the landmark. This uses the fitted joint model
+to integrate over the unobserved horizon status. It is coherent only to the
+extent that the event model and its conditioning information are adequate for
+the censoring setting. It does not turn an informative dropout process into
+independent censoring by assumption.
+
+The same posterior mean risk determines both the uncertain-status weight and
+the primary threshold classification. This matches the plug-in character of
+the main ROC curve. Posterior-draw ROC curves retain the status weights and
+vary the subject classification over posterior survival draws.
+
+## Inverse-probability-of-censoring treatment
+
+With `type_weights = "IPCW"`, subjects of unknown horizon status receive zero
+case and control weight. Let
+
+$$
+G(u\mid s)=\Pr(C_i\geq u\mid C_i>s)
+$$
+
+be the conditional probability of remaining uncensored. JoiNMe estimates
+$G$ by a Kaplan--Meier curve in the landmark risk set. Requested-cause
+failures are failures rather than censoring events in this auxiliary
+distribution; administrative censoring and competing events terminate
+observation of the requested cause.
+
+The weights are
+
+$$
+w_i^{(1)}
+=
+\frac{\mathbb I(D_i=1)}{\widehat G(T_i-\mid s)}
+$$
+
+and
+
+$$
+w_i^{(0)}
+=
+\frac{\mathbb I(D_i=0)}{\widehat G(t\mid s)}.
+$$
+
+The immediately preceding censoring probability is used for a case so that a
+censoring jump tied at its event time is not allowed to precede the observed
+event. IPCW targets the landmark population under conditional independent
+censoring and positivity. Very small values of $\widehat G$ produce unstable
+weights; users should inspect the number at risk and avoid horizons beyond
+reliable follow-up.
+
+## Posterior-draw and posterior-mean curves
+
+Dynamic prediction retains a survival matrix with posterior draws in rows and
+prediction times in columns for every subject. At the exact horizon, JoiNMe
+aligns these values into a subject-by-draw event-risk matrix. For draw $m$,
+the classification is
+
+$$
+A_i^{(m)}(c)
+=
+\mathbb I\{1-r_i^{(m)}(s,t)<c\}.
+$$
+
+The `tp` and `fp` matrices in the returned object contain one ROC curve per
+retained posterior draw. The upper-case `TP` and `FP` vectors are the primary
+curve calculated from posterior mean subject risks. They are not obtained by
+averaging the posterior-draw ROC curves. This distinction is retained because
+it is the data structure expected by `JMbayes2::tvAUC.tvROC()` and its
+plotting method.
+
+A posterior draw containing a non-finite horizon risk is discarded as a
+whole curve. A subject with a non-finite posterior mean risk is removed before
+the case and control totals are formed. If no complete posterior-draw column
+remains, the posterior mean curve is stored as a single deterministic column.
+
+# Area under the time-dependent ROC curve
+
+## Trapezoidal definition
+
+`tvAUC()` first runs `tvROC()` when supplied with a `JoiNMeFit` object. It then
+passes the resulting `tvROC` object to `JMbayes2::tvAUC()`. S3 dispatch selects
+`JMbayes2::tvAUC.tvROC()`, which evaluates
 
 $$
 \widehat{\operatorname{AUC}}(s,t)
 =
-\frac{1}{n_1n_0}
-\sum_{i:D_i=1}\sum_{j:D_j=0}
-\left[
-\mathbb I\{\widehat r_i>\widehat r_j\}
-+
-\frac{1}{2}\mathbb I\{\widehat r_i=\widehat r_j\}
-\right].
-$$
-
-It is the probability that a randomly selected observed case receives greater
-predicted horizon risk than a randomly selected observed control, with half
-credit for a risk tie.
-
-## Censoring interpretation
-
-The current AUC is an unweighted empirical complete-case estimator. It does
-**not** apply inverse-probability-of-censoring weights. Early-censored subjects
-are omitted because their case/control state at the horizon is unobserved.
-
-This makes the calculation and its effective sample transparent, but it can
-change the target population when censoring is substantial. It is most
-defensible when censoring before the horizon is limited and plausibly
-independent of the latent event status, conditionally on the analysis design.
-For substantial or informative censoring, an IPCW or model-based
-time-dependent AUC should be pre-specified instead. The returned case, control,
-and pair counts should always be reported.
-
-## Efficient calculation by rank sum
-
-Construct the combined vector of case risks followed by control risks and let
-$\mathcal R_i$ be its average rank, so tied values receive their mean rank.
-The number of control risks below the cases, with half credit for ties, is
-
-$$
-\sum_{i:D_i=1}\mathcal R_i-\frac{n_1(n_1+1)}{2}.
-$$
-
-Therefore,
-
-$$
-\widehat{\operatorname{AUC}}(s,t)
-=
+\sum_{\ell=1}^{100}
 \frac{
-\displaystyle
-\sum_{i:D_i=1}\mathcal R_i-n_1(n_1+1)/2
-}{
-n_1n_0
-}.
+\widehat{\operatorname{TP}}(c_{\ell+1})
++
+\widehat{\operatorname{TP}}(c_{\ell})
+}{2}
+\left\{
+\widehat{\operatorname{FP}}(c_{\ell+1})
+-
+\widehat{\operatorname{FP}}(c_{\ell})
+\right\}.
 $$
 
-This Mann--Whitney identity is numerically equivalent to enumerating all
-$n_1n_0$ case--control comparisons, but requires only a combined vector and
-its ranks rather than a full pairwise matrix.
+This is the trapezoidal area under the weighted cumulative/dynamic ROC curve.
+In the absence of censoring weights and with sufficiently complete threshold
+coverage, it has the familiar interpretation as the probability that a case
+has a greater predicted event risk than a control, with half credit to risk
+ties. Under model-based or IPCW weighting, that probability is taken with
+respect to the corresponding weighted landmark population.
 
-# AUC: implementation from call to result
+The area is calculated from `TP` and `FP`, and therefore from posterior mean
+subject risks. It is not a posterior mean of draw-specific areas and it is not
+a credible interval. A resampling or posterior procedure would be required
+for uncertainty in predictive performance.
 
-## Step 1: dispatch and argument validation
+## Optimal threshold summaries
 
-`auc()` is the S3 generic. `AUC` is an alias retained for users who prefer the
-capitalised spelling. `auc.JoiNMeFit()`:
+For descriptive use, `tvROC()` also returns two survival-probability cut-offs:
 
-1. validates the fitted object, landmark values, event cause, and horizons;
-2. resolves training or new data through `.resolve_train_data()`;
-3. determines a horizon for every landmark; and
-4. processes each landmark--horizon pair in turn.
+- `F1score` is the median threshold among all finite maxima of
+  $2\,n_{\mathrm{TP}}/(2n_{\mathrm{TP}}+n_{\mathrm{FN}}+n_{\mathrm{FP}})$;
+- `Youden` is the median threshold among all maxima of
+  $\operatorname{TP}-\operatorname{FP}$.
 
-When `time_horizon` is omitted:
+These are data-dependent summaries, not automatically recommended clinical
+decision thresholds. Their consequences depend on event prevalence, the
+relative costs of errors, calibration, and the intended intervention.
 
-- `Dt` gives $t=s+\texttt{Dt}$; or
-- if `Dt` is also omitted, `.default_discrimination_horizon()` uses the fitted
-  maximum follow-up time and otherwise the maximum finite observed event or
-  censoring time.
+# ROC implementation from call to result
 
-Every horizon must be strictly greater than its landmark. A scalar horizon is
-repeated over several landmarks; otherwise the number of horizons must equal
-the number of landmarks.
+## Step 1: dispatch and preserve the JoiNMe argument recipe
 
-## Step 2: construct a landmark-specific risk set
+JoiNMe re-exports the `JMbayes2::tvROC()` and `JMbayes2::tvAUC()` generics.
+The `JoiNMeFit` methods preserve the argument names used by the former JoiNMe
+AUC interface:
 
-`.dynamic_discrimination_risk_set()` uses
-`.subject_event_outcomes()` to obtain one terminal outcome per subject and
-`.subject_time_map()` to align the landmark and horizon declarations.
+```r
+tvROC(
+  object,
+  newdataLong = NULL,
+  newdataEvent = NULL,
+  time_start = 0,
+  time_horizon = NULL,
+  Dt = NULL,
+  cause = 1,
+  n_samples = 200,
+  seed = 123,
+  type_weights = c("model-based", "IPCW"),
+  ...
+)
+```
 
-It restricts every longitudinal history to measurements at or before the
-landmark. Subjects whose outcome was already observed at or before the
-landmark are subsequently removed because conditional prediction assumes
-survival beyond $s$.
+`tvAUC.JoiNMeFit()` has the same recipe. The only new choice is
+`type_weights`, which makes the censoring treatment explicit.
 
-## Step 3: predict at the exact horizon
+`.get_train_data()` selects the stored fitting data when both new-data
+arguments are absent. If either new-data argument is supplied, both must be
+supplied so that longitudinal history and event outcome refer to the same
+evaluation cohort.
+
+## Step 2: resolve landmarks and horizons
+
+`.get_tvroc_times()` validates finite numeric landmarks. When
+`time_horizon` is omitted:
+
+- `Dt` defines $t=s+\texttt{Dt}$; or
+- when `Dt` is also absent, `.default_discrimination_horizon()` uses the
+  fitted maximum follow-up, falling back to the largest finite observed event
+  or censoring time.
+
+A scalar horizon is repeated across several landmarks. Otherwise there must
+be one horizon for each landmark. Every horizon must be strictly greater than
+its landmark. Several landmarks are evaluated separately; they do not form
+repeated observations of one common ROC curve.
+
+## Step 3: recover one terminal event outcome per subject
+
+`.subject_event_outcomes()` reads the event response from the fitted formula.
+For right-censored data, the event time and status are used directly. For
+counting-process data, rows are ordered within subject and reduced to the
+terminal interval. Event type is retained when a cause-coded status is used.
+Left- and interval-censored responses are rejected because their horizon
+status requires a different estimator.
+
+`.subject_time_map()` aligns scalar, named, and event-column time declarations
+by subject identifier. A time column repeated over counting-process rows must
+be finite and constant within subject.
+
+## Step 4: retain prospective longitudinal history
+
+`.dynamic_discrimination_risk_set()` retains longitudinal observations whose
+recorded time is no later than the landmark. A subject whose outcome occurred
+at or before the landmark is removed. These restrictions ensure that a
+horizon classification is based only on information available when the
+prediction would have been made.
+
+The filtering uses indexed vectors rather than repeatedly splitting and
+joining subject data. Its cost is linear in the number of longitudinal rows.
+
+## Step 5: obtain conditional survival at the exact horizon
 
 `.discrimination_time_grid()` creates 50 equally spaced prediction times from
-the landmark to the horizon, including both endpoints. Prediction uses the
-same `predict.JoiNMeFit()` event process as concordance. The row at the exact
-horizon is selected using a relative floating-point tolerance; a neighbouring
-grid point is not substituted.
+the landmark through the horizon, including both endpoints.
+`predict.JoiNMeFit(process = "event")` then evaluates the complete fitted
+joint model. The horizon row is selected with a relative numerical tolerance;
+a neighbouring grid point is never substituted.
 
-For every subject, the risk-set data then contain:
+The risk-set data retain the posterior mean risk, terminal time, event status,
+event type, landmark, horizon, and truncated follow-up. The prediction call
+also retains raw posterior survival draws. Consequently identity,
+formula-based, monotone-spline, and ordered piecewise-linear associations are
+handled in exactly the same way as ordinary dynamic survival prediction.
 
-- `risk`, equal to one minus posterior mean survival at the horizon;
-- `event_time`, the observed terminal time;
-- `event_status` and `event_type`;
-- `event_window`, the case indicator;
-- `time_start` and `time_horizon`; and
-- `time_window`, observed or truncated follow-up from the landmark.
+## Step 6: align raw posterior draws
 
-## Step 4: classify observed cases and controls
+`.discrimination_horizon_risk_draws()` finds the exact horizon column in each
+subject's raw survival matrix and converts it to event risk. Older prediction
+objects may contain unequal numbers of draws; the common minimum is used to
+form a rectangular matrix without recycling values. If raw draws are absent,
+ROC estimation remains available from posterior mean risks.
 
-`.auc_from_risk_set()` selects finite risks for:
+## Step 7: construct censoring weights
 
-- cases with `event_window == 1`; and
-- controls with `event_window == 0` and `event_time > time_horizon`.
+`.tvroc_status_weights()` implements the equations above. Model-based weights
+use fractional expected case status. IPCW weights first estimate the
+cause-specific censoring survival curve, then weight observed cases at their
+event time and controls at the horizon. The helper returns separate
+non-negative case and control vectors, making the denominator of each ROC
+ordinate explicit.
 
-The second condition is important. It prevents a subject censored, or
-experiencing a competing event, before the horizon from being incorrectly
-labelled as a control.
+## Step 8: calculate every threshold efficiently
 
-## Step 5: calculate and return AUC
+`.tvroc_from_risk_set()` forms a subject-by-threshold logical classification
+matrix with `outer()`. Matrix cross-products with the case and control weight
+vectors calculate all 101 numerators without constructing any case--control
+pair matrix. This reduces the central calculation to $O(101n)$ operations and
+uses a compact $n\times101$ temporary matrix.
 
-`.auc_from_risk_set()` applies the average-rank identity above. If there is no
-case or no control, no empirical case--control comparison exists and `auc` is
-returned as `NA`.
+Posterior-draw curves are evaluated one draw at a time. This avoids a
+three-dimensional subject-by-threshold-by-draw array, whose memory use can be
+substantial in external validation samples.
 
-The result contains:
+## Step 9: return a JMbayes2-compatible object
 
-| Column | Meaning |
+For one landmark, `tvROC.JoiNMeFit()` returns class `"tvROC"` with the
+JMbayes2 fields:
+
+| Field | Statistical content |
 |---|---|
-| `time_start` | Landmark $s$ |
-| `time_horizon` | Horizon $t$ |
-| `auc` | Empirical cumulative/dynamic AUC |
-| `n_cases` | Observed cause-specific cases in $(s,t]$ |
-| `n_controls` | Subjects observed event-free beyond $t$ |
-| `n_pairs` | $n_\text{cases}n_\text{controls}$ |
+| `TP`, `FP` | Primary sensitivity and false-positive fractions |
+| `nTP`, `nFN`, `nFP`, `nTN` | Weighted classification totals |
+| `tp`, `fp` | Posterior-draw ROC ordinate matrices |
+| `thrs` | The 101 survival thresholds |
+| `F1score`, `Youden` | Descriptive optimal threshold summaries |
+| `Tstart`, `Thoriz` | Landmark and horizon |
+| `nr` | Number of analysable subjects |
+| `type_weights` | Censoring treatment |
+| `nameObject`, `classObject` | Model labels used by JMbayes2 methods |
 
-# Concordance and AUC answer different questions
+JoiNMe additionally retains `cause` and the `thr` spelling for transparent
+inspection. The inherited `plot.tvROC()` method draws `FP` against `TP`.
 
-| Feature | `concordance()` | `auc()` |
+For several landmarks, `tvROC.JoiNMeFit()` returns a
+`"tvROC_JoiNMeFit_list"` with one standard `tvROC` object in `curves` for each
+aligned landmark--horizon pair. This explicit structure prevents a plot from
+silently combining distinct estimands.
+
+## Step 10: calculate area through JMbayes2 dispatch
+
+`tvAUC.JoiNMeFit()` calls `tvROC()` with the unchanged arguments. A scalar
+result is passed directly to `JMbayes2::tvAUC()`, whose
+`tvAUC.tvROC()` method performs trapezoidal integration. The returned object
+has class `"tvAUC"`.
+
+For several landmarks, each compatible curve is integrated separately and a
+`"tvAUC_JoiNMeFit"` data frame returns `time_start`, `time_horizon`, `auc`,
+`n_subjects`, and `type_weights`.
+
+# Concordance and horizon-specific ROC answer different questions
+
+| Feature | `concordance()` | `tvROC()` and `tvAUC()` |
 |---|---|---|
-| Scientific question | Are earlier failures assigned lower survival than subjects observed to survive longer? | Are cases by a specified horizon assigned greater risk than controls beyond it? |
-| Time summary | One follow-up-wide index | One value per landmark--horizon pair |
-| Prediction used | The survival curve at each observable event time | Risk $1-S(t\mid s)$ at one horizon |
-| Comparison unit | Earlier-event subject versus later-observed subject | Case versus control |
-| Early censoring | Pair remains usable only before censoring | Subject is omitted if status at the horizon is unknown |
-| Prediction ties | Half credit | Half credit |
-| Event-time ties | No strict failure order; excluded | Both may be cases and compared with controls |
-| Weighting | Selectable event-time weighting | Unweighted empirical rank comparison |
-| Competing event | Cause-specific censoring at its event time | Omitted if it occurs before the horizon |
-| Principal output | `concordance` and weighted pair counts | `auc`, case count, control count, pair count |
+| Scientific question | Are earlier failures assigned lower survival than subjects observed to survive longer? | Can horizon cases be separated from horizon controls? |
+| Time summary | One follow-up-wide index | One curve and area per landmark--horizon pair |
+| Prediction used | Survival at each observable event time | Conditional survival at one horizon |
+| Comparison unit | Earlier-event subject versus later-observed subject | Weighted case and control classification |
+| Premature censoring | Pair remains usable only before censoring | Model-based expected status or IPCW |
+| Prediction ties | Half credit in pair counts | Represented by the ROC steps and trapezoidal area |
+| Event-time ties | No strict failure order; excluded | Status follows the $(s,t]$ prediction window |
+| Weighting | Selectable event-time weighting | `"model-based"` or `"IPCW"` censoring weights |
+| Competing event | Cause-specific censoring at its event time | Cause-specific censoring for horizon status |
+| Principal output | Concordance and auditable pair totals | ROC ordinates, thresholds, and trapezoidal AUC |
 
-Neither measure should be substituted for the other. AUC can vary markedly
-with the selected horizon even when follow-up-wide concordance changes little.
+Neither measure should replace the other. AUC can vary markedly with the
+chosen horizon even when follow-up-wide concordance changes little.
 Concordance can conceal clinically important horizon-specific behaviour by
-averaging comparisons over event times.
+combining comparisons made at many event times.
 
 # Reproducible use
 
@@ -813,7 +1021,7 @@ concordance(
   fit,
   time_start = 2,
   type_weights = "none",
-  n_samples = 500,
+  predict_control = list(n_samples = 500, n_pred_draws = 100),
   seed = 2026
 )
 
@@ -822,43 +1030,57 @@ concordance(
   fit,
   time_start = 2,
   type_weights = "n/G2",
-  n_samples = 500,
+  predict_control = list(n_samples = 500, n_pred_draws = 100),
   seed = 2026
 )
 ```
 
-The default `n_samples = 200` is intended to control prediction cost.
-Increasing it reduces Monte Carlo variation in posterior mean curve
-ordinates. Stability can be checked by repeating the calculation with a
-larger value while keeping `seed` fixed for reproducibility.
+Concordance controls posterior extraction and dynamic-prediction draws through
+`predict_control`. Stability can be checked by repeating the calculation with
+more posterior and prediction draws while retaining the seed.
 
-## Time-dependent AUC
+## Time-dependent ROC curve and AUC
 
-```{r auc-examples}
-# Risk at time 5 among subjects under observation after time 2.
-auc(
+```{r roc-examples}
+# Risk through time 5 among subjects under observation after time 2.
+roc_2_5 <- tvROC(
   fit,
   time_start = 2,
   time_horizon = 5,
+  type_weights = "model-based",
+  n_samples = 500,
+  seed = 2026
+)
+
+plot(roc_2_5)
+
+# Integrate an already calculated curve without repeating prediction.
+area_2_5 <- tvAUC(roc_2_5)
+
+# Or calculate the curve and area from the fitted model in one call.
+area_2_5_direct <- tvAUC(
+  fit,
+  time_start = 2,
+  time_horizon = 5,
+  type_weights = "IPCW",
   n_samples = 500,
   seed = 2026
 )
 
 # A three-year prediction window from several landmarks.
-auc(
+areas <- tvAUC(
   fit,
   time_start = c(0, 1, 2),
   Dt = 3,
+  type_weights = "model-based",
   n_samples = 500,
   seed = 2026
 )
-
-# Equivalent public alias.
-AUC(fit, time_start = 2, time_horizon = 5)
 ```
 
 For several landmarks, each row is a separate cumulative/dynamic estimand.
-It is not a repeated-measures sample from one common AUC.
+To plot them, select the intended compatible curve explicitly, for example
+`plot(rocs$curves[[1]])`.
 
 ## Evaluation on new subjects
 
@@ -868,27 +1090,29 @@ validation_c <- concordance(
   newdataLong = validation_long,
   newdataEvent = validation_event,
   time_start = 2,
-  n_samples = 500,
+  predict_control = list(n_samples = 500, n_pred_draws = 100),
   seed = 2026
 )
 
-validation_auc <- auc(
+validation_roc <- tvROC(
   fit,
   newdataLong = validation_long,
   newdataEvent = validation_event,
   time_start = 2,
   time_horizon = 5,
+  type_weights = "IPCW",
   n_samples = 500,
   seed = 2026
 )
+
+validation_auc <- tvAUC(validation_roc)
 ```
 
 When new data are omitted, the fitting data are used. This is useful for model
-checking but generally gives an optimistic description of predictive
-performance because the same subjects informed the posterior. Predictive
-claims should preferably use external validation data or a pre-specified
-cross-validation procedure in which model fitting is repeated within each
-training fold.
+checking but usually optimistic because those subjects informed the posterior
+random effects and model parameters. Predictive claims should preferably use
+external validation or a pre-specified cross-validation procedure in which
+the complete modelling procedure is repeated within each training fold.
 
 # Interpretation and reporting
 
@@ -896,15 +1120,15 @@ training fold.
 
 A manuscript should state:
 
-1. whether the origin was the default last pre-outcome measurement, a common
+1. whether the origin was the default final pre-outcome measurement, a common
    landmark, or a subject-specific clinical landmark;
 2. the event cause and treatment of competing events;
-3. the weighting rule;
+3. the event-time weighting rule;
 4. whether evaluation was apparent, internally validated, or externally
    validated;
-5. `n_samples` and the random seed;
+5. the posterior prediction settings and random seed;
 6. the number of retained subjects and cause-specific events;
-7. the concordance estimate and weighted comparable-pair count; and
+7. the estimate and weighted comparable-pair count; and
 8. that the reported value is calculated from posterior mean curves and has
    no uncertainty interval unless one was obtained separately.
 
@@ -917,28 +1141,33 @@ An example methods statement is:
 > time were not comparable, prediction ties received half credit, and
 > event-time weights followed the pre-specified `n/G2` rule.
 
-## What should be reported for AUC
+## What should be reported for ROC and AUC
 
 A manuscript should state:
 
 1. the landmark and horizon on the original time scale;
-2. the cumulative/dynamic case and control definitions;
+2. the cumulative/dynamic case definition on $(s,t]$ and dynamic control
+   definition;
 3. the event cause and treatment of competing events;
-4. that early-censored subjects were omitted and no IPCW was applied;
-5. the numbers of cases, controls, and case--control pairs;
+4. whether censoring weights were model-based or IPCW;
+5. the analysable sample size and, for IPCW, the support of the estimated
+   censoring curve;
 6. whether evaluation was apparent, internally validated, or externally
-   validated; and
-7. `n_samples` and the random seed.
+   validated;
+7. `n_samples` and the random seed;
+8. whether thresholds or the full ROC curve were examined; and
+9. that the area is a trapezoidal plug-in estimate from posterior mean risks,
+   without an uncertainty interval unless separately calculated.
 
 An example methods statement is:
 
-> At a landmark of two years, we calculated the empirical
-> cumulative/dynamic AUC for the five-year horizon. Cases experienced the
-> cause of interest during years two to five; controls were observed
-> event-free beyond year five. Subjects censored or experiencing a competing
-> event before the horizon were omitted. The estimator compared posterior
-> mean conditional risks, assigned half credit to ties, and did not use
-> inverse-probability-of-censoring weights.
+> At a landmark of two years, we estimated the cumulative/dynamic ROC curve
+> for the five-year horizon. Cases experienced the cause of interest after
+> two years and through five years, and controls were known to
+> remain without that cause through five years. Premature censoring was
+> handled using inverse Kaplan--Meier censoring weights. The AUC was the
+> trapezoidal area under the ROC curve obtained from posterior mean
+> conditional survival probabilities.
 
 # Assumptions, limitations, and diagnostic checks
 
@@ -946,69 +1175,72 @@ An example methods statement is:
 
 All event times, longitudinal times, landmarks, and horizons must use the same
 original time scale. A subject-specific concordance origin defines a
-remaining-lifetime estimand; a common origin defines a common-landmark
+remaining-lifetime estimand; a common ROC origin defines a common-landmark
 estimand. These should not be combined under one interpretation.
 
 ## Availability of longitudinal history
 
 A dynamic prediction requires longitudinal information observed by its
 landmark. Removing subjects without such history changes the analysed
-population. The returned `n_subjects` should therefore be checked against the
-intended cohort.
+population. The returned subject counts should therefore be checked against
+the intended cohort.
 
-## Censoring
+## Censoring and positivity
 
-Concordance uses only observable orderings and optionally changes their
-event-time weights. AUC omits subjects with unknown horizon status. Neither
-procedure makes unexplained informative censoring harmless. Sensitivity
-analyses should be considered when dropout is associated with unobserved
-health deterioration.
+Concordance uses observable orderings and may alter their event-time weights.
+ROC estimation either models unknown horizon status or assumes conditional
+independent censoring for IPCW. Neither choice makes unexplained informative
+dropout harmless. IPCW additionally requires a positive probability of
+remaining observed through every weighted time. Sensitivity analyses are
+appropriate when dropout is associated with unobserved deterioration.
 
-## Small comparison sets
+## Small case or control weight
 
-Concordance requires at least one observable event--comparator pair. AUC
-requires at least one case and one control. An `NA` estimate with zero pairs is
-an undefined empirical estimand for the supplied data and times, not a
-numerical failure to be replaced by zero.
+Concordance requires at least one observable event--comparator pair. ROC
+estimation requires positive total case and control weight and at least one
+observed event of the requested cause in the window. An error in such a
+window describes an undefined empirical discrimination problem; changing the
+horizon solely to obtain a result would change the estimand.
 
 ## Monte Carlo stability
 
-The posterior mean predictions depend on the selected posterior draws.
-Compare results at increasing `n_samples`, using a fixed seed, until
-scientifically material digits are stable. This check concerns Monte Carlo
+Posterior mean predictions and draw-specific ROC curves depend on the selected
+posterior draws. Compare results at increasing `n_samples` with a fixed seed
+until scientifically material digits are stable. This examines Monte Carlo
 approximation only; it does not quantify sampling, validation, or posterior
-uncertainty in the discrimination statistic.
+uncertainty in discrimination.
 
 ## Apparent versus predictive performance
 
-Calculating either measure on the fitting data assesses apparent
-discrimination. Random effects and association parameters have been informed
-by those subjects, so the estimate is not an unbiased assessment for future
+Calculating a measure on the fitting data assesses apparent discrimination.
+Random effects and association parameters have been informed by those
 subjects. Held-out evaluation must preserve the full modelling procedure,
-including model selection and tuning, within the training data.
+including model selection and transform choices, within the training data.
 
 ## Discrimination is not calibration or utility
 
 Neither statistic verifies absolute-risk calibration, prediction-interval
-coverage, net benefit, or a clinically acceptable decision threshold.
+coverage, net benefit, or an acceptable clinical decision threshold.
 Discrimination should be reported alongside calibration and predictive
 uncertainty appropriate to the intended use.
 
 # Function-by-function reference
 
 The complete discrimination path is summarised below. This table is also a map
-for readers auditing the implementation in `R/diagnosis.R`.
+for readers auditing `R/diagnosis.R`.
 
-| Function | Role |
+| Function | Statistical role |
 |---|---|
-| `concordance.JoiNMeFit()` | Public concordance method; validates, predicts, compares, and returns one follow-up-wide result |
-| `auc()` | S3 generic for time-dependent AUC |
-| `auc.JoiNMeFit()` | Public JoiNMe AUC method; validates times and evaluates each landmark--horizon pair |
-| `AUC()` | Alias of `auc()` |
-| `.resolve_train_data()` | Selects stored fitting data or requires a complete pair of new longitudinal and event data |
+| `concordance.JoiNMeFit()` | Validates, predicts, compares observable survival orders, and returns one follow-up-wide result |
+| `tvROC()` | Re-exported JMbayes2 generic for time-dependent ROC estimation |
+| `tvROC.JoiNMeFit()` | Resolves JoiNMe data and times and calculates one compatible ROC curve per landmark |
+| `tvAUC()` | Re-exported JMbayes2 generic for trapezoidal time-dependent AUC |
+| `tvAUC.JoiNMeFit()` | Runs `tvROC()` and delegates each compatible curve to `JMbayes2::tvAUC.tvROC()` |
+| `.get_train_data()` | Selects stored fitting data or a complete pair of new longitudinal and event data |
 | `.constant_finite_value()` | Verifies that a subject-level time column is finite and constant within subject |
-| `.discrimination_time_grid()` | Creates the 50-point landmark-to-horizon grid used by AUC prediction |
-| `.default_discrimination_horizon()` | Finds a fitted or observed maximum time when no AUC horizon is supplied |
+| `.discrimination_time_grid()` | Creates the 50-point landmark-to-horizon prediction grid |
+| `.default_discrimination_horizon()` | Finds a fitted or observed maximum time when no horizon is supplied |
+| `.get_tvroc_times()` | Aligns the existing JoiNMe landmark, horizon, and `Dt` recipe |
 | `.concordance_time_weight()` | Validates concordance weighting and maps `"none"` to `"n"` |
 | `.subject_time_map()` | Aligns scalar, vector, named-vector, or event-column time declarations by subject |
 | `.subject_event_outcomes()` | Reduces right-censored or counting-process data to one terminal outcome per subject |
@@ -1018,9 +1250,13 @@ for readers auditing the implementation in `R/diagnosis.R`.
 | `.concordance_survival_matrix()` | Aligns posterior mean curves on distinct residual event times without extrapolation |
 | `.concordance_event_weights()` | Obtains event-time weights from `survival` and converts them to pair weights |
 | `.concordance_from_survival_curves()` | Counts each observable concordant, discordant, or tied pair and forms $\widehat C$ |
-| `.dynamic_discrimination_risk_set()` | Builds one AUC risk set and extracts posterior mean risk at the exact horizon |
-| `.auc_from_risk_set()` | Applies the Mann--Whitney rank identity and returns AUC with its effective sample counts |
-| `predict.JoiNMeFit()` | Supplies conditional survival predictions from the complete fitted joint model |
+| `.dynamic_discrimination_risk_set()` | Builds one horizon risk set from the complete dynamic-prediction pathway |
+| `.discrimination_horizon_risk_draws()` | Aligns raw posterior event-risk draws at each subject's exact horizon |
+| `.censoring_survival_at()` | Evaluates the Kaplan--Meier censoring curve at event or horizon times |
+| `.tvroc_status_weights()` | Constructs model-based or IPCW case and control weights |
+| `.central_optimal_threshold()` | Returns the central threshold among tied finite criterion maxima |
+| `.tvroc_from_risk_set()` | Calculates weighted ROC ordinates and returns the JMbayes2-compatible object |
+| `predict.JoiNMeFit()` | Supplies conditional survival from the complete fitted joint model, including ordered piecewise-linear associations |
 
 # References
 
@@ -1028,9 +1264,18 @@ Antolini L, Boracchi P, Biganzoli E (2005). A time-dependent discrimination
 index for survival data. *Statistics in Medicine*, 24, 3927--3944.
 [doi:10.1002/sim.2427](https://doi.org/10.1002/sim.2427).
 
+Heagerty PJ, Zheng Y (2005). Survival model predictive accuracy and ROC
+curves. *Biometrics*, 61, 92--105.
+[doi:10.1111/j.0006-341X.2005.030814.x](https://doi.org/10.1111/j.0006-341X.2005.030814.x).
+
 Rizopoulos D (2011). Dynamic predictions and prospective accuracy in joint
 models for longitudinal and time-to-event data. *Biometrics*, 67, 819--829.
 [Publisher record](https://onlinelibrary.wiley.com/doi/10.1111/j.1541-0420.2010.01546.x).
+
+Rizopoulos D, Papageorgiou G, Miranda Afonso P (2024). `JMbayes2` accuracy
+measures. The package reference defines the `tvROC` and `tvAUC` interfaces,
+censoring choices, returned structures, and associated methods.
+[R documentation](https://search.r-project.org/CRAN/refmans/JMbayes2/html/accuracy.html).
 
 Therneau TM. `survival::concordance`: concordance for survival and regression
 models. The official documentation describes risk-set comparability, event

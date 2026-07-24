@@ -182,7 +182,7 @@ predict.JoiNMeFit <- function(object,
     # 3. Identify Subjects
     id_var <- eval(object$call$id_var) %||% "id"
     newdataEvent_all_rows <- newdataEvent
-    ev_vars <- .resolve_event_model_vars(
+    ev_vars <- .get_event_model_vars(
         formulaEvent = forms$formulaEvent,
         dataEvent = newdataEvent,
         context = "predict.JoiNMeFit()"
@@ -197,7 +197,7 @@ predict.JoiNMeFit <- function(object,
         newdataEvent$.__joinme_event_start <- NULL
         newdataEvent$.__joinme_event_stop <- NULL
 
-        ev_vars <- .resolve_event_model_vars(
+        ev_vars <- .get_event_model_vars(
             formulaEvent = forms$formulaEvent,
             dataEvent = newdataEvent,
             context = "predict.JoiNMeFit()"
@@ -338,7 +338,7 @@ predict.JoiNMeFit <- function(object,
     draws_list_raw <- .scale_draw_dependent_time_terms(draws_list_raw, object$stan_data, tmax_val)
     n_samples_extracted <- .n_draws_in_prediction_list(draws_list_raw)
     n_pred_draws_max <- (control$iter_sampling %||% control$n_pred_draws %||% 1) * n_samples_extracted * (control$chains %||% control$parallel_chains %||% 1L) / (control$thin %||% 1L)
-    n_pred_draws <- .resolve_n_pred_draws(control$n_pred_draws, n_samples_extracted, n_pred_draws_max)
+    n_pred_draws <- .get_n_pred_draws(control$n_pred_draws, n_samples_extracted, n_pred_draws_max)
     # pred_draw_index <- .prediction_draw_index(n_samples_extracted, n_pred_draws, seed)
     draws_list <- .subset_draws_for_prediction(draws_list_raw, seq_len(n_samples_extracted)) #pred_draw_index)
     # browser()
@@ -359,7 +359,7 @@ predict.JoiNMeFit <- function(object,
     )
 
     engine_default <- getOption("stan_preferred_engine", object$config$engine %||% "cmdstanr")
-    engine <- .resolve_stan_engine(control$engine %||% engine_default)
+    engine <- .get_stan_engine(control$engine %||% engine_default)
     if (!is.null(object$config$engine) && !identical(engine, object$config$engine)) {
         cli::cli_warn(c(
             x = "Prediction engine {engine} differs from fitted engine {object$config$engine}.",
@@ -518,7 +518,7 @@ predict.JoiNMeFit <- function(object,
                 # strictly positive entry time, use that entry as the default
                 # conditioning origin so survival does not implicitly restart at
                 # the first observed longitudinal measurement.
-                ev_vars_i <- .resolve_event_model_vars(
+                ev_vars_i <- .get_event_model_vars(
                     formulaEvent = forms$formulaEvent,
                     dataEvent = dE_all,
                     context = "predict.JoiNMeFit()"
@@ -542,7 +542,7 @@ predict.JoiNMeFit <- function(object,
             # - longitudinal and survival grids can differ in density
             t_grid <- numeric(0)
             if ("longitudinal" %in% process) {
-                t_grid <- .resolve_time_grid(
+                t_grid <- .get_time_grid(
                     times,
                     id,
                     t_cond,
@@ -556,7 +556,7 @@ predict.JoiNMeFit <- function(object,
 
             t_surv_grid <- numeric(0)
             if ("event" %in% process) {
-                t_surv_grid <- .resolve_time_grid(
+                t_surv_grid <- .get_time_grid(
                     times,
                     id,
                     t_cond,
@@ -1006,7 +1006,7 @@ predict.JoiNMeFit <- function(object,
 }
 
 # Resolve prediction draw count independent of posterior extraction count.
-.resolve_n_pred_draws <- function(n_pred_draws, n_available, iter_sampling) {
+.get_n_pred_draws <- function(n_pred_draws, n_available, iter_sampling) {
 
     if (is.null(n_pred_draws)) {
         n_available <- if (n_available <= 50) 20 * n_available else n_available
@@ -1940,7 +1940,7 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
 
     quadrature_nodes <- control$quadrature_nodes %||% sd$quadrature_nodes %||% sd$n_gk %||% NULL
     quadrature_nodes_input <- quadrature_nodes %||% 15L
-    quad_req <- .resolve_gk_request(nodes = quadrature_nodes_input)
+    quad_req <- .get_gk_request(nodes = quadrature_nodes_input)
     quad <- .gk_single_panel(rule = quad_req$rule)
     n_gk <- as.integer(quad$n_gk)
     gk_nodes <- quad$nodes
@@ -2131,7 +2131,7 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
     }
 
     # Response and marker identification
-    y_var <- .resolve_response_var(
+    y_var <- .get_response_var(
         formulaLong = object$formulaLong,
         dataLong = dL,
         context = "predict.joinme()"
@@ -2841,7 +2841,7 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
     sort(unique(ci_levels))
 }
 
-.resolve_time_grid <- function(times, id, t_cond, tmax_val, time_horizon, default_n = 50, min_points = 50, kind = "longitudinal") {
+.get_time_grid <- function(times, id, t_cond, tmax_val, time_horizon, default_n = 50, min_points = 50, kind = "longitudinal") {
     grid <- NULL
     horizon_is_default <- is.finite(tmax_val) && isTRUE(all.equal(as.numeric(time_horizon), as.numeric(tmax_val)))
     raw_upper_time <- if (horizon_is_default) tmax_val else (t_cond + time_horizon)

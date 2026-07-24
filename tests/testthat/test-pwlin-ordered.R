@@ -178,10 +178,10 @@ test_that("Stan estimates ordered pwlin ordinates in a fitted joint model", {
   expect_true(is.data.frame(summary(fit)$tables$piecewise_ordinates))
 })
 
-test_that("time-dependent AUC uses the shared dynamic-risk path", {
+test_that("time-dependent ROC and AUC use the piecewise-aware prediction path", {
   object <- structure(list(), class = "JoiNMeFit")
   testthat::local_mocked_bindings(
-    .resolve_train_data = function(object, newdataLong, newdataEvent, purpose) {
+    .get_train_data = function(object, newdataLong, newdataEvent, purpose) {
       list(newdataLong = data.frame(id = 1:4), newdataEvent = data.frame(id = 1:4))
     },
     .dynamic_discrimination_risk_set = function(...) {
@@ -189,18 +189,25 @@ test_that("time-dependent AUC uses the shared dynamic-risk path", {
         risk = c(0.8, 0.6, 0.4, 0.6),
         event_window = c(1L, 1L, 0L, 0L),
         event_time = c(1.5, 1.8, 3, 4),
+        event_status = c(1L, 1L, 0L, 0L),
+        event_type = c(1L, 1L, 0L, 0L),
         time_horizon = rep(2, 4)
       )
     },
     .package = "joinme"
   )
 
-  out <- auc(object, time_start = 1, time_horizon = 2)
-  expect_s3_class(out, "tvAUC_JoiNMeFit")
+  roc <- suppressWarnings(
+    tvROC(object, time_start = 1, time_horizon = 2)
+  )
+  out <- suppressWarnings(
+    tvAUC(object, time_start = 1, time_horizon = 2)
+  )
+  expect_s3_class(roc, "tvROC")
+  expect_s3_class(out, "tvAUC")
   expect_equal(out$auc, 0.875)
-  expect_equal(out$n_cases, 2L)
-  expect_equal(out$n_controls, 2L)
-  expect_equal(out$n_pairs, 4L)
+  expect_equal(max(roc$nTP), 2)
+  expect_equal(max(roc$nFP), 2)
 })
 
 test_that("piecewise summary reports posterior relative log-hazard ordinates", {

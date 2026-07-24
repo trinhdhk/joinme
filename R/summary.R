@@ -635,7 +635,7 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
       next
     }
 
-    mode_name <- paste0("tf_mode_", .resolve_transform_term(channel)$mode_suffix)
+    mode_name <- paste0("tf_mode_", .get_transform_term(channel)$mode_suffix)
     direction <- .monotone_direction_label(
       transform_specs[[channel]]$direction %||%
         if (as.integer(object$stan_data[[mode_name]] %||% 3L) == 7L) -1L else 1L

@@ -330,8 +330,8 @@ preds <- tryCatch(
 head(preds$predictions$survival)
 ```
 
-`concordance(fit)` is a follow-up-wide survival-curve concordance rather than an
-AUC at a selected horizon. By default, residual follow-up for subject \(i\)
+`concordance(fit)` is a follow-up-wide survival-curve concordance rather than a
+ROC analysis at one selected horizon. By default, residual follow-up for subject \(i\)
 starts at their final longitudinal measurement strictly before the observed
 event or censoring time, \(T_{0i}\). For an event at residual time
 \(r_i=T_i-T_{0i}\), the event subject is compared with every subject known to
@@ -349,13 +349,17 @@ Fitted monotone splines and ordered piecewise-linear associations enter every
 conditional curve through their posterior ordinates, exactly as in
 `predict()`.
 
-`auc(fit, ...)` retains the horizon-specific estimand. At landmark \(s\) and
-horizon \(t\), it compares cumulative risk
-\(1-S_i(t\mid s)\) between cases observed by \(t\) and controls known to remain
-event-free beyond \(t\). Subjects censored earlier have unknown case/control
-status and are omitted. Dynamic prediction for both methods reuses the exact
-fitted B-spline, natural-spline, or formula baseline-hazard basis, including
-its original centring constants.
+`tvROC(fit, ...)` retains the horizon-specific estimand. At landmark \(s\) and
+horizon \(t\), it evaluates sensitivity and the false-positive fraction over
+101 thresholds of conditional survival. Cases experience the requested cause
+in the interval \((s,t]\), while controls are known to remain without
+that cause through \(t\). Premature censoring is handled either by
+model-based expected case/control status or inverse Kaplan--Meier censoring
+weights. `tvAUC(fit, ...)` first calculates that curve and then uses
+`JMbayes2::tvAUC.tvROC()` to obtain its trapezoidal area. Dynamic prediction
+for all methods reuses the exact fitted B-spline, natural-spline, or formula
+baseline-hazard basis, including its original centring constants and any
+ordered piecewise-linear association.
 
 The estimands, censoring rules, event-time weighting, computational steps, and
 reporting recommendations are derived in the
@@ -364,7 +368,14 @@ reporting recommendations are derived in the
 ```{r discrimination-example, eval=FALSE}
 concordance(fit)
 concordance(fit, time_start = 2, type_weights = "n/G2")
-auc(fit, time_start = 2, time_horizon = 5)
+roc <- tvROC(
+  fit,
+  time_start = 2,
+  time_horizon = 5,
+  type_weights = "model-based"
+)
+plot(roc)
+tvAUC(roc)
 ```
 
 Finally, we visualise the predicted survival curve. The shaded area represents the 95% credible interval, accounting for uncertainty in both the parameters and the random effects.

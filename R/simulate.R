@@ -2126,7 +2126,7 @@ simulate_joinme <- function(
   fixed_rhs[[2]] <- NULL
 
   grp_names <- vapply(bars, function(b) .group_name_from_expr(b[[3]]), character(1))
-  indep_flags <- .resolve_re_independence(formulaLong, marker_var = marker_var, id_var = id_var)
+  indep_flags <- .get_re_independence(formulaLong, marker_var = marker_var, id_var = id_var)
   id_idx <- which(grp_names == id_var)
   id_rhs_list <- if (length(id_idx) > 0) .bar_terms_to_rhs_list(bars[id_idx]) else list()
 
@@ -2153,7 +2153,7 @@ simulate_joinme <- function(
   names(dataEvent)[names(dataEvent) == "id"] <- id_var
 
   # Covariance-regression design for the subject-specific marker-by-id covariance.
-  formulaVCov <- .resolve_vcov_formula(
+  formulaVCov <- .get_vcov_formula(
     formulaVCov = formulaVCov,
     default = ~ 1,
     context = "simulate_joinme()"
@@ -2223,7 +2223,7 @@ simulate_joinme <- function(
   assoc_effective <- unique(assoc_effective)
   if (length(assoc_effective) == 0) assoc_effective <- "cv_total"
 
-  marker_weight_spec <- .resolve_marker_weight_structure(
+  marker_weight_spec <- .get_marker_weight_structure(
     marker_weights = marker_weights,
     marker_levels = marker_levels,
     active_terms = .active_weighted_assoc_terms(assoc_effective),

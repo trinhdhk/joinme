@@ -131,7 +131,7 @@
 #'   matrix representation used by Stan.
 #' @keywords internal
 #' @noRd
-.resolve_marker_weight_structure <- function(marker_weights,
+.get_marker_weight_structure <- function(marker_weights,
                                              marker_levels,
                                              active_terms,
                                              shared_marker_weights = TRUE,

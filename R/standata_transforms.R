@@ -152,7 +152,7 @@
 #' @return Integer direction code: `1L` for increasing, `-1L` for decreasing.
 #' @keywords internal
 #' @noRd
-.resolve_monotone_direction <- function(direction = NULL, default = "increasing") {
+.get_monotone_direction <- function(direction = NULL, default = "increasing") {
   direction <- direction %||% default
   if (is.numeric(direction) && length(direction) == 1L && is.finite(direction)) {
     if (direction > 0) return(1L)
@@ -213,7 +213,7 @@
 #' @keywords internal
 #' @noRd
 .monotone_direction_label <- function(direction) {
-  if (.resolve_monotone_direction(direction, default = 1L) < 0L) {
+  if (.get_monotone_direction(direction, default = 1L) < 0L) {
     "decreasing"
   } else {
     "increasing"
@@ -288,7 +288,7 @@
   inferred_direction <- if (is.null(legacy_y)) "increasing" else {
     .infer_monotone_direction(knots, legacy_y)
   }
-  direction <- .resolve_monotone_direction(spec$direction, default = inferred_direction)
+  direction <- .get_monotone_direction(spec$direction, default = inferred_direction)
 
   lambda <- spec$lambda %||% 0
   if (!is.numeric(lambda) || length(lambda) != 1L || !is.finite(lambda) || lambda < 0) {
@@ -483,7 +483,7 @@ build_standata_transforms <- function(
   if (!is.null(transform_list)) {
     for (term_name in names(transform_list)) {
       spec <- transform_list[[term_name]]
-      term_info <- .resolve_transform_term(term_name)
+      term_info <- .get_transform_term(term_name)
       mode_suffix <- term_info$mode_suffix
       short_suffix <- term_info$short_suffix
       n_components <- if (term_name %in% c("corr", "vcov")) max(0L, component_counts[[term_name]]) else 1L
@@ -528,7 +528,7 @@ build_standata_transforms <- function(
             spec$knots <- .validate_expit_domain_values(spec$knots, "knots")
           }
         }
-        spline_direction <- .resolve_monotone_direction(spec$direction %||% spec$spline_direction %||% 1L, default = 1L)
+        spline_direction <- .get_monotone_direction(spec$direction %||% spec$spline_direction %||% 1L, default = 1L)
         standata[[paste0("tf_mode_", mode_suffix)]] <- if (.transform_uses_expit_input(spec$type)) {
           if (spline_direction < 0L) 6L else 4L
         } else {
@@ -592,7 +592,7 @@ build_standata_transforms <- function(
 }
 
 #' @keywords internal
-.resolve_transform_term <- function(term_name) {
+.get_transform_term <- function(term_name) {
   switch(term_name,
     cv_total = list(mode_suffix = "cv_tot", short_suffix = "cv"),
     cv_tot = list(mode_suffix = "cv_tot", short_suffix = "cv"),
@@ -914,7 +914,7 @@ penalized_ispline_transform <- function(...) {
     ))
   }
 
-  spline_direction <- .resolve_monotone_direction(spec$direction, default = "increasing")
+  spline_direction <- .get_monotone_direction(spec$direction, default = "increasing")
 
   list(
     type = if (.transform_uses_expit_input(spec)) "ispline_expit" else "ispline",
@@ -965,7 +965,7 @@ penalized_ispline_transform <- function(...) {
       i = "Check the transform training data."
     ))
   }
-  spline_direction <- .resolve_monotone_direction(spec$direction, default = .infer_monotone_direction(x, y))
+  spline_direction <- .get_monotone_direction(spec$direction, default = .infer_monotone_direction(x, y))
   if (!is.numeric(spec$lambda) || length(spec$lambda) != 1 || spec$lambda < 0) {
     cli::cli_abort(c(
       x = "{.arg lambda} must be a non-negative numeric scalar.",
