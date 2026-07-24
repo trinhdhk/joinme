@@ -573,7 +573,7 @@
 #' @importFrom lme4 fixef
 #' @export
 fixef.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
-  assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
+  
   assertthat::assert_that(is.logical(summary) && length(summary) == 1L && !is.na(summary),
                           msg = "summary must be TRUE or FALSE.")
   fit <- object$fit
@@ -684,7 +684,7 @@ posterior_fixef <- function(object, ...) {
 #' @importFrom lme4 ranef
 #' @export
 ranef.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
-  assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
+  
   assertthat::assert_that(is.logical(summary) && length(summary) == 1L && !is.na(summary),
                           msg = "summary must be TRUE or FALSE.")
   fit <- object$fit
@@ -951,7 +951,7 @@ posterior_ranef <- function(object, ...) {
 #' @method coef JoiNMeFit
 #' @export
 coef.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
-  assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
+  
   assertthat::assert_that(is.logical(summary) && length(summary) == 1L && !is.na(summary),
                           msg = "summary must be TRUE or FALSE.")
   if (is.null(draws)) draws <- object$config$draws_default
@@ -1013,7 +1013,6 @@ posterior_coef <- function(object, ...) {
 #' @importFrom lme4 ranef
 #' @export
 ranef.JoiNMeDynPred <- function(object, ...) {
-    assertthat::assert_that(inherits(object, "JoiNMeDynPred"), msg = "Object must be a JoiNMeDynPred instance.")
 
     if (!isTRUE(object$metadata$marker_corr_depends_on_id)) {
         cli::cli_abort(c(

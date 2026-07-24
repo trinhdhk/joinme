@@ -53,13 +53,25 @@ diagnosis <- function(object, ...) {
 		param_label <- as.character(df$parameter)
 		empty_idx <- !nzchar(trimws(label))
 		label[empty_idx] <- param_label[empty_idx]
-		label[!empty_idx] <- paste0(param_label[!empty_idx], ": ", label[!empty_idx])
+		label[!empty_idx] <- paste0(
+			param_label[!empty_idx],
+			": ",
+			label[!empty_idx]
+		)
 	}
 	if ("channel" %in% names(df)) {
-		label <- ifelse(nzchar(trimws(label)), paste0(df$channel, ": ", label), as.character(df$channel))
+		label <- ifelse(
+			nzchar(trimws(label)),
+			paste0(df$channel, ": ", label),
+			as.character(df$channel)
+		)
 	}
 	if ("block" %in% names(df)) {
-		label <- ifelse(nzchar(trimws(label)), paste0(df$block, ": ", label), as.character(df$block))
+		label <- ifelse(
+			nzchar(trimws(label)),
+			paste0(df$block, ": ", label),
+			as.character(df$block)
+		)
 	}
 	if (all(c("row", "col") %in% names(df))) {
 		rc_label <- ifelse(
@@ -73,14 +85,25 @@ diagnosis <- function(object, ...) {
 			label
 		)
 	}
-	label[!nzchar(trimws(label))] <- paste0("parameter_", seq_len(sum(!nzchar(trimws(label)))))
+	label[!nzchar(trimws(label))] <- paste0(
+		"parameter_",
+		seq_len(sum(!nzchar(trimws(label))))
+	)
 	trimws(label)
 }
 
 #' @keywords internal
 #' @noRd
 .diagnosis_parameter_table_from_tables <- function(tables) {
-	metric_cols <- c("Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail")
+	metric_cols <- c(
+		"Estimate",
+		"Est.Error",
+		"Q2.5",
+		"Q97.5",
+		"Rhat",
+		"ess_bulk",
+		"ess_tail"
+	)
 	drop_cols <- c(metric_cols, "Hazard.Ratio", "HR.Q2.5", "HR.Q97.5")
 
 	collect_tables <- function(x, path = character()) {
@@ -94,14 +117,26 @@ diagnosis <- function(object, ...) {
 			id_cols <- setdiff(names(x), drop_cols)
 			out <- x[, c(id_cols, intersect(metric_cols, names(x))), drop = FALSE]
 			out$section <- if (length(path) >= 1L) path[[1L]] else NA_character_
-			out$subsection <- if (length(path) > 1L) paste(path[-1L], collapse = " / ") else NA_character_
+			out$subsection <- if (length(path) > 1L) {
+				paste(path[-1L], collapse = " / ")
+			} else {
+				NA_character_
+			}
 			out$parameter_label <- .diagnosis_parameter_label(out)
-			keep_id_cols <- setdiff(id_cols, c("section", "subsection", "parameter_label"))
-			out <- out[, c(
-				"section", "subsection", "parameter_label",
-				keep_id_cols,
-				intersect(metric_cols, names(out))
-			), drop = FALSE]
+			keep_id_cols <- setdiff(
+				id_cols,
+				c("section", "subsection", "parameter_label")
+			)
+			out <- out[,
+				c(
+					"section",
+					"subsection",
+					"parameter_label",
+					keep_id_cols,
+					intersect(metric_cols, names(out))
+				),
+				drop = FALSE
+			]
 			return(list(out))
 		}
 		if (is.list(x)) {
@@ -143,20 +178,45 @@ diagnosis <- function(object, ...) {
 }
 
 #' @export
-diagnosis.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, include_corr = TRUE, ...) {
-	assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
-	cache_key <- paste0("diagnosis_", draws %||% "default", "_", digits, "_", include_corr)
+diagnosis.JoiNMeFit <- function(
+	object,
+	draws = NULL,
+	seed = 1,
+	digits = 3,
+	include_corr = TRUE,
+	...
+) {
+	
+	cache_key <- paste0(
+		"diagnosis_",
+		draws %||% "default",
+		"_",
+		digits,
+		"_",
+		include_corr
+	)
 	cached <- object$cache_get(cache_key)
 	if (!is.null(cached)) {
 		return(cached)
 	}
-	sum_obj <- summary(object, draws = draws, seed = seed, digits = digits, include_corr = include_corr, ...)
+	sum_obj <- summary(
+		object,
+		draws = draws,
+		seed = seed,
+		digits = digits,
+		include_corr = include_corr,
+		...
+	)
 	result <- structure(
 		list(
-			summary = sum_obj$tables$diagnostics %||% .diagnostics_table_from_sampler(sum_obj$diagnostics %||% list()),
+			summary = sum_obj$tables$diagnostics %||%
+				.diagnostics_table_from_sampler(sum_obj$diagnostics %||% list()),
 			by_parameter = .diagnosis_parameter_table_from_tables(sum_obj$tables),
 			sampler = sum_obj$diagnostics %||% list(),
-			metadata = c(sum_obj$metadata %||% list(), list(include_corr = include_corr, digits = digits))
+			metadata = c(
+				sum_obj$metadata %||% list(),
+				list(include_corr = include_corr, digits = digits)
+			)
 		),
 		class = "JoiNMe_diagnosis"
 	)
@@ -166,15 +226,23 @@ diagnosis.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, incl
 
 #' @export
 diagnosis.JoiNMeDynPred <- function(object, ...) {
-	assertthat::assert_that(inherits(object, "JoiNMeDynPred"), msg = "Object must be a JoiNMeDynPred instance.")
+	assertthat::assert_that(
+		inherits(object, "JoiNMeDynPred"),
+		msg = "Object must be a JoiNMeDynPred instance."
+	)
 	sum_obj <- summary(object)
 	sum_obj$tables$diagnostics %||% .build_common_diagnostics_table()
 }
 
 #' @export
 print.JoiNMe_diagnosis <- function(x, max_rows = 20, ...) {
-	assertthat::assert_that(inherits(x, "JoiNMe_diagnosis"), msg = "x must be a JoiNMe_diagnosis object.")
-	.cli_print_table_section("Diagnostics Summary", x$summary, level = 1L, formatter = .format_common_diagnostics_for_print)
+	
+	.cli_print_table_section(
+		"Diagnostics Summary",
+		x$summary,
+		level = 1L,
+		formatter = .format_common_diagnostics_for_print
+	)
 	if (is.data.frame(x$by_parameter) && nrow(x$by_parameter) > 0L) {
 		.tbl <- x$by_parameter
 		if (nrow(.tbl) > max_rows) {
@@ -182,7 +250,12 @@ print.JoiNMe_diagnosis <- function(x, max_rows = 20, ...) {
 		}
 		.cli_print_table_section("Per-Parameter Diagnostics", .tbl, level = 2L)
 		if (nrow(x$by_parameter) > max_rows) {
-			cat("... truncated to ", max_rows, " rows; inspect $by_parameter for the full table.\n", sep = "")
+			cat(
+				"... truncated to ",
+				max_rows,
+				" rows; inspect $by_parameter for the full table.\n",
+				sep = ""
+			)
 		}
 	}
 	invisible(x)
@@ -206,17 +279,25 @@ print.JoiNMe_diagnosis <- function(x, max_rows = 20, ...) {
 #' @return A matrix
 #' @seealso [log_lik()]
 #' @export
-log_lik.JoiNMeFit <- function(object, what = c("long", "surv", "total"), draws = NULL, seed = 1, ...) {
-	assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
+log_lik.JoiNMeFit <- function(
+	object,
+	what = c("long", "surv", "total"),
+	draws = NULL,
+	seed = 1,
+	...
+) {
+	
 	what <- match.arg(what)
 	sd <- object$stan_data
 
 	vars_long <- paste0("log_lik_long[", seq_len(sd$N), "]")
 	vars_surv <- paste0("log_lik_surv[", seq_len(sd$n_id), "]")
-	vars <- switch(what,
-								 long = vars_long,
-								 surv = vars_surv,
-								 total = c(vars_long, vars_surv))
+	vars <- switch(
+		what,
+		long = vars_long,
+		surv = vars_surv,
+		total = c(vars_long, vars_surv)
+	)
 
 	ddf <- .get_draws_df(object$fit, variables = vars, draws = draws, seed = seed)
 	mat <- as.matrix(ddf[, vars, drop = FALSE])
@@ -227,7 +308,13 @@ log_lik.JoiNMeFit <- function(object, what = c("long", "surv", "total"), draws =
 #' Backup, unused
 #' @noRd
 #' @keywords internal
-unused_loo.JoiNMeFit <- function(object, what = c("total", "long", "surv"), draws = NULL, seed = 1, ...) {
+unused_loo.JoiNMeFit <- function(
+	object,
+	what = c("total", "long", "surv"),
+	draws = NULL,
+	seed = 1,
+	...
+) {
 	what <- match.arg(what)
 	ll_mat <- log_lik.JoiNMeFit(object, what = what, draws = draws, seed = seed)
 
@@ -238,7 +325,7 @@ unused_loo.JoiNMeFit <- function(object, what = c("total", "long", "surv"), draw
 
 	log_colMeansExp <- function(mat) {
 		S <- nrow(mat)
-		matrixStats::colLogSumExps(mat, na.rm=TRUE) - log(S)
+		matrixStats::colLogSumExps(mat, na.rm = TRUE) - log(S)
 	}
 
 	# pointwise <- apply(ll_mat, 2, log_mean_exp)
@@ -250,8 +337,11 @@ unused_loo.JoiNMeFit <- function(object, what = c("total", "long", "surv"), draw
 			pointwise = structure(pointwise, component = 'elpd_loo'),
 			estimates = structure(
 				cbind(elpd, se_elpd),
-				.dimnames = list('elpd_loo', c("Estimate", "SE")))
-		), class = c('psis_loo', 'loo'))
+				.dimnames = list('elpd_loo', c("Estimate", "SE"))
+			)
+		),
+		class = c('psis_loo', 'loo')
+	)
 	attr(output, 'what') <- what
 	output
 }
@@ -259,7 +349,7 @@ unused_loo.JoiNMeFit <- function(object, what = c("total", "long", "surv"), draw
 # ---- LOO / WAIC / ELPD ---------------------------------------------------
 
 #' LOO-CV for JoiNMe models
-#' 
+#'
 #' @rdname loo.JoiNMeFit
 #' @param object A fitted object of class `JoiNMeFit`.
 #' @param what Character; which component to return: `"long"`, `"surv"`, or `"total"`.
@@ -270,7 +360,13 @@ unused_loo.JoiNMeFit <- function(object, what = c("total", "long", "surv"), draw
 #' @return A `loo` object.
 #' @importFrom loo loo
 #' @export
-loo.JoiNMeFit <- function(object, what = c("total", "long", "surv"), draws = NULL, seed = 1, ...) {
+loo.JoiNMeFit <- function(
+	object,
+	what = c("total", "long", "surv"),
+	draws = NULL,
+	seed = 1,
+	...
+) {
 	what <- match.arg(what)
 	ll_mat <- log_lik.JoiNMeFit(object, what = what, draws = draws, seed = seed)
 	loo::loo(ll_mat, ...)
@@ -285,12 +381,20 @@ loo.JoiNMeFit <- function(object, what = c("total", "long", "surv"), draws = NUL
 #' @param ... Additional arguments passed to `loo::waic()`.
 #'
 #' @importFrom loo waic
-#' 
+#'
 #' @return A `waic` object.
 #' @export
-waic.JoiNMeFit <- function(object, what = c("total", "long", "surv"), draws = NULL, seed = 1, ...) {
+waic.JoiNMeFit <- function(
+	object,
+	what = c("total", "long", "surv"),
+	draws = NULL,
+	seed = 1,
+	...
+) {
 	if (!requireNamespace("loo", quietly = TRUE)) {
-		cli::cli_abort("Package {.pkg loo} is required for waic(). Install it with install.packages('loo').")
+		cli::cli_abort(
+			"Package {.pkg loo} is required for waic(). Install it with install.packages('loo')."
+		)
 	}
 	what <- match.arg(what)
 	ll_mat <- log_lik.JoiNMeFit(object, what = what, draws = draws, seed = seed)
@@ -299,18 +403,24 @@ waic.JoiNMeFit <- function(object, what = c("total", "long", "surv"), draws = NU
 
 
 #' ELPD summary for JoiNMe models
-#' 
+#'
 #' @param object A fitted object of class `JoiNMeFit`.
 #' @param what Character; which component to return: `"long"`, `"surv"`, or `"total"`.
 #' @param draws Optional number of posterior draws to subset.
 #' @param seed Random seed for draw subsetting.
 #' @param ... Additional arguments passed to `loo::elpd()`.
-#' 
+#'
 #' @importFrom loo elpd
 #' @rdname elpd.JoiNMeFit
 #' @return A data frame with ELPD and standard error.
 #' @export
-elpd.JoiNMeFit <- function(object, what = c("total", "long", "surv"), draws = NULL, seed = 1, ...) {
+elpd.JoiNMeFit <- function(
+	object,
+	what = c("total", "long", "surv"),
+	draws = NULL,
+	seed = 1,
+	...
+) {
 	loo_obj <- loo.JoiNMeFit(object, what = what, draws = draws, seed = seed, ...)
 	structure(
 		data.frame(
@@ -333,11 +443,19 @@ elpd.JoiNMeFit <- function(object, what = c("total", "long", "surv"), draws = NU
 #' @return A list with bridge sampling results and Bayes factor.
 #' @export
 bayes_factor <- function(fit1, fit2, ...) {
-	assertthat::assert_that(inherits(fit1, "JoiNMeFit"), msg = "fit1 must be a JoiNMeFit instance.")
-	assertthat::assert_that(inherits(fit2, "JoiNMeFit"), msg = "fit2 must be a JoiNMeFit instance.")
+	assertthat::assert_that(
+		inherits(fit1, "JoiNMeFit"),
+		msg = "fit1 must be a JoiNMeFit instance."
+	)
+	assertthat::assert_that(
+		inherits(fit2, "JoiNMeFit"),
+		msg = "fit2 must be a JoiNMeFit instance."
+	)
 
 	if (!requireNamespace("bridgesampling", quietly = TRUE)) {
-		cli::cli_abort("Package {.pkg bridgesampling} is required for bayes_factor(). Install it with install.packages('bridgesampling').")
+		cli::cli_abort(
+			"Package {.pkg bridgesampling} is required for bayes_factor(). Install it with install.packages('bridgesampling')."
+		)
 	}
 
 	bs1 <- tryCatch(
@@ -374,18 +492,27 @@ bayes_factor <- function(fit1, fit2, ...) {
 #' @param newdataLong New longitudinal data frame for predictions.
 #' @param newdataEvent New event data frame for predictions.
 #' @param ci_level Numeric; credible interval level (default 0.95).
-#' @param n_samples Integer; number of posterior samples to use (default 200).	
+#' @param n_samples Integer; number of posterior samples to use (default 200).
 #' @param ... Additional arguments.
 #'
 #' @importFrom bayesplot pp_check
 #' @rdname pp_check.JoiNMeFit
-#' @details 
+#' @details
 #' This crap is still under development.
 #' @return A list with observation-level summaries and overall diagnostics.
 #' @export
-pp_check.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, ci_level = 0.95, n_samples = 200, seed = 123, plot = FALSE,...) {
+pp_check.JoiNMeFit <- function(
+	object,
+	newdataLong = NULL,
+	newdataEvent = NULL,
+	ci_level = 0.95,
+	n_samples = 200,
+	seed = 123,
+	plot = FALSE,
+	...
+) {
 	# Workflow: run posterior_epred -> summarise coverage and RMSE
-	assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
+	
 	if (is.null(newdataLong) && is.null(newdataEvent)) {
 		if (!is.null(object$dataLong) && !is.null(object$dataEvent)) {
 			newdataLong <- object$dataLong
@@ -407,35 +534,46 @@ pp_check.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, 
 	ci_level <- .validate_ci_levels(ci_level)
 	probs <- .quantile_probs_from_ci(ci_level)
 
-	pred <- posterior_epred(object,
-				newdataLong = newdataLong,
-				newdataEvent = newdataEvent,
-				control = list(n_samples = n_samples),
-				seed = seed,
-				...)
+	pred <- posterior_epred(
+		object,
+		newdataLong = newdataLong,
+		newdataEvent = newdataEvent,
+		control = list(n_samples = n_samples),
+		seed = seed,
+		...
+	)
 
 	draws_fit <- pred$draws$longitudinal_fitted
 	if (is.null(draws_fit) || length(draws_fit) == 0) {
-		cli::cli_abort("No fitted draws found. Ensure longitudinal data is provided.")
+		cli::cli_abort(
+			"No fitted draws found. Ensure longitudinal data is provided."
+		)
 	}
 
 	id_var <- pred$metadata$id_var %||% (eval(object$call$id_var) %||% "id")
-	time_var <- pred$metadata$time_var %||% (eval(object$call$time_var) %||% "time")
-	marker_var <- pred$metadata$marker_var %||% (eval(object$call$marker_var) %||% "marker")
-	y_var <- pred$metadata$response_var %||% .resolve_response_var(
-		formulaLong = object$formulaLong,
-		dataLong = newdataLong,
-		context = "joinme_diagnosis()"
-	)
+	time_var <- pred$metadata$time_var %||%
+		(eval(object$call$time_var) %||% "time")
+	marker_var <- pred$metadata$marker_var %||%
+		(eval(object$call$marker_var) %||% "marker")
+	y_var <- pred$metadata$response_var %||%
+		.resolve_response_var(
+			formulaLong = object$formulaLong,
+			dataLong = newdataLong,
+			context = "joinme_diagnosis()"
+		)
 
 	out_list <- list()
 	for (id in names(draws_fit)) {
 		# Per-subject summary of fitted draws vs observed outcomes
 		dL <- newdataLong[newdataLong[[id_var]] == id, , drop = FALSE]
-		if (nrow(dL) == 0) next
+		if (nrow(dL) == 0) {
+			next
+		}
 
 		epred_mat <- draws_fit[[id]]$epred
-		if (is.null(epred_mat) || nrow(epred_mat) == 0) next
+		if (is.null(epred_mat) || nrow(epred_mat) == 0) {
+			next
+		}
 
 		mean_epred <- colMeans(epred_mat)
 		sd_epred <- apply(epred_mat, 2, stats::sd)
@@ -468,7 +606,12 @@ pp_check.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, 
 
 #' @keywords internal
 #' @noRd
-.resolve_train_data <- function(object, newdataLong, newdataEvent, purpose = "analysis") {
+.resolve_train_data <- function(
+	object,
+	newdataLong,
+	newdataEvent,
+	purpose = "analysis"
+) {
 	if (is.null(newdataLong) && is.null(newdataEvent)) {
 		if (!is.null(object$dataLong) && !is.null(object$dataEvent)) {
 			newdataLong <- object$dataLong
@@ -538,8 +681,12 @@ pp_check.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, 
 #' @noRd
 .default_discrimination_horizon <- function(object, data_event) {
 	horizon <- object$tmax %||% object$config$tmax %||% object$stan_data$tmax
-	if (is.numeric(horizon) && length(horizon) == 1L &&
-			is.finite(horizon) && horizon > 0) {
+	if (
+		is.numeric(horizon) &&
+			length(horizon) == 1L &&
+			is.finite(horizon) &&
+			horizon > 0
+	) {
 		return(as.numeric(horizon))
 	}
 	event_vars <- .resolve_event_model_vars(
@@ -549,7 +696,9 @@ pp_check.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, 
 	)
 	horizon <- max(as.numeric(event_vars$event_time), na.rm = TRUE)
 	if (!is.finite(horizon) || horizon <= 0) {
-		cli::cli_abort("Could not determine a positive default prediction horizon from the fitted data.")
+		cli::cli_abort(
+			"Could not determine a positive default prediction horizon from the fitted data."
+		)
 	}
 	horizon
 }
@@ -565,8 +714,11 @@ pp_check.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, 
 #' @noRd
 .concordance_time_weight <- function(type_weights) {
 	valid_weights <- c("none", "n", "S", "S/G", "n/G2", "I")
-	if (!is.character(type_weights) || length(type_weights) != 1L ||
-			!(type_weights %in% valid_weights)) {
+	if (
+		!is.character(type_weights) ||
+			length(type_weights) != 1L ||
+			!(type_weights %in% valid_weights)
+	) {
 		cli::cli_abort("{.arg type_weights} must be one of {.val {valid_weights}}.")
 	}
 	if (identical(type_weights, "none")) "n" else type_weights
@@ -600,13 +752,19 @@ pp_check.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, 
 
 	if (is.character(value)) {
 		if (length(value) != 1L || is.na(value)) {
-			cli::cli_abort("{.arg {argument}} must name one column in {.arg newdataEvent}.")
+			cli::cli_abort(
+				"{.arg {argument}} must name one column in {.arg newdataEvent}."
+			)
 		}
 		if (!(value %in% names(data_event))) {
-			cli::cli_abort("Column {.val {value}} named by {.arg {argument}} was not found in {.arg newdataEvent}.")
+			cli::cli_abort(
+				"Column {.val {value}} named by {.arg {argument}} was not found in {.arg newdataEvent}."
+			)
 		}
 		if (!is.numeric(data_event[[value]])) {
-			cli::cli_abort("Column {.val {value}} named by {.arg {argument}} must be numeric.")
+			cli::cli_abort(
+				"Column {.val {value}} named by {.arg {argument}} must be numeric."
+			)
 		}
 		# Event data may contain several counting-process intervals per subject.
 		# The first match is sufficient only when the time declaration is constant
@@ -615,25 +773,33 @@ pp_check.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, 
 		mapped <- as.numeric(data_event[[value]][match(id_keys, row_keys)])
 		if (anyDuplicated(row_keys)) {
 			group_range <- tapply(
-				as.numeric(data_event[[value]]), row_keys, .constant_finite_value
+				as.numeric(data_event[[value]]),
+				row_keys,
+				.constant_finite_value
 			)
 			mapped <- as.numeric(group_range[id_keys])
 		}
 	} else {
 		if (!is.numeric(value) || !length(value)) {
-			cli::cli_abort("{.arg {argument}} must be numeric or name a column in {.arg newdataEvent}.")
+			cli::cli_abort(
+				"{.arg {argument}} must be numeric or name a column in {.arg newdataEvent}."
+			)
 		}
 		if (length(value) == 1L) {
 			mapped <- rep(as.numeric(value), length(ids))
 		} else if (!is.null(names(value))) {
 			if (anyDuplicated(names(value))) {
-				cli::cli_abort("Names in {.arg {argument}} must be unique subject identifiers.")
+				cli::cli_abort(
+					"Names in {.arg {argument}} must be unique subject identifiers."
+				)
 			}
 			mapped <- as.numeric(value[match(id_keys, names(value))])
 		} else if (length(value) == length(ids)) {
 			mapped <- as.numeric(value)
 		} else {
-			cli::cli_abort("{.arg {argument}} must be scalar, named by subject, or contain one value per subject.")
+			cli::cli_abort(
+				"{.arg {argument}} must be scalar, named by subject, or contain one value per subject."
+			)
 		}
 	}
 
@@ -664,10 +830,16 @@ pp_check.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, 
 #'   `event_status`, and `event_type`, in addition to the identifier column.
 #' @keywords internal
 #' @noRd
-.subject_event_outcomes <- function(formula_event, data_event, id_var,
-									context = "concordance.JoiNMeFit()") {
+.subject_event_outcomes <- function(
+	formula_event,
+	data_event,
+	id_var,
+	context = "concordance.JoiNMeFit()"
+) {
 	if (!(id_var %in% names(data_event)) || anyNA(data_event[[id_var]])) {
-		cli::cli_abort("{context}: {.arg newdataEvent} must contain a non-missing subject identifier in {.field {id_var}}.")
+		cli::cli_abort(
+			"{context}: {.arg newdataEvent} must contain a non-missing subject identifier in {.field {id_var}}."
+		)
 	}
 	event_vars <- .resolve_event_model_vars(
 		formulaEvent = formula_event,
@@ -693,7 +865,11 @@ pp_check.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, 
 	# to the incoming row order.
 	ord <- order(outcome$.__id, outcome$event_time, outcome$.__event_start)
 	outcome <- outcome[ord, , drop = FALSE]
-	outcome <- outcome[!duplicated(as.character(outcome$.__id), fromLast = TRUE), , drop = FALSE]
+	outcome <- outcome[
+		!duplicated(as.character(outcome$.__id), fromLast = TRUE),
+		,
+		drop = FALSE
+	]
 	decoded <- .derive_event_outcomes(outcome$event_status, context = context)
 	outcome$event_status <- decoded$d_event
 	outcome$event_type <- decoded$event_type
@@ -773,25 +949,35 @@ pp_check.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL, 
 #' @seealso [auc.JoiNMeFit()], [predict.JoiNMeFit()], [survival::concordance()]
 #' @importFrom survival Surv concordance
 #' @export
-concordance.JoiNMeFit <- function(object, newdataLong = NULL,
-								  newdataEvent = NULL, time_start = NULL,
-								  cause = 1,
-								  predict_control = list(n_samples = 200, n_pred_draws = 20),
-									seed = .Random.seed[[1]], 
-								  type_weights = "none", ...) {
-	assertthat::assert_that(
-		inherits(object, "JoiNMeFit"),
-		msg = "Object must be a JoiNMeFit instance."
-	)
-	
-	if (!is.numeric(cause) || length(cause) != 1L || !is.finite(cause) ||
-			cause < 1 || cause != as.integer(cause)) {
+concordance.JoiNMeFit <- function(
+	object,
+	newdataLong = NULL,
+	newdataEvent = NULL,
+	time_start = NULL,
+	cause = 1,
+	predict_control = list(n_samples = 200, n_pred_draws = 20),
+	seed = .Random.seed[[1]],
+	type_weights = "none",
+	...
+) {
+  
+  .warn_experimental("concordance")
+  
+	if (
+		!is.numeric(cause) ||
+			length(cause) != 1L ||
+			!is.finite(cause) ||
+			cause < 1 ||
+			cause != as.integer(cause)
+	) {
 		cli::cli_abort("{.arg cause} must be a single positive integer.")
 	}
 	.concordance_time_weight(type_weights)
 
 	data_in <- .resolve_train_data(
-		object, newdataLong, newdataEvent,
+		object,
+		newdataLong,
+		newdataEvent,
 		purpose = "conditional-survival concordance"
 	)
 	curves <- .concordance_survival_curves(
@@ -830,15 +1016,22 @@ concordance.JoiNMeFit <- function(object, newdataLong = NULL,
 #'   pre-outcome measurement receive `NA_real_`.
 #' @keywords internal
 #' @noRd
-.last_preoutcome_measurement <- function(ids, event_time, data_long,
-										 id_var, time_var) {
+.last_preoutcome_measurement <- function(
+	ids,
+	event_time,
+	data_long,
+	id_var,
+	time_var
+) {
 	id_keys <- as.character(ids)
 	event_map <- stats::setNames(as.numeric(event_time), id_keys)
 	long_keys <- as.character(data_long[[id_var]])
 	long_times <- as.numeric(data_long[[time_var]])
 	subject_end <- as.numeric(event_map[long_keys])
 	tolerance <- sqrt(.Machine$double.eps) * pmax(1, abs(subject_end))
-	keep <- !is.na(long_keys) & is.finite(long_times) & is.finite(subject_end) &
+	keep <- !is.na(long_keys) &
+		is.finite(long_times) &
+		is.finite(subject_end) &
 		long_times < subject_end - tolerance
 	if (!any(keep)) {
 		return(stats::setNames(rep(NA_real_, length(ids)), id_keys))
@@ -849,7 +1042,11 @@ concordance.JoiNMeFit <- function(object, newdataLong = NULL,
 		time = long_times[keep],
 		stringsAsFactors = FALSE
 	)
-	candidates <- candidates[order(candidates$id, candidates$time), , drop = FALSE]
+	candidates <- candidates[
+		order(candidates$id, candidates$time),
+		,
+		drop = FALSE
+	]
 	candidates <- candidates[
 		!duplicated(candidates$id, fromLast = TRUE),
 		,
@@ -871,8 +1068,11 @@ concordance.JoiNMeFit <- function(object, newdataLong = NULL,
 #'   a regular grid for stable curve interpolation.
 #' @keywords internal
 #' @noRd
-.concordance_prediction_grid <- function(landmark, residual_end,
-										 event_residuals) {
+.concordance_prediction_grid <- function(
+	landmark,
+	residual_end,
+	event_residuals
+) {
 	relevant_events <- event_residuals[
 		event_residuals >= 0 & event_residuals <= residual_end
 	]
@@ -895,14 +1095,25 @@ concordance.JoiNMeFit <- function(object, newdataLong = NULL,
 #'   whose columns follow the subject order in `outcomes`.
 #' @keywords internal
 #' @noRd
-.concordance_survival_curves <- function(object, newdataLong, newdataEvent,
-										 time_start, cause, predict_control,
-										 seed, ...) {
+.concordance_survival_curves <- function(
+	object,
+	newdataLong,
+	newdataEvent,
+	time_start,
+	cause,
+	predict_control,
+	seed,
+	...
+) {
 	id_var <- eval(object$call$id_var) %||% "id"
 	time_var <- eval(object$call$time_var) %||% "time"
-	if (!(id_var %in% names(newdataLong)) ||
-			!(time_var %in% names(newdataLong))) {
-		cli::cli_abort("{.arg newdataLong} must contain the fitted identifier and time columns.")
+	if (
+		!(id_var %in% names(newdataLong)) ||
+			!(time_var %in% names(newdataLong))
+	) {
+		cli::cli_abort(
+			"{.arg newdataLong} must contain the fitted identifier and time columns."
+		)
 	}
 
 	outcomes <- .subject_event_outcomes(
@@ -923,11 +1134,16 @@ concordance.JoiNMeFit <- function(object, newdataLong = NULL,
 		)
 	} else {
 		landmark <- .subject_time_map(
-			time_start, ids, newdataEvent, id_var, "time_start"
+			time_start,
+			ids,
+			newdataEvent,
+			id_var,
+			"time_start"
 		)
 	}
 
-	eligible <- is.finite(landmark) & is.finite(outcomes$event_time) &
+	eligible <- is.finite(landmark) &
+		is.finite(outcomes$event_time) &
 		outcomes$event_time > landmark
 	if (sum(eligible) < 2L) {
 		cli::cli_abort(c(
@@ -965,10 +1181,16 @@ concordance.JoiNMeFit <- function(object, newdataLong = NULL,
 		landmark <- landmark[has_history]
 		ids <- outcomes[[id_var]]
 		id_keys <- as.character(ids)
-		history <- history[as.character(history[[id_var]]) %in% id_keys, , drop = FALSE]
+		history <- history[
+			as.character(history[[id_var]]) %in% id_keys,
+			,
+			drop = FALSE
+		]
 	}
 	if (nrow(outcomes) < 2L || !any(outcomes$cause_event == 1L)) {
-		cli::cli_abort("Insufficient longitudinal histories remain for concordance estimation.")
+		cli::cli_abort(
+			"Insufficient longitudinal histories remain for concordance estimation."
+		)
 	}
 
 	event_residuals <- sort(unique(
@@ -998,7 +1220,9 @@ concordance.JoiNMeFit <- function(object, newdataLong = NULL,
 	)
 	survival_df <- prediction$predictions$survival
 	if (is.null(survival_df) || nrow(survival_df) == 0L) {
-		cli::cli_abort("No conditional survival predictions were returned for concordance.")
+		cli::cli_abort(
+			"No conditional survival predictions were returned for concordance."
+		)
 	}
 	survival_matrix <- .concordance_survival_matrix(
 		survival_df = survival_df,
@@ -1026,8 +1250,12 @@ concordance.JoiNMeFit <- function(object, newdataLong = NULL,
 #' @return Numeric matrix indexed by residual event time and subject.
 #' @keywords internal
 #' @noRd
-.concordance_survival_matrix <- function(survival_df, ids, landmark,
-										 event_residuals) {
+.concordance_survival_matrix <- function(
+	survival_df,
+	ids,
+	landmark,
+	event_residuals
+) {
 	required <- c("id", "time", "Survival")
 	if (!all(required %in% names(survival_df))) {
 		cli::cli_abort("Conditional survival predictions lack required columns.")
@@ -1102,17 +1330,22 @@ concordance.JoiNMeFit <- function(object, newdataLong = NULL,
 	# aligning the event.  This also keeps the method stable across survival
 	# releases that preserve or drop this dimension.
 	required_rank_columns <- c("time", "rank", "timewt", "casewt")
-	if (!all(required_rank_columns %in% names(ranks)) &&
-			all(required_rank_columns %in% rownames(ranks))) {
+	if (
+		!all(required_rank_columns %in% names(ranks)) &&
+			all(required_rank_columns %in% rownames(ranks))
+	) {
 		ranks <- as.data.frame(t(as.matrix(ranks)), stringsAsFactors = FALSE)
 	}
 	if (!all(c("time", "timewt") %in% names(ranks))) {
-		cli::cli_abort("The concordance weighting engine returned an unrecognised rank table.")
+		cli::cli_abort(
+			"The concordance weighting engine returned an unrecognised rank table."
+		)
 	}
 
 	event_rows <- suppressWarnings(as.integer(rownames(ranks)))
 	valid_rows <- is.finite(event_rows) &
-		event_rows >= 1L & event_rows <= nrow(outcomes)
+		event_rows >= 1L &
+		event_rows <= nrow(outcomes)
 	if (!all(valid_rows)) {
 		# When row names are unavailable, match only observed event rows.  A
 		# censoring observation may share the same time and must not receive the
@@ -1151,8 +1384,11 @@ concordance.JoiNMeFit <- function(object, newdataLong = NULL,
 #'   comparison counts.
 #' @keywords internal
 #' @noRd
-.concordance_from_survival_curves <- function(outcomes, survival,
-											  type_weights = "none") {
+.concordance_from_survival_curves <- function(
+	outcomes,
+	survival,
+	type_weights = "none"
+) {
 	required <- c("residual_time", "cause_event")
 	if (!all(required %in% names(outcomes))) {
 		cli::cli_abort("Concordance outcomes lack residual time or event status.")
@@ -1226,9 +1462,17 @@ concordance.JoiNMeFit <- function(object, newdataLong = NULL,
 #'   observed event or censoring outcome.
 #' @keywords internal
 #' @noRd
-.dynamic_discrimination_risk_set <- function(object, newdataLong, newdataEvent,
-												 time_start, time_horizon, cause,
-												 n_samples, seed, ...) {
+.dynamic_discrimination_risk_set <- function(
+	object,
+	newdataLong,
+	newdataEvent,
+	time_start,
+	time_horizon,
+	cause,
+	n_samples,
+	seed,
+	...
+) {
 	id_var <- eval(object$call$id_var) %||% "id"
 	time_var <- eval(object$call$time_var) %||% "time"
 	event_df <- .subject_event_outcomes(
@@ -1240,13 +1484,23 @@ concordance.JoiNMeFit <- function(object, newdataLong = NULL,
 	ids <- event_df[[id_var]]
 	id_keys <- as.character(ids)
 	time_start_map <- .subject_time_map(
-		time_start, ids, newdataEvent, id_var, "time_start"
+		time_start,
+		ids,
+		newdataEvent,
+		id_var,
+		"time_start"
 	)
 	time_horizon_map <- .subject_time_map(
-		time_horizon, ids, newdataEvent, id_var, "time_horizon"
+		time_horizon,
+		ids,
+		newdataEvent,
+		id_var,
+		"time_horizon"
 	)
 	if (any(time_horizon_map <= time_start_map)) {
-		cli::cli_abort("{.arg time_horizon} must be greater than {.arg time_start} for every subject.")
+		cli::cli_abort(
+			"{.arg time_horizon} must be greater than {.arg time_start} for every subject."
+		)
 	}
 
 	# A direct indexed comparison avoids constructing and recombining one data
@@ -1259,7 +1513,9 @@ concordance.JoiNMeFit <- function(object, newdataLong = NULL,
 		newdataLong[[time_var]] <= long_landmark
 	newdataLong <- newdataLong[keep_history, , drop = FALSE]
 	if (nrow(newdataLong) == 0L) {
-		cli::cli_abort("No longitudinal history is available at or before the landmark time(s).")
+		cli::cli_abort(
+			"No longitudinal history is available at or before the landmark time(s)."
+		)
 	}
 
 	# Fifty points preserve the established prediction behaviour and include the
@@ -1285,7 +1541,9 @@ concordance.JoiNMeFit <- function(object, newdataLong = NULL,
 	)
 	surv_df <- pred$predictions$survival
 	if (is.null(surv_df) || nrow(surv_df) == 0L) {
-		cli::cli_abort("No survival predictions were returned for time-varying discrimination.")
+		cli::cli_abort(
+			"No survival predictions were returned for time-varying discrimination."
+		)
 	}
 
 	# Match each prediction row to its requested subject-specific horizon.  The
@@ -1294,12 +1552,15 @@ concordance.JoiNMeFit <- function(object, newdataLong = NULL,
 	pred_keys <- as.character(surv_df$id)
 	pred_horizon <- as.numeric(time_horizon_map[pred_keys])
 	tolerance <- sqrt(.Machine$double.eps) * pmax(1, abs(pred_horizon))
-	at_horizon <- is.finite(pred_horizon) & is.finite(surv_df$time) &
+	at_horizon <- is.finite(pred_horizon) &
+		is.finite(surv_df$time) &
 		abs(surv_df$time - pred_horizon) <= tolerance
 	surv_horizon <- surv_df[at_horizon, , drop = FALSE]
 	pred_index <- match(id_keys, as.character(surv_horizon$id))
 	if (all(is.na(pred_index))) {
-		cli::cli_abort("Failed to align survival predictions at the requested horizon.")
+		cli::cli_abort(
+			"Failed to align survival predictions at the requested horizon."
+		)
 	}
 
 	risk_set <- event_df
@@ -1436,18 +1697,43 @@ auc <- function(object, ...) {
 #' explicitly and the returned counts make the resulting comparison set clear.
 #'
 #' @export
-auc.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL,
-						  time_start = 0, time_horizon = NULL, Dt = NULL, cause = 1,
-						  n_samples = 200, seed = 123, ...) {
-	assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
-	if (!is.numeric(time_start) || !length(time_start) || any(!is.finite(time_start))) {
-		cli::cli_abort("{.arg time_start} must be a finite numeric value or vector.")
+auc.JoiNMeFit <- function(
+	object,
+	newdataLong = NULL,
+	newdataEvent = NULL,
+	time_start = 0,
+	time_horizon = NULL,
+	Dt = NULL,
+	cause = 1,
+	n_samples = 200,
+	seed = 123,
+	...
+) {
+	.warn_experimental("auc")
+	if (
+		!is.numeric(time_start) ||
+			!length(time_start) ||
+			any(!is.finite(time_start))
+	) {
+		cli::cli_abort(
+			"{.arg time_start} must be a finite numeric value or vector."
+		)
 	}
-	if (!is.numeric(cause) || length(cause) != 1L || !is.finite(cause) ||
-			cause < 1 || cause != as.integer(cause)) {
+	if (
+		!is.numeric(cause) ||
+			length(cause) != 1L ||
+			!is.finite(cause) ||
+			cause < 1 ||
+			cause != as.integer(cause)
+	) {
 		cli::cli_abort("{.arg cause} must be a single positive integer.")
 	}
-	data_in <- .resolve_train_data(object, newdataLong, newdataEvent, purpose = "time-dependent AUC")
+	data_in <- .resolve_train_data(
+		object,
+		newdataLong,
+		newdataEvent,
+		purpose = "time-dependent AUC"
+	)
 	if (is.null(time_horizon)) {
 		if (is.null(Dt)) {
 			time_horizon <- rep(
@@ -1461,16 +1747,23 @@ auc.JoiNMeFit <- function(object, newdataLong = NULL, newdataEvent = NULL,
 			time_horizon <- time_start + Dt
 		}
 	} else {
-		if (!is.numeric(time_horizon) || any(!is.finite(time_horizon)) ||
-				!(length(time_horizon) %in% c(1L, length(time_start)))) {
-			cli::cli_abort("{.arg time_horizon} must be finite and have length one or length(time_start).")
+		if (
+			!is.numeric(time_horizon) ||
+				any(!is.finite(time_horizon)) ||
+				!(length(time_horizon) %in% c(1L, length(time_start)))
+		) {
+			cli::cli_abort(
+				"{.arg time_horizon} must be finite and have length one or length(time_start)."
+			)
 		}
 		if (length(time_horizon) == 1L) {
 			time_horizon <- rep(time_horizon, length(time_start))
 		}
 	}
 	if (any(time_horizon <= time_start)) {
-		cli::cli_abort("Every {.arg time_horizon} must be greater than its landmark time.")
+		cli::cli_abort(
+			"Every {.arg time_horizon} must be greater than its landmark time."
+		)
 	}
 
 	rows <- lapply(seq_along(time_start), function(i) {
@@ -1516,23 +1809,43 @@ AUC <- auc
 #'
 #' @return A data frame of diagnostics by parameter.
 #' @export
-stan_rhat.JoiNMeFit <- function(object, pars = NULL, regex_pars = NULL, draws = NULL, seed = 1, ...) {
-	assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
+stan_rhat.JoiNMeFit <- function(
+	object,
+	pars = NULL,
+	regex_pars = NULL,
+	draws = NULL,
+	seed = 1,
+	...
+) {
+	
 	draws_obj <- draws(object, format = "draws_array")
 	vars <- posterior::variables(draws_obj)
 	vars <- .filter_diag_vars(vars, pars, regex_pars)
 	if (length(vars) == 0) {
 		return(data.frame(variable = character(0), rhat = numeric(0)))
 	}
-	draws_obj <- draws(object, variables = vars, draws = draws, seed = seed, format = "draws_array")
+	draws_obj <- draws(
+		object,
+		variables = vars,
+		draws = draws,
+		seed = seed,
+		format = "draws_array"
+	)
 	.diag_summary_df(draws_obj, metric = "rhat", vars = vars)
 }
 
 #' @rdname stan_diagnostics.JoiNMeFit
 #' @export
-stan_ess.JoiNMeFit <- function(object, pars = NULL, regex_pars = NULL, draws = NULL, seed = 1,
-                               type = c("bulk", "tail"), ...) {
-	assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
+stan_ess.JoiNMeFit <- function(
+	object,
+	pars = NULL,
+	regex_pars = NULL,
+	draws = NULL,
+	seed = 1,
+	type = c("bulk", "tail"),
+	...
+) {
+	
 	type <- match.arg(type)
 	draws_obj <- draws(object, format = "draws_array")
 	vars <- posterior::variables(draws_obj)
@@ -1540,7 +1853,13 @@ stan_ess.JoiNMeFit <- function(object, pars = NULL, regex_pars = NULL, draws = N
 	if (length(vars) == 0) {
 		return(data.frame(variable = character(0), ess = numeric(0)))
 	}
-	draws_obj <- draws(object, variables = vars, draws = draws, seed = seed, format = "draws_array")
+	draws_obj <- draws(
+		object,
+		variables = vars,
+		draws = draws,
+		seed = seed,
+		format = "draws_array"
+	)
 	metric_name <- if (type == "bulk") "ess_bulk" else "ess_tail"
 	metric_df <- .diag_summary_df(draws_obj, metric = metric_name, vars = vars)
 	names(metric_df)[2] <- "ess"
@@ -1549,9 +1868,16 @@ stan_ess.JoiNMeFit <- function(object, pars = NULL, regex_pars = NULL, draws = N
 
 #' @rdname stan_diagnostics.JoiNMeFit
 #' @export
-stan_mcse.JoiNMeFit <- function(object, pars = NULL, regex_pars = NULL, draws = NULL, seed = 1,
-                                type = c("mean", "sd", "median"), ...) {
-	assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
+stan_mcse.JoiNMeFit <- function(
+	object,
+	pars = NULL,
+	regex_pars = NULL,
+	draws = NULL,
+	seed = 1,
+	type = c("mean", "sd", "median"),
+	...
+) {
+	
 	type <- match.arg(type)
 	draws_obj <- draws(object, format = "draws_array")
 	vars <- posterior::variables(draws_obj)
@@ -1559,8 +1885,15 @@ stan_mcse.JoiNMeFit <- function(object, pars = NULL, regex_pars = NULL, draws = 
 	if (length(vars) == 0) {
 		return(data.frame(variable = character(0), mcse = numeric(0)))
 	}
-	draws_obj <- draws(object, variables = vars, draws = draws, seed = seed, format = "draws_array")
-	metric_name <- switch(type,
+	draws_obj <- draws(
+		object,
+		variables = vars,
+		draws = draws,
+		seed = seed,
+		format = "draws_array"
+	)
+	metric_name <- switch(
+		type,
 		mean = "mcse_mean",
 		sd = "mcse_sd",
 		median = "mcse_median"
@@ -1581,19 +1914,33 @@ stan_mcse.JoiNMeFit <- function(object, pars = NULL, regex_pars = NULL, draws = 
 	if (is.null(metric_df) || !all(c("variable", metric) %in% names(metric_df))) {
 		cli::cli_abort("Failed to summarise posterior diagnostics for plotting.")
 	}
-	metric_df <- as.data.frame(metric_df[, c("variable", metric), drop = FALSE], row.names = NULL, stringsAsFactors = FALSE)
+	metric_df <- as.data.frame(
+		metric_df[, c("variable", metric), drop = FALSE],
+		row.names = NULL,
+		stringsAsFactors = FALSE
+	)
 	if (nrow(metric_df) == 0L) {
-		out <- data.frame(variable = character(0), value = numeric(0), row.names = NULL)
+		out <- data.frame(
+			variable = character(0),
+			value = numeric(0),
+			row.names = NULL
+		)
 		names(out)[2] <- metric
 		return(out)
 	}
 	if (!is.null(vars)) {
 		metric_df <- metric_df[match(vars, metric_df$variable), , drop = FALSE]
 		if (nrow(metric_df) != length(vars) || anyNA(metric_df$variable)) {
-			cli::cli_abort("Posterior diagnostic output does not align with selected parameters.")
+			cli::cli_abort(
+				"Posterior diagnostic output does not align with selected parameters."
+			)
 		}
 	}
-	out <- data.frame(variable = metric_df$variable, value = metric_df[[metric]], row.names = NULL)
+	out <- data.frame(
+		variable = metric_df$variable,
+		value = metric_df[[metric]],
+		row.names = NULL
+	)
 	names(out)[2] <- metric
 	out
 }

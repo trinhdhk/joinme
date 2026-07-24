@@ -2621,3 +2621,13 @@ gk_quadrature <- function(nodes = 15L) {
     eval(expr, envir = parent.frame())
   }
 }
+
+#' Experimental feature warning
+#' @keywords internal
+#' @noRd
+.warn_experimental <- function(feature_name) {
+  cli::cli_warn(c(
+    x = "The feature {.val {feature_name}} is experimental and may not be correct.",
+    i = "Use with caution and report any issues on Github repository."
+  ))
+}

@@ -20,7 +20,7 @@
 #' @method vcov JoiNMeFit
 #' @export
 vcov.JoiNMeFit <- function(object, what = NULL, draws = NULL, ...) {
-  assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
+ 
   fit <- object$fit
   sd <- object$stan_data
   if (is.null(draws)) draws <- object$config$draws_default
@@ -208,7 +208,6 @@ vcov.JoiNMeFit <- function(object, what = NULL, draws = NULL, ...) {
 #' @method vcov JoiNMeDynPred
 #' @export
 vcov.JoiNMeDynPred <- function(object, ...) {
-    assertthat::assert_that(inherits(object, "JoiNMeDynPred"), msg = "Object must be a JoiNMeDynPred instance.")
 
     if (!isTRUE(object$metadata$marker_corr_depends_on_id)) {
         cli::cli_abort(c(

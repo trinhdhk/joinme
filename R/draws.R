@@ -318,7 +318,7 @@ draws <- function(object, ...) {
 draws.JoiNMeFit <- function(object, variables = NULL, regex = FALSE, draws = NULL, seed = 1,
                             what = c("all", "basehaz", "baseline_hazard"),
                             format = c("draws_array", "draws_matrix", "draws_df"), ...) {
-  assertthat::assert_that(inherits(object, "JoiNMeFit"), msg = "Object must be a JoiNMeFit instance.")
+  
   what <- match.arg(what)
 
   if (!identical(what, "all")) {
@@ -348,7 +348,7 @@ draws.JoiNMeFit <- function(object, variables = NULL, regex = FALSE, draws = NUL
 #' @export
 draws.JoiNMeDynPred <- function(object, variables = NULL, regex = FALSE, draws = NULL, seed = 1,
                                 format = c("draws_array", "draws_matrix", "draws_df"), ...) {
-  assertthat::assert_that(inherits(object, "JoiNMeDynPred"), msg = "Object must be a JoiNMeDynPred instance.")
+  
   draw_array <- .dynpred_cached_draws_array(object)
   draw_array <- .subset_draws(draw_array, variables = variables, regex = regex, draws = draws, seed = seed)
   .format_draws(draw_array, format = format)
