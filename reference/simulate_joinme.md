@@ -37,7 +37,7 @@ simulate_joinme(
   left_truncation_max = 0,
   truncate_longitudinal_before_entry = TRUE,
   ...,
-  seed = 42,
+  seed = .Random.seed[[1]],
   covariate_formulas = list(x1 ~ rnorm(n_id), x2 ~ rnorm(n_id)),
   marker_weights = NULL,
   shared_marker_weights = TRUE,
@@ -139,7 +139,8 @@ simulate_joinme(
   semantics). Functional transforms support arithmetic and common
   nonlinear functions, including `inv_logit`/`expit`/`sigmoid`, `exp`,
   `log`, `sqrt`, `power`, `cbrt`, `softplus`/`log1p_exp`, trigonometric
-  and hyperbolic functions.
+  and hyperbolic functions, the standard normal CDF (`Phi`, `pnorm`),
+  and the standard normal quantile (`inv_Phi`, `qnorm`, `probit`).
 
   Quick parameterisation reference:
 
@@ -164,7 +165,10 @@ simulate_joinme(
     penalised monotone I-spline on `plogis(x)` in legacy plug-in mode.
 
   - `list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))`:
-    piecewise-linear transform; `x` and `y` are required.
+    piecewise-linear transform; `x` and `y` are required. Simulation
+    deliberately treats these as fixed interpolation pairs. This differs
+    from model fitting, where knot ordinates are estimated as an ordered
+    simplex construction and `y` no longer fixes the curve.
 
   For monotone spline transforms during simulation:
 
@@ -196,7 +200,14 @@ simulate_joinme(
 
 - families:
 
-  Family specification input (vector or list).
+  Marker-specific family names. Use
+  [`jm_family()`](https://trinhdhk.github.io/joinme/reference/joinme_family.md)
+  entries to supply custom `link`/`inv_link` expressions. A named probit
+  link applies `Phi` as its inverse link. In formula expressions,
+  `Phi`/`pnorm` are the standard normal CDF and
+  `inv_Phi`/`qnorm`/`probit` are the standard normal quantile.
+  Simulation evaluates the same bytecode instructions as fitting and
+  prediction.
 
 - marker_levels:
 
@@ -515,10 +526,6 @@ simulate_joinme(
 
   Parsed inverse-link bytecode.
 
-- D:
-
-  Number of markers.
-
 ## Value
 
 A list containing `dataLong`, `dataEvent`, `truth` (also available as
@@ -534,9 +541,6 @@ posterior output names.
 List of results.
 
 Numeric vector on response scale.
-
-List with family codes, link names, and inverse-link bytecode per
-marker.
 
 ## Examples
 

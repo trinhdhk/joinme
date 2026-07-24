@@ -47,9 +47,28 @@ Accepted specifications include:
 
 ### 2.1 Family-specific links (new)
 
-Longitudinal families can now carry per-marker inverse-links with
-`jm_family(...)`. This affects both `epred` and `predict` scales in
-dynamic prediction.
+Longitudinal families can carry per-marker links with `jm_family(...)`.
+A character or formula supplied to `link` defines the forward link and
+JoiNMe compiles its algebraic inverse; `inv_link` directly defines the
+inverse link. Thus `link = "log"` and `link = ~ log(x)` both apply
+`exp(eta)` on the response scale. This affects both `epred` and
+`predict` scales in dynamic prediction.
+
+For a probit model, the forward link is the standard normal quantile,
+(g()=^{-1}()), and the inverse link is the standard normal CDF,
+(g^{-1}()=()). Formula names follow these mathematical directions:
+`inv_Phi(x)`, `qnorm(x)`, and `probit(x)` are quantile expressions,
+whereas `Phi(x)` and `pnorm(x)` are CDF expressions. Consequently the
+following three declarations describe the same family:
+
+Code
+
+``` r
+
+jm_family("bernoulli", link = "probit")
+jm_family("bernoulli", link = ~ inv_Phi(x))
+jm_family("bernoulli", inv_link = ~ Phi(x))
+```
 
 Code
 
@@ -58,7 +77,7 @@ Code
 families_linked <- list(
   jm_family("student_t", link = "identity"),
   jm_family("bernoulli", link = "probit"),
-  jm_family("poisson", inv_link = ~ exp(x))
+  jm_family("poisson", link = ~ log(x))
 )
 
 fit_linked <- joinme(
@@ -102,7 +121,8 @@ sim <- simulate_joinme(
 # Gauss-Kronrod nodes/weights are fixed in Stan; `quadrature_nodes` selects
 # the node count used to build the design matrices in R.
 
-# Custom inverse-links can be supplied via jm_family(..., inv_link = ~ ...).
+# Formula links are inverted symbolically; custom inverse-links can be supplied
+# directly via jm_family(..., inv_link = ~ ...).
 
 # When estimating marker weights, compare against sim$truth$marker_weights
 # because weights are used directly in Stan.
@@ -154,8 +174,8 @@ fit <- joinme(
 
 To customise priors or the baseline hazard basis, supply
 `priors = joinme_priors(...)` and/or forward standata arguments via
-`...`. Distributional regression for parameters such as $`\sigma`$ or
-$`\nu`$ can be specified through `formulaDist`.
+`...`. Distributional regression for parameters such as \sigma or \nu
+can be specified through `formulaDist`.
 
 Code
 
@@ -321,8 +341,8 @@ another available scale) to choose which trajectory scale to visualise.
 
 Dynamic prediction is conditional on observed history up to `time_start`
 and (by construction) survival up to that landmark; the survival plot
-corresponds to
-$`\Pr(T > t \mid T > T_{start}, \mathcal{H}(T_{start}))`$.
+corresponds to \Pr(T \> t \mid T \> T\_{start},
+\mathcal{H}(T\_{start})).
 
 `control$n_samples` controls how many posterior parameter draws are
 extracted from the fitted model, while `control$n_pred_draws` controls
@@ -616,9 +636,9 @@ transforms <- joinme_tf(
 ### 5.1 Optional: distributional regression
 
 If a marker family supports additional parameters, you can model these
-via `formulaDist`. `nu` denotes Student-$`t`$ degrees of freedom,
-`kappa` denotes the positive Beta sample size (with shapes $`\mu\kappa`$
-and $`(1-\mu)\kappa`$), and `tau` denotes the skew-double-exponential
+via `formulaDist`. `nu` denotes Student-t degrees of freedom, `kappa`
+denotes the positive Beta sample size (with shapes \mu\kappa and
+(1-\mu)\kappa), and `tau` denotes the skew-double-exponential
 quantile/asymmetry parameter. For example, the following model allows a
 heteroscedastic longitudinal scale:
 

@@ -22,8 +22,8 @@ spec_cv <- list(
 # Example 2: Piecewise-linear
 spec_cs <- list(
   type = "pwlin",
-  x = c(-2, -1, 0, 1, 2),
-  y = c(0.1, 0.3, 1.0, 0.3, 0.1)  # smooth bump
+  knots = c(-2, -1, 0, 1, 2),
+  direction = "increasing"
 )
 
 # Example 3: I-spline (monotonic)
@@ -78,6 +78,5 @@ transforms <- joinme_tf(
   cs_total = spec_cs,
   corr = spec_corr
 )
-standata_tf <- build_standata_transforms(transforms)
-#> Error in build_standata_transforms(transforms): could not find function "build_standata_transforms"
+standata_tf <- joinme:::build_standata_transforms(transforms)
 ```

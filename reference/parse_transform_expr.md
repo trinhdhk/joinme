@@ -18,7 +18,7 @@ Supported operations:
   acosh, atanh
 
 - Common links: inv_logit (softmax, SoftMax), logit, sigmoid, expit,
-  softplus (log1p_exp)
+  softplus (log1p_exp), `Phi`/`pnorm`, and `inv_Phi`/`qnorm`/`probit`
 
 - Reciprocal: 1/x or rec(x)
 
@@ -35,6 +35,12 @@ parse_transform_expr(expr, iota_nodes = NULL)
   A formula (e.g. `~ x + 2`), quosure, quoted expression, or character
   string to parse.
 
+- iota_nodes:
+
+  Optional internal description of transformation-specific affine
+  shifts. Each declared node identifies whether an intercept, slope, or
+  both are estimated for one nonlinear operation.
+
 ## Details
 
 Provides R utilities to parse user-friendly transformation expressions
@@ -43,9 +49,12 @@ evaluator.
 
 ## Note
 
-Functional bytecode is a vector of operation codes (0-25) paired with a
+Functional bytecode is a vector of operation codes (0-27) paired with a
 vector of constant values. Constants are embedded using PUSH_CONST
-operations.
+operations. `Phi` denotes the standard normal cumulative distribution
+function, whereas `inv_Phi` and `probit` denote its quantile function.
+They are deliberately assigned different instructions because their
+domains and ranges differ.
 
 ## Functional Bytecode Reference
 
@@ -155,7 +164,11 @@ operations.
 
 - 26:
 
-  PROBIT: Pop a; push Phi(a)
+  PHI: Pop a; push the standard normal CDF \\\Phi(a)\\
+
+- 27:
+
+  INV_PHI: Pop a; push the standard normal quantile \\\Phi^{-1}(a)\\
 
 ## Examples
 
@@ -169,4 +182,8 @@ bc <- parse_transform_expr(~ log(x + 1))
 
 # Complex: f(x) = (log(sqrt(x + 1/inv_logit(3*x - 3))))^2
 bc <- parse_transform_expr(~ (log(sqrt(x + 1/inv_logit(3*x - 3))))^2)
+
+# The normal CDF and its quantile use separate instructions
+phi_bc <- parse_transform_expr(~ Phi(x))
+probit_bc <- parse_transform_expr(~ inv_Phi(x))
 ```

@@ -57,13 +57,17 @@ tf <- joinme_tf(
   cv_total = "identity",
   corr = ~ -x,
   vcov = "identity",
-  cv_marker = list(type = "pwlin", x = c(-1, 0, 1), y = c(0.2, 1, 0.2))
+  cv_marker = list(
+    type = "pwlin",
+    knots = c(-1, 0, 1),
+    direction = "increasing"
+  )
 )
 print(tf)
 #> Transformation specification for Joint Mixed Effects model
-#>    channel    specification
-#>   cv_total         identity
-#>       corr functional (~-x)
-#>       vcov         identity
-#>  cv_marker  pwlin, points=3
+#>    channel              specification
+#>   cv_total                   identity
+#>       corr           functional (~-x)
+#>       vcov                   identity
+#>  cv_marker pwlin, knots=3, increasing
 ```

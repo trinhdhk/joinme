@@ -10,7 +10,7 @@ simulate_joinme_joint_student_t_cvtotal(
   n_id = 50,
   D = 10,
   n_t = 10,
-  seed = 42,
+  seed = .Random.seed[[1]],
   include_marker_only = TRUE,
   Q_idm = 2,
   R_id = 2,

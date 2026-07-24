@@ -36,6 +36,13 @@ log_lik(object, what = c("long", "surv", "total"), draws = NULL, seed = 1, ...)
 
 A matrix
 
+## Details
+
+The stored pointwise likelihood is evaluated by Stan with the full
+fitted association contribution. This includes the posterior ordinates
+of every ordered piecewise-linear transform; legacy `y` values are not
+used.
+
 ## See also
 
 [`log_lik()`](https://mc-stan.org/rstantools/reference/log_lik.html)

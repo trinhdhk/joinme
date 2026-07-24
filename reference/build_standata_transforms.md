@@ -6,7 +6,7 @@ Transform can be specified in four modes:
 
 - Mode 1: Functional (arbitrary nested functions via parser)
 
-- Mode 2: I-spline basis (monotonic, smooth)
+- Mode 2: I-spline basis (monotonic spline)
 
 - Mode 2 (penalised): I-spline coefficients estimated with smoothness
   penalty
@@ -14,7 +14,9 @@ Transform can be specified in four modes:
 - Mode 4: I-spline basis evaluated on `expit(x)` for a bounded,
   numerically stable spline input domain
 
-- Mode 3: Piecewise-linear (user-defined interpolation)
+- Mode 3: Increasing ordered piecewise-linear association
+
+- Mode 7: Decreasing ordered piecewise-linear association
 
 Each transformation term (CV_total, CS_total, CV_mean, CS_mean,
 CV_marker, CS_marker, corr, vcov) can have its own independent
@@ -45,6 +47,16 @@ build_standata_transforms(
 - default_mode:
 
   Default transformation mode if not specified.
+
+- n_corr_components:
+
+  Optional non-negative number of correlation components. It determines
+  the row count of component-specific coefficient matrices.
+
+- n_vcov_components:
+
+  Optional non-negative number of covariance components. It determines
+  the row count of component-specific coefficient matrices.
 
 ## Value
 
@@ -98,7 +110,8 @@ Each element of transform_list should be a list with:
     explicit `knots` for these transform types must therefore already be
     specified on the expit scale in `[0, 1]`.
 
-  - pwlin: x (vector), y (vector)
+  - pwlin: knots (or cutpoints/x) and direction; legacy y is accepted
+    but does not determine the fitted ordinates
 
 Defaults and minimal examples:
 
@@ -126,7 +139,7 @@ Defaults and minimal examples:
   `list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), n_knots = 6, degree = 3, lambda = 1)`
 
 - pwlin:
-  `list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))`
+  `list(type = "pwlin", knots = c(-2, -1, 0, 1, 2), direction = "increasing")`
 
 Default values used internally:
 
@@ -137,8 +150,9 @@ Default values used internally:
 - `ispline_penalised`: `n_knots = 6`, `degree = 3`, `lambda = 1` if
   omitted,
 
-- `pwlin` and `functional`: no additional defaults beyond their required
-  fields.
+- `pwlin`: `direction = "increasing"` if omitted,
+
+- `functional`: no additional defaults beyond its required fields.
 
 For `ispline_expit*` declarations, the internal spline basis lives on
 the bounded interval \$(0, 1)\$ after applying

@@ -27,6 +27,8 @@ penalised_ispline_transform(
   weights = NULL,
   diff_order = 2
 )
+
+penalized_ispline_transform(...)
 ```
 
 ## Arguments
@@ -72,6 +74,10 @@ penalised_ispline_transform(
 - diff_order:
 
   Integer difference order for penalty (default 2).
+
+- ...:
+
+  Arguments passed to `penalised_ispline_transform()`.
 
 ## Value
 

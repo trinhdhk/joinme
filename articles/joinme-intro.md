@@ -1,4 +1,4 @@
-# Introduction to JoiNMe
+# Introduction to Joint Nested Mixed Effects Models
 
 ## Installation
 
@@ -29,15 +29,15 @@ The `JoiNMe` model links two components:
 1.  A multivariate longitudinal model for repeated biomarker
     measurements.
 2.  A survival model whose hazard depends on summaries of the
-    longitudinal process at time $`t`$.
+    longitudinal process at time t.
 
 For the longitudinal part, each marker can follow its own distribution
-(Gaussian, Student-$`t`$, Poisson, negative binomial, Bernoulli, beta,
-skew families, or ordinal). The linear predictor is decomposed into
-fixed effects, subject-level random effects, marker-level random
-effects, and optional marker-by-subject random effects. The survival
-part uses a proportional hazards model with a flexible spline baseline
-hazard and time-dependent association terms.
+(Gaussian, Student-t, Poisson, negative binomial, Bernoulli, beta, skew
+families, or ordinal). The linear predictor is decomposed into fixed
+effects, subject-level random effects, marker-level random effects, and
+optional marker-by-subject random effects. The survival part uses a
+proportional hazards model with a flexible spline baseline hazard and
+time-dependent association terms.
 
 The association terms implemented in `joinme` package are:
 
@@ -49,9 +49,8 @@ The association terms implemented in `joinme` package are:
   marker-by-subject Cholesky-factor entries taken directly from `L`.
 
 Each association term can be left on its original scale or transformed
-using a functional expression, a monotone I-spline, or a piecewise
-linear mapping. These transformations are configured in R and passed to
-Stan as data so that the likelihood remains fully deterministic.
+using a functional expression, a monotone I-spline, or an ordered
+piecewise-linear mapping.
 
 ## Family-shared distributional semantics
 
@@ -109,8 +108,8 @@ You need two data frames:
 - `dataEvent`: one row per subject with event/censoring time, event
   indicator, and baseline covariates.
 
-Time is internally scaled to $`[0, 1]`$ for numerical stability. The
-model returns coefficients on the original time scale.
+Time is internally scaled to \[0, 1\] for numerical stability. The model
+returns coefficients on the original time scale.
 
 ### Step 1: Load packages and set a reproducible seed
 
@@ -277,16 +276,16 @@ summary(fit) # or posterior_summary(fit)fixef(fit)
 
     Baseline hazard coefficients
     # A tibble: 8 × 11
-      term    Estimate Hazard.Ratio Est.Error   Q2.5  Q97.5 HR.Q2.5 HR.Q97.5  Rhat
-      <chr>      <dbl>        <dbl>     <dbl>  <dbl>  <dbl>   <dbl>    <dbl> <dbl>
-    1 basis_1   -7.70         0         3.01  -13.9  -2.23    0        0.107 0.999
-    2 basis_2   -0.949        0.387     1.13   -3.34  0.989   0.036    2.69  0.999
-    3 basis_3   -0.672        0.511     0.935  -2.88  0.874   0.056    2.40  1.00
-    4 basis_4   -0.394        0.674     0.86   -2.13  1.14    0.119    3.13  0.999
-    5 basis_5   -0.111        0.895     0.83   -1.89  1.38    0.151    3.96  1.00
-    6 basis_6    0.218        1.24      0.839  -1.55  1.70    0.212    5.48  1.00
-    7 basis_7    0.548        1.73      0.929  -1.26  2.24    0.285    9.41  1.00
-    8 basis_8    0.894        2.44      1.17   -1.16  3.22    0.314   25.0   1.02
+      term  Estimate Hazard.Ratio Est.Error   Q2.5  Q97.5 HR.Q2.5 HR.Q97.5  Rhat
+      <chr>    <dbl>        <dbl>     <dbl>  <dbl>  <dbl>   <dbl>    <dbl> <dbl>
+    1 1       -7.70         0         3.01  -13.9  -2.23    0        0.107 0.999
+    2 2       -0.949        0.387     1.13   -3.34  0.989   0.036    2.69  0.999
+    3 3       -0.672        0.511     0.935  -2.88  0.874   0.056    2.40  1.00
+    4 4       -0.394        0.674     0.86   -2.13  1.14    0.119    3.13  0.999
+    5 5       -0.111        0.895     0.83   -1.89  1.38    0.151    3.96  1.00
+    6 6        0.218        1.24      0.839  -1.55  1.70    0.212    5.48  1.00
+    7 7        0.548        1.73      0.929  -1.26  2.24    0.285    9.41  1.00
+    8 8        0.894        2.44      1.17   -1.16  3.22    0.314   25.0   1.02
       ess_bulk ess_tail
          <dbl>    <dbl>
     1    468.     313.
@@ -711,14 +710,14 @@ diagnosis(fit)
      1 fixef            <NA>       (Intercept)           (Intercept)
      2 fixef            <NA>       time                  time
      3 fixef            <NA>       x1                    x1
-     4 baseline_hazard  <NA>       basis_1               basis_1
-     5 baseline_hazard  <NA>       basis_2               basis_2
-     6 baseline_hazard  <NA>       basis_3               basis_3
-     7 baseline_hazard  <NA>       basis_4               basis_4
-     8 baseline_hazard  <NA>       basis_5               basis_5
-     9 baseline_hazard  <NA>       basis_6               basis_6
-    10 baseline_hazard  <NA>       basis_7               basis_7
-    11 baseline_hazard  <NA>       basis_8               basis_8
+     4 baseline_hazard  <NA>       1                     1
+     5 baseline_hazard  <NA>       2                     2
+     6 baseline_hazard  <NA>       3                     3
+     7 baseline_hazard  <NA>       4                     4
+     8 baseline_hazard  <NA>       5                     5
+     9 baseline_hazard  <NA>       6                     6
+    10 baseline_hazard  <NA>       7                     7
+    11 baseline_hazard  <NA>       8                     8
     12 survival_process <NA>       x1                    x1
     13 survival_process <NA>       x2                    x2
     14 assoc            <NA>       cv_total              cv_total

@@ -1,8 +1,7 @@
 # Update a JoiNMe fit
 
 Refits a JoiNMe model using the stored call, with optional updates to
-formulas, data, and control arguments. This mirrors the pattern used by
-brms::update.
+formulas, data, and control arguments.
 
 ## Usage
 
@@ -21,6 +20,7 @@ update(
   families = NULL,
   transforms = NULL,
   priors = NULL,
+  .env = NULL,
   ...
 )
 ```
@@ -77,6 +77,12 @@ update(
 
   Optional updated priors list.
 
+- .env:
+
+  Optional environment for evaluating the updated call. If NULL, the
+  parent frame is used. When failed, the environment of the original
+  formulaLong is used.
+
 - ...:
 
   Additional arguments passed to
@@ -85,3 +91,7 @@ update(
 ## Value
 
 A refitted JoiNMe object.
+
+## See also
+
+[`update()`](https://rdrr.io/r/stats/update.html)

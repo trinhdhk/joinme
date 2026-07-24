@@ -38,7 +38,7 @@ joinme_standata(
   quadrature_nodes = NULL,
   vcov_diag_link = c("softplus", "exp"),
   tau_fixed = NULL,
-  seed = NULL
+  seed = .Random.seed[[1]]
 )
 ```
 
@@ -144,8 +144,14 @@ joinme_standata(
 
   Optional marker-specific family specification. Can be character family
   names or `jm_family(...)` entries with per-marker links. If NULL, all
-  markers use Gaussian responses with identity link. Supported
-  links/inverse-links: `identity`, `log`, `logit`, `probit`, `exp`.
+  markers use Gaussian responses with identity link. Supported named
+  forward links are `identity`, `log`, `logit`, `probit`, and `exp`;
+  [`jm_family()`](https://trinhdhk.github.io/joinme/reference/joinme_family.md)
+  also accepts an invertible formula link or a directly specified
+  inverse-link formula. In formula syntax, `inv_Phi`/`qnorm`/`probit`
+  denote the standard normal quantile and `Phi`/`pnorm` denote the
+  standard normal CDF. Thus a probit forward link is inverted to `Phi`
+  before Stan data are constructed.
 
 - transforms:
 
@@ -157,7 +163,12 @@ joinme_standata(
   `K` features (`corr`) or to the combined off-diagonal `K` plus
   subject-specific SD features (`vcov`). Functional transforms may
   request fit-only affine-shift parameters through `intercept = TRUE`
-  and/or `slope = TRUE` inside the transform formula.
+  and/or `slope = TRUE` inside the transform formula. Ordered
+  piecewise-linear fits use
+  `list(type = "pwlin", knots = ..., direction = "increasing")` (or
+  `"decreasing"`). Their knot ordinates are estimated from simplex
+  increments; legacy `x` is accepted as an alias for `knots`, while
+  legacy `y` no longer fixes the fitted curve.
 
 - beta_prior:
 

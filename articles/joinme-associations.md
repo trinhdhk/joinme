@@ -68,44 +68,41 @@ marker block does not include an inner `( ... | id )` term, then
 ## 2 Marker-weighted CV and CS
 
 When multiple biomarkers are modelled, `JoiNMe` constructs
-marker-average association components using weights $`\omega_d`$ (one
-per marker). For marker-aggregated terms (`cv_total`, `cv_marker`,
+marker-average association components using weights \omega_d (one per
+marker). For marker-aggregated terms (`cv_total`, `cv_marker`,
 `cs_total`, `cs_marker`), transforms are applied at the marker level
 first and then averaged with weights. This matters whenever transforms
 are nonlinear.
 
-For example, with marker-specific total current values $`CV_{id}(t)`$
-and transform $`f_{cv}`$:
+For example, with marker-specific total current values CV\_{id}(t) and
+transform f\_{cv}:
 
-``` math
-    ext{cv\_total}(t) = \frac{1}{D}\sum_{d=1}^{D} \omega_d\, f_{cv}\!\left(CV_{id}(t)\right),
-```
+ext{cv\\total}(t) = \frac{1}{D}\sum\_{d=1}^{D} \omega_d\\
+f\_{cv}\\\left(CV\_{id}(t)\right),
 
-which differs from $`f_{cv}(\frac{1}{D}\sum_d \omega_d CV_{id}(t))`$
-unless $`f_{cv}`$ is linear.
+which differs from f\_{cv}(\frac{1}{D}\sum_d \omega_d CV\_{id}(t))
+unless f\_{cv} is linear.
 
-For slopes, let $`CS_{id}(t)`$ be a marker-specific slope feature and
-$`f_{cs}`$ the configured CS transform. Then
+For slopes, let CS\_{id}(t) be a marker-specific slope feature and
+f\_{cs} the configured CS transform. Then
 
-``` math
-    ext{cs\_total}(t) = \frac{1}{D}\sum_{d=1}^{D} \omega_d\, f_{cs}\!\left(CS_{id}(t)\right),
-```
+ext{cs\\total}(t) = \frac{1}{D}\sum\_{d=1}^{D} \omega_d\\
+f\_{cs}\\\left(CS\_{id}(t)\right),
 
 and analogously for `cs_marker`. This is intentionally not equal to
-$`f_{cs}(\frac{1}{D}\sum_d \omega_d CS_{id}(t))`$ unless $`f_{cs}`$ is
+f\_{cs}(\frac{1}{D}\sum_d \omega_d CS\_{id}(t)) unless f\_{cs} is
 linear.
 
 In practice, provide fixed weights with `marker_weights` and
 `fixed_marker_weights = TRUE`, or set `fixed_marker_weights = FALSE` to
-use signed perturbations around base weights,
-$`\omega_d = \omega_d^{(0)} + z_d`$. The `shrinkage` switch controls the
-standardized latent family in both fitting and simulation: `0` is
-Student-$`t_6(0,1)`$, `1` is Laplace$`(0,1)`$, and `2` is
-Normal$`(0,1)`$. With estimated weights and no supplied base,
-$`\omega^{(0)}=0`$. The simulator stores the base, latent, and effective
-truths in `truth$marker_weights_base`, `truth$marker_weights_latent`,
-and `truth$marker_weights`; the last of these is the effective weight
-used to generate survival times.
+use signed perturbations around base weights, \omega_d =
+\omega_d^{(0)} + z_d. The `shrinkage` switch controls the standardized
+latent family in both fitting and simulation: `0` is Student-t_6(0,1),
+`1` is Laplace(0,1), and `2` is Normal(0,1). With estimated weights and
+no supplied base, \omega^{(0)}=0. The simulator stores the base, latent,
+and effective truths in `truth$marker_weights_base`,
+`truth$marker_weights_latent`, and `truth$marker_weights`; the last of
+these is the effective weight used to generate survival times.
 
 ### 2.1 Plotting fitted association curves
 
@@ -192,12 +189,12 @@ plot(ce, ask = FALSE)
 
 ## 3 Association coefficients and naming
 
-Internally, association coefficients are denoted with the $`\alpha`$
-prefix (e.g., `alpha_cv_total`). This follows joint-model conventions
-and avoids confusion with the linear predictor $`\eta`$ used throughout
-the longitudinal and survival submodels. Total, mean, and marker
-associations use a positive non-centred parameterisation
-$`\alpha = z_{\alpha} \cdot sd_{\alpha}`$ for stable sampling.
+Internally, association coefficients are denoted with the \alpha prefix
+(e.g., `alpha_cv_total`). This follows joint-model conventions and
+avoids confusion with the linear predictor \eta used throughout the
+longitudinal and survival submodels. Total, mean, and marker
+associations use a positive non-centred parameterisation \alpha =
+z\_{\alpha} \cdot sd\_{\alpha} for stable sampling.
 
 When an association component is not selected in `assoc`, its
 coefficient is prior-only and does not enter the likelihood. Summaries
@@ -206,7 +203,8 @@ fitted association structure.
 
 ## 4 Transform modes
 
-`JoiNMe` supports four transformation modes for association features:
+`joinme` supports the following transformation families for association
+features:
 
 - **Identity** (`type = "identity"`): no transformation.
 - **Functional** (`type = "functional"`): a user-defined expression
@@ -216,8 +214,9 @@ fitted association structure.
 - **Bounded-domain monotone I-spline** (`type = "ispline_expit"` or
   `"ispline_expit_penalised"`): the same monotone spline machinery, but
   applied to `plogis(x)` rather than directly to `x`.
-- **Piecewise linear** (`type = "pwlin"`): linear interpolation across
-  knots.
+- **Ordered piecewise linear** (`type = "pwlin"`): posterior
+  interpolation across fixed knots with monotone knot ordinates
+  estimated in Stan.
 
 Interpretation note for recovery experiments:
 
@@ -261,11 +260,14 @@ Interpretation note for recovery experiments:
     runtime, and the spline basis is built on that bounded domain.
     Supply training `x` and explicit `knots` directly on the expit scale
     in `[0, 1]` so the fitted spline domain matches the runtime basis.
-- **Piecewise linear**:
+- **Ordered piecewise linear**:
   - Syntax:
-    `list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))`
-  - Required fields: `x`, `y`.
-  - No additional defaults.
+    `list(type = "pwlin", knots = c(-2, -1, 0, 1, 2), direction = "increasing")`.
+  - Required field: `knots` (aliases: `cutpoints` and legacy `x`).
+  - Default: `direction = "increasing"`; use `"decreasing"` for a
+    falling transform.
+  - An optional non-negative `lambda` penalises second differences of
+    the ordered knot ordinates; it defaults to zero.
 
 ## 5 Functional Transform
 
@@ -420,18 +422,37 @@ transforms <- list(
 )
 ```
 
-**When to use**
+## 8 Ordered Piecewise-Linear Association
 
-- You want a monotone transform with smoothing, either anchored by
-  `(x, y)` orestimated jointly in Stan.
-- Penalisation avoids overfitting when knot counts are moderate.
+For model fitting, the raw association feature is divided by fixed
+knots, but the association values at those knots are not supplied as an
+outcome-like `y` vector. With (K) knots, Stan estimates a (K-1) simplex
+(). The relative transform ordinate at knot (j) is
 
-## 8 Piecewise-Linear
+f_j = s \sum\_{r=1}^{j-1} \zeta_r, \qquad s = \begin{cases} 1, &
+\text{increasing}, \\ -1, & \text{decreasing}. \end{cases}
 
-This is mean for simulation but you can use for fiting as well as a mean
-to provide some prior the association curve. The transform is defined by
-a set of knots and corresponding values. The transform is linear between
-knots and constant outside the knot range.
+Thus (f_1=0), (f_K=s), and every adjacent difference has the requested
+sign. Linear interpolation is used between knots and the boundary
+ordinates are held constant outside the knot range. The survival
+contribution is (f(x)): () estimates the total log-hazard span and the
+simplex estimates how that span is distributed across intervals. This
+follows the monotonic-effect separation of magnitude and simplex shape
+described in the [brms monotonic-effects
+vignette](https://paulbuerkner.com/brms/articles/brms_monotonic.html)
+and implemented by
+[`brms::mo()`](https://paulbuerkner.com/brms/reference/mo.html).
+
+The `direction` argument orders the standardised transform (f). As in
+the `brms` construction, () remains a signed magnitude parameter, so the
+direction of the realised log-hazard contribution (f(x)) also depends on
+the posterior sign of ().
+
+The zero first ordinate is an identifiability constraint. A common free
+intercept added to every ordinate cannot be distinguished from the log
+baseline hazard, so the reported products (f_j) are relative log-hazard
+contributions. `summary(fit)$tables$piecewise_ordinates` reports their
+posterior contribution and corresponding hazard ratios at every knot.
 
 Code
 
@@ -446,11 +467,19 @@ transforms <- list(
   ),
   corr = list(
     type = "pwlin",
-    x = c(-2, -1, 0, 1, 2),
-    y = c(0.2, 0.5, 1, 0.5, 0.2)
+    knots = c(-2, -1, 0, 1, 2),
+    direction = "increasing"
   )
 )
 ```
+
+The former fitted declaration `x = ..., y = ...` remains readable for
+backwards compatibility. Its `x` values become the knots and `y` is used
+only to infer direction when direction is omitted; it does not fix or
+train the fitted association. In contrast,
+[`simulate_joinme()`](https://trinhdhk.github.io/joinme/reference/simulate_joinme.md)
+deliberately keeps the old fixed `x`/`y` interpolation so established
+simulation scenarios are unchanged.
 
 ## 9 Association Diagram
 

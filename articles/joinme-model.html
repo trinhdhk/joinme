@@ -6,7 +6,8 @@
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 <title>Technical Specification and Implementation Details • joinme</title>
-<script src="../lightswitch.js"></script><script src="../deps/jquery-3.6.0/jquery-3.6.0.min.js"></script><meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+<!-- katex math --><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" integrity="sha384-7zkQWkzuo3B5mTepMUcHkMB5jZaolc2xDwL6VFqjFALcbeS9Ggm/Yr2r3Dy4lfFg" crossorigin="anonymous"></script><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous" onload="renderMathInElement(document.body);"></script><script src="../katex-auto.js"></script><script src="../lightswitch.js"></script><script src="../deps/jquery-3.6.0/jquery-3.6.0.min.js"></script><meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 <link href="../deps/bootstrap-5.3.8/bootstrap.min.css" rel="stylesheet">
 <script src="../deps/bootstrap-5.3.8/bootstrap.bundle.min.js"></script><link href="../deps/font-awesome-6.5.2/css/all.min.css" rel="stylesheet">
 <link href="../deps/font-awesome-6.5.2/css/v4-shims.min.css" rel="stylesheet">
@@ -38,6 +39,7 @@
 <li class="nav-item"><form class="form-inline" role="search">
  <input class="form-control" type="search" name="search-input" id="search-input" autocomplete="off" aria-label="Search site" placeholder="Search for" data-search-index="../search.json">
 </form></li>
+<li class="nav-item"><a class="external-link nav-link" href="https://github.com/trinhdhk/joinme/" aria-label="GitHub"><span class="fa fab fa-github fa-lg"></span></a></li>
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-lightswitch" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true" aria-label="Light switch"><span class="fa fa-sun"></span></button>
   <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="dropdown-lightswitch">
@@ -60,7 +62,7 @@
 
 
 
-
+      <small class="dont-index">Source: <a href="https://github.com/trinhdhk/joinme/blob/master/vignettes/joinme-model.qmd" class="external-link"><code>vignettes/joinme-model.qmd</code></a></small>
       <div class="d-none name"><code></code></div>
     </div>
 
@@ -82,74 +84,74 @@
 </h3>
 <ul>
 <li>
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>N</mi><annotation encoding="application/x-tex">N</annotation></semantics></math>: Number of subjects (<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>i</mi><mo>=</mo><mn>1</mn><mo>,</mo><mi>…</mi><mo>,</mo><mi>N</mi></mrow><annotation encoding="application/x-tex">i = 1, \dots, N</annotation></semantics></math>).</li>
+<span class="math inline">N</span>: Number of subjects (<span class="math inline">i = 1, \dots, N</span>).</li>
 <li>
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>D</mi><annotation encoding="application/x-tex">D</annotation></semantics></math>: Number of longitudinal markers (<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi><mo>=</mo><mn>1</mn><mo>,</mo><mi>…</mi><mo>,</mo><mi>D</mi></mrow><annotation encoding="application/x-tex">d = 1, \dots, D</annotation></semantics></math>).</li>
+<span class="math inline">D</span>: Number of longitudinal markers (<span class="math inline">d = 1, \dots, D</span>).</li>
 <li>
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>n</mi><mrow><mi>i</mi><mi>d</mi></mrow></msub><annotation encoding="application/x-tex">n_{id}</annotation></semantics></math>: Number of observations for subject <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>i</mi><annotation encoding="application/x-tex">i</annotation></semantics></math> marker <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>d</mi><annotation encoding="application/x-tex">d</annotation></semantics></math>.</li>
+<span class="math inline">n_{id}</span>: Number of observations for subject <span class="math inline">i</span> marker <span class="math inline">d</span>.</li>
 <li>
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>T</mi><mi>i</mi></msub><annotation encoding="application/x-tex">T_i</annotation></semantics></math>: Observed event or censoring time for subject <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>i</mi><annotation encoding="application/x-tex">i</annotation></semantics></math>.</li>
+<span class="math inline">T_i</span>: Observed event or censoring time for subject <span class="math inline">i</span>.</li>
 <li>
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>δ</mi><mi>i</mi></msub><annotation encoding="application/x-tex">\delta_i</annotation></semantics></math>: Event indicator (1 if event, 0 if censored).</li>
+<span class="math inline">\delta_i</span>: Event indicator (1 if event, 0 if censored).</li>
 <li>
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>y</mi><mrow><mi>i</mi><mi>j</mi><mi>k</mi></mrow></msub><annotation encoding="application/x-tex">y_{ijk}</annotation></semantics></math>: The <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>k</mi><annotation encoding="application/x-tex">k</annotation></semantics></math>-th observation of marker <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>d</mi><annotation encoding="application/x-tex">d</annotation></semantics></math> for subject <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>i</mi><annotation encoding="application/x-tex">i</annotation></semantics></math> at time <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>t</mi><mrow><mi>i</mi><mi>j</mi><mi>k</mi></mrow></msub><annotation encoding="application/x-tex">t_{ijk}</annotation></semantics></math>.</li>
+<span class="math inline">y_{ijk}</span>: The <span class="math inline">k</span>-th observation of marker <span class="math inline">d</span> for subject <span class="math inline">i</span> at time <span class="math inline">t_{ijk}</span>.</li>
 </ul></section><section class="level2" data-number="2.2"><h3 data-number="2.2" id="longitudinal-submodel">
 <span class="header-section-number">2.2</span> Longitudinal Submodel<a class="anchor" aria-label="anchor" href="#longitudinal-submodel"></a>
 </h3>
-<p>We assume the observed outcomes <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>y</mi><mrow><mi>i</mi><mi>j</mi><mi>k</mi></mrow></msub><annotation encoding="application/x-tex">y_{ijk}</annotation></semantics></math> follow a distribution from the exponential family (e.g., Gaussian, Student-t) centred at a linear predictor <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>η</mi><mrow><mi>i</mi><mi>j</mi><mi>k</mi></mrow></msub><mo stretchy="false" form="prefix">(</mo><mi>t</mi><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">\eta_{ijk}(t)</annotation></semantics></math>.</p>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>y</mi><mrow><mi>i</mi><mi>j</mi><mi>k</mi></mrow></msub><mo>∼</mo><mi>𝒟</mi><mo stretchy="false" form="prefix">(</mo><msub><mi>η</mi><mrow><mi>i</mi><mi>d</mi></mrow></msub><mo stretchy="false" form="prefix">(</mo><msub><mi>t</mi><mrow><mi>i</mi><mi>j</mi><mi>k</mi></mrow></msub><mo stretchy="false" form="postfix">)</mo><mo>,</mo><msub><mi>σ</mi><mi>y</mi></msub><mo>,</mo><mi>ν</mi><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">
+<p>We assume the observed outcomes <span class="math inline">y_{ijk}</span> follow a distribution from the exponential family (e.g., Gaussian, Student-t) centred at a linear predictor <span class="math inline">\eta_{ijk}(t)</span>.</p>
+<p><span class="math display">
 y_{ijk} \sim \mathcal{D}(\eta_{id}(t_{ijk}), \sigma_y, \nu)
-</annotation></semantics></math></p>
-<p>The linear predictor <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>η</mi><mrow><mi>i</mi><mi>d</mi></mrow></msub><mo stretchy="false" form="prefix">(</mo><mi>t</mi><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">\eta_{id}(t)</annotation></semantics></math> is decomposed into fixed effects and random effects components. A key feature of <code>JoiNMe</code> is the flexible random effects structure:</p>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>η</mi><mrow><mi>i</mi><mi>d</mi></mrow></msub><mo stretchy="false" form="prefix">(</mo><mi>t</mi><mo stretchy="false" form="postfix">)</mo><mo>=</mo><msub><mi>𝐱</mi><mrow><mi>i</mi><mi>d</mi></mrow></msub><mo stretchy="false" form="prefix">(</mo><mi>t</mi><msup><mo stretchy="false" form="postfix">)</mo><mi>⊤</mi></msup><mi>𝛃</mi><mo>+</mo><msub><mi>𝐳</mi><mrow><mi>i</mi><mi>d</mi><mo>,</mo><mi>i</mi><mi>d</mi></mrow></msub><mo stretchy="false" form="prefix">(</mo><mi>t</mi><msup><mo stretchy="false" form="postfix">)</mo><mi>⊤</mi></msup><msub><mi>𝐛</mi><mi>i</mi></msub><mo>+</mo><msub><mi>𝐳</mi><mrow><mi>i</mi><mi>d</mi><mo>,</mo><mi>m</mi><mi>k</mi></mrow></msub><mo stretchy="false" form="prefix">(</mo><mi>t</mi><msup><mo stretchy="false" form="postfix">)</mo><mi>⊤</mi></msup><msub><mi>𝐮</mi><mi>d</mi></msub><mo>+</mo><msub><mi>𝐳</mi><mrow><mi>i</mi><mi>d</mi><mo>,</mo><mi>i</mi><mi>d</mi><mi>m</mi></mrow></msub><mo stretchy="false" form="prefix">(</mo><mi>t</mi><msup><mo stretchy="false" form="postfix">)</mo><mi>⊤</mi></msup><msub><mi>𝐰</mi><mrow><mi>i</mi><mi>d</mi></mrow></msub></mrow><annotation encoding="application/x-tex">
+</span></p>
+<p>The linear predictor <span class="math inline">\eta_{id}(t)</span> is decomposed into fixed effects and random effects components. A key feature of <code>JoiNMe</code> is the flexible random effects structure:</p>
+<p><span class="math display">
 \eta_{id}(t) = \mathbf{x}_{id}(t)^\top \boldsymbol{\beta} + \mathbf{z}_{id, id}(t)^\top \mathbf{b}_i + \mathbf{z}_{id, mk}(t)^\top \mathbf{u}_d + \mathbf{z}_{id, idm}(t)^\top \mathbf{w}_{id}
-</annotation></semantics></math></p>
+</span></p>
 <p>where:</p>
 <ul>
 <li>
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>𝐱</mi><mrow><mi>i</mi><mi>d</mi></mrow></msub><mo stretchy="false" form="prefix">(</mo><mi>t</mi><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">\mathbf{x}_{id}(t)</annotation></semantics></math>: Fixed effects design vector (time-varying).</li>
+<span class="math inline">\mathbf{x}_{id}(t)</span>: Fixed effects design vector (time-varying).</li>
 <li>
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>𝐛</mi><mi>i</mi></msub><mo>∼</mo><mi>N</mi><mo stretchy="false" form="prefix">(</mo><mn>𝟎</mn><mo>,</mo><msub><mi mathvariant="normal">Σ</mi><mi>b</mi></msub><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">\mathbf{b}_i \sim N(\mathbf{0}, \Sigma_b)</annotation></semantics></math>: Subject-specific random effects (shared across markers or independent).</li>
+<span class="math inline">\mathbf{b}_i \sim N(\mathbf{0}, \Sigma_b)</span>: Subject-specific random effects (shared across markers or independent).</li>
 <li>
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>𝐮</mi><mi>d</mi></msub><mo>∼</mo><mi>N</mi><mo stretchy="false" form="prefix">(</mo><mn>𝟎</mn><mo>,</mo><msub><mi mathvariant="normal">Σ</mi><mi>u</mi></msub><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">\mathbf{u}_d \sim N(\mathbf{0}, \Sigma_u)</annotation></semantics></math>: Marker-specific random effects (e.g., marker-specific average intercept).</li>
+<span class="math inline">\mathbf{u}_d \sim N(\mathbf{0}, \Sigma_u)</span>: Marker-specific random effects (e.g., marker-specific average intercept).</li>
 <li>
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>𝐰</mi><mrow><mi>i</mi><mi>d</mi></mrow></msub><mo>∼</mo><mi>N</mi><mo stretchy="false" form="prefix">(</mo><mn>𝟎</mn><mo>,</mo><msub><mi mathvariant="normal">Σ</mi><mi>w</mi></msub><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">\mathbf{w}_{id} \sim N(\mathbf{0}, \Sigma_w)</annotation></semantics></math>: Subject-marker-specific random effects (the interaction level).</li>
+<span class="math inline">\mathbf{w}_{id} \sim N(\mathbf{0}, \Sigma_w)</span>: Subject-marker-specific random effects (the interaction level).</li>
 </ul>
-<p><strong>Optional marker-by-id block.</strong> If the marker block omits the inner <code>( ... | id )</code> term, then <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>𝐰</mi><mrow><mi>i</mi><mi>d</mi></mrow></msub><annotation encoding="application/x-tex">\mathbf{w}_{id}</annotation></semantics></math> is removed and the marker-by-id block has dimension <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>Q</mi><mrow><mi>i</mi><mi>d</mi><mi>m</mi></mrow></msub><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">Q_{idm} = 0</annotation></semantics></math>. In this case, covariance-style associations (<code>corr</code>, <code>vcov</code>) are not available, because there is no subject-specific marker covariance to model.</p>
+<p><strong>Optional marker-by-id block.</strong> If the marker block omits the inner <code>( ... | id )</code> term, then <span class="math inline">\mathbf{w}_{id}</span> is removed and the marker-by-id block has dimension <span class="math inline">Q_{idm} = 0</span>. In this case, covariance-style associations (<code>corr</code>, <code>vcov</code>) are not available, because there is no subject-specific marker covariance to model.</p>
 <p>This decomposition allows capturing correlations within subjects across markers, within markers across subjects, and the specific deviation of a subject’s trajectory for a specific marker.</p>
 </section><section class="level2" data-number="2.3"><h3 data-number="2.3" id="survival-submodel">
 <span class="header-section-number">2.3</span> Survival Submodel<a class="anchor" aria-label="anchor" href="#survival-submodel"></a>
 </h3>
-<p>The hazard function <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>h</mi><mi>i</mi></msub><mo stretchy="false" form="prefix">(</mo><mi>t</mi><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">h_i(t)</annotation></semantics></math> for subject <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>i</mi><annotation encoding="application/x-tex">i</annotation></semantics></math> at time <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>t</mi><annotation encoding="application/x-tex">t</annotation></semantics></math> is modelled as:</p>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>h</mi><mi>i</mi></msub><mo stretchy="false" form="prefix">(</mo><mi>t</mi><mo stretchy="false" form="postfix">)</mo><mo>=</mo><msub><mi>h</mi><mn>0</mn></msub><mo stretchy="false" form="prefix">(</mo><mi>t</mi><mo stretchy="false" form="postfix">)</mo><mrow><mi mathvariant="normal">exp</mi><mo>⁡</mo></mrow><mrow><mo stretchy="true" form="prefix">(</mo><msubsup><mi>𝐰</mi><mi>i</mi><mi>⊤</mi></msubsup><mi>𝛄</mi><mo>+</mo><munderover><mo>∑</mo><mrow><mi>k</mi><mo>=</mo><mn>1</mn></mrow><mi>K</mi></munderover><msub><mi>g</mi><mi>k</mi></msub><mo stretchy="false" form="prefix">(</mo><msub><mi>ℳ</mi><mi>i</mi></msub><mo stretchy="false" form="prefix">(</mo><mi>t</mi><mo stretchy="false" form="postfix">)</mo><mo>,</mo><msub><mi>𝛂</mi><mi>k</mi></msub><mo stretchy="false" form="postfix">)</mo><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">
+<p>The hazard function <span class="math inline">h_i(t)</span> for subject <span class="math inline">i</span> at time <span class="math inline">t</span> is modelled as:</p>
+<p><span class="math display">
 h_i(t) = h_0(t) \exp\left( \mathbf{w}_i^\top \boldsymbol{\gamma} + \sum_{k=1}^K g_k(\mathcal{M}_i(t), \boldsymbol{\alpha}_k) \right)
-</annotation></semantics></math></p>
+</span></p>
 <p>where:</p>
 <ul>
 <li>
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>h</mi><mn>0</mn></msub><mo stretchy="false" form="prefix">(</mo><mi>t</mi><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">h_0(t)</annotation></semantics></math>: Baseline hazard function modelled via spline basis or a user-specified baseline hazard formula.</li>
+<span class="math inline">h_0(t)</span>: Baseline hazard function modelled via spline basis or a user-specified baseline hazard formula.</li>
 <li>
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>𝐰</mi><mi>i</mi></msub><annotation encoding="application/x-tex">\mathbf{w}_i</annotation></semantics></math>: Baseline covariates (baseline age, sex, treatment).</li>
+<span class="math inline">\mathbf{w}_i</span>: Baseline covariates (baseline age, sex, treatment).</li>
 <li>
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>ℳ</mi><mi>i</mi></msub><mo stretchy="false" form="prefix">(</mo><mi>t</mi><mo stretchy="false" form="postfix">)</mo><mo>=</mo><mo stretchy="false" form="prefix">{</mo><msub><mi>η</mi><mrow><mi>i</mi><mn>1</mn></mrow></msub><mo stretchy="false" form="prefix">(</mo><mi>t</mi><mo stretchy="false" form="postfix">)</mo><mo>,</mo><mi>…</mi><mo>,</mo><msub><mi>η</mi><mrow><mi>i</mi><mi>D</mi></mrow></msub><mo stretchy="false" form="prefix">(</mo><mi>t</mi><mo stretchy="false" form="postfix">)</mo><mo>,</mo><msubsup><mi>η</mi><mrow><mi>i</mi><mn>1</mn></mrow><mo>′</mo></msubsup><mo stretchy="false" form="prefix">(</mo><mi>t</mi><mo stretchy="false" form="postfix">)</mo><mo>,</mo><mi>…</mi><mo stretchy="false" form="postfix">}</mo></mrow><annotation encoding="application/x-tex">\mathcal{M}_i(t) = \{ \eta_{i1}(t), \dots, \eta_{iD}(t), \eta'_{i1}(t), \dots \}</annotation></semantics></math>: The collection of longitudinal trajectories and their derivatives (slopes) at time <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>t</mi><annotation encoding="application/x-tex">t</annotation></semantics></math>.</li>
+<span class="math inline">\mathcal{M}_i(t) = \{ \eta_{i1}(t), \dots, \eta_{iD}(t), \eta'_{i1}(t), \dots \}</span>: The collection of longitudinal trajectories and their derivatives (slopes) at time <span class="math inline">t</span>.</li>
 <li>
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>g</mi><mi>k</mi></msub><mo stretchy="false" form="prefix">(</mo><mi>⋅</mi><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">g_k(\cdot)</annotation></semantics></math>: A functional transformation linking the longitudinal history to the hazard (the “association structure”).</li>
+<span class="math inline">g_k(\cdot)</span>: A functional transformation linking the longitudinal history to the hazard (the “association structure”).</li>
 </ul>
-<p>Common forms for <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>g</mi><mi>k</mi></msub><mo stretchy="false" form="prefix">(</mo><mi>⋅</mi><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">g_k(\cdot)</annotation></semantics></math> in <code>JoiNMe</code> are constructed from the following association summaries, each optionally transformed:</p>
+<p>Common forms for <span class="math inline">g_k(\cdot)</span> in <code>JoiNMe</code> are constructed from the following association summaries, each optionally transformed:</p>
 <ul>
 <li>
-<strong>Current value (CV)</strong>: the value of the longitudinal linear predictor at time <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>t</mi><annotation encoding="application/x-tex">t</annotation></semantics></math>.</li>
+<strong>Current value (CV)</strong>: the value of the longitudinal linear predictor at time <span class="math inline">t</span>.</li>
 <li>
-<strong>Current slope (CS)</strong>: the derivative of the linear predictor at time <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>t</mi><annotation encoding="application/x-tex">t</annotation></semantics></math>.</li>
+<strong>Current slope (CS)</strong>: the derivative of the linear predictor at time <span class="math inline">t</span>.</li>
 <li>
 <strong>Correlation association (CORR)</strong>: a subject-specific, time-constant summary of off-diagonal marker-by-id correlations.</li>
 <li>
 <strong>Variance-covariance association (VCOV)</strong>: a subject-specific, time-constant summary of lower-triangular marker-by-id Cholesky-factor features, taken directly from <code>L</code>.</li>
 </ul>
-<p>In implementation, CV and CS are evaluated at a default set of 15 Gauss-Kronrod nodes on the scaled time interval (configurable via <code>quadrature_nodes</code>), and CS is approximated by a forward finite difference with step size <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>ε</mi><annotation encoding="application/x-tex">\varepsilon</annotation></semantics></math>.</p>
-<p>When multiple markers are present, <code>JoiNMe</code> forms marker-average CV and CS components using weights <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>ω</mi><mi>d</mi></msub><annotation encoding="application/x-tex">\omega_d</annotation></semantics></math> (one per marker). These weights apply to marker summaries after transformation and before association scaling. When marker-weight estimation is enabled, latent perturbations are added to base weights and the resulting weights are used directly before aggregation. Marker weights and association coefficients are regularized with standard Student-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>t</mi><mn>6</mn></msub><annotation encoding="application/x-tex">t_6</annotation></semantics></math>, Laplace, or Normal priors for <code>shrinkage = 0, 1, 2</code>, respectively, using a positive non-centred parameterisation <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>α</mi><mo>=</mo><msub><mi>z</mi><mi>α</mi></msub><mo>⋅</mo><mi>s</mi><msub><mi>d</mi><mi>α</mi></msub></mrow><annotation encoding="application/x-tex">\alpha = z_{\alpha} \cdot sd_{\alpha}</annotation></semantics></math>.</p>
+<p>In implementation, CV and CS are evaluated at a default set of 15 Gauss-Kronrod nodes on the scaled time interval (configurable via <code>quadrature_nodes</code>), and CS is approximated by a forward finite difference with step size <span class="math inline">\varepsilon</span>.</p>
+<p>When multiple markers are present, <code>JoiNMe</code> forms marker-average CV and CS components using weights <span class="math inline">\omega_d</span> (one per marker). These weights apply to marker summaries after transformation and before association scaling. When marker-weight estimation is enabled, latent perturbations are added to base weights and the resulting weights are used directly before aggregation. Marker weights and association coefficients are regularized with standard Student-<span class="math inline">t_6</span>, Laplace, or Normal priors for <code>shrinkage = 0, 1, 2</code>, respectively, using a positive non-centred parameterisation <span class="math inline">\alpha = z_{\alpha} \cdot sd_{\alpha}</span>.</p>
 <p>For covariance-style channels (<code>corr</code>, <code>vcov</code>), the fitted association coefficients use the same positive-scale parameterisation: a global scale (<code>s_corr</code> or <code>s_vcov</code>) multiplies a latent coefficient vector, and summaries report the resulting effective coefficients on the hazard scale.</p>
-<p>For covariance regression, each lower-triangular entry has its own latent perturbation <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>z</mi><mrow><mi>i</mi><mi>m</mi></mrow></msub><annotation encoding="application/x-tex">z_{im}</annotation></semantics></math> and a non-negative loading <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>λ</mi><mi>m</mi></msub><annotation encoding="application/x-tex">\lambda_m</annotation></semantics></math>, so the identified form is <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>η</mi><mrow><mi>i</mi><mi>m</mi></mrow></msub><mo>=</mo><msub><mi>α</mi><mi>m</mi></msub><mo>+</mo><msubsup><mi>x</mi><mi>i</mi><mi>⊤</mi></msubsup><msub><mi>β</mi><mi>m</mi></msub><mo>+</mo><msub><mi>λ</mi><mi>m</mi></msub><msub><mi>z</mi><mrow><mi>i</mi><mi>m</mi></mrow></msub></mrow><annotation encoding="application/x-tex">\eta_{im} = \alpha_m + x_i^\top \beta_m + \lambda_m z_{im}</annotation></semantics></math> with <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>λ</mi><mi>m</mi></msub><mo>≥</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">\lambda_m \ge 0</annotation></semantics></math> and <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>z</mi><mrow><mi>i</mi><mi>m</mi></mrow></msub><mo>∼</mo><mi>𝒩</mi><mo stretchy="false" form="prefix">(</mo><mn>0</mn><mo>,</mo><mn>1</mn><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">z_{im} \sim \mathcal{N}(0, 1)</annotation></semantics></math>.</p>
+<p>For covariance regression, each lower-triangular entry has its own latent perturbation <span class="math inline">z_{im}</span> and a non-negative loading <span class="math inline">\lambda_m</span>, so the identified form is <span class="math inline">\eta_{im} = \alpha_m + x_i^\top \beta_m + \lambda_m z_{im}</span> with <span class="math inline">\lambda_m \ge 0</span> and <span class="math inline">z_{im} \sim \mathcal{N}(0, 1)</span>.</p>
 </section></section><section class="section level2" data-number="3"><h2 data-number="3" id="implementation">
 <span class="header-section-number">3</span> Implementation<a class="anchor" aria-label="anchor" href="#implementation"></a>
 </h2>
@@ -157,66 +159,69 @@ h_i(t) = h_0(t) \exp\left( \mathbf{w}_i^\top \boldsymbol{\gamma} + \sum_{k=1}^K 
 <section class="level2" data-number="3.1"><h3 data-number="3.1" id="time-scaling">
 <span class="header-section-number">3.1</span> Time Scaling<a class="anchor" aria-label="anchor" href="#time-scaling"></a>
 </h3>
-<p>To check numerical stability and ensure spline bases are well-defined, all internal time calculations are performed on a scaled domain <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>t</mi><mo>′</mo></msup><mo>∈</mo><mo stretchy="false" form="prefix">[</mo><mn>0</mn><mo>,</mo><mn>1</mn><mo stretchy="false" form="postfix">]</mo></mrow><annotation encoding="application/x-tex">t' \in [0, 1]</annotation></semantics></math>:</p>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mi>t</mi><mo>′</mo></msup><mo>=</mo><mfrac><mi>t</mi><msub><mi>t</mi><mrow><mi>m</mi><mi>a</mi><mi>x</mi></mrow></msub></mfrac><mo>,</mo><mspace width="1.0em"></mspace><msub><mi>t</mi><mrow><mi>m</mi><mi>a</mi><mi>x</mi></mrow></msub><mo>=</mo><munder><mi mathvariant="normal">max</mi><mi>i</mi></munder><mo stretchy="false" form="prefix">(</mo><msub><mi>T</mi><mi>i</mi></msub><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">
+<p>To check numerical stability and ensure spline bases are well-defined, all internal time calculations are performed on a scaled domain <span class="math inline">t' \in [0, 1]</span>:</p>
+<p><span class="math display">
 t' = \frac{t}{t_{max}}, \quad t_{max} = \max_i(T_i)
-</annotation></semantics></math></p>
+</span></p>
 <p>Coefficients reported to the user are automatically rescaled to the original time scale.</p>
 </section><section class="level2" data-number="3.2"><h3 data-number="3.2" id="integration-strategy-gauss-kronrod">
 <span class="header-section-number">3.2</span> Integration Strategy (Gauss-Kronrod)<a class="anchor" aria-label="anchor" href="#integration-strategy-gauss-kronrod"></a>
 </h3>
-<p>The survival likelihood requires evaluating the cumulative hazard <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>H</mi><mi>i</mi></msub><mo stretchy="false" form="prefix">(</mo><msub><mi>T</mi><mi>i</mi></msub><mo stretchy="false" form="postfix">)</mo><mo>=</mo><msubsup><mo>∫</mo><mn>0</mn><msub><mi>T</mi><mi>i</mi></msub></msubsup><msub><mi>h</mi><mi>i</mi></msub><mo stretchy="false" form="prefix">(</mo><mi>s</mi><mo stretchy="false" form="postfix">)</mo><mi>d</mi><mi>s</mi></mrow><annotation encoding="application/x-tex">H_i(T_i) = \int_0^{T_i} h_i(s) ds</annotation></semantics></math>. Since the hazard contains time-varying random effects <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>η</mi><mrow><mi>i</mi><mi>d</mi></mrow></msub><mo stretchy="false" form="prefix">(</mo><mi>s</mi><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">\eta_{id}(s)</annotation></semantics></math>, this integral has no closed form.</p>
+<p>The survival likelihood requires evaluating the cumulative hazard <span class="math inline">H_i(T_i) = \int_0^{T_i} h_i(s) ds</span>. Since the hazard contains time-varying random effects <span class="math inline">\eta_{id}(s)</span>, this integral has no closed form.</p>
 <p><code>JoiNMe</code> employs <strong>Gauss-Kronrod quadrature</strong> (default 15-point, configurable) to approximate this integral numerically within the Stan <code>log_prob</code> block. The Stan program uses hardcoded nodes and weights for the supported node counts, so only the node count is passed in the data.</p>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mo>∫</mo><mn>0</mn><msub><mi>T</mi><mi>i</mi></msub></msubsup><msub><mi>h</mi><mi>i</mi></msub><mo stretchy="false" form="prefix">(</mo><mi>s</mi><mo stretchy="false" form="postfix">)</mo><mi>d</mi><mi>s</mi><mo>≈</mo><mfrac><msub><mi>T</mi><mi>i</mi></msub><mn>2</mn></mfrac><munderover><mo>∑</mo><mrow><mi>j</mi><mo>=</mo><mn>1</mn></mrow><mi>K</mi></munderover><msub><mi>w</mi><mi>j</mi></msub><msub><mi>h</mi><mi>i</mi></msub><mrow><mo stretchy="true" form="prefix">(</mo><mfrac><msub><mi>T</mi><mi>i</mi></msub><mn>2</mn></mfrac><mo stretchy="false" form="prefix">(</mo><msub><mi>x</mi><mi>j</mi></msub><mo>+</mo><mn>1</mn><mo stretchy="false" form="postfix">)</mo><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">
+<p><span class="math display">
 \int_0^{T_i} h_i(s) ds \approx \frac{T_i}{2} \sum_{j=1}^{K} w_j h_i \left( \frac{T_i}{2}(x_j + 1) \right)
-</annotation></semantics></math></p>
+</span></p>
 <p>This method provides high accuracy with relatively few function evaluations compared to Simpson’s rule or trapezoidal integration.</p>
 </section><section class="level2" data-number="3.3"><h3 data-number="3.3" id="arbitrary-transformation">
 <span class="header-section-number">3.3</span> Arbitrary Transformation<a class="anchor" aria-label="anchor" href="#arbitrary-transformation"></a>
 </h3>
-<p><code>JoiNMe</code> supports user-specified association transforms in four modes:</p>
+<p><code>joinme</code> supports association transforms in several families:</p>
 <ul>
 <li>
 <strong>Identity</strong>: no transformation.</li>
 <li>
-<strong>Functional bytecode</strong>: a data-defined Reverse Polish Notation (RPN) program.</li>
+<strong>Functional bytecode</strong>: a small translation program supporting basic arithmetic and standard mathematical functions, compiled from a user-supplied expression: <code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>, <code>log</code>, <code>exp</code>, <code>sqrt</code>, trigonometric and hyperbolic functions, power functions, the standard normal CDF (<code>Phi</code>, <code>pnorm</code>), and the standard normal quantile (<code>inv_Phi</code>, <code>qnorm</code>, <code>probit</code>).</li>
 <li>
 <strong>Monotone I-spline</strong>: smooth monotone mapping with user-supplied knots and coefficients.</li>
 <li>
-<strong>Piecewise linear</strong>: linear interpolation between user-supplied knots.</li>
+<strong>Ordered piecewise linear</strong>: fixed knots with posterior monotone ordinates reconstructed from cumulative simplex increments.</li>
 </ul>
-<p>The functional bytecode evaluator implements the following operations:</p>
-<ul>
-<li>0: PUSH_X</li>
-<li>1: PUSH_CONST</li>
-<li>2: ADD</li>
-<li>3: SUB</li>
-<li>4: MUL</li>
-<li>5: DIV</li>
-<li>6: LOG</li>
-<li>7: EXP</li>
-<li>8: SQRT</li>
-<li>9: INV_LOGIT</li>
-<li>10: LOGIT</li>
-<li>11: RECIPROCAL</li>
-<li>12: POW</li>
-<li>13: SIN</li>
-<li>14: COS</li>
-<li>15: TAN</li>
-<li>16: ABS</li>
-<li>17: SQUARE</li>
-<li>18: SINH</li>
-<li>19: COSH</li>
-<li>20: TANH</li>
-<li>21: ASINH</li>
-<li>22: ACOSH</li>
-<li>23: ATANH</li>
-<li>24: SOFTPLUS</li>
-<li>25: CBRT</li>
-</ul></section><section class="level2" data-number="3.4"><h3 data-number="3.4" id="parallelisation">
+<!--
+The functional bytecode evaluator implements the following operations:
+
+- 0: PUSH_X
+- 1: PUSH_CONST
+- 2: ADD
+- 3: SUB
+- 4: MUL
+- 5: DIV
+- 6: LOG
+- 7: EXP
+- 8: SQRT
+- 9: INV_LOGIT
+- 10: LOGIT
+- 11: RECIPROCAL
+- 12: POW
+- 13: SIN
+- 14: COS
+- 15: TAN
+- 16: ABS
+- 17: SQUARE
+- 18: SINH
+- 19: COSH
+- 20: TANH
+- 21: ASINH
+- 22: ACOSH
+- 23: ATANH
+- 24: SOFTPLUS
+- 25: CBRT
+- 26: PHI, the standard normal CDF
+- 27: INV_PHI
+--></section><section class="level2" data-number="3.4"><h3 data-number="3.4" id="parallelisation">
 <span class="header-section-number">3.4</span> Parallelisation<a class="anchor" aria-label="anchor" href="#parallelisation"></a>
 </h3>
-<p>The model supports <code>reduce_sum</code> for within-chain parallelisation. The likelihood evaluation is sharded by subject <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>i</mi><annotation encoding="application/x-tex">i</annotation></semantics></math>.</p>
+<p>The model supports <code>reduce_sum</code> for within-chain parallelisation. The likelihood evaluation is sharded by subject <span class="math inline">i</span>.</p>
 <ul>
 <li>
 <strong>Longitudinal Likelihood</strong>: Calculated independently for each block of subjects.</li>
@@ -286,7 +291,7 @@ t' = \frac{t}{t_{max}}, \quad t_{max} = \max_i(T_i)
 <td style="text-align: left;">
 <code>tf_mode_*</code>, <code>functional_ops_*</code>, <code>const_data_*</code>
 </td>
-<td style="text-align: left;">association transform configuration</td>
+<td style="text-align: left;">association transform configuration, including increasing/decreasing piecewise mode</td>
 </tr>
 <tr class="even">
 <td style="text-align: left;">
@@ -298,11 +303,12 @@ t' = \frac{t}{t_{max}}, \quad t_{max} = \max_i(T_i)
 </table></section><section class="section level2" data-number="5"><h2 data-number="5" id="prediction">
 <span class="header-section-number">5</span> Prediction<a class="anchor" aria-label="anchor" href="#prediction"></a>
 </h2>
-<p>Dynamic predictions <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>π</mi><mi>i</mi></msub><mo stretchy="false" form="prefix">(</mo><mi>u</mi><mo stretchy="false" form="prefix">|</mo><mi>t</mi><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">\pi_i(u|t)</annotation></semantics></math> are efficiently computed using the same Stan code structure (via <code>generated quantities</code> or a separate <code>standalone generated quantities</code> run) to ensure consistency.</p>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>S</mi><mi>i</mi></msub><mo stretchy="false" form="prefix">(</mo><mi>u</mi><mo stretchy="false" form="prefix">|</mo><mi>t</mi><mo stretchy="false" form="postfix">)</mo><mo>=</mo><mfrac><mrow><mrow><mi mathvariant="normal">exp</mi><mo>⁡</mo></mrow><mo stretchy="false" form="prefix">(</mo><mi>−</mi><msub><mi mathvariant="normal">Λ</mi><mi>i</mi></msub><mo stretchy="false" form="prefix">(</mo><mi>u</mi><mo stretchy="false" form="postfix">)</mo><mo stretchy="false" form="postfix">)</mo></mrow><mrow><mrow><mi mathvariant="normal">exp</mi><mo>⁡</mo></mrow><mo stretchy="false" form="prefix">(</mo><mi>−</mi><msub><mi mathvariant="normal">Λ</mi><mi>i</mi></msub><mo stretchy="false" form="prefix">(</mo><mi>t</mi><mo stretchy="false" form="postfix">)</mo><mo stretchy="false" form="postfix">)</mo></mrow></mfrac></mrow><annotation encoding="application/x-tex">
+<p>Dynamic predictions <span class="math inline">\pi_i(u|t)</span> are efficiently computed using the same Stan code structure (via <code>generated quantities</code> or a separate <code>standalone generated quantities</code> run) to ensure consistency.</p>
+<p><span class="math display">
 S_i(u|t) = \frac{\exp(-\Lambda_i(u))}{\exp(-\Lambda_i(t))}
-</annotation></semantics></math></p>
-<p>where <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi mathvariant="normal">Λ</mi><mi>i</mi></msub><mo stretchy="false" form="prefix">(</mo><mi>t</mi><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">\Lambda_i(t)</annotation></semantics></math> uses the same Gauss-Kronrod integrator and association bytecode as the likelihood.</p>
+</span></p>
+<p>where <span class="math inline">\Lambda_i(t)</span> uses the same Gauss-Kronrod integrator and association bytecode as the likelihood.</p>
+<p>For an ordered piecewise-linear association with (K) knots, fitting and dynamic prediction use the same posterior coefficient vector. The fit samples a (K-1) simplex, cumulatively sums its positive elements, applies the requested sign, and anchors the first ordinate at zero. Dynamic prediction receives the resulting draw-specific ordinates directly; it never reconstructs the curve from a user-supplied response vector.</p>
 </section><script id="quarto-html-after-body" type="application/javascript">
   window.document.addEventListener("DOMContentLoaded", function (event) {
       var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);

@@ -92,6 +92,10 @@ A list with fields:
 - `support`: for `what = "association_plot"`, cached model-implied raw
   support ranges used by association plotting.
 
+- `transform_coeff_draws`: for `what = "association_plot"`,
+  draw-specific fitted I-spline or ordered piecewise-linear ordinates,
+  including one matrix per covariance component when applicable.
+
 ## See also
 
 [`draws()`](https://trinhdhk.github.io/joinme/reference/draws.md) for a

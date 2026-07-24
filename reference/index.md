@@ -7,14 +7,16 @@
   : Build posterior association effects for a fitted JoiNMe model
 - [`association_plot()`](https://trinhdhk.github.io/joinme/reference/association_plot.md)
   : Plot fitted association curves from a JoiNMe fit
+- [`auc()`](https://trinhdhk.github.io/joinme/reference/auc.md) :
+  Time-dependent area under the ROC curve
 - [`bayes_factor()`](https://trinhdhk.github.io/joinme/reference/bayes_factor.md)
   : Bayes factor between two JoiNMe fits
 - [`build_standata_transforms()`](https://trinhdhk.github.io/joinme/reference/build_standata_transforms.md)
   : Transform Specification Helper
 - [`coef(`*`<JoiNMeFit>`*`)`](https://trinhdhk.github.io/joinme/reference/coef.JoinMeFit.md)
   : Combined posterior coefficients for fitted JoiNMe models
-- [`concordance(`*`<JoiNMeFit>`*`)`](https://trinhdhk.github.io/joinme/reference/concordance.JoinMeFit.md)
-  : Time-varying concordance for the survival component
+- [`concordance(`*`<JoiNMeFit>`*`)`](https://trinhdhk.github.io/joinme/reference/concordance.JoiNMeFit.md)
+  : Concordance of conditional survival predictions
 - [`conditional_effects(`*`<JoiNMeFit>`*`)`](https://trinhdhk.github.io/joinme/reference/conditional_effects.JoiNMeFit.md)
   : Conditional effects for a fitted joint model
 - [`cumhaz_plot()`](https://trinhdhk.github.io/joinme/reference/cumhaz_plot.md)
@@ -44,6 +46,8 @@
   : Extract fixed effects
 - [`gk_quadrature()`](https://trinhdhk.github.io/joinme/reference/gk_quadrature.md)
   : Gauss-Kronrod quadrature grid helper
+- [`invert_transform_expr()`](https://trinhdhk.github.io/joinme/reference/invert_transform_expr.md)
+  : Invert a one-to-one transformation expression
 - [`joinme-package`](https://trinhdhk.github.io/joinme/reference/joinme-package.md)
   [`JoiNMe-package`](https://trinhdhk.github.io/joinme/reference/joinme-package.md)
   [`JoiNMe`](https://trinhdhk.github.io/joinme/reference/joinme-package.md)
@@ -87,6 +91,7 @@
 - [`parse_transform_expr()`](https://trinhdhk.github.io/joinme/reference/parse_transform_expr.md)
   : Functional Transform Builder for Joint Models
 - [`penalised_ispline_transform()`](https://trinhdhk.github.io/joinme/reference/penalised_ispline_transform.md)
+  [`penalized_ispline_transform()`](https://trinhdhk.github.io/joinme/reference/penalised_ispline_transform.md)
   : Penalised Monotone I-spline Transform Spec
 - [`plot(`*`<JoiNMeConditionalEffects>`*`)`](https://trinhdhk.github.io/joinme/reference/plot.JoiNMeConditionalEffects.md)
   : Plot JoiNMe conditional effects

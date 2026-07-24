@@ -23,6 +23,7 @@ joinme(
   fixed_marker_weights = FALSE,
   shared_marker_weights = TRUE,
   basehaz = joinme_basehaz(),
+  fit = TRUE,
   seed = NULL,
   ...
 )
@@ -163,8 +164,14 @@ joinme(
 
   Marker-specific family specification (optional). Can be a character
   vector of family names aligned to marker order, or a list of
-  `jm_family(...)` entries with per-marker links. Supported
-  links/inverse-links: `identity`, `log`, `logit`, `probit`, `exp`.
+  `jm_family(...)` entries with per-marker links. Supported named
+  forward links are `identity`, `log`, `logit`, `probit`, and `exp`;
+  [`jm_family()`](https://trinhdhk.github.io/joinme/reference/joinme_family.md)
+  also accepts an invertible formula link or a directly specified
+  inverse-link formula. In formula syntax, `inv_Phi`/`qnorm`/`probit`
+  denote the standard normal quantile and `Phi`/`pnorm` denote the
+  standard normal CDF. Thus a probit forward link is inverted to `Phi`
+  before fitting.
 
 - transforms:
 
@@ -203,6 +210,15 @@ joinme(
   See
   [`?joinme_basehaz`](https://trinhdhk.github.io/joinme/reference/joinme_basehaz.md)
   for details.
+
+- fit:
+
+  logical; if TRUE, the model is fitted and a `JoiNMeFit` object is
+  returned. If FALSE, only the Stan data list is returned.
+
+- seed:
+
+  Optional random seed for reproducibility.
 
 - ...:
 
@@ -274,7 +290,7 @@ and strictly positive.
 
 Transformation for supported association terms can be fed to `joinme()`
 in a named list. For example
-`list(cv_total = list(type = "functional", expr = ~ log1p(x)), cs_total = list(type = "identity"), corr = list(type = "pwlin", x = c(-2, 0, 2), y = c(0.2, 1, 0.2)), vcov = list(type = "identity"))`
+`list(cv_total = list(type = "functional", expr = ~ log1p(x)), cs_total = list(type = "identity"), corr = list(type = "pwlin", knots = c(-2, 0, 2), direction = "increasing"), vcov = list(type = "identity"))`
 
 Transformation parameterisation:
 
@@ -314,9 +330,17 @@ Transformation parameterisation:
   penalised monotone I-spline on `plogis(x)` with Stan-estimated
   coefficients.
 
-- `list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))`:
-  piecewise-linear transform; both `x` and `y` are required. This is
-  intended for simulation but it works here too, off-labelly.
+- `list(type = "pwlin", knots = c(-2, -1, 0, 1, 2), direction = "increasing")`:
+  ordered piecewise-linear association estimated jointly in Stan.
+
+For fitted piecewise-linear associations, the knots divide the raw
+association feature into linear intervals. With \$K\$ knots, Stan
+estimates a \$K-1\$ simplex. Its cumulative sums give ordered relative
+association ordinates running from zero to one for an increasing curve,
+or from zero to minus one for a decreasing curve. The signed association
+coefficient estimates the total log-hazard span. The first ordinate is
+anchored at zero because a free common ordinate would be confounded with
+the baseline hazard.
 
 For monotone spline transforms:
 

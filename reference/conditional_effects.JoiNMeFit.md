@@ -190,7 +190,7 @@ The event result is a relative-hazard effect rather than a dynamic
 survival prediction. Dynamic survival probabilities depend on a
 subject's observed marker history and conditioning time and therefore
 remain the estimand of
-[`predict.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/predict.JoinMeFit.md).
+[`predict.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/predict.JoiNMeFit.md).
 Keeping these two estimands separate prevents a table of baseline
 covariate effects from being mislabeled as subject-specific dynamic
 prediction.
@@ -199,7 +199,7 @@ prediction.
 
 [`brms::conditional_effects()`](https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html),
 `make_conditions()`,
-[`predict.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/predict.JoinMeFit.md)
+[`predict.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/predict.JoiNMeFit.md)
 
 ## Examples
 

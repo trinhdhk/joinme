@@ -17,9 +17,9 @@ consistent summaries and plotting helpers.
 The `joinme` package follows the below data-processing and model-fitting
 sequence:
 
-1.  **Data assembly (R)**: build design matrices, scale time to
-    $`[0, 1]`$, and prepare Gauss-Kronrod nodes (default 15,
-    configurable) for survival integration.
+1.  **Data assembly (R)**: build design matrices, scale time to \[0,
+    1\], and prepare Gauss-Kronrod nodes (default 15, configurable) for
+    survival integration.
 2.  **Parameter declarations (Stan)**: define fixed effects, random
     effects, distributional regression coefficients, baseline hazard
     parameters, and association coefficients.
@@ -83,6 +83,9 @@ sim <- simulate_joinme(
 
 # Gauss-Kronrod nodes/weights are fixed in Stan; `quadrature_nodes` selects
 # the node count used to build the design matrices in R.
+#
+# For a probit marker, use link = "probit" or link = ~ inv_Phi(x).
+# A direct inverse-link declaration instead uses inv_link = ~ Phi(x).
 
 # `truth$marker_weights` is the effective base + latent value used in the hazard.
 # The decomposition is available as marker_weights_base/marker_weights_latent.
@@ -105,21 +108,21 @@ dataEvent_split <- sim_split$dataEvent
 
 # Preview the data
 head(dataLong)
-#>   id marker      time       x1        x2           y
-#> 1  1     m1 0.0000000 1.370958 0.2059986 -1.51724626
-#> 2  1     m1 0.7272727 1.370958 0.2059986  2.70925844
-#> 3  1     m1 1.4545455 1.370958 0.2059986 -1.75833339
-#> 4  1     m1 2.1818182 1.370958 0.2059986  0.02561363
-#> 5  1     m1 2.9090909 1.370958 0.2059986 -1.71592539
-#> 6  1     m1 3.6363636 1.370958 0.2059986 -4.28562285
+#>   id marker      time         x1        x2         y
+#> 1  1     m1 0.0000000 -0.2942841 0.1433918 3.2878746
+#> 2  1     m1 0.7272727 -0.2942841 0.1433918 0.4591744
+#> 3  1     m1 1.4545455 -0.2942841 0.1433918 1.5627928
+#> 4  1     m1 2.1818182 -0.2942841 0.1433918 0.7059543
+#> 5  1     m1 2.9090909 -0.2942841 0.1433918 0.6613724
+#> 6  1     m1 3.6363636 -0.2942841 0.1433918 4.6048840
 head(dataEvent)
-#>   id         x1         x2     time event time_start time_stop
-#> 1  1  1.3709584  0.2059986 8.000000     0          0  8.000000
-#> 2  2 -0.5646982 -0.3610573 1.052114     1          0  1.052114
-#> 3  3  0.3631284  0.7581632 3.641210     1          0  3.641210
-#> 4  4  0.6328626 -0.7267048 6.699508     1          0  6.699508
-#> 5  5  0.4042683 -1.3682810 5.019946     1          0  5.019946
-#> 6  6 -0.1061245  0.4328180 1.797717     1          0  1.797717
+#>   id         x1         x2      time event time_start time_stop
+#> 1  1 -0.2942841  0.1433918 4.2850991     1          0 4.2850991
+#> 2  2 -0.5631947  0.7502855 0.1089635     1          0 0.1089635
+#> 3  3  0.3776016 -0.1379869 8.0000000     0          0 8.0000000
+#> 4  4 -0.1430829  0.6646221 0.5845890     1          0 0.5845890
+#> 5  5  0.2235321 -1.0430229 8.0000000     0          0 8.0000000
+#> 6  6  0.4042901  0.5142336 8.0000000     0          0 8.0000000
 ```
 
 Visualise your longitudinal trajectories and survival distribution
@@ -151,11 +154,11 @@ Code
 table(dataEvent$event)
 #> 
 #>  0  1 
-#> 10 30
+#> 15 25
 prop.table(table(dataEvent$event))
 #> 
-#>    0    1 
-#> 0.25 0.75
+#>     0     1 
+#> 0.375 0.625
 ```
 
 Ensure the event rate is sufficient (typically \>10-20 events per
@@ -173,19 +176,19 @@ of the biomarkers.
 #### 3.0.1 Families and distributional regression
 
 Each marker can follow a distinct family (for example Gaussian,
-Student-$`t`$, Poisson, negative binomial, Bernoulli, beta, or ordinal).
-When a family includes additional parameters (for example $`\sigma`$,
-$`\nu`$, or $`\phi`$), those parameters can be modelled through
-`formulaDist`. This allows heteroscedasticity or covariate-dependent
-dispersion while keeping the mean structure aligned across markers.
+Student-t, Poisson, negative binomial, Bernoulli, beta, or ordinal).
+When a family includes additional parameters (for example \sigma, \nu,
+or \phi), those parameters can be modelled through `formulaDist`. This
+allows heteroscedasticity or covariate-dependent dispersion while
+keeping the mean structure aligned across markers.
 
 #### 3.0.2 Association transformations
 
 The association terms can be transformed using one of four modes:
 identity, functional bytecode expressions, monotone I-splines, or
-piecewise linear interpolation. These transformations are specified in R
-and passed to Stan as data so that the likelihood remains deterministic
-and reproducible.
+ordered piecewise-linear interpolation. These transformations are
+specified in R and passed to Stan as data so that the likelihood remains
+deterministic and reproducible.
 
 ### 3.1 Marker-only random effects (no inner id term)
 
@@ -244,13 +247,12 @@ engine <- if (has_cmdstan) "cmdstanr" else "rstan"
 control <- list(
   engine = engine,
   chains = 1,           # Use 4 chains for publication
-  iter_warmup = 200,    # Typically 1000+
-  iter_sampling = 200,  # Typically 1000+
+  iter_warmup = 100,    # Typically 1000+
+  iter_sampling = 100,  # Typically 1000+
   parallel_chains = 1,
-  adapt_delta = 0.90,   # Increase if divergences occur
+  adapt_delta = 0.8,   # Increase if divergences occur
   max_treedepth = 12
 )
-if (engine == "cmdstanr") control$init <- 0
 
 fit <- joinme(
   dataLong = dataLong,
@@ -268,21 +270,27 @@ fit <- joinme(
 #> 
 #> SAMPLING FOR MODEL 'joinme_fit_threading' NOW (CHAIN 1).
 #> Chain 1: 
-#> Chain 1: Gradient evaluation took 0.006444 seconds
-#> Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 64.44 seconds.
+#> Chain 1: Gradient evaluation took 0.005799 seconds
+#> Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 57.99 seconds.
 #> Chain 1: Adjust your expectations accordingly!
 #> Chain 1: 
 #> Chain 1: 
-#> Chain 1: Iteration:   1 / 400 [  0%]  (Warmup)
-#> Chain 1: Iteration: 100 / 400 [ 25%]  (Warmup)
-#> Chain 1: Iteration: 200 / 400 [ 50%]  (Warmup)
-#> Chain 1: Iteration: 201 / 400 [ 50%]  (Sampling)
-#> Chain 1: Iteration: 300 / 400 [ 75%]  (Sampling)
-#> Chain 1: Iteration: 400 / 400 [100%]  (Sampling)
+#> Chain 1: WARNING: There aren't enough warmup iterations to fit the
+#> Chain 1:          three stages of adaptation as currently configured.
+#> Chain 1:          Reducing each adaptation stage to 15%/75%/10% of
+#> Chain 1:          the given number of warmup iterations:
+#> Chain 1:            init_buffer = 15
+#> Chain 1:            adapt_window = 75
+#> Chain 1:            term_buffer = 10
 #> Chain 1: 
-#> Chain 1:  Elapsed Time: 300.658 seconds (Warm-up)
-#> Chain 1:                557.888 seconds (Sampling)
-#> Chain 1:                858.546 seconds (Total)
+#> Chain 1: Iteration:   1 / 200 [  0%]  (Warmup)
+#> Chain 1: Iteration: 100 / 200 [ 50%]  (Warmup)
+#> Chain 1: Iteration: 101 / 200 [ 50%]  (Sampling)
+#> Chain 1: Iteration: 200 / 200 [100%]  (Sampling)
+#> Chain 1: 
+#> Chain 1:  Elapsed Time: 40.707 seconds (Warm-up)
+#> Chain 1:                65.622 seconds (Sampling)
+#> Chain 1:                106.329 seconds (Total)
 #> Chain 1:
 
 # Counting-process fit with left truncation/time-split covariates:
@@ -297,21 +305,27 @@ fit_split <- joinme(
 #> 
 #> SAMPLING FOR MODEL 'joinme_fit_threading' NOW (CHAIN 1).
 #> Chain 1: 
-#> Chain 1: Gradient evaluation took 0.009439 seconds
-#> Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 94.39 seconds.
+#> Chain 1: Gradient evaluation took 0.008789 seconds
+#> Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 87.89 seconds.
 #> Chain 1: Adjust your expectations accordingly!
 #> Chain 1: 
 #> Chain 1: 
-#> Chain 1: Iteration:   1 / 400 [  0%]  (Warmup)
-#> Chain 1: Iteration: 100 / 400 [ 25%]  (Warmup)
-#> Chain 1: Iteration: 200 / 400 [ 50%]  (Warmup)
-#> Chain 1: Iteration: 201 / 400 [ 50%]  (Sampling)
-#> Chain 1: Iteration: 300 / 400 [ 75%]  (Sampling)
-#> Chain 1: Iteration: 400 / 400 [100%]  (Sampling)
+#> Chain 1: WARNING: There aren't enough warmup iterations to fit the
+#> Chain 1:          three stages of adaptation as currently configured.
+#> Chain 1:          Reducing each adaptation stage to 15%/75%/10% of
+#> Chain 1:          the given number of warmup iterations:
+#> Chain 1:            init_buffer = 15
+#> Chain 1:            adapt_window = 75
+#> Chain 1:            term_buffer = 10
 #> Chain 1: 
-#> Chain 1:  Elapsed Time: 355.621 seconds (Warm-up)
-#> Chain 1:                202.061 seconds (Sampling)
-#> Chain 1:                557.682 seconds (Total)
+#> Chain 1: Iteration:   1 / 200 [  0%]  (Warmup)
+#> Chain 1: Iteration: 100 / 200 [ 50%]  (Warmup)
+#> Chain 1: Iteration: 101 / 200 [ 50%]  (Sampling)
+#> Chain 1: Iteration: 200 / 200 [100%]  (Sampling)
+#> Chain 1: 
+#> Chain 1:  Elapsed Time: 134.044 seconds (Warm-up)
+#> Chain 1:                90.486 seconds (Sampling)
+#> Chain 1:                224.53 seconds (Total)
 #> Chain 1:
 ```
 
@@ -322,8 +336,8 @@ chains.
 
 ### 5.1 R-hat and Effective Sample Size
 
-Values of $`\hat{R} < 1.01`$ and ESS \> 400 indicate reasonable
-convergence for inference, as recommended by Stan developers.
+Values of \hat{R} \< 1.01 and ESS \> 400 indicate reasonable convergence
+for inference, as recommended by Stan developers.
 
 Code
 
@@ -344,11 +358,11 @@ posterior::summarise_draws(
   default_convergence_measures()
 )
 #> # A tibble: 3 × 10
-#>   variable     mean median    sd   mad       q5   q95  rhat ess_bulk ess_tail
-#>   <chr>       <dbl>  <dbl> <dbl> <dbl>    <dbl> <dbl> <dbl>    <dbl>    <dbl>
-#> 1 (Intercept) 0.837  0.851 0.426 0.265  0.250   1.33  0.995     264.     184.
-#> 2 time        0.177  0.179 0.117 0.108 -0.00460 0.355 1.00      393.     190.
-#> 3 cv_total    0.429  0.345 0.389 0.226  0.0712  1.20  0.996     149.     178.
+#>   variable     mean median    sd    mad      q5   q95  rhat ess_bulk ess_tail
+#>   <chr>       <dbl>  <dbl> <dbl>  <dbl>   <dbl> <dbl> <dbl>    <dbl>    <dbl>
+#> 1 (Intercept) 1.03  1.16   0.575 0.539  0.110   1.83  1.01     102.      57.6
+#> 2 time        0.253 0.264  0.111 0.131  0.0839  0.431 0.998     87.9     71.3
+#> 3 cv_total    0.149 0.0804 0.234 0.0876 0.00460 0.425 1.01      51.5     76.6
 ```
 
 ### 5.2 Traceplots
@@ -402,7 +416,7 @@ ndLong <- dataLong |> filter(id == target_id, time <= t_cond)
 ndEvent <- dataEvent |> filter(id == target_id)
 
 print(paste("Predicting for ID:", target_id, "conditioned on history up to t =", t_cond))
-#> [1] "Predicting for ID: 4 conditioned on history up to t = 4"
+#> [1] "Predicting for ID: 7 conditioned on history up to t = 4"
 ```
 
 Run the prediction:
@@ -430,19 +444,56 @@ preds <- tryCatch(
 
 head(preds$predictions$survival)
 #>     id     time  Survival    Median  Est.Error       L95       U95
-#> 4.1  4 4.000000 1.0000000 1.0000000 0.00000000 1.0000000 1.0000000
-#> 4.2  4 4.137931 0.9674819 0.9681881 0.01268423 0.9396159 0.9871276
-#> 4.3  4 4.275862 0.9360509 0.9373449 0.02482678 0.8804698 0.9744973
-#> 4.4  4 4.413793 0.9056763 0.9075484 0.03643158 0.8226668 0.9621030
-#> 4.5  4 4.551724 0.8763169 0.8787884 0.04750484 0.7663613 0.9499354
-#> 4.6  4 4.689655 0.8479239 0.8509846 0.05805437 0.7116180 0.9379819
+#> 7.1  7 4.000000 1.0000000 1.0000000 0.00000000 1.0000000 1.0000000
+#> 7.2  7 4.137931 0.9813482 0.9848616 0.01081059 0.9482546 0.9914852
+#> 7.3  7 4.275862 0.9629472 0.9697253 0.02141386 0.8966224 0.9830937
+#> 7.4  7 4.413793 0.9447983 0.9546153 0.03178993 0.8453193 0.9748782
+#> 7.5  7 4.551724 0.9269025 0.9395565 0.04191772 0.7951691 0.9666450
+#> 7.6  7 4.689655 0.9092609 0.9246760 0.05177424 0.7461024 0.9583546
 ```
 
-`concordance(fit, ...)` now evaluates dynamic prediction on a dense
-per-subject survival grid between the landmark and the requested
-horizon. This keeps the discrimination calculation aligned with the same
-prediction machinery used by the fitted plotting helpers and avoids the
-instability that can arise from endpoint-only event prediction.
+`concordance(fit)` is a follow-up-wide survival-curve concordance rather
+than an AUC at a selected horizon. By default, residual follow-up for
+subject (i) starts at their final longitudinal measurement strictly
+before the observed event or censoring time, (T\_{0i}). For an event at
+residual time (r_i=T_i-T\_{0i}), the event subject is compared with
+every subject known to survive longer. The pair is concordant when
+(S_i(r_i)\<S_j(r_i)): both conditional survival curves are evaluated at
+the same earlier event time. This is the survival-curve concordance
+proposed by Antolini and colleagues and does not use the outcome time to
+construct a fixed subject score.
+
+Premature censoring is handled through observability. A subject censored
+before (r_i) is not comparable with that event; censoring at (r_i)
+establishes survival through that time and remains comparable.
+`type_weights = "n/G2"` requests Uno’s inverse-censoring weighting
+through
+[`survival::concordance()`](https://rdrr.io/pkg/survival/man/concordance.html).
+Fitted monotone splines and ordered piecewise-linear associations enter
+every conditional curve through their posterior ordinates, exactly as in
+[`predict()`](https://rdrr.io/r/stats/predict.html).
+
+`auc(fit, ...)` retains the horizon-specific estimand. At landmark (s)
+and horizon (t), it compares cumulative risk (1-S_i(ts)) between cases
+observed by (t) and controls known to remain event-free beyond (t).
+Subjects censored earlier have unknown case/control status and are
+omitted. Dynamic prediction for both methods reuses the exact fitted
+B-spline, natural-spline, or formula baseline-hazard basis, including
+its original centring constants.
+
+The estimands, censoring rules, event-time weighting, computational
+steps, and reporting recommendations are derived in the [dedicated
+discrimination
+vignette](https://trinhdhk.github.io/joinme/articles/joinme-discrimination.md).
+
+Code
+
+``` r
+
+concordance(fit)
+concordance(fit, time_start = 2, type_weights = "n/G2")
+auc(fit, time_start = 2, time_horizon = 5)
+```
 
 Finally, we visualise the predicted survival curve. The shaded area
 represents the 95% credible interval, accounting for uncertainty in both
@@ -477,13 +528,13 @@ Code
 renamed_draws <- draws(fit, variables = c("time", "cv_total"), format = "draws_df")
 head(renamed_draws)
 #> # A draws_df: 6 iterations, 1 chains, and 2 variables
-#>    time cv_total
-#> 1  0.14     0.34
-#> 2  0.23     0.61
-#> 3  0.13     0.37
-#> 4  0.28     0.17
-#> 5  0.36     0.21
-#> 6 -0.18     0.50
+#>   time cv_total
+#> 1 0.32   0.0079
+#> 2 0.35   0.0704
+#> 3 0.29   0.0444
+#> 4 0.37   0.1085
+#> 5 0.28   2.0446
+#> 6 0.44   0.0792
 #> # ... hidden reserved variables {'.chain', '.iteration', '.draw'}
 
 mcmc_plot(fit, variable = c("time", "cv_total"), type = "intervals")

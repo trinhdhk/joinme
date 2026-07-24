@@ -10,7 +10,7 @@ fits
 plot(
   x,
   type = c("rhat", "ess_bulk", "ess_tail", "mcse_mean", "mcse_sd", "running_mean",
-    "running_quantile", "mcmc"),
+    "running_quantile", "mcmc", "longitudinal", "survival", "cumhaz", "association"),
   pars = NULL,
   regex_pars = NULL,
   draws = 400,

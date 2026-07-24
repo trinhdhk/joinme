@@ -5,7 +5,7 @@
 so the resulting labelled condition tables can be passed directly to
 [`conditional_effects.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/conditional_effects.JoiNMeFit.md).
 Conditioning belongs to the conditional- effects estimand; neither
-[`predict.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/predict.JoinMeFit.md)
+[`predict.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/predict.JoiNMeFit.md)
 nor
 [`plot.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/plot.JoinMeFit.md)
 accepts a `condition` argument.

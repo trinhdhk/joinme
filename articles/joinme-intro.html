@@ -5,14 +5,15 @@
 <meta charset="utf-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>Introduction to JoiNMe • joinme</title>
-<script src="../lightswitch.js"></script><script src="../deps/jquery-3.6.0/jquery-3.6.0.min.js"></script><meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+<title>Introduction to Joint Nested Mixed Effects Models • joinme</title>
+<!-- katex math --><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" integrity="sha384-7zkQWkzuo3B5mTepMUcHkMB5jZaolc2xDwL6VFqjFALcbeS9Ggm/Yr2r3Dy4lfFg" crossorigin="anonymous"></script><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous" onload="renderMathInElement(document.body);"></script><script src="../katex-auto.js"></script><script src="../lightswitch.js"></script><script src="../deps/jquery-3.6.0/jquery-3.6.0.min.js"></script><meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 <link href="../deps/bootstrap-5.3.8/bootstrap.min.css" rel="stylesheet">
 <script src="../deps/bootstrap-5.3.8/bootstrap.bundle.min.js"></script><link href="../deps/font-awesome-6.5.2/css/all.min.css" rel="stylesheet">
 <link href="../deps/font-awesome-6.5.2/css/v4-shims.min.css" rel="stylesheet">
 <script src="../deps/headroom-0.11.0/headroom.min.js"></script><script src="../deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="../deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="../deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="../deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="../deps/search-1.0.0/fuse.min.js"></script><script src="../deps/search-1.0.0/mark.min.js"></script><script src="joinme-intro_files/libs/quarto-html/popper.min.js"></script><script src="joinme-intro_files/libs/quarto-html/tippy.umd.min.js"></script><link href="joinme-intro_files/libs/quarto-html/tippy.css" rel="stylesheet">
 <link href="joinme-intro_files/libs/quarto-html/light-border.css" rel="stylesheet">
-<!-- pkgdown --><script src="../pkgdown.js"></script><meta property="og:title" content="Introduction to JoiNMe">
+<!-- pkgdown --><script src="../pkgdown.js"></script><meta property="og:title" content="Introduction to Joint Nested Mixed Effects Models">
 </head>
 <body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
@@ -38,6 +39,7 @@
 <li class="nav-item"><form class="form-inline" role="search">
  <input class="form-control" type="search" name="search-input" id="search-input" autocomplete="off" aria-label="Search site" placeholder="Search for" data-search-index="../search.json">
 </form></li>
+<li class="nav-item"><a class="external-link nav-link" href="https://github.com/trinhdhk/joinme/" aria-label="GitHub"><span class="fa fab fa-github fa-lg"></span></a></li>
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-lightswitch" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true" aria-label="Light switch"><span class="fa fa-sun"></span></button>
   <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="dropdown-lightswitch">
@@ -55,12 +57,12 @@
 <div class="row">
   <main id="main" class="col-md-9"><div class="page-header">
 
-      <h1>Introduction to JoiNMe</h1>
+      <h1>Introduction to Joint Nested Mixed Effects Models</h1>
 
 
 
 
-
+      <small class="dont-index">Source: <a href="https://github.com/trinhdhk/joinme/blob/master/vignettes/joinme-intro.qmd" class="external-link"><code>vignettes/joinme-intro.qmd</code></a></small>
       <div class="d-none name"><code></code></div>
     </div>
 
@@ -89,9 +91,9 @@
 <p>The <code>JoiNMe</code> model links two components:</p>
 <ol type="1">
 <li>A multivariate longitudinal model for repeated biomarker measurements.</li>
-<li>A survival model whose hazard depends on summaries of the longitudinal process at time <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>t</mi><annotation encoding="application/x-tex">t</annotation></semantics></math>.</li>
+<li>A survival model whose hazard depends on summaries of the longitudinal process at time <span class="math inline">t</span>.</li>
 </ol>
-<p>For the longitudinal part, each marker can follow its own distribution (Gaussian, Student-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>t</mi><annotation encoding="application/x-tex">t</annotation></semantics></math>, Poisson, negative binomial, Bernoulli, beta, skew families, or ordinal). The linear predictor is decomposed into fixed effects, subject-level random effects, marker-level random effects, and optional marker-by-subject random effects. The survival part uses a proportional hazards model with a flexible spline baseline hazard and time-dependent association terms.</p>
+<p>For the longitudinal part, each marker can follow its own distribution (Gaussian, Student-<span class="math inline">t</span>, Poisson, negative binomial, Bernoulli, beta, skew families, or ordinal). The linear predictor is decomposed into fixed effects, subject-level random effects, marker-level random effects, and optional marker-by-subject random effects. The survival part uses a proportional hazards model with a flexible spline baseline hazard and time-dependent association terms.</p>
 <p>The association terms implemented in <code>joinme</code> package are:</p>
 <ul>
 <li>Current value (CV) of the latent linear predictor.</li>
@@ -99,7 +101,7 @@
 <li>Correlation association (CORR) derived from off-diagonal marker-by-subject correlations.</li>
 <li>Variance-covariance association (VCOV) derived from lower-triangular marker-by-subject Cholesky-factor entries taken directly from <code>L</code>.</li>
 </ul>
-<p>Each association term can be left on its original scale or transformed using a functional expression, a monotone I-spline, or a piecewise linear mapping. These transformations are configured in R and passed to Stan as data so that the likelihood remains fully deterministic.</p>
+<p>Each association term can be left on its original scale or transformed using a functional expression, a monotone I-spline, or an ordered piecewise-linear mapping.</p>
 </section><section class="level2"><h2 id="family-shared-distributional-semantics">Family-shared distributional semantics<a class="anchor" aria-label="anchor" href="#family-shared-distributional-semantics"></a>
 </h2>
 <p>For mixed longitudinal families, <code>JoiNMe</code> treats distributional parameters as <strong>shared by family</strong> when no distributional regression is supplied.</p>
@@ -138,7 +140,7 @@
 <li>
 <code>dataEvent</code>: one row per subject with event/censoring time, event indicator, and baseline covariates.</li>
 </ul>
-<p>Time is internally scaled to <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false" form="prefix">[</mo><mn>0</mn><mo>,</mo><mn>1</mn><mo stretchy="false" form="postfix">]</mo></mrow><annotation encoding="application/x-tex">[0, 1]</annotation></semantics></math> for numerical stability. The model returns coefficients on the original time scale.</p>
+<p>Time is internally scaled to <span class="math inline">[0, 1]</span> for numerical stability. The model returns coefficients on the original time scale.</p>
 <section class="level3"><h3 id="step-1-load-packages-and-set-a-reproducible-seed">Step 1: Load packages and set a reproducible seed<a class="anchor" aria-label="anchor" href="#step-1-load-packages-and-set-a-reproducible-seed"></a>
 </h3>
 <div class="cell">
@@ -288,16 +290,16 @@ Fixed effects (beta)
 
 Baseline hazard coefficients
 # A tibble: 8 × 11
-  term    Estimate Hazard.Ratio Est.Error   Q2.5  Q97.5 HR.Q2.5 HR.Q97.5  Rhat
-  &lt;chr&gt;      &lt;dbl&gt;        &lt;dbl&gt;     &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;   &lt;dbl&gt;    &lt;dbl&gt; &lt;dbl&gt;
-1 basis_1   -7.70         0         3.01  -13.9  -2.23    0        0.107 0.999
-2 basis_2   -0.949        0.387     1.13   -3.34  0.989   0.036    2.69  0.999
-3 basis_3   -0.672        0.511     0.935  -2.88  0.874   0.056    2.40  1.00
-4 basis_4   -0.394        0.674     0.86   -2.13  1.14    0.119    3.13  0.999
-5 basis_5   -0.111        0.895     0.83   -1.89  1.38    0.151    3.96  1.00
-6 basis_6    0.218        1.24      0.839  -1.55  1.70    0.212    5.48  1.00
-7 basis_7    0.548        1.73      0.929  -1.26  2.24    0.285    9.41  1.00
-8 basis_8    0.894        2.44      1.17   -1.16  3.22    0.314   25.0   1.02
+  term  Estimate Hazard.Ratio Est.Error   Q2.5  Q97.5 HR.Q2.5 HR.Q97.5  Rhat
+  &lt;chr&gt;    &lt;dbl&gt;        &lt;dbl&gt;     &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;   &lt;dbl&gt;    &lt;dbl&gt; &lt;dbl&gt;
+1 1       -7.70         0         3.01  -13.9  -2.23    0        0.107 0.999
+2 2       -0.949        0.387     1.13   -3.34  0.989   0.036    2.69  0.999
+3 3       -0.672        0.511     0.935  -2.88  0.874   0.056    2.40  1.00
+4 4       -0.394        0.674     0.86   -2.13  1.14    0.119    3.13  0.999
+5 5       -0.111        0.895     0.83   -1.89  1.38    0.151    3.96  1.00
+6 6        0.218        1.24      0.839  -1.55  1.70    0.212    5.48  1.00
+7 7        0.548        1.73      0.929  -1.26  2.24    0.285    9.41  1.00
+8 8        0.894        2.44      1.17   -1.16  3.22    0.314   25.0   1.02
   ess_bulk ess_tail
      &lt;dbl&gt;    &lt;dbl&gt;
 1    468.     313.
@@ -683,14 +685,14 @@ Per-Parameter Diagnostics
  1 fixef            &lt;NA&gt;       (Intercept)           (Intercept)
  2 fixef            &lt;NA&gt;       time                  time
  3 fixef            &lt;NA&gt;       x1                    x1
- 4 baseline_hazard  &lt;NA&gt;       basis_1               basis_1
- 5 baseline_hazard  &lt;NA&gt;       basis_2               basis_2
- 6 baseline_hazard  &lt;NA&gt;       basis_3               basis_3
- 7 baseline_hazard  &lt;NA&gt;       basis_4               basis_4
- 8 baseline_hazard  &lt;NA&gt;       basis_5               basis_5
- 9 baseline_hazard  &lt;NA&gt;       basis_6               basis_6
-10 baseline_hazard  &lt;NA&gt;       basis_7               basis_7
-11 baseline_hazard  &lt;NA&gt;       basis_8               basis_8
+ 4 baseline_hazard  &lt;NA&gt;       1                     1
+ 5 baseline_hazard  &lt;NA&gt;       2                     2
+ 6 baseline_hazard  &lt;NA&gt;       3                     3
+ 7 baseline_hazard  &lt;NA&gt;       4                     4
+ 8 baseline_hazard  &lt;NA&gt;       5                     5
+ 9 baseline_hazard  &lt;NA&gt;       6                     6
+10 baseline_hazard  &lt;NA&gt;       7                     7
+11 baseline_hazard  &lt;NA&gt;       8                     8
 12 survival_process &lt;NA&gt;       x1                    x1
 13 survival_process &lt;NA&gt;       x2                    x2
 14 assoc            &lt;NA&gt;       cv_total              cv_total

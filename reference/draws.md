@@ -17,8 +17,8 @@ explicit id, scale, marker, and time labels.
 
 Fitted-object draw arrays are cached inside the underlying R6 container
 after the first request so later summaries, diagnostics, and plotting
-methods can reuse the same renamed draw payload without re-reading the
-backend fit.
+methods can reuse the same renamed draw collection without re-reading
+the backend fit.
 
 Use `draws()` when you want:
 
@@ -31,7 +31,7 @@ Use `draws()` when you want:
   [`mcmc_plot()`](https://trinhdhk.github.io/joinme/reference/mcmc_plot.html),
 
 - a standard draws array/matrix/data frame rather than a
-  component-specific extraction payload.
+  component-specific extraction result.
 
 - `as.array` is a shorthand for `draws(format = "draws_array")`.
 
@@ -92,7 +92,9 @@ as.array(x, ...)
 
 - ...:
 
-  Unused.
+  Additional arguments forwarded from
+  [`as.array()`](https://rdrr.io/r/base/array.html) to `draws()`;
+  otherwise unused.
 
 - variables:
 
@@ -119,6 +121,12 @@ as.array(x, ...)
 
   Output format. Supported values are `"draws_array"`, `"draws_matrix"`,
   and `"draws_df"`.
+
+- x:
+
+  A fitted `JoiNMeFit` or dynamic-prediction `JoiNMeDynPred` object
+  passed to the corresponding
+  [`as.array()`](https://rdrr.io/r/base/array.html) method.
 
 ## Value
 

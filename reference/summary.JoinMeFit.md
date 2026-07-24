@@ -9,7 +9,14 @@ contains non-intercept covariates beyond association features.
 
 ``` r
 # S3 method for class 'JoiNMeFit'
-summary(object, draws = NULL, seed = 1, digits = 3, include_corr = TRUE, ...)
+summary(
+  object,
+  draws = NULL,
+  seed = .Random.seed[[1]],
+  digits = 3,
+  include_corr = TRUE,
+  ...
+)
 
 # S3 method for class 'JoiNMeFit'
 posterior_summary(object, ...)
@@ -43,4 +50,7 @@ posterior_summary(object, ...)
 
 ## Value
 
-A `summary_JoiNMeFit` object
+A `summary_JoiNMeFit` object. Its `tables` element includes posterior
+association coefficients, transform parameters, and, when an ordered
+piecewise-linear association is active, `piecewise_ordinates` containing
+the relative log-hazard and hazard-ratio contribution at every knot.
