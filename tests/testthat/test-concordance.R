@@ -201,7 +201,7 @@ test_that("concordance prediction grids contain every observable event time", {
     newdataEvent = data_event,
     time_start = NULL,
     cause = 1L,
-    n_samples = 5,
+    predict_control = list(n_samples = 5, n_pred_draws = 5),
     seed = 1
   )
 
@@ -210,7 +210,7 @@ test_that("concordance prediction grids contain every observable event time", {
   expect_equal(dim(curves$survival), c(2, 3))
 })
 
-test_that("concordance has no horizon and delegates horizon discrimination to AUC", {
+test_that("concordance has no horizon and directs horizon analysis to tvROC", {
   object <- structure(list(
     dataLong = data.frame(id = 1:3),
     dataEvent = data.frame(id = 1:3),
@@ -219,8 +219,9 @@ test_that("concordance has no horizon and delegates horizon discrimination to AU
   testthat::local_mocked_bindings(
     .concordance_survival_curves = function(
         object, newdataLong, newdataEvent, time_start, cause,
-        n_samples, seed, ...) {
+        predict_control, seed, ...) {
       expect_null(time_start)
+      expect_equal(predict_control$n_samples, 200)
       list(
         outcomes = data.frame(
           residual_time = c(1, 2, 3),
@@ -237,17 +238,17 @@ test_that("concordance has no horizon and delegates horizon discrimination to AU
     .package = "joinme"
   )
 
-  out <- concordance(object)
+  out <- suppressWarnings(concordance(object))
 
   expect_s3_class(out, "concordance_JoiNMeFit")
   expect_equal(out$concordance, 1)
   expect_error(
-    concordance(object, time_horizon = 3),
-    "auc\\(object"
+    suppressWarnings(concordance(object, time_horizon = 3)),
+    "tvROC\\(object"
   )
 })
 
-test_that("AUC retains the horizon-specific dynamic-risk calculation", {
+test_that("tvROC and tvAUC retain the established horizon parameter recipe", {
   object <- structure(list(
     dataLong = data.frame(id = 1:2),
     dataEvent = data.frame(id = 1:2),
@@ -265,15 +266,22 @@ test_that("AUC retains the horizon-specific dynamic-risk calculation", {
         risk = c(0.8, 0.2),
         event_window = c(1L, 0L),
         event_time = c(2, 4),
+        event_status = c(1L, 0L),
+        event_type = c(1L, 0L),
         time_horizon = c(3, 3)
       )
     },
     .package = "joinme"
   )
 
-  out <- auc(object)
+  roc <- suppressWarnings(tvROC(object))
+  out <- suppressWarnings(tvAUC(object))
 
-  expect_equal(out$time_start, 0)
-  expect_equal(out$time_horizon, 3)
+  expect_s3_class(roc, "tvROC")
+  expect_s3_class(out, "tvAUC")
+  expect_equal(roc$Tstart, 0)
+  expect_equal(roc$Thoriz, 3)
+  expect_equal(out$Tstart, 0)
+  expect_equal(out$Thoriz, 3)
   expect_equal(out$auc, 1)
 })

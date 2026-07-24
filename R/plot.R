@@ -2503,7 +2503,7 @@ plot.JoiNMeFit <- function(x,
         # Step 8: Retain the existing fitted event-time summaries for combined
         # longitudinal, survival, and cumulative-hazard displays.
         if (isTRUE(include_event_process)) {
-            event_vars <- .resolve_event_model_vars(x$formulaEvent, x$dataEvent, context = "plot.JoiNMeFit()")
+            event_vars <- .get_event_model_vars(x$formulaEvent, x$dataEvent, context = "plot.JoiNMeFit()")
             event_id_all <- as.character(x$dataEvent[[id_var]])
             t_end_by_id <- tapply(as.numeric(event_vars$event_stop), event_id_all, max, na.rm = TRUE)
             surv_draw <- get_mat(paste0("surv_prob_event[", seq_len(n_id), "]"))
@@ -3563,7 +3563,7 @@ plot.JoiNMeFit <- function(x,
     }
 
     out <- coeff_draws %*% t(basis)
-    if (.resolve_monotone_direction(tf_spec$direction %||% tf_spec$spline_direction %||% 1L, default = 1L) < 0L) {
+    if (.get_monotone_direction(tf_spec$direction %||% tf_spec$spline_direction %||% 1L, default = 1L) < 0L) {
         out <- matrix(rowSums(coeff_draws), nrow = nrow(coeff_draws), ncol = ncol(out)) - out
     }
     out
@@ -4193,7 +4193,7 @@ plot.JoiNMeFit <- function(x,
             coef_len <- ncol(basis)
             coeff_use <- if (length(coeff) < coef_len) c(coeff, rep(0, coef_len - length(coeff))) else coeff[seq_len(coef_len)]
             vals <- as.numeric(basis %*% coeff_use)
-            if (.resolve_monotone_direction(spec$direction %||% spec$spline_direction %||% 1L, default = 1L) < 0L) {
+            if (.get_monotone_direction(spec$direction %||% spec$spline_direction %||% 1L, default = 1L) < 0L) {
                 vals <- sum(coeff_use) - vals
             }
             vals

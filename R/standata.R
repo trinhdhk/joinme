@@ -174,12 +174,12 @@ joinme_standata <- function(
   assertthat::assert_that(is.data.frame(dataLong), msg = "dataLong must be a data.frame")
   assertthat::assert_that(is.data.frame(dataEvent), msg = "dataEvent must be a data.frame")
   assoc <- .validate_assoc_channels(assoc, context = "joinme_standata()")
-  y_var <- .resolve_response_var(
+  y_var <- .get_response_var(
     formulaLong = formulaLong,
     dataLong = dataLong,
     context = "joinme_standata()"
   )
-  event_vars <- .resolve_event_model_vars(
+  event_vars <- .get_event_model_vars(
     formulaEvent = formulaEvent,
     dataEvent = dataEvent,
     context = "joinme_standata()"
@@ -191,7 +191,7 @@ joinme_standata <- function(
   surv_type <- as.character(event_vars$surv_type %||% "right")
   basehaz <- match.arg(basehaz)
   vcov_diag_link <- match.arg(vcov_diag_link)
-  quad_req <- .resolve_gk_request(nodes = quadrature_nodes %||% 15L)
+  quad_req <- .get_gk_request(nodes = quadrature_nodes %||% 15L)
 
   if (!is.logical(fixed_marker_weights) || length(fixed_marker_weights) != 1L || is.na(fixed_marker_weights)) {
     cli::cli_abort(c(
@@ -348,7 +348,7 @@ joinme_standata <- function(
   D <- length(marker_levels)
   dataLong$marker_int <- as.integer(dataLong[[marker_var]])
 
-  .resolve_group_weights <- function(group_exprs, data, group_index, n_groups, context) {
+  .get_group_weights <- function(group_exprs, data, group_index, n_groups, context) {
     if (length(group_exprs) == 0) {
       return(rep(1.0, n_groups))
     }
@@ -389,21 +389,21 @@ joinme_standata <- function(
   marker_group_exprs <- lapply(bars[marker_idx], function(bt) bt[[3]])
   idm_group_exprs <- nested$idm_group_exprs
 
-  re_weight_id <- .resolve_group_weights(
+  re_weight_id <- .get_group_weights(
     group_exprs = id_group_exprs,
     data = dataLong,
     group_index = dataLong$id_int,
     n_groups = n_id,
     context = "formulaLong id-level random effects"
   )
-  re_weight_marker <- .resolve_group_weights(
+  re_weight_marker <- .get_group_weights(
     group_exprs = marker_group_exprs,
     data = dataLong,
     group_index = dataLong$marker_int,
     n_groups = D,
     context = "formulaLong marker-level random effects"
   )
-  re_weight_idm <- .resolve_group_weights(
+  re_weight_idm <- .get_group_weights(
     group_exprs = idm_group_exprs,
     data = dataLong,
     group_index = dataLong$id_int,
@@ -438,7 +438,7 @@ joinme_standata <- function(
   active_weight_terms <- .active_weighted_assoc_terms(assoc)
   marker_weight_assoc_active <- as.integer(length(active_weight_terms) > 0L)
   estimate_marker_weights_active <- as.integer(!isTRUE(fixed_marker_weights) && marker_weight_assoc_active == 1L)
-  marker_weight_spec <- .resolve_marker_weight_structure(
+  marker_weight_spec <- .get_marker_weight_structure(
     marker_weights = marker_weights,
     marker_levels = marker_levels,
     active_terms = active_weight_terms,
@@ -453,7 +453,7 @@ joinme_standata <- function(
     # - (... || id) enforces diagonal id RE covariance
     # - (... || marker) enforces diagonal marker RE covariance
     # - Nested (... || id) inside marker block enforces diagonal marker-by-id covariance
-    indep_flags <- .resolve_re_independence(formulaLong, marker_var = marker_var, id_var = id_var)
+    indep_flags <- .get_re_independence(formulaLong, marker_var = marker_var, id_var = id_var)
   # Process mixed families (optional)
   # - family_codes drive distributional parameter availability
   # - link_codes drive family-specific inverse-link mapping in Stan
@@ -695,7 +695,7 @@ joinme_standata <- function(
 
   # Covariance covariates Xcov
   # - used to build subject-specific lower-triangular factors L_i in Stan
-  formulaVCov <- .resolve_vcov_formula(
+  formulaVCov <- .get_vcov_formula(
     formulaVCov = formulaVCov,
     default = ~ 1,
     context = "joinme_standata()"

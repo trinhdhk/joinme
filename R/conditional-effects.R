@@ -706,7 +706,7 @@ print.JoiNMeConditionalEffects <- function(x, ...) {
                                                     draw_surface) {
   effect_variables <- attr(effect_table, "effects")
   marker_variable <- .JoiNMefit_call_arg_chr(object$call, "marker_var", "marker")
-  response_variable <- .resolve_response_var(object$formulaLong, object$dataLong, context = "conditional_effects()")
+  response_variable <- .get_response_var(object$formulaLong, object$dataLong, context = "conditional_effects()")
   observed_data <- object$dataLong
 
   # Step 1: Reproduce every condition-marker facet represented in the posterior

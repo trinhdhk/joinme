@@ -9,14 +9,14 @@ test_that(".get_stan_file always resolves the threaded Stan sources", {
   expect_match(basename(pred_file), "JoiNMe_dynpred_threading\\.stan$")
 })
 
-test_that(".resolve_stan_engine falls back to an available backend", {
+test_that(".get_stan_engine falls back to an available backend", {
   testthat::local_mocked_bindings(
     .stan_backend_available = function(engine) identical(engine, "rstan"),
     .package = "joinme"
   )
 
   expect_warning(
-    resolved <- joinme:::.resolve_stan_engine("cmdstanr"),
+    resolved <- joinme:::.get_stan_engine("cmdstanr"),
     "Falling back"
   )
   expect_identical(resolved, "rstan")

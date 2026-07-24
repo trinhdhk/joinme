@@ -1,8 +1,8 @@
 test_that("prediction draw count resolves independently from posterior extraction", {
-  expect_equal(.resolve_n_pred_draws(NULL, 12), 12)
-  expect_equal(.resolve_n_pred_draws(7, 12), 7)
-  expect_error(.resolve_n_pred_draws(0, 12), "must be >= 1")
-  expect_error(.resolve_n_pred_draws(c(2, 3), 12), "single finite numeric")
+  expect_equal(.get_n_pred_draws(NULL, 12), 12)
+  expect_equal(.get_n_pred_draws(7, 12), 7)
+  expect_error(.get_n_pred_draws(0, 12), "must be >= 1")
+  expect_error(.get_n_pred_draws(c(2, 3), 12), "single finite numeric")
 })
 
 
