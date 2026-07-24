@@ -274,28 +274,6 @@ value approaching $1$ represents increasingly correct ordering, and a value
 below $0.5$ indicates systematic reversal. These descriptions concern
 ranking only and do not establish calibration or clinical usefulness.
 
-## Why both curves are evaluated at the same time
-
-It may appear attractive to assign each subject the value
-$\widehat S_i(R_i)$ and rank subjects by those values. That construction is
-not a valid prognostic score because every score is evaluated at its own
-observed response time. Even identical survival curves decline with time, so a
-subject with long follow-up can receive a smaller survival value merely
-because their curve was evaluated later. The outcome would therefore enter
-the construction of the predictor being assessed.
-
-The same problem applies to a proposed score that subtracts survival under a
-baseline-hazard-only model from survival under the full model at each
-subject's own $R_i$. Such a difference can be scientifically interesting as
-a description of the fitted association contribution, but it is
-response-dependent and is not an outcome-independent discrimination score.
-
-If the purpose is to quantify the incremental discrimination supplied by
-$\mathbf X_i$ or $\mathcal H_i$, the defensible approach is to fit a
-pre-specified reduced model and a full model, calculate the same concordance
-estimand for both on held-out subjects, and report their difference with an
-appropriate resampling or posterior uncertainty analysis.
-
 ## Comparable pairs and censoring
 
 Censoring does not imply long survival. It only limits which temporal
@@ -863,7 +841,6 @@ It is not a repeated-measures sample from one common AUC.
 ## Evaluation on new subjects
 
 ```{r validation-example}
-validation_c <- concordance(
 cIndex <- concordance(
   fit,
   newdataLong = validation_long,
