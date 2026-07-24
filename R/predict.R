@@ -2226,6 +2226,13 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
     marker_to_alpha_family_out <- .default_marker_family_map(sd$marker_to_alpha_family, n_family_alpha_out)
     marker_to_kappa_family_out <- .default_marker_family_map(sd$marker_to_kappa_family, n_family_kappa_out)
     marker_to_tau_family_out <- .default_marker_family_map(sd$marker_to_tau_family, n_family_tau_out)
+    fixed_tau_out <- .normalise_fixed_tau_by_marker(
+        use_tau_fixed = sd$use_tau_fixed,
+        tau_fixed = sd$tau_fixed,
+        family_codes = sd$family_long %||%
+            object$config$family_long %||%
+            rep.int(1L, sd$D)
+    )
     # browser()
     out <- list(
         n_draws = n_draws,
@@ -2319,8 +2326,8 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         marker_to_tau_family = marker_to_tau_family_out,
         # flag_resid_dim = sd$flag_resid_dim,
         vcov_diag_link = sd$vcov_diag_link,
-        use_tau_fixed = sd$use_tau_fixed,
-        tau_fixed = sd$tau_fixed,
+        use_tau_fixed = fixed_tau_out$use_tau_fixed,
+        tau_fixed = fixed_tau_out$tau_fixed,
         coeff_assoc_cv_total = draws_list$coeff_assoc_cv_total, coeff_assoc_cs_total = draws_list$coeff_assoc_cs_total,
         coeff_assoc_cv_mean = draws_list$coeff_assoc_cv_mean, coeff_assoc_cs_mean = draws_list$coeff_assoc_cs_mean,
         coeff_assoc_cv_marker = draws_list$coeff_assoc_cv_marker, coeff_assoc_cs_marker = draws_list$coeff_assoc_cs_marker,

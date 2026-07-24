@@ -124,8 +124,8 @@
  * @param marker_to_tau_family Mapping from marker to tau-family index.
  * @param flag_resid_dim Flag for residual dimension handling.
  * @param vcov_diag_link Link flag for covariance-regression diagonal (0 softplus, 1 exp).
- * @param use_tau_fixed Flag to use fixed tau for SDE.
- * @param tau_fixed Fixed tau value for SDE (0 < tau < 1).
+ * @param use_tau_fixed Marker-specific flags selecting fixed skew-Laplace tau.
+ * @param tau_fixed Marker-specific fixed tau values (0 < tau < 1).
  * @param num_unique_cov_entries Number of unique entries in covariance regression.
  * @param idx_row_cov Row indices for covariance regression.
  * @param idx_col_cov Column indices for covariance regression.
@@ -303,8 +303,8 @@ real partial_draw(
     array[] int marker_to_tau_family,
     // int flag_resid_dim,
     int vcov_diag_link,
-    int use_tau_fixed,
-    real tau_fixed,
+    array[] int use_tau_fixed,
+    vector tau_fixed,
     int num_unique_cov_entries,
     array[] int idx_row_cov,
     array[] int idx_col_cov,
@@ -651,8 +651,8 @@ real partial_draw(
       // tau constrained to (0,1) via logit link if regression used
       } else if (family_long[d] == 9) {
         real sig = (P_sigma > 0) ? exp(fmin(dot_product(X_sigma_obs[n], beta_sigma[k]), 20)) : sigma_family[k][marker_to_sigma_family[d]];
-        real tau = use_tau_fixed == 1
-          ? tau_fixed
+        real tau = use_tau_fixed[d] == 1
+          ? tau_fixed[d]
           : ((P_tau > 0) ? inv_logit(dot_product(X_tau_obs[n], beta_tau[k])) : tau_family[k][marker_to_tau_family[d]]);
         // sig: residual scale, tau: skewness in (0,1)
         lp += skew_double_exponential_lpdf(y_real[n] | mu, sig, tau);

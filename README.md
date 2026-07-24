@@ -47,7 +47,9 @@ Allowed distributional parameters:
 - `alpha` (aliases: `alpha_skew`, `skew`)
 - `kappa`: the positive Beta sample size, giving shape parameters
   `mu * kappa` and `(1 - mu) * kappa`
-- `tau`: the skew-double-exponential asymmetry parameter in `(0, 1)`. This is different from fixing it via `tau_fixed`
+- `tau`: the skew-double-exponential quantile/asymmetry parameter in `(0, 1)`.
+  It may be modelled with `formulaDist`, or fixed for one marker with
+  `jm_family("skew_laplace", tau = 0.8)`.
 
 Example:
 
@@ -62,6 +64,24 @@ formulaDist <- list(
   tau[family=skew_double_exponential] ~ 1
 )
 ```
+
+For a fixed skew-Laplace quantile, place the constant in the corresponding
+marker family rather than in `control`:
+
+```r
+families <- list(
+  jm_family("gaussian"),
+  jm_family("skew_laplace", tau = 0.8)
+)
+```
+
+The same `families` declaration can be passed to `simulate_joinme()`. The
+simulator uses the marker-specific constant to generate outcomes and records it
+in the returned distributional truth.
+
+Here `tau = 0.5` gives the symmetric Laplace distribution. Both endpoints are
+excluded: `tau = 0` and `tau = 1` are degenerate limits rather than valid
+skew-Laplace distributions.
 
 ## Installation
 

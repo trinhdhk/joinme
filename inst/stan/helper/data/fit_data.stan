@@ -151,8 +151,8 @@
   int<lower=0> M_vcov_tf;                    // number of vcov transform components
   int<lower=0, upper=1> allow_marker_crosscorr; // 1 allow cross via B_cross
   int<lower=0, upper=1> vcov_diag_link;         // 0 softplus, 1 exp for covariance diagonals
-  int<lower=0, upper=1> use_tau_fixed;      // 1 use fixed tau for SDE
-  real<lower=0, upper=1> tau_fixed;         // fixed tau value when enabled
+  array[D] int<lower=0, upper=1> use_tau_fixed; // marker d uses its family-fixed tau
+  vector<lower=0, upper=1>[D] tau_fixed;        // marker-specific fixed quantiles
 
   /* Hazard covariates */
   int<lower=0> p_w;              // number of baseline hazard covariates

@@ -137,8 +137,8 @@ test_that("standata wires kappa and tau through separate family-scoped regressio
   expect_true(all(c("kappa", "tau") %in% names(standata$dist_cols)))
   expect_false(any(c("P_phi_beta", "P_tau_sde") %in% names(standata)))
 
-  # Step 4: reject simultaneous fixed and regressed tau specifications because
-  # only one can define the likelihood's quantile/asymmetry parameter.
+  # Step 4: reject a tau regression when every skew-Laplace marker fixes tau in
+  # its family declaration, because no observation would use the regression.
   expect_error(
     joinme_standata(
       formulaLong = y ~ 1 + time + x1 +
@@ -147,11 +147,13 @@ test_that("standata wires kappa and tau through separate family-scoped regressio
       dataLong = data_long,
       formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
       dataEvent = data_event,
-      families = c("beta", "skew_double_exponential"),
+      families = list(
+        jm_family("beta"),
+        jm_family("skew_laplace", tau = 0.3)
+      ),
       formulaDist = list(tau[family = skew_double_exponential] ~ 1),
-      tau_fixed = 0.3,
       assoc = "cv_total"
     ),
-    "either.*tau_fixed.*tau"
+    "has no estimated"
   )
 })

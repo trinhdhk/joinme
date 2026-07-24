@@ -226,6 +226,11 @@
     marker_levels <- c(marker_levels, paste0("marker_", seq.int(length(marker_levels) + 1L, D)))
   }
   marker_levels <- marker_levels[seq_len(D)]
+  fixed_tau <- .normalise_fixed_tau_by_marker(
+    use_tau_fixed = sd$use_tau_fixed,
+    tau_fixed = sd$tau_fixed,
+    family_codes = family_long
+  )
 
   # Family -> parameter requirements via .family_distrib_params().
   req_by_marker <- lapply(seq_len(D), function(d) {
@@ -271,7 +276,10 @@
     phi = sort(unique(family_long[vapply(req_by_marker, function(x) "phi" %in% x, logical(1))])),
     alpha = sort(unique(family_long[vapply(req_by_marker, function(x) "alpha" %in% x, logical(1))])),
     kappa = sort(unique(family_long[vapply(req_by_marker, function(x) "kappa" %in% x, logical(1))])),
-    tau = sort(unique(family_long[vapply(req_by_marker, function(x) "tau" %in% x, logical(1))]))
+    tau = sort(unique(family_long[
+      vapply(req_by_marker, function(x) "tau" %in% x, logical(1)) &
+        fixed_tau$use_tau_fixed == 0L
+    ]))
   )
 
   marker_label_prefix <- list(
@@ -292,7 +300,14 @@
   )
 
   markers_for_param <- function(param, fam_code) {
-    which(family_long == fam_code & vapply(req_by_marker, function(x) param %in% x, logical(1)))
+    marker_index <- which(
+      family_long == fam_code &
+        vapply(req_by_marker, function(x) param %in% x, logical(1))
+    )
+    if (identical(param, "tau")) {
+      marker_index <- marker_index[fixed_tau$use_tau_fixed[marker_index] == 0L]
+    }
+    marker_index
   }
 
   add_family_terms <- function(param, stan_prefix, fam_codes, use_regression) {
@@ -363,6 +378,68 @@
 
   # Keep only variables that are present in posterior draws.
   term_map[names(term_map) %in% all_vars]
+}
+
+#' Summarise marker-specific fixed skew-Laplace quantiles
+#'
+#' @description
+#' Constructs deterministic summary rows for skew-Laplace `tau` values supplied
+#' through [jm_family()]. These constants are part of the statistical model but
+#' are not posterior variables; reporting them alongside estimated
+#' distributional parameters makes that distinction visible in
+#' [summary.JoiNMeFit()].
+#'
+#' The posterior standard deviation is zero because the value is fixed.
+#' Convergence and effective-sample-size diagnostics are undefined and are
+#' therefore reported as missing.
+#'
+#' @param object A fitted `JoiNMeFit` object.
+#' @param digits Number of decimal places used for reported values.
+#'
+#' @return A standard JoiNMe posterior-summary data frame, or `NULL` when no
+#'   marker has a fixed skew-Laplace quantile.
+#' @keywords internal
+#' @noRd
+.fixed_tau_summary_table <- function(object, digits = 3) {
+  sd <- object$stan_data
+  family_codes <- as.integer(
+    sd$family_long %||%
+      object$config$family_long %||%
+      integer(0)
+  )
+  if (length(family_codes) == 0L) {
+    return(NULL)
+  }
+
+  fixed_tau <- .normalise_fixed_tau_by_marker(
+    use_tau_fixed = sd$use_tau_fixed,
+    tau_fixed = sd$tau_fixed,
+    family_codes = family_codes
+  )
+  marker_index <- which(fixed_tau$use_tau_fixed == 1L)
+  if (length(marker_index) == 0L) {
+    return(NULL)
+  }
+
+  marker_levels <- as.character(
+    sd$marker_levels %||% paste0("marker_", seq_along(family_codes))
+  )
+  if (length(marker_levels) != length(family_codes)) {
+    marker_levels <- paste0("marker_", seq_along(family_codes))
+  }
+  value <- fixed_tau$tau_fixed[marker_index]
+
+  data.frame(
+    term = paste0("tau_fixed[", marker_levels[marker_index], "]"),
+    Estimate = round(value, digits),
+    Est.Error = 0,
+    Q2.5 = round(value, digits),
+    Q97.5 = round(value, digits),
+    Rhat = NA_real_,
+    ess_bulk = NA_real_,
+    ess_tail = NA_real_,
+    stringsAsFactors = FALSE
+  )
 }
 
 #' @keywords internal

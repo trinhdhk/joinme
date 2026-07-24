@@ -215,13 +215,12 @@
 #'     integration. Allowed values are exactly 7/15/31/41/51/61. Only the node
 #'     count is passed to Stan; GK nodes/weights are fixed in the Stan code.
 #'   - vcov_diag_link: "softplus" or "exp" for covariance regression diagonals.
-#'   - `tau_fixed`: optional fixed `tau` in \eqn{(0,1)} for the skew double
-#'     exponential distribution. It cannot be combined with a \code{tau}
-#'     distributional regression.
 #' @param draws Optional number of posterior draws used for summaries (not sampling).
 #' @param families Marker-specific family specification (optional).
 #'   Can be a character vector of family names aligned to marker order, or a
 #'   list of `jm_family(...)` entries with per-marker links.
+#'   A skew-Laplace marker may fix its quantile/asymmetry parameter through
+#'   `jm_family("skew_laplace", tau = 0.8)`; otherwise `tau` is estimated.
 #'   Supported named forward links are `identity`, `log`, `logit`, `probit`,
 #'   and `exp`; `jm_family()` also accepts an invertible formula link or a
 #'   directly specified inverse-link formula. In formula syntax,
@@ -311,7 +310,6 @@ joinme <- function(
   # Workflow: build standata -> resolve threading -> choose engine -> fit -> wrap
   # - sd: prepared Stan data list with all dimensions and transforms
   vcov_diag_link <- control$vcov_diag_link %||% "softplus"
-  tau_fixed <- control$tau_fixed %||% NULL
   quadrature_nodes <- control$quadrature_nodes %||% NULL
   formulaVCov <- .resolve_vcov_formula(
     formulaVCov = formulaVCov,
@@ -344,7 +342,6 @@ joinme <- function(
       shared_marker_weights = shared_marker_weights,
       quadrature_nodes = quadrature_nodes,
       vcov_diag_link = vcov_diag_link,
-      tau_fixed = tau_fixed,
       basehaz = basehaz$type,
       basehaz_n_knots = basehaz$n_knots,
       basehaz_knots = basehaz$knots,

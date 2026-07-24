@@ -31,8 +31,6 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
                           msg = "draws must be NULL or a positive number.")
   assertthat::assert_that(is.numeric(digits) && digits >= 0, msg = "digits must be non-negative.")
 
-  # The version marker prevents a summary cached under the former raw-name
-  # translation from masking the corrected statistical term labels.
   cache_key <- paste0(
     "summary_draws=", draws,
     "_seed=", seed,
@@ -222,6 +220,14 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
   # - Include only parameters required by each marker family.
   # - Replace numeric marker indices with marker names in term labels.
   s_d <- .extract_fit_summary(object, what = "distributional", draws = draws, seed = seed, digits = digits)
+  s_tau_fixed <- .fixed_tau_summary_table(object, digits = digits)
+  if (!is.null(s_tau_fixed)) {
+    s_d <- if (is.null(s_d)) {
+      s_tau_fixed
+    } else {
+      rbind(s_d, s_tau_fixed)
+    }
+  }
 
   s_dr <- .extract_fit_summary(object, what = "distributional_regression", draws = draws, seed = seed, digits = digits)
   if (!is.null(s_dr) && nrow(s_dr) > 0L) {

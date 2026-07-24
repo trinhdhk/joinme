@@ -113,6 +113,7 @@ $$
 -   **Beta**: For bounded $(0,1)$ proportions.
 -   **Bernoulli / Binomial**: For binary or count-of-success data.
 -   **Poisson / Negative Binomial**: For count data.
+-   **Double Exponential / Skew Double Exponential**: For continuous outcomes with Laplace tails and, when required, asymmetric conditional quantiles.
 -   **Cumulative Logit**: For ordinal outcomes.
 
 Furthermore, distributional parameters (for example, residual scale $\sigma$)
@@ -131,6 +132,37 @@ syntax on the left-hand side, e.g.
 These scopes are estimated as separate coefficient blocks and only contribute
 to rows of the scoped family. Without brackets (for example, `sigma ~ ...`),
 the formula applies to all rows where the parameter exists.
+
+## Fixed skew-Laplace quantiles
+
+For the skew double exponential distribution, JoiNMe uses Stan's quantile
+parameterisation. Given location \(\mu\), scale \(\sigma>0\), and
+\(0<\tau<1\), its density is
+
+$$
+f(y\mid\mu,\sigma,\tau)
+=
+\frac{2\tau(1-\tau)}{\sigma}
+\begin{cases}
+\exp\{-2(1-\tau)|y-\mu|/\sigma\}, & y<\mu,\\
+\exp\{-2\tau|y-\mu|/\sigma\}, & y\geq\mu.
+\end{cases}
+$$
+
+Thus \(\mu\) is the conditional \(\tau\)-quantile, and \(\tau=0.5\) recovers
+the symmetric Laplace distribution. At either endpoint, the normalising
+constant is zero and the limiting expression is not a proper density.
+Consequently, JoiNMe requires `tau` to lie strictly inside the unit interval.
+
+A marker-specific fixed value is declared as
+`jm_family("skew_laplace", tau = 0.8)`. If it is omitted, `tau` is estimated
+through a `tau ~ ...` distributional regression when present, or as a
+family-level constant otherwise. Fixed and estimated skew-Laplace markers may
+coexist: the Stan likelihood, pointwise log likelihood, and posterior
+prediction select the appropriate value by marker. Simulation uses the same
+selection rule. Its row-specific generating values are retained in
+`truth$distributional$rowwise$tau`, while the fixed-value flags and constants
+are retained in `truth$stan_fit`.
 
 # Covariance Regression
 

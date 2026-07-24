@@ -155,7 +155,7 @@ draws <- function(object, ...) {
   # Version the cache because fitted objects are mutable R6 objects and can
   # survive a package reload. An earlier cached array may therefore contain
   # raw Stan names even after the renaming rules have been corrected.
-  cache_key <- "renamed_draws_array"
+  cache_key <- "renamed_draws_array_v2"
   cached <- object$cache_get(cache_key)
   if (!is.null(cached)) {
     return(cached)

@@ -392,6 +392,78 @@ simulate_joinme_joint_student_t_cvtotal <- function(
   list(dataLong = dataLong, dataEvent = dataEvent, truth = truth, helpers = helpers, tmax = tmax)
 }
 
+#' Resolve marker-specific family declarations for simulation
+#'
+#' @description
+#' Converts character and structured family declarations into the
+#' marker-aligned codes, inverse-link instructions, and fixed skew-Laplace
+#' quantiles used by `simulate_joinme()`. The same family parser and fixed-`tau`
+#' normaliser are used by fitting, which prevents simulation and estimation
+#' from assigning different meanings to a family declaration.
+#'
+#' @param families Character vector or list containing one family declaration
+#'   per marker.
+#' @param D Positive integer number of longitudinal markers.
+#'
+#' @return A list containing marker-aligned `family_codes`, `link_names`,
+#'   `inv_link_specs`, `use_tau_fixed`, and `tau_fixed`.
+#' @keywords internal
+#' @noRd
+.sim_resolve_family_specs <- function(families, D) {
+  if (.is_single_family_spec(families)) {
+    families <- rep(list(families), D)
+  } else if (length(families) == 1L && !is.list(families)) {
+    families <- rep(list(families), D)
+  } else if (!is.list(families)) {
+    families <- as.list(families)
+  }
+
+  if (length(families) != D) {
+    cli::cli_abort(
+      "families must have length {D} (number of markers), got {length(families)}"
+    )
+  }
+
+  specifications <- lapply(families, .extract_family_and_link)
+  family_codes <- vapply(
+    specifications,
+    function(specification) specification$family_code,
+    integer(1)
+  )
+  fixed_tau <- .normalise_fixed_tau_by_marker(
+    use_tau_fixed = as.integer(vapply(
+      specifications,
+      function(specification) !is.na(specification$tau_fixed),
+      logical(1)
+    )),
+    tau_fixed = vapply(
+      specifications,
+      function(specification) {
+        if (is.na(specification$tau_fixed)) 0.5 else specification$tau_fixed
+      },
+      numeric(1)
+    ),
+    family_codes = family_codes
+  )
+  link_names <- vapply(
+    specifications,
+    function(specification) specification$link_name,
+    character(1)
+  )
+  link_names[is.na(link_names)] <- "custom"
+
+  list(
+    family_codes = as.integer(family_codes),
+    link_names = link_names,
+    inv_link_specs = lapply(
+      specifications,
+      function(specification) specification$inv_link_bc
+    ),
+    use_tau_fixed = fixed_tau$use_tau_fixed,
+    tau_fixed = fixed_tau$tau_fixed
+  )
+}
+
 #' Simulate joint model data
 #' 
 #' @description
@@ -510,12 +582,15 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   and `2` draws standard Normal. This is the same switch used by the Stan
 #'   priors. It does not change explicitly supplied fixed weights.
 #' @param n_id Number of subjects.
-#' @param families Marker-specific family names.
-#'   Use `jm_family()` entries to supply custom `link`/`inv_link` expressions.
+#' @param families Marker-specific family names or `jm_family()` declarations.
+#'   Use `jm_family()` entries to supply custom `link`/`inv_link` expressions
+#'   or to fix the skew-Laplace quantile for a marker, for example
+#'   `jm_family("skew_laplace", tau = 0.8)`.
 #'   A named probit link applies `Phi` as its inverse link. In formula
 #'   expressions, `Phi`/`pnorm` are the standard normal CDF and
 #'   `inv_Phi`/`qnorm`/`probit` are the standard normal quantile. Simulation
-#'   evaluates the same bytecode instructions as fitting and prediction.
+#'   evaluates the same bytecode instructions and fixed-quantile selection as
+#'   fitting and prediction.
 #' @param marker_levels Optional marker names; defaults to `m1`, `m2`, ...
 #' @param times_obs Scheduled observation time grid used for every `(id, marker)`
 #'   before optional visit-time jitter and post-event censoring are applied.
@@ -640,6 +715,9 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   \code{skew_double_exponential = list(sigma = ..., tau = ...)}.
 #'   \code{kappa} must be positive. \code{tau} must lie in \eqn{(0,1)}, with
 #'   \eqn{0.5} giving the symmetric double exponential distribution.
+#'   A marker-specific `tau` in `jm_family()` takes precedence over this shared
+#'   family constant and over a `tau` distributional regression for that
+#'   marker, matching the fitted likelihood.
 #' @param h0 Optional baseline hazard function `h0(t)`
 #'   If supplied, it takes precedence over `baseline_hazard`/`formulaBasehaz`.
 #' @param baseline_hazard Optional baseline hazard specification. Supported forms:
@@ -673,6 +751,10 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   distinguishes base, latent, and effective values. Baseline-hazard truth is
 #'   stored in `truth$baseline_hazard`; when a log-linear representation exists,
 #'   its resolved coefficients are also in `truth$stan_fit$bs_gamma_c`.
+#'   Marker-specific fixed skew-Laplace quantiles are recorded in
+#'   `truth$stan_fit$use_tau_fixed` and `truth$stan_fit$tau_fixed`; realised
+#'   row-specific quantiles are recorded in
+#'   `truth$distributional$rowwise$tau`.
 #'   Hazard-scale association coefficients are stored as `alpha_cv_total`,
 #'   `alpha_cs_total`, `alpha_cv_mean`, `alpha_cs_mean`, `alpha_corr`, and
 #'   `alpha_vcov`, matching the fitted posterior output names.
@@ -1428,33 +1510,6 @@ simulate_joinme <- function(
     )
   }
 
-  # Normalise vector or list family declarations to one specification per
-  # marker. Probit forward links use inv_Phi and their inverse links use Phi;
-  # qnorm and pnorm are the corresponding R-style aliases. The returned list
-  # contains family codes, link names, and inverse-link bytecode.
-  .sim_parse_family_specs <- function(families, D) {
-    # Normalise family/link specs to a per-marker list of bytecode maps.
-    if (length(families) == 1L && !is.list(families)) {
-      families <- rep(list(families), D)
-    } else if (!is.list(families)) {
-      families <- as.list(families)
-    }
-    if (length(families) != D) {
-      cli::cli_abort("families must have length {D} (number of markers), got {length(families)}")
-    }
-
-    specs <- lapply(families, .extract_family_and_link)
-    family_codes <- vapply(specs, function(s) s$family_code, integer(1))
-    link_names <- vapply(specs, function(s) s$link_name, character(1))
-    inv_link_specs <- lapply(specs, function(s) s$inv_link_bc)
-
-    list(
-      family_codes = as.integer(family_codes),
-      link_names = as.character(link_names),
-      inv_link_specs = inv_link_specs
-    )
-  }
-
   .sim_sample_ordinal <- function(eta, cutpoints) {
     cp <- sort(as.numeric(cutpoints))
     cdf_vals <- stats::plogis(cp - eta)
@@ -2002,7 +2057,14 @@ simulate_joinme <- function(
   }
 
   # ---- Step 1: Define marker/family dimensions and parse model structure
-  if (length(families) == 1L && !is.null(marker_levels) && length(marker_levels) > 1L) {
+  if (.is_single_family_spec(families)) {
+    n_markers_requested <- length(marker_levels %||% "m1")
+    families <- rep(list(families), n_markers_requested)
+  } else if (
+    length(families) == 1L &&
+      !is.null(marker_levels) &&
+      length(marker_levels) > 1L
+  ) {
     families <- rep(families, length(marker_levels))
   }
   D <- length(families)
@@ -2020,11 +2082,35 @@ simulate_joinme <- function(
     ))
   }
   # ---- Step 1a: Resolve marker-family mappings and inverse-link bytecode
-  family_spec <- .sim_parse_family_specs(families, D)
+  family_spec <- .sim_resolve_family_specs(families, D)
   family_codes <- family_spec$family_codes
   link_names <- family_spec$link_names
   inv_link_specs <- family_spec$inv_link_specs
+  use_tau_fixed <- family_spec$use_tau_fixed
+  tau_fixed <- family_spec$tau_fixed
   family_names <- vapply(family_codes, .family_code_to_name, character(1))
+  skew_laplace_marker <- family_codes == 9L
+
+  # Resolve distributional formulas before generating any random quantities.
+  # This permits immediate rejection of a tau regression that no simulated
+  # marker can use, avoiding unnecessary longitudinal and event-time sampling.
+  dist_formulas <- .normalize_formula_dist(formulaDist)
+  family_names_present <- vapply(
+    sort(unique(family_codes)),
+    .family_code_to_name,
+    character(1)
+  )
+  .validate_dist_formula_scopes(dist_formulas, family_names_present)
+  if (
+    !is.null(dist_formulas$tau) &&
+      any(skew_laplace_marker) &&
+      all(use_tau_fixed[skew_laplace_marker] == 1L)
+  ) {
+    cli::cli_abort(c(
+      x = "The {.code tau ~ ...} distributional regression has no simulated skew-Laplace marker.",
+      i = "Remove the tau regression or omit {.arg tau} from at least one skew-Laplace family specification."
+    ))
+  }
 
   # ---- Step 1b: Parse longitudinal random-effect structure from formulaLong
   f_exp <- reformulas::expandDoubleVerts(formulaLong)
@@ -3252,9 +3338,6 @@ simulate_joinme <- function(
   tau_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "tau", 0.5), numeric(1))
   trials_vec <- vapply(family_by_row, function(f) .sim_get_family_param(f, "trials", 10L), numeric(1))
 
-  dist_formulas <- .normalize_formula_dist(formulaDist)
-  family_names_present <- vapply(sort(unique(family_codes)), .family_code_to_name, character(1))
-  .validate_dist_formula_scopes(dist_formulas, family_names_present)
   dist_re_effective <- list()
   dist_coef_effective <- list()
   dist_eta_effective <- list()
@@ -3306,6 +3389,13 @@ simulate_joinme <- function(
     if (param_name == "kappa") kappa_vec <- exp(eta_param)
     if (param_name == "tau") tau_vec <- stats::plogis(eta_param)
   }
+
+  # A fixed family quantile is the final statistical specification for its
+  # marker. Apply it after distributional regression so mixed simulations
+  # mirror Stan: fixed markers use their declared constants, while remaining
+  # skew-Laplace markers retain their family-level or row-specific values.
+  fixed_tau_row <- use_tau_fixed[marker_index] == 1L
+  tau_vec[fixed_tau_row] <- tau_fixed[marker_index[fixed_tau_row]]
 
   # ---- Step: draw outcomes by marker-specific family
   y_out <- numeric(nrow(dataLong))
@@ -3383,7 +3473,9 @@ simulate_joinme <- function(
     coef = dist_coef_effective,
     eta = dist_eta_effective,
     design_cols = dist_design_cols,
-    family_defaults = family_params
+    family_defaults = family_params,
+    use_tau_fixed = stats::setNames(use_tau_fixed, marker_levels),
+    tau_fixed = stats::setNames(tau_fixed, marker_levels)
   )
 
   tmax <- max(dataEvent[[event_time_var]])
@@ -3433,7 +3525,13 @@ simulate_joinme <- function(
   phi_family_truth <- .sim_family_param_truth("phi", 2.0)
   alpha_family_truth <- .sim_family_param_truth("alpha", 0.0)
   kappa_family_truth <- .sim_family_param_truth("kappa", 10.0)
-  tau_family_truth <- .sim_family_param_truth("tau", 0.5)
+  # The fitted model declares a family-level tau only when at least one
+  # skew-Laplace marker has not supplied its own fixed quantile.
+  tau_family_truth <- if (any(skew_laplace_marker & use_tau_fixed == 0L)) {
+    .sim_family_param_truth("tau", 0.5)
+  } else {
+    numeric(0)
+  }
   trials_family_truth <- if (any(family_names_present == "binomial")) {
     vals <- c(binomial = .sim_get_family_param("binomial", "trials", 10L))
     as.numeric(setNames(vals, names(vals)))
@@ -3452,6 +3550,7 @@ simulate_joinme <- function(
   marker_to_alpha_family <- setNames(match(family_names, names(alpha_family_truth), nomatch = 0L), marker_levels)
   marker_to_kappa_family <- setNames(match(family_names, names(kappa_family_truth), nomatch = 0L), marker_levels)
   marker_to_tau_family <- setNames(match(family_names, names(tau_family_truth), nomatch = 0L), marker_levels)
+  marker_to_tau_family[use_tau_fixed == 1L] <- 0L
 
   stan_fit_truth <- list(
     beta = beta_long,
@@ -3494,6 +3593,8 @@ simulate_joinme <- function(
     alpha_family = alpha_family_truth,
     kappa_family = kappa_family_truth,
     tau_family = tau_family_truth,
+    use_tau_fixed = stats::setNames(use_tau_fixed, marker_levels),
+    tau_fixed = stats::setNames(tau_fixed, marker_levels),
     trials_family = trials_family_truth,
     cutpoints_ord = cutpoints_ord_truth,
     marker_to_sigma_family = marker_to_sigma_family,
@@ -3515,6 +3616,8 @@ simulate_joinme <- function(
       marker_to_alpha_family = unname(marker_to_alpha_family),
       marker_to_kappa_family = unname(marker_to_kappa_family),
       marker_to_tau_family = unname(marker_to_tau_family),
+      use_tau_fixed = use_tau_fixed,
+      tau_fixed = tau_fixed,
       stringsAsFactors = FALSE
     ),
     shared = stan_fit_truth[c(
@@ -3626,7 +3729,9 @@ simulate_joinme <- function(
   marker_info <- list(
     names = marker_levels,
     families = families,
-    family_codes = family_codes
+    family_codes = family_codes,
+    use_tau_fixed = stats::setNames(use_tau_fixed, marker_levels),
+    tau_fixed = stats::setNames(tau_fixed, marker_levels)
   )
 
   helpers <- list(

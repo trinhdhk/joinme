@@ -79,19 +79,19 @@
 
   /**
   * @brief Dispatch vector transformation evaluation.
-   *
-   * @param x Vector of input values
+  *
+  * @param x Vector of input values
   * @param mode Transformation mode. Accepted values are 0, 1, 2, 3, 4, 5, 6, or 7 with
   *   the same semantics as `apply_transform_scalar`.
   * @param bytecode Functional bytecode instructions (for mode 1)
   * @param const_data Functional bytecode constants (for mode 1)
   * @param spline_knots Knot vector (for modes 2-3)
   * @param spline_coeff Spline or piecewise coefficients (for modes 2-3)
-   * @param spline_degree Spline degree (for mode 2)
-     * @param iota_intercept Fit-only affine-shift intercept. Ignored unless mode 1.
-     * @param iota_slope Fit-only affine-shift slope. Ignored unless mode 1.
-   * @return Vector of transformed values
-   */
+  * @param spline_degree Spline degree (for mode 2)
+  * @param iota_intercept Fit-only affine-shift intercept. Ignored unless mode 1.
+  * @param iota_slope Fit-only affine-shift slope. Ignored unless mode 1.
+  * @return Vector of transformed values
+  */
   vector apply_transform_vector(
       vector x,
       int mode,
