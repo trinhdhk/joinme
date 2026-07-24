@@ -3,7 +3,6 @@
 \name{auc}
 \alias{auc}
 \alias{auc.JoiNMeFit}
-\alias{AUC}
 \title{Time-dependent area under the ROC curve}
 \usage{
 auc(object, ...)
@@ -20,8 +19,6 @@ auc(object, ...)
   seed = 123,
   ...
 )
-
-AUC(object, ...)
 }
 \arguments{
 \item{object}{A fitted object.  Methods are currently provided for
