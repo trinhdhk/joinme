@@ -35,7 +35,6 @@ joinme_standata(
   tau_spline = 0.4,
   quadrature_nodes = NULL,
   vcov_diag_link = c("softplus", "exp"),
-  tau_fixed = NULL,
   seed = .Random.seed[[1]]
 )
 }
@@ -117,7 +116,10 @@ and \code{exp}; \code{jm_family()} also accepts an invertible formula link or a
 directly specified inverse-link formula. In formula syntax,
 \code{inv_Phi}/\code{qnorm}/\code{probit} denote the standard normal quantile and
 \code{Phi}/\code{pnorm} denote the standard normal CDF. Thus a probit forward link
-is inverted to \code{Phi} before Stan data are constructed.}
+is inverted to \code{Phi} before Stan data are constructed. A skew-Laplace
+marker may additionally fix its quantile/asymmetry parameter with
+\code{jm_family("skew_laplace", tau = 0.8)}. Fixed values must lie strictly
+between zero and one and are carried separately for each marker.}
 
 \item{transforms}{Optional list specifying transformations for association terms.
 Each element (cv_total, cs_total, corr, vcov) is a list with a \code{type} and fields
@@ -184,11 +186,6 @@ Only the node count is passed to Stan; GK nodes/weights are fixed in Stan.}
 
 \item{vcov_diag_link}{Link for the subject-specific standard deviation regression:
 "softplus" or "exp".}
-
-\item{tau_fixed}{Optional fixed quantile/asymmetry parameter for the skew
-double exponential family. It must lie strictly between zero and one; the
-value \eqn{0.5} gives the symmetric double exponential distribution. It
-cannot be combined with a \code{tau} distributional regression.}
 
 \item{seed}{Optional random seed for deterministic components of standata.}
 

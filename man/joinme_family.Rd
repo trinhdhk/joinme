@@ -5,9 +5,9 @@
 \alias{jm_family}
 \title{JoiNMe longitudinal family specification}
 \usage{
-joinme_family(name, link = NULL, inv_link = NULL)
+joinme_family(name, link = NULL, inv_link = NULL, tau = NULL)
 
-jm_family(name, link = NULL, inv_link = NULL)
+jm_family(name, link = NULL, inv_link = NULL, tau = NULL)
 }
 \arguments{
 \item{name}{Character scalar family name, e.g. \code{"student_t"}, \code{"bernoulli"}.}
@@ -18,17 +18,24 @@ Formula links must be one-to-one compositions that can be inverted
 algebraically by \code{\link[=invert_transform_expr]{invert_transform_expr()}}.}
 
 \item{inv_link}{Optional one-sided formula \code{~ ...} or expression string
-using \code{x} (e.g. \code{~ exp(x)}, \code{~ inv_logit(x)}, or \code{~ Phi(x)}).
-\code{Phi} is the standard normal CDF and is the inverse link for a probit
-model. In contrast, \code{inv_Phi}, \code{qnorm}, and \code{probit} denote the standard
-normal quantile function.}
+using \code{x} (e.g. \code{~ exp(x)}, \code{~ inv_logit(x)}, or \code{~ Phi(x)}).}
+
+\item{tau}{Optional fixed quantile/asymmetry parameter for
+\code{"skew_laplace"} or \code{"skew_double_exponential"}. It must be a finite
+scalar strictly between zero and one. Under Stan's quantile
+parameterisation, \code{tau = 0.5} is the symmetric Laplace distribution.
+Values zero and one are excluded because they yield a degenerate,
+non-normalisable limiting distribution. When omitted, \code{tau} is estimated
+from a distributional regression or as a family-level parameter.}
 }
 \value{
 Object of class \code{"JoiNMe_family_spec"}.
 }
 \description{
-Creates a family specification object for \code{joinme(..., families = ...)} with an
-optional custom longitudinal link (or inverse-link) per marker family.
+Creates a marker-specific family specification for
+\code{joinme(..., families = ...)}. A specification may define a custom
+longitudinal link (or inverse link) and, for the skew-Laplace family, a
+fixed quantile parameter.
 
 Character values supplied through \code{link} name the \emph{forward} link
 \eqn{g(\mu)}.  Formula values supplied through \code{link} are inverted
@@ -56,4 +63,5 @@ jm_family("poisson", link = ~ log(x))
 jm_family("bernoulli", inv_link = ~ inv_logit(x))
 jm_family("bernoulli", link = ~ inv_Phi(x))
 jm_family("bernoulli", inv_link = ~ Phi(x))
+jm_family("skew_laplace", tau = 0.8)
 }

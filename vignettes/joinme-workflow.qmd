@@ -363,7 +363,7 @@ ordered piecewise-linear association.
 
 The estimands, censoring rules, event-time weighting, computational steps, and
 reporting recommendations are derived in the
-[dedicated discrimination vignette](joinme-discrimination.html).
+[discrimination vignette](joinme-discrimination.html).
 
 ```{r discrimination-example, eval=FALSE}
 concordance(fit)

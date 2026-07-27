@@ -153,12 +153,15 @@ it does not estimate spline coefficients jointly inside Stan.}
 
 \item{n_id}{Number of subjects.}
 
-\item{families}{Marker-specific family names.
-Use \code{jm_family()} entries to supply custom \code{link}/\code{inv_link} expressions.
+\item{families}{Marker-specific family names or \code{jm_family()} declarations.
+Use \code{jm_family()} entries to supply custom \code{link}/\code{inv_link} expressions
+or to fix the skew-Laplace quantile for a marker, for example
+\code{jm_family("skew_laplace", tau = 0.8)}.
 A named probit link applies \code{Phi} as its inverse link. In formula
 expressions, \code{Phi}/\code{pnorm} are the standard normal CDF and
 \code{inv_Phi}/\code{qnorm}/\code{probit} are the standard normal quantile. Simulation
-evaluates the same bytecode instructions as fitting and prediction.}
+evaluates the same bytecode instructions and fixed-quantile selection as
+fitting and prediction.}
 
 \item{marker_levels}{Optional marker names; defaults to \code{m1}, \code{m2}, ...}
 
@@ -345,7 +348,10 @@ Beta mean/sample-size model with \code{beta = list(kappa = ...)} and the
 skew double exponential model with
 \code{skew_double_exponential = list(sigma = ..., tau = ...)}.
 \code{kappa} must be positive. \code{tau} must lie in \eqn{(0,1)}, with
-\eqn{0.5} giving the symmetric double exponential distribution.}
+\eqn{0.5} giving the symmetric double exponential distribution.
+A marker-specific \code{tau} in \code{jm_family()} takes precedence over this shared
+family constant and over a \code{tau} distributional regression for that
+marker, matching the fitted likelihood.}
 
 \item{h0}{Optional baseline hazard function \code{h0(t)}
 If supplied, it takes precedence over \code{baseline_hazard}/\code{formulaBasehaz}.}
@@ -394,6 +400,10 @@ A list containing \code{dataLong}, \code{dataEvent}, \code{truth} (also availabl
 distinguishes base, latent, and effective values. Baseline-hazard truth is
 stored in \code{truth$baseline_hazard}; when a log-linear representation exists,
 its resolved coefficients are also in \code{truth$stan_fit$bs_gamma_c}.
+Marker-specific fixed skew-Laplace quantiles are recorded in
+\code{truth$stan_fit$use_tau_fixed} and \code{truth$stan_fit$tau_fixed}; realised
+row-specific quantiles are recorded in
+\code{truth$distributional$rowwise$tau}.
 Hazard-scale association coefficients are stored as \code{alpha_cv_total},
 \code{alpha_cs_total}, \code{alpha_cv_mean}, \code{alpha_cs_mean}, \code{alpha_corr}, and
 \code{alpha_vcov}, matching the fitted posterior output names.

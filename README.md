@@ -1,6 +1,6 @@
 # Bayesian joint mixed-effects (JoiNMe) model using Stan
 
-`JoiNMe` (with package name styled as `joinme` for deliberate ambiguity) fits Bayesian joint mixed-effects models for multivariate longitudinal markers and time-to-event outcomes. It supports multiple outcome families (Gaussian, Student-t, binary, count, beta, ordinal, skewed families), irregular measurement schedule. 
+`JoiNMe` (with package name styled as `joinme` for deliberate ambiguity) fits Bayesian joint mixed-effects models for multivariate longitudinal markers and time-to-event outcomes. It supports multiple outcome families (Gaussian, Student-t, binary, count, beta, ordinal, skewed families), irregular measurement schedule.
 
 Current implementation experiments with flexible association structures, covariance regression, transform-based modelling for nonlinear effects, and dynamic prediction.
 
@@ -99,7 +99,7 @@ skew-Laplace distributions.
 # precompile_cmdstanr_models()
 ```
 
-### Backend behaviour and threading
+### Backend and threading
 
 - At runtime, `joinme` prefers CmdStanR when CmdStan is installed.
 - If the preferred backend is unavailable in the current session, `joinme`

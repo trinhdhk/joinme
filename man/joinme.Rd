@@ -112,9 +112,6 @@ otherwise.
 integration. Allowed values are exactly 7/15/31/41/51/61. Only the node
 count is passed to Stan; GK nodes/weights are fixed in the Stan code.
 \item vcov_diag_link: "softplus" or "exp" for covariance regression diagonals.
-\item \code{tau_fixed}: optional fixed \code{tau} in \eqn{(0,1)} for the skew double
-exponential distribution. It cannot be combined with a \code{tau}
-distributional regression.
 }}
 
 \item{draws}{Optional number of posterior draws used for summaries (not sampling).}
@@ -122,6 +119,8 @@ distributional regression.
 \item{families}{Marker-specific family specification (optional).
 Can be a character vector of family names aligned to marker order, or a
 list of \code{jm_family(...)} entries with per-marker links.
+A skew-Laplace marker may fix its quantile/asymmetry parameter through
+\code{jm_family("skew_laplace", tau = 0.8)}; otherwise \code{tau} is estimated.
 Supported named forward links are \code{identity}, \code{log}, \code{logit}, \code{probit},
 and \code{exp}; \code{jm_family()} also accepts an invertible formula link or a
 directly specified inverse-link formula. In formula syntax,
