@@ -188,8 +188,8 @@ test_that("fit and dynamic-prediction Stan data admit both normal operations", {
 
   evaluator <- readLines(
     file.path(
-      root, "inst", "stan", "helper", "functions",
-      "functional_transform.stanfunctions"
+      root, "inst", "stan", "helper", "bytecode",
+      "interpreter.stanfunctions"
     ),
     warn = FALSE
   )

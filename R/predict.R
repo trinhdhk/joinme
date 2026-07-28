@@ -100,7 +100,12 @@ NULL
 #' \item{longitudinal_fitted}{A data.frame containing fitted values for observed history on the linpred and epred scales. Includes a `scale` column.}
 #' \item{survival}{A data.frame containing survival probabilities (S(t|time_start)) for each time point in `times`. Columns: id, time, Survival, Median, Est.Error, L95, U95.}
 #' \item{cumhaz}{A data.frame containing conditional cumulative hazards H(t|time_start). Columns: id, time, Cumhaz, Median, Est.Error, L95, U95.}
-#' \item{draws}{A list containing raw posterior draws (`longitudinal`, `longitudinal_fitted`, `survival`, `cumhaz`) and reconstructed subject-level random effects (`random_effects_id`, `random_effects_marker_id`, including marker-by-id covariance draws when id-dependent covariance is active).}
+#' \item{draws}{A list containing raw posterior draws (`longitudinal`,
+#' `longitudinal_fitted`, `survival`, `cumhaz`) and reconstructed subject-level
+#' random effects (`random_effects_id`, `random_effects_marker_id`, including
+#' marker-by-id covariance draws when id-dependent covariance is active).
+#' Predictions from [joinme_mix()] additionally retain conditional allocation
+#' draws in `posterior_class`.}
 #'
 #' @details
 #' `predict.JoiNMeFit()` does not accept a `condition` argument. It estimates
@@ -354,7 +359,7 @@ predict.JoiNMeFit <- function(object,
     }
 
     stan_file <- .get_stan_file(
-        program = "joinme_dynpred",
+        program = .stan_dynpred_program(object),
         threaded = TRUE
     )
 
@@ -467,6 +472,7 @@ predict.JoiNMeFit <- function(object,
     draws_long_fit <- list()
     draws_re_id_list <- list()
     draws_re_marker_id_list <- list()
+    draws_class_list <- list()
     quantiles_long_list <- list()
     quantiles_surv_list <- list()
     quantiles_cumhaz_list <- list()
@@ -696,6 +702,45 @@ predict.JoiNMeFit <- function(object,
             )
             if (!is.null(marker_id_draws)) {
                 draws_re_marker_id_list[[as.character(id)]] <- marker_id_draws
+            }
+
+            # Retain class uncertainty after conditioning on this subject's
+            # observed history.  The first matrix describes the shared
+            # subject allocation; the optional three-dimensional array
+            # describes marker allocations by marker and class.
+            if (as.integer(sd_pred$use_dynamic_mixture %||% 0L) == 1L) {
+                class_draws_for_subject <- list()
+                number_classes <- as.integer(
+                    sd_pred$dynamic_n_clusters %||% 1L
+                )
+                if (
+                    as.integer(sd_pred$dynamic_mix_subject %||% 0L) == 1L ||
+                    as.integer(sd_pred$dynamic_mix_covariance %||% 0L) == 1L
+                ) {
+                    class_draws_for_subject$subject <-
+                        .extract_matrix_from_stan(
+                            draws_mat,
+                            "posterior_class_probability_new_subject",
+                            number_classes,
+                            n_pred_draws
+                        )
+                }
+                if (as.integer(sd_pred$dynamic_mix_marker %||% 0L) == 1L) {
+                    class_draws_for_subject$marker <-
+                        .extract_array3_from_stan(
+                            draws_mat = draws_mat,
+                            variable_name =
+                                "posterior_class_probability_new_marker",
+                            second_dimension =
+                                as.integer(sd_pred$n_marker_types),
+                            third_dimension = number_classes,
+                            target_draws = n_pred_draws
+                        )
+                }
+                if (length(class_draws_for_subject) > 0L) {
+                    draws_class_list[[as.character(id)]] <-
+                        class_draws_for_subject
+                }
             }
 
             if (nrow(dL) > 0) {
@@ -983,6 +1028,7 @@ predict.JoiNMeFit <- function(object,
             longitudinal_fitted = draws_long_fit,
             random_effects_id = draws_re_id_list,
             random_effects_marker_id = draws_re_marker_id_list,
+            posterior_class = draws_class_list,
             survival = draws_surv_list,
             cumhaz = draws_cumhaz_list
         ),
@@ -1063,6 +1109,27 @@ predict.JoiNMeFit <- function(object,
     if (as.integer(standata_subject$n_random_marker_id %||% 0L) > 0L) {
         draw_variables <- c(draw_variables, "z_w_lat", "z_L")
     }
+    # Mixture predictions additionally retain the conditional allocation
+    # probabilities calculated from the dynamically sampled latent effects.
+    # Ordinary fits set `use_dynamic_mixture` to zero, so their extraction
+    # contract and output size remain unchanged.
+    if (as.integer(standata_subject$use_dynamic_mixture %||% 0L) == 1L) {
+        if (
+            as.integer(standata_subject$dynamic_mix_subject %||% 0L) == 1L ||
+            as.integer(standata_subject$dynamic_mix_covariance %||% 0L) == 1L
+        ) {
+            draw_variables <- c(
+                draw_variables,
+                "posterior_class_probability_new_subject"
+            )
+        }
+        if (as.integer(standata_subject$dynamic_mix_marker %||% 0L) == 1L) {
+            draw_variables <- c(
+                draw_variables,
+                "posterior_class_probability_new_marker"
+            )
+        }
+    }
     unique(draw_variables)
 }
 
@@ -1114,7 +1181,33 @@ predict.JoiNMeFit <- function(object,
     }
 
     out <- draws_list
+    # These values describe the fitted mixture layout; their first element is
+    # not a posterior-draw dimension.  Keeping them out of the generic
+    # first-dimension reindexer is particularly important when only one fitted
+    # draw is requested, because otherwise a two-coordinate index vector would
+    # be shortened to its first coordinate.
+    structural_mixture_fields <- c(
+        "use_dynamic_mixture",
+        "dynamic_n_clusters",
+        "dynamic_mix_dimension",
+        "dynamic_mix_family",
+        "dynamic_mix_subject",
+        "dynamic_mix_dim_subject",
+        "dynamic_mix_idx_subject",
+        "dynamic_mix_start_subject",
+        "dynamic_mix_covariance",
+        "dynamic_mix_dim_covariance",
+        "dynamic_mix_idx_covariance",
+        "dynamic_mix_start_covariance",
+        "dynamic_mix_marker",
+        "dynamic_mix_dim_marker",
+        "dynamic_mix_idx_marker",
+        "dynamic_mix_start_marker"
+    )
     for (nm in names(out)) {
+        if (nm %in% structural_mixture_fields) {
+            next
+        }
         out[[nm]] <- reindex_first_dim(out[[nm]], draw_index)
     }
     out
@@ -1222,6 +1315,85 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         # }
     }
     mat
+}
+
+# Recover a Stan `array[draw] matrix[unit, class]` quantity.
+#
+# Dynamic generated quantities contain one embedded fitted-draw dimension and
+# Stan sampling adds a second posterior-sampling dimension.  As elsewhere in
+# this file, successive embedded draws are paired with successive posterior
+# rows instead of being averaged.  This preserves conditional latent-effect
+# uncertainty in the reported class probabilities.
+.extract_array3_from_stan <- function(
+    draws_mat,
+    variable_name,
+    second_dimension,
+    third_dimension,
+    target_draws
+) {
+    second_dimension <- as.integer(second_dimension)
+    third_dimension <- as.integer(third_dimension)
+    target_draws <- as.integer(target_draws)
+    output <- array(
+        NA_real_,
+        dim = c(target_draws, second_dimension, third_dimension)
+    )
+    if (
+        target_draws < 1L ||
+        second_dimension < 1L ||
+        third_dimension < 1L
+    ) {
+        return(output)
+    }
+
+    for (second_index in seq_len(second_dimension)) {
+        for (third_index in seq_len(third_dimension)) {
+            index_suffix <- paste0(
+                ",",
+                second_index,
+                ",",
+                third_index,
+                "]"
+            )
+            available_names <- grep(
+                paste0(
+                    "^",
+                    variable_name,
+                    "\\[[0-9]+",
+                    index_suffix
+                ),
+                colnames(draws_mat),
+                value = TRUE
+            )
+            number_embedded_draws <- length(available_names)
+            if (number_embedded_draws < 1L) {
+                next
+            }
+
+            ordered_names <- paste0(
+                variable_name,
+                "[",
+                seq_len(number_embedded_draws),
+                index_suffix
+            )
+            repetitions <- ceiling(target_draws / number_embedded_draws)
+            values <- numeric(0)
+            for (posterior_row in seq_len(repetitions)) {
+                source_row <- (
+                    (posterior_row - 1L) %% max(1L, nrow(draws_mat))
+                ) + 1L
+                values <- c(
+                    values,
+                    as.numeric(
+                        draws_mat[source_row, ordered_names, drop = TRUE]
+                    )
+                )
+            }
+            output[, second_index, third_index] <-
+                values[seq_len(target_draws)]
+        }
+    }
+    output
 }
 
 .scale_draw_dependent_time_terms <- function(draws_list, stan_data, tmax) {
@@ -1742,6 +1914,111 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         matrix(0, n, 0)
     }
 
+    # ------------------------------------------------------------------
+    # Fitted finite-mixture draws for dynamic prediction
+    # ------------------------------------------------------------------
+    # The dynamic Stan programme has one latent-effect vector per retained
+    # fitted draw.  We consequently preserve the posterior pairing: row k of
+    # the ordinary parameter arrays receives row k of the component
+    # probabilities, locations and scales.  An ordinary model uses one neutral
+    # component and one inert coordinate so the dynamic data structure remains
+    # simple and robust across Stan interfaces.
+    use_dynamic_mixture <- as.integer(sd$use_mixture %||% 0L)
+    dynamic_n_clusters <- max(1L, as.integer(sd$n_clusters %||% 1L))
+    fitted_mix_dimension <- max(0L, as.integer(sd$K_mix %||% 0L))
+    dynamic_mix_dimension <- max(1L, fitted_mix_dimension)
+
+    dynamic_mix_probability <- matrix(
+        1 / dynamic_n_clusters,
+        nrow = n,
+        ncol = dynamic_n_clusters
+    )
+    probability_names <- paste0(
+        "mix_probability[",
+        seq_len(dynamic_n_clusters),
+        "]"
+    )
+    if (
+        use_dynamic_mixture == 1L &&
+        all(probability_names %in% colnames(dmat))
+    ) {
+        dynamic_mix_probability <- get_mat(probability_names)
+    }
+
+    extract_class_coefficients <- function(prefix, number_covariates) {
+        number_covariates <- as.integer(
+            number_covariates %||% 0L
+        ) # fitted class-design columns for this allocation domain
+        coefficients <- matrix(
+            0,
+            nrow = n,
+            ncol = number_covariates
+        ) # draw-by-concatenated-coefficient container
+        if (
+            use_dynamic_mixture == 1L &&
+            number_covariates > 0L
+        ) {
+            for (covariate in seq_len(number_covariates)) {
+                coefficient_name <- paste0(
+                    prefix,
+                    "[",
+                    covariate,
+                    "]"
+                ) # Stan draw name for one compact class coefficient
+                if (coefficient_name %in% colnames(dmat)) {
+                    coefficients[, covariate] <-
+                        as.numeric(dmat[, coefficient_name])
+                }
+            }
+        }
+        coefficients
+    }
+    dynamic_class_coefficient_subject <- extract_class_coefficients(
+        "mix_class_coefficient_subject",
+        sd$P_class_subject
+    ) # fitted subject-domain class-regression coefficients
+    dynamic_class_coefficient_marker <- extract_class_coefficients(
+        "mix_class_coefficient_marker",
+        sd$P_class_marker
+    ) # fitted marker-domain class-regression coefficients
+
+    dynamic_mix_location <- array(
+        0,
+        dim = c(n, dynamic_n_clusters, dynamic_mix_dimension)
+    )
+    dynamic_mix_scale <- array(
+        1,
+        dim = c(n, dynamic_n_clusters, dynamic_mix_dimension)
+    )
+    if (use_dynamic_mixture == 1L && fitted_mix_dimension > 0L) {
+        for (group in seq_len(dynamic_n_clusters)) {
+            for (coordinate in seq_len(fitted_mix_dimension)) {
+                location_name <- paste0(
+                    "mix_location[",
+                    group,
+                    ",",
+                    coordinate,
+                    "]"
+                )
+                scale_name <- paste0(
+                    "mix_scale[",
+                    group,
+                    ",",
+                    coordinate,
+                    "]"
+                )
+                if (location_name %in% colnames(dmat)) {
+                    dynamic_mix_location[, group, coordinate] <-
+                        as.numeric(dmat[, location_name])
+                }
+                if (scale_name %in% colnames(dmat)) {
+                    dynamic_mix_scale[, group, coordinate] <-
+                        pmax(as.numeric(dmat[, scale_name]), 1e-8)
+                }
+            }
+        }
+    }
+
     list(
         n_samples = n,
         beta_fixed = beta_fixed,
@@ -1822,6 +2099,29 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         coeff_cv_marker = get_transform_coeff_draws("coeff_cv_marker_eff", sd$coeff_cv_marker, sd$n_coeff_cv_marker),
         coeff_cs_mean = get_transform_coeff_draws("coeff_cs_mean_eff", sd$coeff_cs_mean, sd$n_coeff_cs_mean),
         coeff_cs_marker = get_transform_coeff_draws("coeff_cs_marker_eff", sd$coeff_cs_marker, sd$n_coeff_cs_marker),
+        use_dynamic_mixture = use_dynamic_mixture,
+        dynamic_n_clusters = dynamic_n_clusters,
+        dynamic_mix_dimension = dynamic_mix_dimension,
+        dynamic_mix_family = as.integer(sd$shrinkage %||% 0L),
+        dynamic_mix_probability = dynamic_mix_probability,
+        dynamic_class_coefficient_subject =
+            dynamic_class_coefficient_subject,
+        dynamic_class_coefficient_marker =
+            dynamic_class_coefficient_marker,
+        dynamic_mix_location = dynamic_mix_location,
+        dynamic_mix_scale = dynamic_mix_scale,
+        dynamic_mix_subject = as.integer(sd$mix_subject %||% 0L),
+        dynamic_mix_dim_subject = as.integer(sd$mix_dim_subject %||% 0L),
+        dynamic_mix_idx_subject = as.integer(sd$mix_idx_subject %||% integer(0)),
+        dynamic_mix_start_subject = as.integer(sd$mix_start_subject %||% 0L),
+        dynamic_mix_covariance = as.integer(sd$mix_covariance %||% 0L),
+        dynamic_mix_dim_covariance = as.integer(sd$mix_dim_covariance %||% 0L),
+        dynamic_mix_idx_covariance = as.integer(sd$mix_idx_covariance %||% integer(0)),
+        dynamic_mix_start_covariance = as.integer(sd$mix_start_covariance %||% 0L),
+        dynamic_mix_marker = as.integer(sd$mix_marker %||% 0L),
+        dynamic_mix_dim_marker = as.integer(sd$mix_dim_marker %||% 0L),
+        dynamic_mix_idx_marker = as.integer(sd$mix_idx_marker %||% integer(0)),
+        dynamic_mix_start_marker = as.integer(sd$mix_start_marker %||% 0L),
         cutpoints_ord = if (!is.null(sd$K_ord) && sd$K_ord > 1 && "cutpoints_ord[1]" %in% colnames(dmat)) {
             get_mat(paste0("cutpoints_ord[", 1:(sd$K_ord - 1), "]"))
         } else {
@@ -1866,6 +2166,82 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
 
     sd <- object$stan_data
     templates <- sd$design_templates %||% list()
+
+    mixture_metadata <- sd$mixture # fitted latent-progress design metadata, when present
+    baseline_class_probability <- draws_list$dynamic_mix_probability
+    number_dynamic_clusters <- draws_list$dynamic_n_clusters
+    number_fitted_markers <- as.integer(
+        sd$D
+    ) # marker allocation units represented in the fitted model
+    subject_class_design <- matrix(
+        0,
+        nrow = 1L,
+        ncol = 0L
+    ) # default intercept-only design for the subject being predicted
+    marker_class_design <- matrix(
+        0,
+        nrow = number_fitted_markers,
+        ncol = 0L
+    ) # default intercept-only design for the established fitted markers
+    if (
+        !is.null(mixture_metadata) &&
+        as.integer(sd$use_mixture %||% 0L) == 1L
+    ) {
+        subject_design_record <-
+            mixture_metadata$class_design$subject
+        marker_design_record <- mixture_metadata$class_design$marker
+        if (
+            !is.null(subject_design_record) &&
+            length(subject_design_record$columns %||% character(0)) > 0L
+        ) {
+            subject_identifier <- if (
+                id_var %in% names(dE) && nrow(dE) > 0L
+            ) {
+                dE[[id_var]][[1L]]
+            } else {
+                dL[[id_var]][[1L]]
+            } # identifier used to select constant covariates for this subject
+            subject_class_design <- .mixture_prediction_class_design(
+                design_record = subject_design_record,
+                primary_data = dE,
+                fallback_data = dL,
+                unit_variable = id_var,
+                unit_value = subject_identifier,
+                domain = "subject"
+            )
+        }
+        if (!is.null(marker_design_record)) {
+            marker_class_design <- marker_design_record$matrix
+        }
+    }
+    subject_class_probability_array <- .mixture_class_probability(
+        baseline_probability = baseline_class_probability,
+        class_coefficient =
+            draws_list$dynamic_class_coefficient_subject,
+        class_design = subject_class_design,
+        class_term_start =
+            mixture_metadata$class_design$subject$class_term_start %||%
+              rep.int(1L, number_dynamic_clusters),
+        class_term_count =
+            mixture_metadata$class_design$subject$class_term_count %||%
+              integer(number_dynamic_clusters)
+    ) # draw-specific prior class probabilities for this new subject
+    dynamic_mix_probability_subject <- matrix(
+        subject_class_probability_array[, 1L, ],
+        nrow = nrow(baseline_class_probability),
+        ncol = number_dynamic_clusters
+    ) # Stan matrix form of the single subject allocation domain
+    dynamic_mix_probability_marker <- .mixture_class_probability(
+        baseline_probability = baseline_class_probability,
+        class_coefficient = draws_list$dynamic_class_coefficient_marker,
+        class_design = marker_class_design,
+        class_term_start =
+            mixture_metadata$class_design$marker$class_term_start %||%
+              rep.int(1L, number_dynamic_clusters),
+        class_term_count =
+            mixture_metadata$class_design$marker$class_term_count %||%
+              integer(number_dynamic_clusters)
+    ) # draw-by-marker class probabilities under the fitted marker formula
 
     dL[[time_var]] <- dL[[time_var]] / tmax
     T_cond_scaled <- t_cond / tmax
@@ -2328,6 +2704,39 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         vcov_diag_link = sd$vcov_diag_link,
         use_tau_fixed = fixed_tau_out$use_tau_fixed,
         tau_fixed = fixed_tau_out$tau_fixed,
+        # Draw-specific latent-progress distribution.  These entries are
+        # neutral for an ordinary fit and reproduce the fitted mixture for a
+        # `joinme_mix()` parent.  Starts and indices refer to the same common
+        # coordinate layout used during fitting, so compatible blocks share
+        # one allocation rather than receiving independent class labels.
+        use_dynamic_mixture = draws_list$use_dynamic_mixture,
+        dynamic_n_clusters = draws_list$dynamic_n_clusters,
+        dynamic_mix_dimension = draws_list$dynamic_mix_dimension,
+        dynamic_mix_family = draws_list$dynamic_mix_family,
+        dynamic_mix_probability_subject =
+            dynamic_mix_probability_subject,
+        dynamic_mix_probability_marker =
+            dynamic_mix_probability_marker,
+        dynamic_mix_location = draws_list$dynamic_mix_location,
+        dynamic_mix_scale = draws_list$dynamic_mix_scale,
+        dynamic_mix_subject = draws_list$dynamic_mix_subject,
+        dynamic_mix_dim_subject = draws_list$dynamic_mix_dim_subject,
+        dynamic_mix_idx_subject = as.array(
+            as.integer(draws_list$dynamic_mix_idx_subject)
+        ),
+        dynamic_mix_start_subject = draws_list$dynamic_mix_start_subject,
+        dynamic_mix_covariance = draws_list$dynamic_mix_covariance,
+        dynamic_mix_dim_covariance = draws_list$dynamic_mix_dim_covariance,
+        dynamic_mix_idx_covariance = as.array(
+            as.integer(draws_list$dynamic_mix_idx_covariance)
+        ),
+        dynamic_mix_start_covariance = draws_list$dynamic_mix_start_covariance,
+        dynamic_mix_marker = draws_list$dynamic_mix_marker,
+        dynamic_mix_dim_marker = draws_list$dynamic_mix_dim_marker,
+        dynamic_mix_idx_marker = as.array(
+            as.integer(draws_list$dynamic_mix_idx_marker)
+        ),
+        dynamic_mix_start_marker = draws_list$dynamic_mix_start_marker,
         coeff_assoc_cv_total = draws_list$coeff_assoc_cv_total, coeff_assoc_cs_total = draws_list$coeff_assoc_cs_total,
         coeff_assoc_cv_mean = draws_list$coeff_assoc_cv_mean, coeff_assoc_cs_mean = draws_list$coeff_assoc_cs_mean,
         coeff_assoc_cv_marker = draws_list$coeff_assoc_cv_marker, coeff_assoc_cs_marker = draws_list$coeff_assoc_cs_marker,

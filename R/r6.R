@@ -1,5 +1,5 @@
 #' @name JoiNMe_r6_classes
-#' @aliases JoiNMeFit JoiNMeFit JoiNMeDynPred SummaryJoiNMeFit SummaryJoiNMeDynPred
+#' @aliases JoiNMeFit JoiNMeMixFit JoiNMeDynPred JoiNMeMixDynPred SummaryJoiNMeFit SummaryJoiNMeDynPred
 #' @title JoiNMe R6 Classes
 #'
 #' @importFrom R6 R6Class
@@ -28,7 +28,7 @@
 #' Methods: initialize.
 #'
 #' @keywords internal
-#' @export JoiNMeFit JoiNMeFit JoiNMeDynPred SummaryJoiNMeFit SummaryJoiNMeDynPred
+#' @export JoiNMeFit JoiNMeMixFit JoiNMeDynPred JoiNMeMixDynPred SummaryJoiNMeFit SummaryJoiNMeDynPred
 NULL
 
 
@@ -115,6 +115,83 @@ JoiNMeFit <- R6::R6Class(
   )
 )
 
+#' Fitted latent-progress mixture
+#'
+#' @description
+#' R6 container returned by [joinme_mix()].  It inherits every field and method
+#' from `JoiNMeFit` and adds the checked mixture description used by
+#' class-specific summaries, plots, and predictions.
+#'
+#' @export
+JoiNMeMixFit <- R6::R6Class(
+  classname = "JoiNMeMixFit",
+  inherit = JoiNMeFit,
+  public = list(
+    mixture = NULL,
+    initialize = function(
+      fit,
+      stan_data,
+      formulaLong,
+      formulaEvent,
+      formulaVCov,
+      config,
+      call,
+      tmax,
+      dataLong,
+      dataEvent,
+      mixture
+    ) {
+      super$initialize(
+        fit = fit,
+        stan_data = stan_data,
+        formulaLong = formulaLong,
+        formulaEvent = formulaEvent,
+        formulaVCov = formulaVCov,
+        config = config,
+        call = call,
+        tmax = tmax,
+        dataLong = dataLong,
+        dataEvent = dataEvent
+      )
+      self$mixture <- mixture
+      class(self) <- unique(c(
+        "JoiNMeMixFit",
+        "JoiNMeFit",
+        class(self)
+      ))
+    },
+    print = function(...) {
+      .cli_summary_heading("Latent-progress joint model", level = 1L)
+      if (!is.null(self$call)) {
+        cat("Call:\n")
+        print(self$call)
+      }
+      mixture <- self$mixture %||% list()
+      cat("Classes: ", mixture$n_clusters %||% NA_integer_, "\n", sep = "")
+      cat(
+        "Clustering types: ",
+        paste(mixture$cluster_type %||% character(0), collapse = ", "),
+        "\n",
+        sep = ""
+      )
+      cat(
+        "Event process: ",
+        if (isTRUE(mixture$include_survival)) {
+          "joint longitudinal-survival"
+        } else {
+          "longitudinal only"
+        },
+        "\n",
+        sep = ""
+      )
+      cli::cli_bullets(
+        "Use {.code summary()} for class probabilities, locations, and model parameters.\n"
+      )
+      invisible(self)
+    }
+  )
+)
+
 #' @noRd
 JoiNMeDynPred <- R6::R6Class(
   classname = "JoiNMeDynPred",
@@ -162,6 +239,49 @@ JoiNMeDynPred <- R6::R6Class(
   ),
   private = list(
     cache = list()
+  )
+)
+
+#' Dynamic predictions from a latent-progress mixture
+#'
+#' @description
+#' Prediction container inheriting the complete `JoiNMeDynPred` interface and
+#' retaining the mixture definition of its parent fit.
+#'
+#' @export
+JoiNMeMixDynPred <- R6::R6Class(
+  classname = "JoiNMeMixDynPred",
+  inherit = JoiNMeDynPred,
+  public = list(
+    mixture = NULL,
+    initialize = function(
+      predictions,
+      quantiles,
+      draws,
+      data,
+      metadata,
+      call,
+      tmax,
+      n_samples,
+      mixture
+    ) {
+      super$initialize(
+        predictions = predictions,
+        quantiles = quantiles,
+        draws = draws,
+        data = data,
+        metadata = metadata,
+        call = call,
+        tmax = tmax,
+        n_samples = n_samples
+      )
+      self$mixture <- mixture
+      class(self) <- unique(c(
+        "JoiNMeMixDynPred",
+        "JoiNMeDynPred",
+        class(self)
+      ))
+    }
   )
 )
 
@@ -224,42 +344,32 @@ JoiNMeStanData <- R6::R6Class(
     stan_mod = NULL,
     stan_engine = NULL,
     stan_args = NULL,
+    result_class = NULL,
+    result_metadata = NULL,
 
     initialize = function(
-      formulaLong,
-      formulaEvent,
-      formulaVCov,
-      parent_call,
-      dataLong,
-      dataEvent,
-      transforms,
-      draws,
-      threads_per_chain,
-      stan_data,
-      stan_mod,
-      stan_engine,
-      stan_args
-    ){
-      self$formulaLong <- formulaLong
-      self$formulaEvent <- formulaEvent
-      self$formulaVCov <- formulaVCov
-      self$parent_call <- parent_call
-      self$dataLong <- dataLong
-      self$dataEvent <- dataEvent
-      self$transforms <- transforms
-      self$draws <- draws
-      self$threads_per_chain <- threads_per_chain
-      self$stan_data <- stan_data
-      self$stan_mod <- stan_mod
-      self$stan_engine <- stan_engine
-      self$stan_args <- stan_args
+      recipes
+    ) {
+      self$formulaLong <- recipes$formulaLong
+      self$formulaEvent <- recipes$formulaEvent
+      self$formulaVCov <- recipes$formulaVCov
+      self$parent_call <- recipes$parent_call
+      self$dataLong <- recipes$dataLong
+      self$dataEvent <- recipes$dataEvent
+      self$transforms <- recipes$transforms
+      self$draws <- recipes$draws
+      self$threads_per_chain <- recipes$threads_per_chain
+      self$stan_data <- recipes$stan_data
+      self$stan_mod <- recipes$stan_mod
+      self$stan_engine <- recipes$stan_engine
+      self$stan_args <- recipes$stan_args
     },
     print = function(...) {
       .cli_summary_heading("JoiNMe Stan Data", level = 1L)
       cli::cli_bullets(paste("Stan engine: ", self$stan_engine, "\n", sep = ""))
       cli::cli_bullets("Sample args: ")
-      cli::cli_ul(items = 
-        if (self$stan_engine == "cmdstanr") {
+      cli::cli_ul(
+        items = if (self$stan_engine == "cmdstanr") {
           self$stan_args
         } else {
           self$stan_args[names(self$stan_args) != "object"]
@@ -267,16 +377,8 @@ JoiNMeStanData <- R6::R6Class(
       )
       invisible(self)
     },
-    sample = function(){
+    make_cfg = function() {
       sd <- self$stan_data
-      if (self$stan_engine == "cmdstanr") {
-        fit <- do.call(self$stan_mod$sample, self$stan_args)
-        fit <- .import_cmdstanr_fit(fit)
-      } else {
-        # Rstan returns warnings about NA in Rhat which is untrue. Can easily work out with diagnosis tho so let's suppress it for now.
-        fit <- suppressWarnings(do.call(rstan::sampling, self$stan_args))
-      }
-      
       cfg <- list(
         family_long = sd$family_long,
         family_link = sd$link_long,
@@ -305,7 +407,11 @@ JoiNMeStanData <- R6::R6Class(
           tf_mode_corr = sd$tf_mode_corr,
           tf_mode_vcov = sd$tf_mode_vcov
         ),
+        # Retain both names for objects written by earlier development
+        # versions.  Plotting and class-trajectory reconstruction use the
+        # plural field as the canonical resolved specification.
         transform_spec = self$transforms,
+        transforms_spec = self$transforms,
         dist = list(
           dist_cols = sd$dist_cols,
           dist_re_terms = sd$dist_re_terms,
@@ -318,7 +424,15 @@ JoiNMeStanData <- R6::R6Class(
         ),
         allow_marker_crosscorr = sd$allow_marker_crosscorr,
         shrinkage = sd$shrinkage,
-        dims = c(n_id = sd$n_id, N = sd$N, D = sd$D, P = sd$P, R_id = sd$R_id, R_mk = sd$R_mk, Q_idm = sd$Q_idm),
+        dims = c(
+          n_id = sd$n_id,
+          N = sd$N,
+          D = sd$D,
+          P = sd$P,
+          R_id = sd$R_id,
+          R_mk = sd$R_mk,
+          Q_idm = sd$Q_idm
+        ),
         draws_default = self$draws,
         threads_per_chain = self$threads_per_chain,
         # tmax_internal = sd$tmax,
@@ -345,6 +459,22 @@ JoiNMeStanData <- R6::R6Class(
         tau_fixed = sd$tau_fixed
       )
       cfg$engine <- self$stan_engine
+      cfg
+      # cfg$mixture <- self$result_metadata %||% sd$mixture
+    },
+    sample = function(...) {
+      sd <- self$stan_data
+      if (length(list(...)) > 0) {
+        self$stan_args <- modifyList(self$stan_args, list(...))
+      }
+
+      if (self$stan_engine == "cmdstanr") {
+        fit <- do.call(self$stan_mod$sample, self$stan_args)
+        fit <- .import_cmdstanr_fit(fit)
+      } else {
+        # Rstan returns warnings about NA in Rhat which is untrue. Can easily work out with diagnosis tho so let's suppress it for now.
+        fit <- suppressWarnings(do.call(rstan::sampling, self$stan_args))
+      }
 
       fit_obj <- JoiNMeFit$new(
         fit = fit,
@@ -352,12 +482,24 @@ JoiNMeStanData <- R6::R6Class(
         formulaLong = self$formulaLong,
         formulaEvent = self$formulaEvent,
         formulaVCov = self$formulaVCov,
-        config = cfg,
+        config = self$make_cfg(),
         call = self$parent_call,
         tmax = sd$tmax,
         dataLong = self$dataLong,
         dataEvent = self$dataEvent
       )
+
+      # fit_obj <- if (identical(self$result_class, "mixture")) {
+      #   do.call(
+      #     JoiNMeMixFit$new,
+      #     modifyList(
+      #       common_fit_arguments,
+      #       list(mixture = self$result_metadata %||% sd$mixture)
+      #     )
+      #   )
+      # } else {
+      #   do.call(JoiNMeFit$new, common_fit_arguments)
+      # }
 
       # Store a plotting bundle for association plots remain
       # usable even when cmdstanr CSV outputs are no longer available.
@@ -376,4 +518,84 @@ JoiNMeStanData <- R6::R6Class(
     }
   )
 )
-  
+
+JoiNMeMixStanData <- R6::R6Class(
+  classname = "JoiNMeMixStanData",
+  inherit = JoiNMeStanData,
+  public = list(
+    mixture = NULL,
+    initialize = function(
+      recipe,
+      more_recipe = list()
+    ) {
+      super$initialize(recipe)
+      self$mixture <- more_recipe$mixture
+    },
+    print = function() {
+      .cli_summary_heading("Latent-progress mixture Stan Data", level = 1L)
+      cli::cli_bullets(paste("Stan engine: ", self$stan_engine, "\n", sep = ""))
+      cli::cli_bullets("Sample args: ")
+      cli::cli_ul(
+        items = if (self$stan_engine == "cmdstanr") {
+          self$stan_args
+        } else {
+          self$stan_args[names(self$stan_args) != "object"]
+        }
+      )
+      cli::cli_bullets(paste(
+        "Classes: ",
+        self$mixture$n_clusters %||% NA_integer_,
+        "\n",
+        sep = ""
+      ))
+      cli::cli_bullets(paste(
+        "Clustering types: ",
+        paste(self$mixture$cluster_type %||% character(0), collapse = ", "),
+        "\n",
+        sep = ""
+      ))
+      cli::cli_bullets(paste(
+        "Event process: ",
+        if (isTRUE(self$mixture$include_survival)) {
+          "joint longitudinal-survival"
+        } else {
+          "longitudinal only"
+        },
+        "\n",
+        sep = ""
+      ))
+      invisible(self)
+    },
+    make_cfg = function() {
+      cfg <- super$make_cfg()
+      cfg$mixture <- self$mixture
+      cfg
+    },
+    sample = function() {
+      sd <- self$stan_data
+      if (self$stan_engine == "cmdstanr") {
+        fit <- do.call(self$stan_mod$sample, self$stan_args)
+        fit <- .import_cmdstanr_fit(fit)
+      } else {
+        # Rstan returns warnings about NA in Rhat which is untrue. Can easily work out with diagnosis tho so let's suppress it for now.
+        fit <- suppressWarnings(do.call(rstan::sampling, self$stan_args))
+      }
+
+      fit_obj <- JoiNMeMixFit$new(
+        fit = fit,
+        stan_data = sd,
+        formulaLong = self$formulaLong,
+        formulaEvent = self$formulaEvent,
+        formulaVCov = self$formulaVCov,
+        config = self$make_cfg(),
+        call = self$parent_call,
+        tmax = sd$tmax,
+        dataLong = self$dataLong,
+        dataEvent = self$dataEvent,
+        mixture = self$mixture
+      )
+
+      fit_obj
+    }
+  )
+)

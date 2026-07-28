@@ -39,7 +39,7 @@ int make_canonical_link(
   array[,] int inv_link_ops,
   array[] int inv_link_n_const
 ) {
-  int n_ops = inv_link_n_ops[marker_idx];
+  int n_ops = inv_link_n_ops[marker_idx]; // Role: number of operations.
   if (inv_link_n_const[marker_idx] != 0) return 0;
   if (n_ops == 1 && inv_link_ops[marker_idx, 1] == 0) return 1;
   if (n_ops == 2 && inv_link_ops[marker_idx, 1] == 0) {
@@ -106,10 +106,10 @@ real inv_link_bytecode(
   array[] int inv_link_n_const,
   matrix inv_link_const
 ) {
-  int n_ops = inv_link_n_ops[marker_idx];
-  int n_const = inv_link_n_const[marker_idx];
-  array[n_ops] int marker_bytecode;
-  vector[n_const] marker_const;
+  int n_ops = inv_link_n_ops[marker_idx]; // Role: number of operations.
+  int n_const = inv_link_n_const[marker_idx]; // Role: number of constants.
+  array[n_ops] int marker_bytecode; // Role: marker bytecode.
+  vector[n_const] marker_const; // Role: marker constants.
 
   if (n_ops > 0) {
     for (j in 1:n_ops) {

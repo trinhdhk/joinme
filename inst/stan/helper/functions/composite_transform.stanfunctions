@@ -160,8 +160,8 @@
     int n_iota_slope,
     vector iota_slope
   ) {
-    int n_comp = num_elements(x);
-    vector[n_comp] out;
+    int n_comp = num_elements(x); // Role: number of comp.
+    vector[n_comp] out; // Role: out.
     if (mode == 0) {
       return x;
     } else if (mode == 1) {
@@ -256,9 +256,9 @@
       vector iota_intercept,
       vector iota_slope
   ) {
-    int n_comp = num_elements(x);
-    int n_iota_intercept = (n_comp > 0) ? (num_elements(iota_intercept) %/% n_comp) : 0;
-    int n_iota_slope = (n_comp > 0) ? (num_elements(iota_slope) %/% n_comp) : 0;
+    int n_comp = num_elements(x); // Role: number of comp.
+    int n_iota_intercept = (n_comp > 0) ? (num_elements(iota_intercept) %/% n_comp) : 0; // Role: number of affine transformation intercept.
+    int n_iota_slope = (n_comp > 0) ? (num_elements(iota_slope) %/% n_comp) : 0; // Role: number of affine transformation slope.
     return apply_transform_vector_by_component(
       x,
       mode,
@@ -287,9 +287,9 @@
       vector iota_intercept,
       vector iota_slope
   ) {
-    int n_comp = num_elements(x);
-    int n_iota_intercept = (n_comp > 0) ? (num_elements(iota_intercept) %/% n_comp) : 0;
-    int n_iota_slope = (n_comp > 0) ? (num_elements(iota_slope) %/% n_comp) : 0;
+    int n_comp = num_elements(x); // Role: number of comp.
+    int n_iota_intercept = (n_comp > 0) ? (num_elements(iota_intercept) %/% n_comp) : 0; // Role: number of affine transformation intercept.
+    int n_iota_slope = (n_comp > 0) ? (num_elements(iota_slope) %/% n_comp) : 0; // Role: number of affine transformation slope.
     return apply_transform_vector_by_component(
       x,
       mode,

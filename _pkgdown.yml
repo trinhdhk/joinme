@@ -32,3 +32,11 @@ articles:
   - joinme-associations
   - joinme-model
   - joinme-theory
+- title: Latent progress
+  contents:
+  - joinme-latent-progress-theory
+  - joinme-latent-progress-guide
+  - joinme-latent-progress-example
+  - joinme-mix-simulation-theory
+  - joinme-mix-simulation-guide
+  - joinme-mix-simulation-example

@@ -410,7 +410,7 @@ joinme <- function(
   }
 
   stan_file <- .get_stan_file(
-    program = "joinme_fit",
+    program = .stan_fit_program(sd),
     threaded = TRUE
   )
 
@@ -487,6 +487,7 @@ joinme <- function(
 
   # Ensure time index arrays are preserved for cmdstanr JSON (avoid auto-unbox)
   sd_stan <- .coerce_rstan_time_indices(sd_stan)
+  sd_stan <- .coerce_rstan_mixture_data(sd_stan)
 
   # Coerce arrays/vectors consistently for both cmdstanr and rstan
   sd_stan <- .coerce_rstan_dist_arrays(sd_stan)
@@ -616,9 +617,8 @@ joinme <- function(
   }
 
   call <- match.call()
-  jm_sd <-
-    JoiNMeStanData$new(
-      formulaLong = formulaLong,
+  sd_recipe <- list(
+    formulaLong = formulaLong,
       formulaEvent = formulaEvent,
       formulaVCov = formulaVCov,
       parent_call = call,
@@ -636,7 +636,8 @@ joinme <- function(
       stan_mod = mod,
       stan_engine = engine,
       stan_args = if (engine == "cmdstanr") args else rstan_args
-    )
+  )
+  jm_sd <- JoiNMeStanData$new(sd_recipe)
   # If no fitting is requested, return the prepared Stan data list, program sample args
   if (!fit) {
     return(jm_sd)

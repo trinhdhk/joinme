@@ -81,7 +81,8 @@ NULL
 
 #' Resolve packaged/local Stan source file
 #'
-#' @param program One of "joinme_fit" or "joinme_dynpred".
+#' @param program One of `"joinme_fit"`, `"joinme_mix_fit"`,
+#'   `"joinme_dynpred"`, or `"joinme_mix_dynpred"`.
 #' @param threaded Logical retained for compatibility. joinme now always uses
 #'   the threaded Stan program and runs it serially when
 #'   `threads_per_chain = 1`.
@@ -89,7 +90,15 @@ NULL
 #' @return Absolute or relative path to an existing Stan source file.
 #' @keywords internal
 #' @noRd
-.get_stan_file <- function(program = c("joinme_fit", "joinme_dynpred"), threaded = TRUE) {
+.get_stan_file <- function(
+  program = c(
+    "joinme_fit",
+    "joinme_mix_fit",
+    "joinme_dynpred",
+    "joinme_mix_dynpred"
+  ),
+  threaded = TRUE
+) {
   program <- match.arg(program)
   if (!isTRUE(threaded)) {
     cli::cli_warn("Non-threaded Stan paths are deprecated; using the threaded Stan program instead.")
@@ -111,6 +120,50 @@ NULL
     ))
   }
   stan_file
+}
+
+#' Select a Stan fitting programme
+#'
+#' @description
+#' Keeps model-family routing in one deliberately small function.  The
+#' ordinary entry point is selected unless the prepared data explicitly
+#' requests a latent-progress mixture.  This makes the choice testable without
+#' compiling Stan and prevents ordinary fits from receiving the larger mixture
+#' data contract.
+#'
+#' @param stan_data Prepared fitting data.
+#'
+#' @return A character scalar accepted by [`.get_stan_file()`].
+#' @keywords internal
+#' @noRd
+.stan_fit_program <- function(stan_data) {
+  if (identical(as.integer(stan_data$use_mixture %||% 0L), 1L)) {
+    return("joinme_mix_fit")
+  }
+  "joinme_fit"
+}
+
+#' Select a Stan dynamic-prediction programme
+#'
+#' @description
+#' Uses the latent-class programme only when the parent fit carries an active
+#' mixture.  Class inheritance is considered as a safeguard for older saved
+#' fits whose stored Stan data predate `use_mixture`.
+#'
+#' @param object A fitted JoiNMe model.
+#'
+#' @return A character scalar accepted by [`.get_stan_file()`].
+#' @keywords internal
+#' @noRd
+.stan_dynpred_program <- function(object) {
+  has_mixture_data <- identical(
+    as.integer(object$stan_data$use_mixture %||% 0L),
+    1L
+  )
+  if (has_mixture_data || inherits(object, "JoiNMeMixFit")) {
+    return("joinme_mix_dynpred")
+  }
+  "joinme_dynpred"
 }
 
 #' Resolve cached CmdStan executable path for a Stan source file
@@ -410,8 +463,16 @@ precompile_cmdstanr_models <- function(force_recompile = TRUE, cleanup = TRUE) {
       "stan/joinme_fit_threading.stan",
       package = "joinme"
     ),
+    joinme_mix_fit_threading = system.file(
+      "stan/joinme_mix_fit_threading.stan",
+      package = "joinme"
+    ),
     joinme_dynpred_threading = system.file(
       "stan/joinme_dynpred_threading.stan",
+      package = "joinme"
+    ),
+    joinme_mix_dynpred_threading = system.file(
+      "stan/joinme_mix_dynpred_threading.stan",
       package = "joinme"
     )
   )
@@ -426,7 +487,11 @@ precompile_cmdstanr_models <- function(force_recompile = TRUE, cleanup = TRUE) {
   # Clean-up old cached executables that match the naming pattern to prevent stale models. We can be aggressive here since the cache key includes file hashes, so old executables won't be reused anyway. This ensures that if the source files change, we won't accidentally use an old cached executable that doesn't match the new source.
   cache_dir <- .stan_cache_dir()
   if (cleanup) {
-    old_exes <- list.files(cache_dir, pattern = "^JoiNMe_.*\\.(exe)?$", full.names = TRUE)
+    old_exes <- list.files(
+      cache_dir,
+      pattern = "^joinme_.*(\\.exe)?$",
+      full.names = TRUE
+    )
     if (length(old_exes) > 0) {
       unlink(old_exes, force = TRUE)
     }

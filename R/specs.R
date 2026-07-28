@@ -102,6 +102,8 @@ print.joinme_tf <- function(x, ...) {
 #' - `alpha`: association prior scale
 #' - `iota`: fit-only affine-shift prior scale for functional association transforms
 #' - `lkj`: LKJ concentration parameter
+#' - `class_probability`: Dirichlet concentration for baseline class probabilities
+#' - `class_regression`: Normal prior scale for class-membership regression
 #'
 #' @param beta Beta prior specification. Use either a numeric scale (or vector of
 #'   scales) or a list with `scale`/`sd`.
@@ -111,11 +113,16 @@ print.joinme_tf <- function(x, ...) {
 #'   slope parameters in functional association transforms. Use either a numeric
 #'   scale or a list with `scale`/`sd`.
 #' @param lkj LKJ concentration parameter.
+#' @param class_probability Positive Dirichlet concentration for the baseline
+#'   class probabilities. A scalar is repeated over classes; a vector may give
+#'   one concentration per class.
+#' @param class_regression Positive Normal prior scale for coefficients from
+#'   `formulaCluster`.
 #' @param .validate Logical; if `TRUE` (default), validate the resulting prior
 #'   declarations immediately.
 #'
 #' @return An object of class `joinme_priors`.
-#' @aliases jm_priors
+#' @aliases jm_priors jm_prior
 #' @export
 #'
 #' @examples
@@ -123,12 +130,29 @@ print.joinme_tf <- function(x, ...) {
 #'   beta = list(scale = 2.5),
 #'   alpha = list(scale = 1.0),
 #'   iota = list(scale = 1.0),
-#'   lkj = 2
+#'   lkj = 2,
+#'   class_probability = c(2, 2, 2),
+#'   class_regression = 1
 #' )
 #' print(pri)
-joinme_priors <- function(beta = NULL, alpha = NULL, iota = NULL, lkj = NULL, .validate = TRUE) {
+joinme_priors <- function(
+  beta = NULL, # prior scale for fixed-effect coefficients
+  alpha = NULL, # prior scale for association coefficients
+  iota = NULL, # prior scale for fitted transformation shifts
+  lkj = NULL, # LKJ concentration for correlation matrices
+  class_probability = 1, # Dirichlet concentration for baseline class weights
+  class_regression = 1, # Normal prior scale for class-regression coefficients
+  .validate = TRUE # whether to validate the assembled prior specification
+) {
   .joinme_priors_(
-    list(beta = beta, alpha = alpha, iota = iota, lkj = lkj),
+    list(
+      beta = beta,
+      alpha = alpha,
+      iota = iota,
+      lkj = lkj,
+      class_probability = class_probability,
+      class_regression = class_regression
+    ),
     validate = .validate
   )
 }
@@ -136,6 +160,10 @@ joinme_priors <- function(beta = NULL, alpha = NULL, iota = NULL, lkj = NULL, .v
 #' @rdname joinme_priors
 #' @export
 jm_priors <- joinme_priors
+
+#' @rdname joinme_priors
+#' @export
+jm_prior <- joinme_priors
 
 #' @export
 print.joinme_priors <- function(x, ...) {
@@ -153,10 +181,26 @@ print.joinme_priors <- function(x, ...) {
     paste(iota_scale, collapse = ", ")
   }
   lkj_txt <- if (is.null(priors$lkj)) "default" else paste(priors$lkj, collapse = ", ")
+  class_probability_txt <- paste(priors$class_probability, collapse = ", ")
+  class_regression_txt <- paste(priors$class_regression, collapse = ", ")
 
   tbl <- data.frame(
-    component = c("beta", "alpha", "iota", "lkj"),
-    value = c(beta_txt, alpha_txt, iota_txt, lkj_txt),
+    component = c(
+      "beta",
+      "alpha",
+      "iota",
+      "lkj",
+      "class_probability",
+      "class_regression"
+    ),
+    value = c(
+      beta_txt,
+      alpha_txt,
+      iota_txt,
+      lkj_txt,
+      class_probability_txt,
+      class_regression_txt
+    ),
     stringsAsFactors = FALSE
   )
   cat("Prior specification for Joint Mixed Effects model\n")
@@ -576,7 +620,14 @@ make_conditions <- function(x, ...) {
 #' @keywords internal
 .joinme_priors_ <- function(priors = NULL, validate = TRUE) {
   if (is.null(priors)) {
-    priors <- list(beta = NULL, alpha = NULL, iota = NULL, lkj = NULL)
+    priors <- list(
+      beta = NULL,
+      alpha = NULL,
+      iota = NULL,
+      lkj = NULL,
+      class_probability = 1,
+      class_regression = 1
+    )
   }
   priors <- if (inherits(priors, "joinme_priors")) unclass(priors) else priors
 
@@ -589,16 +640,23 @@ make_conditions <- function(x, ...) {
   if (length(priors) > 0 && (is.null(names(priors)) || any(names(priors) %in% c("", NA_character_)))) {
     cli::cli_abort(c(
       x = "{.arg priors} must be a named list.",
-      i = "Allowed components are beta, alpha, and lkj."
+      i = "Allowed components are beta, alpha, iota, lkj, class_probability, and class_regression."
     ))
   }
 
-  allowed <- c("beta", "alpha", "iota", "lkj")
+  allowed <- c(
+    "beta",
+    "alpha",
+    "iota",
+    "lkj",
+    "class_probability",
+    "class_regression"
+  )
   bad <- setdiff(names(priors), allowed)
   if (length(bad) > 0) {
     cli::cli_abort(c(
       x = "Unknown prior component(s): {paste(bad, collapse = ', ')}.",
-      i = "Allowed components: beta, alpha, lkj."
+      i = "Allowed components: beta, alpha, iota, lkj, class_probability, class_regression."
     ))
   }
 
@@ -606,12 +664,34 @@ make_conditions <- function(x, ...) {
     beta = priors$beta %||% NULL,
     alpha = priors$alpha %||% NULL,
     iota = priors$iota %||% NULL,
-    lkj = priors$lkj %||% NULL
+    lkj = priors$lkj %||% NULL,
+    class_probability = priors$class_probability %||% 1,
+    class_regression = priors$class_regression %||% 1
   )
 
   .validate_joinme_prior_component(out$beta, "beta")
   .validate_joinme_prior_component(out$alpha, "alpha")
   .validate_joinme_prior_component(out$iota, "iota")
+  if (
+    !is.numeric(out$class_probability) ||
+      length(out$class_probability) < 1L ||
+      any(!is.finite(out$class_probability)) ||
+      any(out$class_probability <= 0)
+  ) {
+    cli::cli_abort(
+      "{.arg class_probability} must contain positive finite Dirichlet concentrations."
+    )
+  }
+  if (
+    !is.numeric(out$class_regression) ||
+      length(out$class_regression) != 1L ||
+      !is.finite(out$class_regression) ||
+      out$class_regression <= 0
+  ) {
+    cli::cli_abort("{.arg class_regression} must be a positive numeric scalar.")
+  }
+  out$class_probability <- as.numeric(out$class_probability)
+  out$class_regression <- as.numeric(out$class_regression)
   if (!is.null(out$lkj)) {
     if (!is.numeric(out$lkj) || length(out$lkj) != 1L || !is.finite(out$lkj) || out$lkj <= 0) {
       cli::cli_abort(c(

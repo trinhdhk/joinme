@@ -20,9 +20,12 @@
 #' @param priors Optional updated priors list.
 #' @param .env Optional environment for evaluating the updated call. 
 #' If NULL, the parent frame is used. When failed, the environment of the original formulaLong is used.
-#' @param ... Additional arguments passed to `joinme()`.
+#' @param ... Additional arguments passed to `joinme()`, or to `joinme_mix()`
+#'   when `object` is a latent-progress mixture.
 #'
-#' @return A refitted JoiNMe object.
+#' @return A refitted JoiNMe object. Mixture fits retain their mixture entry
+#'   point and class specification; longitudinal-only mixtures remain
+#'   longitudinal only unless new event inputs are supplied explicitly.
 #' @method update JoiNMeFit
 #' @seealso [update()]
 #' @export
@@ -42,11 +45,22 @@ update.JoiNMeFit <- function(
   .env = NULL,
   ...
 ) {
+  mixture_fit <- inherits(object, "JoiNMeMixFit")
+  longitudinal_only_mixture <- mixture_fit &&
+    !isTRUE(
+      (object$mixture %||% object$config$mixture)$include_survival
+    )
   call_obj <- object$call
   if (is.null(call_obj) || !is.call(call_obj)) {
-    call_obj <- call("JoiNMe")
+    call_obj <- call(
+      if (mixture_fit) "joinme_mix" else "JoiNMe"
+    )
   }
-  call_obj[[1]] <- quote(JoiNMe)
+  call_obj[[1]] <- if (mixture_fit) {
+    quote(joinme_mix)
+  } else {
+    quote(JoiNMe)
+  }
 
   update_formula <- function(current, updated, name) {
     # Support update formulas ("~ . + x") while preserving original
@@ -92,7 +106,18 @@ update.JoiNMeFit <- function(
   }
 
   call_obj$formulaLong <- update_formula(object$formulaLong, formulaLong, "formulaLong")
-  call_obj$formulaEvent <- update_formula(object$formulaEvent, formulaEvent, "formulaEvent")
+  call_obj$formulaEvent <- if (
+    longitudinal_only_mixture &&
+      is.null(formulaEvent)
+  ) {
+    NULL
+  } else {
+    update_formula(
+      object$formulaEvent,
+      formulaEvent,
+      "formulaEvent"
+    )
+  }
   call_obj$formulaVCov <- update_formula(object$formulaVCov, formulaVCov, "formulaVCov")
   if (!is.null(formulaDist)) call_obj$formulaDist <- formulaDist
 
@@ -132,7 +157,10 @@ update.JoiNMeFit <- function(
   if (is.null(call_obj$dataLong)) {
     cli::cli_abort("{.arg dataLong} must be supplied when it is not available in the stored call.")
   }
-  if (is.null(call_obj$dataEvent)) {
+  if (
+    is.null(call_obj$dataEvent) &&
+      !longitudinal_only_mixture
+  ) {
     cli::cli_abort("{.arg dataEvent} must be supplied when it is not available in the stored call.")
   }
 

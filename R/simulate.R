@@ -739,6 +739,9 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   from the main `seed` for reproducible simulations.
 #' @param id_var,marker_var,time_var,y_var,event_time_var,event_var Column names aligned
 #'   with `joinme_standata()` defaults.
+#' @param .mixture_specification Private latent-progress simulation
+#'   specification assembled by [simulate_joinme_mix()]. Users should call
+#'   [simulate_joinme_mix()] rather than supplying this argument directly.
 #' @param left_truncation_max Optional non-negative delayed-entry bound. When > 0,
 #'   each subject receives a sampled entry in
 #'   `[0, min(left_truncation_max, stop_time))`.
@@ -868,7 +871,8 @@ simulate_joinme <- function(
   time_var = "time",
   y_var = "y",
   event_time_var = "time",
-  event_var = "event"
+  event_var = "event",
+  .mixture_specification = NULL
 ) {
   # Algorithm overview (statistical simulation workflow):
   # Step 1. Parse formulas and design structures to mirror the fitted-model
@@ -966,107 +970,11 @@ simulate_joinme <- function(
     on.exit(mirai::daemons(0L), add = TRUE)
   }
 
-  # Local bytecode evaluators used by simulation closures.
-  # These are intentionally self-contained so mirai workers do not depend on
-  # package namespace internals.
-  .sim_eval_bytecode_scalar <- function(x, bytecode, const_data) {
-    code <- as.integer(bytecode %||% integer(0))
-    constants <- as.numeric(const_data %||% numeric(0))
-    if (length(code) == 0L) return(as.numeric(x))
-
-    # Instructions 26 and 27 are deliberately distinct. PHI maps a real
-    # variate to its standard normal cumulative probability, whereas INV_PHI
-    # maps a probability to its standard normal quantile. The explicit local
-    # list is retained because this evaluator is serialised to independent
-    # simulation workers.
-    unary_ops <- c(
-      6L, 7L, 8L, 9L, 10L, 11L, 13L, 14L, 15L, 16L, 17L, 18L, 19L,
-      20L, 21L, 22L, 23L, 24L, 25L, 26L, 27L
-    )
-    if (code[[1]] %in% unary_ops) {
-      code <- c(0L, code)
-    }
-
-    stack <- numeric(0)
-    const_idx <- 1L
-    for (op in code) {
-      if (op == 0L) {
-        stack <- c(stack, as.numeric(x))
-      } else if (op == 1L) {
-        stack <- c(stack, constants[const_idx])
-        const_idx <- const_idx + 1L
-      } else if (op == 2L) {
-        b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
-        stack <- c(stack[-c(length(stack) - 1L, length(stack))], a + b)
-      } else if (op == 3L) {
-        b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
-        stack <- c(stack[-c(length(stack) - 1L, length(stack))], a - b)
-      } else if (op == 4L) {
-        b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
-        stack <- c(stack[-c(length(stack) - 1L, length(stack))], a * b)
-      } else if (op == 5L) {
-        b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
-        stack <- c(stack[-c(length(stack) - 1L, length(stack))], a / b)
-      } else if (op == 6L) {
-        stack[length(stack)] <- log(stack[length(stack)])
-      } else if (op == 7L) {
-        stack[length(stack)] <- exp(stack[length(stack)])
-      } else if (op == 8L) {
-        stack[length(stack)] <- sqrt(stack[length(stack)])
-      } else if (op == 9L) {
-        stack[length(stack)] <- stats::plogis(stack[length(stack)])
-      } else if (op == 10L) {
-        stack[length(stack)] <- stats::qlogis(stack[length(stack)])
-      } else if (op == 11L) {
-        stack[length(stack)] <- 1 / stack[length(stack)]
-      } else if (op == 12L) {
-        b <- stack[length(stack)]; a <- stack[length(stack) - 1L]
-        stack <- c(stack[-c(length(stack) - 1L, length(stack))], a^b)
-      } else if (op == 13L) {
-        stack[length(stack)] <- sin(stack[length(stack)])
-      } else if (op == 14L) {
-        stack[length(stack)] <- cos(stack[length(stack)])
-      } else if (op == 15L) {
-        stack[length(stack)] <- tan(stack[length(stack)])
-      } else if (op == 16L) {
-        stack[length(stack)] <- abs(stack[length(stack)])
-      } else if (op == 17L) {
-        stack[length(stack)] <- stack[length(stack)]^2
-      } else if (op == 18L) {
-        stack[length(stack)] <- sinh(stack[length(stack)])
-      } else if (op == 19L) {
-        stack[length(stack)] <- cosh(stack[length(stack)])
-      } else if (op == 20L) {
-        stack[length(stack)] <- tanh(stack[length(stack)])
-      } else if (op == 21L) {
-        stack[length(stack)] <- asinh(stack[length(stack)])
-      } else if (op == 22L) {
-        stack[length(stack)] <- acosh(stack[length(stack)])
-      } else if (op == 23L) {
-        stack[length(stack)] <- atanh(stack[length(stack)])
-      } else if (op == 24L) {
-        stack[length(stack)] <- softplus(stack[length(stack)])
-      } else if (op == 25L) {
-        a <- stack[length(stack)]
-        stack[length(stack)] <- sign(a) * abs(a)^(1 / 3)
-      } else if (op == 26L) {
-        # PHI: standard normal cumulative distribution function.
-        stack[length(stack)] <- stats::pnorm(stack[length(stack)])
-      } else if (op == 27L) {
-        # INV_PHI (probit): standard normal quantile function.
-        stack[length(stack)] <- stats::qnorm(stack[length(stack)])
-      } else {
-        cli::cli_abort("Unknown transform bytecode instruction: {op}.")
-      }
-    }
-    stack[length(stack)]
-  }
-
-  .sim_eval_bytecode_vector <- function(x, bytecode, const_data) {
-    code <- as.integer(bytecode %||% integer(0))
-    constants <- as.numeric(const_data %||% numeric(0))
-    vapply(as.numeric(x), .sim_eval_bytecode_scalar, numeric(1), bytecode = code, const_data = constants)
-  }
+  # Reuse the package-neutral interpreter module.  Binding the functions into
+  # this simulation closure also makes the complete evaluator available when
+  # the closure is serialised to a mirai worker.
+  .sim_eval_bytecode_scalar <- eval_bytecode_scalar
+  .sim_eval_bytecode_vector <- eval_bytecode_vector
 
   #' @param x Vector of inputs to process.
   #' @param fun Function to apply.
@@ -2352,8 +2260,76 @@ simulate_joinme <- function(
       re_marker_effective_internal$corr %*%
       diag(as.numeric(re_marker_effective_internal$sd), K_mk, K_mk)
   }
-  re_id <- .sim_draw_re_block(n_id, K_id, re_params$id %||% list(), "id", resolved = re_id_effective_internal)
-  re_marker <- .sim_draw_re_block(D, K_mk, re_params$marker %||% list(), "marker", resolved = re_marker_effective_internal)
+  # ---- Step 3a: prepare the optional latent-progress distribution
+  # The mixture builder is invoked only after the random-effect formulae have
+  # determined every available dimension. This is the earliest point at which
+  # `cluster_dimensions` can be checked faithfully. The builder itself reuses
+  # the fitting coordinate-layout machinery, so simulation and estimation
+  # cannot silently disagree about which standardised coordinate an index
+  # denotes.
+  mixture_configuration <- .sim_prepare_mixture(
+    specification = .mixture_specification,
+    data_event = dataEvent,
+    marker_prototype = prototype,
+    dimensions = c(
+      subject = K_id,
+      marker = K_mk,
+      covariance_basis = K_idm
+    ),
+    labels = list(
+      subject = colnames(Z_id_proto) %||% character(0),
+      marker = colnames(Z_mk_proto) %||% character(0),
+      covariance = colnames(Z_idm_proto) %||% character(0)
+    ),
+    covariance_is_diagonal =
+      as.integer(indep_flags$indep_idmarker_cov %||% 0L) == 1L,
+    shrinkage = shrinkage,
+    id_variable = id_var,
+    marker_variable = marker_var
+  ) # checked component layout, probabilities, allocations, locations and scales
+
+  # Draw the standardised individual effects first, replace only the selected
+  # coordinates conditional on the subject's common class, and finally apply
+  # the ordinary random-effect covariance factor. This is precisely the
+  # `u_i = L_u z_{u,i}` ordering used in Stan.
+  z_id <- if (K_id > 0L) {
+    matrix(stats::rnorm(n_id * K_id), nrow = n_id, ncol = K_id)
+  } else {
+    matrix(0, nrow = n_id, ncol = 0L)
+  } # standardised individual random effects before covariance scaling
+  z_id <- .sim_apply_mixture_to_latent(
+    latent_matrix = z_id,
+    level = "subject",
+    allocation = mixture_configuration$allocation$subject %||% integer(0),
+    mixture = mixture_configuration,
+    shrinkage = shrinkage
+  ) # selected component-conditional individual coordinates
+  re_id <- if (K_id > 0L) {
+    z_id %*% chol(re_id_effective_internal$cov)
+  } else {
+    matrix(0, nrow = n_id, ncol = 0L)
+  } # realised individual effects on the internally scaled time basis
+
+  # Repeat the same construction for marker-level standardised effects. A
+  # combined marker and marker-weight mixture uses the already drawn common
+  # marker allocation rather than sampling a second label.
+  z_marker <- if (K_mk > 0L) {
+    matrix(stats::rnorm(D * K_mk), nrow = D, ncol = K_mk)
+  } else {
+    matrix(0, nrow = D, ncol = 0L)
+  } # standardised marker random effects before covariance scaling
+  z_marker <- .sim_apply_mixture_to_latent(
+    latent_matrix = z_marker,
+    level = "marker",
+    allocation = mixture_configuration$allocation$marker %||% integer(0),
+    mixture = mixture_configuration,
+    shrinkage = shrinkage
+  ) # selected component-conditional marker coordinates
+  re_marker <- if (K_mk > 0L) {
+    z_marker %*% chol(re_marker_effective_internal$cov)
+  } else {
+    matrix(0, nrow = D, ncol = 0L)
+  } # realised marker effects on the internally scaled time basis
 
   re_cov_cfg <- re_params[["id_marker_cov", exact = TRUE]] %||% list()
   re_idm_cfg <- re_cov_cfg[["latent", exact = TRUE]]
@@ -2588,6 +2564,27 @@ simulate_joinme <- function(
     lambda_cov <- cov_latent$lambda
     z_cov <- cov_latent$z
     lambda_cov_sign <- cov_latent$sign
+
+    # The covariance-regression mixture acts on Stan's canonical `z_L`
+    # coordinates, after any sign absorbed from a legacy negative loading.
+    # Individual and covariance-regression clustering share the same subject
+    # allocation held in `mixture_configuration$allocation$subject`.
+    covariance_cluster_type <- intersect(
+      c("corr", "vcov"),
+      mixture_configuration$cluster_type %||% character(0)
+    ) # public covariance representation selected for the shared latent block
+    z_cov <- .sim_apply_mixture_to_latent(
+      latent_matrix = z_cov,
+      level = if (length(covariance_cluster_type) == 1L) {
+        covariance_cluster_type[[1L]]
+      } else {
+        ""
+      },
+      allocation =
+        mixture_configuration$allocation$subject %||% integer(0),
+      mixture = mixture_configuration,
+      shrinkage = shrinkage
+    ) # selected component-conditional covariance-regression latents
 
     lp_cov <- matrix(alpha_cov, nrow = n_id, ncol = M_cov, byrow = TRUE)
     if (K_cov > 0) {
@@ -3605,6 +3602,42 @@ simulate_joinme <- function(
     marker_to_tau_family = marker_to_tau_family
   )
 
+  # Assemble a simulation-truth record in both the public statistical language
+  # and the fitted Stan parameter language. The standardised draws are retained
+  # because class recovery should be assessed at the level on which the mixture
+  # is defined, not by clustering covariance-scaled effects after generation.
+  mixture_truth <- mixture_configuration
+  if (!is.null(mixture_truth)) {
+    mixture_truth$formulaCluster <-
+      .mixture_specification$formulaCluster # original membership formula request
+    mixture_truth$standardised_draws <- list(
+      subject = z_id,
+      marker = z_marker
+    ) # latent values to which component locations and scales may have been applied
+    covariance_cluster_type <- intersect(
+      c("corr", "vcov"),
+      mixture_truth$cluster_type
+    ) # selected public name for the covariance-regression latent matrix
+    if (length(covariance_cluster_type) == 1L) {
+      mixture_truth$standardised_draws[[covariance_cluster_type]] <-
+        z_cov[, seq_len(M_cov), drop = FALSE]
+    }
+    stan_fit_truth$mix_probability <-
+      unname(mixture_truth$probability)
+    stan_fit_truth$mix_location <-
+      unname(mixture_truth$location)
+    stan_fit_truth$mix_scale <-
+      unname(mixture_truth$scale)
+    stan_fit_truth$mix_class_coefficient_subject <-
+      unname(mixture_truth$coefficient$subject)
+    stan_fit_truth$mix_class_coefficient_marker <-
+      unname(mixture_truth$coefficient$marker)
+    stan_fit_truth$posterior_class_subject <-
+      unname(mixture_truth$allocation$subject)
+    stan_fit_truth$posterior_class_marker <-
+      unname(mixture_truth$allocation$marker)
+  }
+
   family_truth <- list(
     by_marker = data.frame(
       marker = marker_levels,
@@ -3721,6 +3754,7 @@ simulate_joinme <- function(
       lambda_sign = lambda_cov_sign,
       diag_link = diag_link_cov
     ),
+    mixture = mixture_truth,
     formulaLong = formulaLong,
     formulaEvent = formulaEvent,
     formulaDist = dist_formulas

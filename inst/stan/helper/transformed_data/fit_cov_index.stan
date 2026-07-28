@@ -9,10 +9,10 @@ int M_cov = (indep_idmarker_cov == 1) ? Q_idm
             : ((Q_idm * (Q_idm + 1)) %/% 2);
 
 /* number of off-diagonal correlation association features */
-int M_corr = (Q_idm >= 2) ? ((Q_idm * (Q_idm - 1)) %/% 2) : 0;
+int M_corr = (Q_idm >= 2) ? ((Q_idm * (Q_idm - 1)) %/% 2) : 0; // Role: derived dimension correlation.
 
 /* number of vcov association features (off-diagonal K entries plus SD entries) */
-int M_vcov = M_cov;
+int M_vcov = M_cov; // Role: derived dimension covariance.
 
 /* mapping m -> (r,c) in the lower triangle of L_i */
 array[M_cov] int r_idx; // row index for element m
@@ -26,7 +26,7 @@ if (indep_idmarker_cov == 1) {
   }
 } else {
   /* Full lower triangle path: row-major within each r */
-  int idx = 1;
+  int idx = 1; // Role: index.
   for (r in 1 : Q_idm)
     for (c in 1 : r) {
       r_idx[idx] = r;

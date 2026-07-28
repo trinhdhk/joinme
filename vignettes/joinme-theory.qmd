@@ -78,6 +78,14 @@ vignette outlines the statistical theory underpinning the package, using
 notation and narrative that are intended to be accessible to applied
 researchers without extensive prior exposure to joint modelling.
 
+The finite latent-progress extension fitted by `joinme_mix()` is developed in
+`joinme-latent-progress-theory.qmd`. That companion states the marginalised
+mixture likelihood, the shared-allocation rule for combined random-effect
+levels, and the distinction between class-centre and within-class marginal
+trajectories. Practical and reproducible workflows are given in
+`joinme-latent-progress-guide.qmd` and
+`joinme-latent-progress-example.qmd`.
+
 # The Multivariate Longitudinal Submodel
 
 Let $\mathcal{D}_i = \{y_{id}(t_{ij}) : j = 1, \dots, n_{id}, d = 1, \dots, D\}$ denote the observed longitudinal data for subject $i$, where $y_{id}(t)$ is the response for marker $d$ at time $t$. We assume generalised linear mixed models (GLMMs) for each marker, linked via a shared latent structure.

@@ -31,28 +31,28 @@
   // 1 gaussian, 2 student_t, 3 bernoulli, 4 binomial, 5 poisson, 6 negbin2,
   // 7 skew_normal, 8 double_exponential, 9 skew_double_exponential, 10 beta,
   // 11 cumulative_logit
-  array[D] int<lower=1, upper=11> family_long;
+  array[D] int<lower=1, upper=11> family_long; // Role: family long.
   array[D] int<lower=0, upper=5> link_long; // 0 custom VM; 1 identity, 2 log, 3 logit, 4 probit, 5 exp
-  int<lower=1> max_inv_link_ops;
-  array[D] int<lower=0> inv_link_n_ops;
-  array[D, max_inv_link_ops] int<lower=0, upper=27> inv_link_ops;
-  int<lower=1> max_inv_link_const;
-  array[D] int<lower=0> inv_link_n_const;
-  matrix[D, max_inv_link_const] inv_link_const;
+  int<lower=1> max_inv_link_ops; // Role: maximum inverse link operations.
+  array[D] int<lower=0> inv_link_n_ops; // Role: inverse link number of operations.
+  array[D, max_inv_link_ops] int<lower=0, upper=27> inv_link_ops; // Role: inverse link operations.
+  int<lower=1> max_inv_link_const; // Role: maximum inverse link constants.
+  array[D] int<lower=0> inv_link_n_const; // Role: inverse link number of constants.
+  matrix[D, max_inv_link_const] inv_link_const; // Role: inverse link constants.
 
   /* Family-level distributional parameter indexing */
   int<lower=0> n_family_sigma;                    // number of families using sigma
-  array[D] int<lower=0, upper=n_family_sigma> marker_to_sigma_family;
+  array[D] int<lower=0, upper=n_family_sigma> marker_to_sigma_family; // Role: marker to scale family.
   int<lower=0> n_family_nu;                       // number of families using nu
-  array[D] int<lower=0, upper=n_family_nu> marker_to_nu_family;
+  array[D] int<lower=0, upper=n_family_nu> marker_to_nu_family; // Role: marker to degrees of freedom family.
   int<lower=0> n_family_phi;                      // number of families using phi
-  array[D] int<lower=0, upper=n_family_phi> marker_to_phi_family;
+  array[D] int<lower=0, upper=n_family_phi> marker_to_phi_family; // Role: marker to precision family.
   int<lower=0> n_family_alpha;                    // number of families using alpha
-  array[D] int<lower=0, upper=n_family_alpha> marker_to_alpha_family;
+  array[D] int<lower=0, upper=n_family_alpha> marker_to_alpha_family; // Role: marker to shape family.
   int<lower=0> n_family_kappa;                 // number of families using kappa
-  array[D] int<lower=0, upper=n_family_kappa> marker_to_kappa_family;
+  array[D] int<lower=0, upper=n_family_kappa> marker_to_kappa_family; // Role: marker to sample size family.
   int<lower=0> n_family_tau;                  // number of families using tau
-  array[D] int<lower=0, upper=n_family_tau> marker_to_tau_family;
+  array[D] int<lower=0, upper=n_family_tau> marker_to_tau_family; // Role: marker to quantile family.
 
   /* Distributional regression designs */
   int<lower=0> P_sigma;                // fixed-effect column count for sigma regression
@@ -143,10 +143,10 @@
   // int<lower=0, upper=1> flag_resid_dim; // 1 -> sigma_marker[d], 0 -> sigma_y
 
   /* Independence/structure flags */
-  int<lower=0, upper=1> indep_id_re;
-  int<lower=0, upper=1> indep_marker_re;
-  int<lower=0, upper=1> indep_marker_byid_latent_re;
-  int<lower=0, upper=1> indep_idmarker_cov;
+  int<lower=0, upper=1> indep_id_re; // Role: independence of individual random effect.
+  int<lower=0, upper=1> indep_marker_re; // Role: independence of marker random effect.
+  int<lower=0, upper=1> indep_marker_byid_latent_re; // Role: independence of marker byid latent random effect.
+  int<lower=0, upper=1> indep_idmarker_cov; // Role: independence of idmarker covariance.
   int<lower=0> M_corr_tf;                    // number of corr transform components
   int<lower=0> M_vcov_tf;                    // number of vcov transform components
   int<lower=0, upper=1> allow_marker_crosscorr; // 1 allow cross via B_cross
@@ -184,24 +184,24 @@
   real<lower=1e-6> eps_fd;       // finite-difference step for slope approximation
 
   /* Mean association designs (CV_mean) */
-  array[N_event] matrix[n_gk, P] X_gk_now;
-  array[N_event] matrix[n_gk, P] X_gk_fwd;
-  array[N_event] matrix[n_gk, R_id] Z_id_gk_now;
-  array[N_event] matrix[n_gk, R_id] Z_id_gk_fwd;
-  matrix[N_event, P] X_event_now;
-  matrix[N_event, P] X_event_fwd;
-  matrix[N_event, R_id] Z_id_event_now;
-  matrix[N_event, R_id] Z_id_event_fwd;
+  array[N_event] matrix[n_gk, P] X_gk_now; // Role: design matrix Gauss-Kronrod now.
+  array[N_event] matrix[n_gk, P] X_gk_fwd; // Role: design matrix Gauss-Kronrod forward difference.
+  array[N_event] matrix[n_gk, R_id] Z_id_gk_now; // Role: random-effect design individual Gauss-Kronrod now.
+  array[N_event] matrix[n_gk, R_id] Z_id_gk_fwd; // Role: random-effect design individual Gauss-Kronrod forward difference.
+  matrix[N_event, P] X_event_now; // Role: design matrix event now.
+  matrix[N_event, P] X_event_fwd; // Role: design matrix event forward difference.
+  matrix[N_event, R_id] Z_id_event_now; // Role: random-effect design individual event now.
+  matrix[N_event, R_id] Z_id_event_fwd; // Role: random-effect design individual event forward difference.
 
   /* Marker association designs (CV_marker) */
-  array[N_event] matrix[n_gk, R_mk] Z_mk_gk_now;
-  array[N_event] matrix[n_gk, R_mk] Z_mk_gk_fwd;
-  array[N_event] matrix[n_gk, Q_idm] Z_idm_gk_now;
-  array[N_event] matrix[n_gk, Q_idm] Z_idm_gk_fwd;
-  matrix[N_event, R_mk] Z_mk_event_now;
-  matrix[N_event, R_mk] Z_mk_event_fwd;
-  matrix[N_event, Q_idm] Z_idm_event_now;
-  matrix[N_event, Q_idm] Z_idm_event_fwd;
+  array[N_event] matrix[n_gk, R_mk] Z_mk_gk_now; // Role: random-effect design mk Gauss-Kronrod now.
+  array[N_event] matrix[n_gk, R_mk] Z_mk_gk_fwd; // Role: random-effect design mk Gauss-Kronrod forward difference.
+  array[N_event] matrix[n_gk, Q_idm] Z_idm_gk_now; // Role: random-effect design idm Gauss-Kronrod now.
+  array[N_event] matrix[n_gk, Q_idm] Z_idm_gk_fwd; // Role: random-effect design idm Gauss-Kronrod forward difference.
+  matrix[N_event, R_mk] Z_mk_event_now; // Role: random-effect design mk event now.
+  matrix[N_event, R_mk] Z_mk_event_fwd; // Role: random-effect design mk event forward difference.
+  matrix[N_event, Q_idm] Z_idm_event_now; // Role: random-effect design idm event now.
+  matrix[N_event, Q_idm] Z_idm_event_fwd; // Role: random-effect design idm event forward difference.
 
   /* Association include flags */
   int<lower=0, upper=1> assoc_cv_total;   // include total current value term
@@ -244,77 +244,77 @@
   int<lower=0, upper=7> tf_mode_cs_marker;  // transform mode for marker CS
 
   /* Fit-only affine shift for functional transforms */
-  int<lower=0> estimate_iota_intercept_cv;
-  int<lower=0> estimate_iota_slope_cv;
-  int<lower=0> estimate_iota_intercept_cs;
-  int<lower=0> estimate_iota_slope_cs;
-  int<lower=0> estimate_iota_intercept_corr;
-  int<lower=0> estimate_iota_slope_corr;
-  int<lower=0> estimate_iota_intercept_vcov;
-  int<lower=0> estimate_iota_slope_vcov;
-  int<lower=0> estimate_iota_intercept_cv_mean;
-  int<lower=0> estimate_iota_slope_cv_mean;
-  int<lower=0> estimate_iota_intercept_cv_marker;
-  int<lower=0> estimate_iota_slope_cv_marker;
-  int<lower=0> estimate_iota_intercept_cs_mean;
-  int<lower=0> estimate_iota_slope_cs_mean;
-  int<lower=0> estimate_iota_intercept_cs_marker;
-  int<lower=0> estimate_iota_slope_cs_marker;
+  int<lower=0> estimate_iota_intercept_cv; // Role: whether to estimate affine transformation intercept current value.
+  int<lower=0> estimate_iota_slope_cv; // Role: whether to estimate affine transformation slope current value.
+  int<lower=0> estimate_iota_intercept_cs; // Role: whether to estimate affine transformation intercept current slope.
+  int<lower=0> estimate_iota_slope_cs; // Role: whether to estimate affine transformation slope current slope.
+  int<lower=0> estimate_iota_intercept_corr; // Role: whether to estimate affine transformation intercept correlation.
+  int<lower=0> estimate_iota_slope_corr; // Role: whether to estimate affine transformation slope correlation.
+  int<lower=0> estimate_iota_intercept_vcov; // Role: whether to estimate affine transformation intercept covariance.
+  int<lower=0> estimate_iota_slope_vcov; // Role: whether to estimate affine transformation slope covariance.
+  int<lower=0> estimate_iota_intercept_cv_mean; // Role: whether to estimate affine transformation intercept current value mean.
+  int<lower=0> estimate_iota_slope_cv_mean; // Role: whether to estimate affine transformation slope current value mean.
+  int<lower=0> estimate_iota_intercept_cv_marker; // Role: whether to estimate affine transformation intercept current value marker.
+  int<lower=0> estimate_iota_slope_cv_marker; // Role: whether to estimate affine transformation slope current value marker.
+  int<lower=0> estimate_iota_intercept_cs_mean; // Role: whether to estimate affine transformation intercept current slope mean.
+  int<lower=0> estimate_iota_slope_cs_mean; // Role: whether to estimate affine transformation slope current slope mean.
+  int<lower=0> estimate_iota_intercept_cs_marker; // Role: whether to estimate affine transformation intercept current slope marker.
+  int<lower=0> estimate_iota_slope_cs_marker; // Role: whether to estimate affine transformation slope current slope marker.
 
   /* Functional bytecode specifications */
   int<lower=0> n_functional_ops_cv;         // op count for total CV
   array[n_functional_ops_cv] int<lower=0, upper=27> functional_ops_cv; // bytecode stream
-  array[n_functional_ops_cv] int<lower=0, upper=estimate_iota_intercept_cv> functional_iota_intercept_idx_cv;
-  array[n_functional_ops_cv] int<lower=0, upper=estimate_iota_slope_cv> functional_iota_slope_idx_cv;
+  array[n_functional_ops_cv] int<lower=0, upper=estimate_iota_intercept_cv> functional_iota_intercept_idx_cv; // Role: functional transformation affine transformation intercept index current value.
+  array[n_functional_ops_cv] int<lower=0, upper=estimate_iota_slope_cv> functional_iota_slope_idx_cv; // Role: functional transformation affine transformation slope index current value.
   int<lower=0> n_const_cv;                  // constants used by CV bytecode
   vector[n_const_cv] const_data_cv;         // constants used by CV bytecode
 
   int<lower=0> n_functional_ops_cs;         // op count for total CS
   array[n_functional_ops_cs] int<lower=0, upper=27> functional_ops_cs; // bytecode stream
-  array[n_functional_ops_cs] int<lower=0, upper=estimate_iota_intercept_cs> functional_iota_intercept_idx_cs;
-  array[n_functional_ops_cs] int<lower=0, upper=estimate_iota_slope_cs> functional_iota_slope_idx_cs;
+  array[n_functional_ops_cs] int<lower=0, upper=estimate_iota_intercept_cs> functional_iota_intercept_idx_cs; // Role: functional transformation affine transformation intercept index current slope.
+  array[n_functional_ops_cs] int<lower=0, upper=estimate_iota_slope_cs> functional_iota_slope_idx_cs; // Role: functional transformation affine transformation slope index current slope.
   int<lower=0> n_const_cs;                  // constants used by CS bytecode
   vector[n_const_cs] const_data_cs;         // constants used by CS bytecode
 
   int<lower=0> n_functional_ops_corr;       // op count for corr
   array[n_functional_ops_corr] int<lower=0, upper=27> functional_ops_corr; // bytecode stream
-  array[n_functional_ops_corr] int<lower=0, upper=estimate_iota_intercept_corr> functional_iota_intercept_idx_corr;
-  array[n_functional_ops_corr] int<lower=0, upper=estimate_iota_slope_corr> functional_iota_slope_idx_corr;
+  array[n_functional_ops_corr] int<lower=0, upper=estimate_iota_intercept_corr> functional_iota_intercept_idx_corr; // Role: functional transformation affine transformation intercept index correlation.
+  array[n_functional_ops_corr] int<lower=0, upper=estimate_iota_slope_corr> functional_iota_slope_idx_corr; // Role: functional transformation affine transformation slope index correlation.
   int<lower=0> n_const_corr;                // constants used by corr bytecode
   vector[n_const_corr] const_data_corr;     // constants used by corr bytecode
 
   int<lower=0> n_functional_ops_vcov;       // op count for vcov
   array[n_functional_ops_vcov] int<lower=0, upper=27> functional_ops_vcov; // bytecode stream
-  array[n_functional_ops_vcov] int<lower=0, upper=estimate_iota_intercept_vcov> functional_iota_intercept_idx_vcov;
-  array[n_functional_ops_vcov] int<lower=0, upper=estimate_iota_slope_vcov> functional_iota_slope_idx_vcov;
+  array[n_functional_ops_vcov] int<lower=0, upper=estimate_iota_intercept_vcov> functional_iota_intercept_idx_vcov; // Role: functional transformation affine transformation intercept index covariance.
+  array[n_functional_ops_vcov] int<lower=0, upper=estimate_iota_slope_vcov> functional_iota_slope_idx_vcov; // Role: functional transformation affine transformation slope index covariance.
   int<lower=0> n_const_vcov;                // constants used by vcov bytecode
   vector[n_const_vcov] const_data_vcov;     // constants used by vcov bytecode
 
   int<lower=0> n_functional_ops_cv_mean;    // op count for mean CV
   array[n_functional_ops_cv_mean] int<lower=0, upper=27> functional_ops_cv_mean; // bytecode stream
-  array[n_functional_ops_cv_mean] int<lower=0, upper=estimate_iota_intercept_cv_mean> functional_iota_intercept_idx_cv_mean;
-  array[n_functional_ops_cv_mean] int<lower=0, upper=estimate_iota_slope_cv_mean> functional_iota_slope_idx_cv_mean;
+  array[n_functional_ops_cv_mean] int<lower=0, upper=estimate_iota_intercept_cv_mean> functional_iota_intercept_idx_cv_mean; // Role: functional transformation affine transformation intercept index current value mean.
+  array[n_functional_ops_cv_mean] int<lower=0, upper=estimate_iota_slope_cv_mean> functional_iota_slope_idx_cv_mean; // Role: functional transformation affine transformation slope index current value mean.
   int<lower=0> n_const_cv_mean;             // constants used by mean CV bytecode
   vector[n_const_cv_mean] const_data_cv_mean; // constants used by mean CV bytecode
 
   int<lower=0> n_functional_ops_cv_marker;  // op count for marker CV
   array[n_functional_ops_cv_marker] int<lower=0, upper=27> functional_ops_cv_marker; // bytecode stream
-  array[n_functional_ops_cv_marker] int<lower=0, upper=estimate_iota_intercept_cv_marker> functional_iota_intercept_idx_cv_marker;
-  array[n_functional_ops_cv_marker] int<lower=0, upper=estimate_iota_slope_cv_marker> functional_iota_slope_idx_cv_marker;
+  array[n_functional_ops_cv_marker] int<lower=0, upper=estimate_iota_intercept_cv_marker> functional_iota_intercept_idx_cv_marker; // Role: functional transformation affine transformation intercept index current value marker.
+  array[n_functional_ops_cv_marker] int<lower=0, upper=estimate_iota_slope_cv_marker> functional_iota_slope_idx_cv_marker; // Role: functional transformation affine transformation slope index current value marker.
   int<lower=0> n_const_cv_marker;           // constants used by marker CV bytecode
   vector[n_const_cv_marker] const_data_cv_marker; // constants used by marker CV bytecode
 
   int<lower=0> n_functional_ops_cs_mean;    // op count for mean CS
   array[n_functional_ops_cs_mean] int<lower=0, upper=27> functional_ops_cs_mean; // bytecode stream
-  array[n_functional_ops_cs_mean] int<lower=0, upper=estimate_iota_intercept_cs_mean> functional_iota_intercept_idx_cs_mean;
-  array[n_functional_ops_cs_mean] int<lower=0, upper=estimate_iota_slope_cs_mean> functional_iota_slope_idx_cs_mean;
+  array[n_functional_ops_cs_mean] int<lower=0, upper=estimate_iota_intercept_cs_mean> functional_iota_intercept_idx_cs_mean; // Role: functional transformation affine transformation intercept index current slope mean.
+  array[n_functional_ops_cs_mean] int<lower=0, upper=estimate_iota_slope_cs_mean> functional_iota_slope_idx_cs_mean; // Role: functional transformation affine transformation slope index current slope mean.
   int<lower=0> n_const_cs_mean;             // constants used by mean CS bytecode
   vector[n_const_cs_mean] const_data_cs_mean; // constants used by mean CS bytecode
 
   int<lower=0> n_functional_ops_cs_marker;  // op count for marker CS
   array[n_functional_ops_cs_marker] int<lower=0, upper=27> functional_ops_cs_marker; // bytecode stream
-  array[n_functional_ops_cs_marker] int<lower=0, upper=estimate_iota_intercept_cs_marker> functional_iota_intercept_idx_cs_marker;
-  array[n_functional_ops_cs_marker] int<lower=0, upper=estimate_iota_slope_cs_marker> functional_iota_slope_idx_cs_marker;
+  array[n_functional_ops_cs_marker] int<lower=0, upper=estimate_iota_intercept_cs_marker> functional_iota_intercept_idx_cs_marker; // Role: functional transformation affine transformation intercept index current slope marker.
+  array[n_functional_ops_cs_marker] int<lower=0, upper=estimate_iota_slope_cs_marker> functional_iota_slope_idx_cs_marker; // Role: functional transformation affine transformation slope index current slope marker.
   int<lower=0> n_const_cs_marker;           // constants used by marker CS bytecode
   vector[n_const_cs_marker] const_data_cs_marker; // constants used by marker CS bytecode
 

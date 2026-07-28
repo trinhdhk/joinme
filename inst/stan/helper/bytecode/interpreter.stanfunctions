@@ -1,8 +1,8 @@
 /**
- * @file functional_transform.stanfunctions
- * @brief Runtime bytecode interpreter for arbitrary transformations.
+ * @file interpreter.stanfunctions
+ * @brief Package-neutral runtime bytecode interpreter for scalar transformations.
  *
- * @details This module evaluates transformations defined by a bytecode
+ * @details This self-contained module evaluates transformations defined by a bytecode
  * sequence in Reverse Polish Notation (RPN). Each bytecode instruction can push values
  * onto a stack or apply an operation to the top elements. This allows
  * complex transformations to be defined entirely by data.
@@ -66,8 +66,8 @@
     int intercept_offset,
     int slope_offset
   ) {
-    real intercept = 0;
-    real slope = 1;
+    real intercept = 0; // Role: intercept.
+    real slope = 1; // Role: slope.
     if (intercept_idx > 0) intercept = iota_intercepts[intercept_offset + intercept_idx];
     if (slope_idx > 0) slope = iota_slopes[slope_offset + slope_idx];
     return intercept + slope * value;
@@ -89,7 +89,7 @@
     int const_idx = 1;  // Index into const_data for PUSH_CONST
 
     for (op_idx in 1:size(bytecode)) {
-      int op = bytecode[op_idx];
+      int op = bytecode[op_idx]; // Role: op.
 
       // Backward compatibility for legacy unary programs encoded without an
       // explicit PUSH_X, e.g. [SOFTPLUS] instead of [PUSH_X, SOFTPLUS].
@@ -109,22 +109,22 @@
         const_idx += 1;
       } else if (op == 2) {
         // ADD
-        real b = stack[stack_ptr];
+        real b = stack[stack_ptr]; // Role: b.
         stack_ptr -= 1;
         stack[stack_ptr] = stack[stack_ptr] + b;
       } else if (op == 3) {
         // SUB
-        real b = stack[stack_ptr];
+        real b = stack[stack_ptr]; // Role: b.
         stack_ptr -= 1;
         stack[stack_ptr] = stack[stack_ptr] - b;
       } else if (op == 4) {
         // MUL
-        real b = stack[stack_ptr];
+        real b = stack[stack_ptr]; // Role: b.
         stack_ptr -= 1;
         stack[stack_ptr] = stack[stack_ptr] * b;
       } else if (op == 5) {
         // DIV
-        real b = stack[stack_ptr];
+        real b = stack[stack_ptr]; // Role: b.
         stack_ptr -= 1;
         stack[stack_ptr] = stack[stack_ptr] / b;
       } else if (op == 6) {
@@ -147,7 +147,7 @@
         stack[stack_ptr] = 1.0 / apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset);
       } else if (op == 12) {
         // POW
-        real b = stack[stack_ptr];
+        real b = stack[stack_ptr]; // Role: b.
         stack_ptr -= 1;
         stack[stack_ptr] = apply_iota_shift_scalar(stack[stack_ptr], iota_intercepts, iota_slopes, op_iota_intercept_idx[op_idx], op_iota_slope_idx[op_idx], intercept_offset, slope_offset) ^ b;
       } else if (op == 13) {
@@ -226,8 +226,8 @@
     int intercept_offset,
     int slope_offset
   ) {
-    int n = num_elements(x);
-    vector[n] result;
+    int n = num_elements(x); // Role: number of.
+    vector[n] result; // Role: result.
 
     // The standard normal operations are common in probit models and
     // association transforms. When no fitted affine shift modifies the

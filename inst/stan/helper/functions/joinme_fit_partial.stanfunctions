@@ -581,11 +581,11 @@ real partial_joinme(
   for (ii in start : end) {
     int idx_local = ii - start + 1;  // Local index within slice
     int i = id_seq[idx_local];       // Global subject index
-    real subj_w = subject_weights[i];
-    real lp_i = 0;
+    real subj_w = subject_weights[i]; // Role: subj w.
+    real lp_i = 0; // Role: lp i.
 
     // Cached weighted average of subject-by-marker REs (used in survival submodel)
-    vector[Q_idm] wbar_i_i = wbar_i[i];
+    vector[Q_idm] wbar_i_i = wbar_i[i]; // Role: wbar i i.
 
     // ---------------------------------------------------------------------
     // PART 1: LONGITUDINAL LOG-LIKELIHOOD
@@ -626,8 +626,8 @@ real partial_joinme(
       //   - Global constant (sigma_y)
       
       // Per-marker inverse-link mapping from eta to mean/location scale.
-      int link_d = make_canonical_link(d, inv_link_n_ops, inv_link_ops, inv_link_n_const);
-      real mu_long = inv_link_bytecode(eta_long, d, inv_link_n_ops, inv_link_ops, inv_link_n_const, inv_link_const);
+      int link_d = make_canonical_link(d, inv_link_n_ops, inv_link_ops, inv_link_n_const); // Role: link d.
+      real mu_long = inv_link_bytecode(eta_long, d, inv_link_n_ops, inv_link_ops, inv_link_n_const, inv_link_const); // Role: mu long.
 
       // FAMILY 1: GAUSSIAN
       // p(y | eta, sigma) = Normal(y | eta, sigma)
@@ -644,7 +644,7 @@ real partial_joinme(
           for (j in 1 : n_re_sigma) {
             // Construct random effects: b_j = z_j .* tau_j (element-wise product)
             // z_j ~ N(0, I), tau_j = scales
-            vector[K_sigma[j]] b = (to_vector(z_sigma[j][J_sigma[j, n], 1:K_sigma[j]]) .* tau_sigma[j][1:K_sigma[j]]);
+            vector[K_sigma[j]] b = (to_vector(z_sigma[j][J_sigma[j, n], 1:K_sigma[j]]) .* tau_sigma[j][1:K_sigma[j]]); // Role: b.
             // b: sigma random-effect coefficients for term j
             eta_sigma += dot_product(Z_sigma[j][n, 1:K_sigma[j]], b);
           }
@@ -669,7 +669,7 @@ real partial_joinme(
         if (P_sigma > 0) eta_sigma += dot_product(X_sigma[n], beta_sigma);
         if (n_re_sigma > 0) {
           for (j in 1 : n_re_sigma) {
-            vector[K_sigma[j]] b = (to_vector(z_sigma[j][J_sigma[j, n], 1:K_sigma[j]]) .* tau_sigma[j][1:K_sigma[j]]);
+            vector[K_sigma[j]] b = (to_vector(z_sigma[j][J_sigma[j, n], 1:K_sigma[j]]) .* tau_sigma[j][1:K_sigma[j]]); // Role: b.
             // b: sigma random-effect coefficients for term j
             eta_sigma += dot_product(Z_sigma[j][n, 1:K_sigma[j]], b);
           }
@@ -685,12 +685,12 @@ real partial_joinme(
         if (P_nu > 0) eta_nu += dot_product(X_nu[n], beta_nu);
         if (n_re_nu > 0) {
           for (j in 1 : n_re_nu) {
-            vector[K_nu[j]] b = (to_vector(z_nu[j][J_nu[j, n], 1:K_nu[j]]) .* tau_nu[j][1:K_nu[j]]);
+            vector[K_nu[j]] b = (to_vector(z_nu[j][J_nu[j, n], 1:K_nu[j]]) .* tau_nu[j][1:K_nu[j]]); // Role: b.
             // b: nu random-effect coefficients for term j
             eta_nu += dot_product(Z_nu[j][n, 1:K_nu[j]], b);
           }
         }
-        real nu = (P_nu > 0 || n_re_nu > 0) ? (2 + exp(fmin(eta_nu, 20))) : nu_family[marker_to_nu_family[d]];
+        real nu = (P_nu > 0 || n_re_nu > 0) ? (2 + exp(fmin(eta_nu, 20))) : nu_family[marker_to_nu_family[d]]; // Role: degrees of freedom.
         // nu: degrees of freedom
         
         lp_i += student_t_lpdf(y_real[n] | nu, mu_long, sig);
@@ -702,7 +702,7 @@ real partial_joinme(
         if (link_d == 3) {
           lp_i += bernoulli_logit_lpmf(y_int[n] | eta_long);
         } else {
-          real p = fmin(fmax(mu_long, 1e-12), 1 - 1e-12);
+          real p = fmin(fmax(mu_long, 1e-12), 1 - 1e-12); // Role: p.
           lp_i += bernoulli_lpmf(y_int[n] | p);
         }
         
@@ -713,7 +713,7 @@ real partial_joinme(
         if (link_d == 3) {
           lp_i += binomial_logit_lpmf(y_int[n] | trials[n], eta_long);
         } else {
-          real p = fmin(fmax(mu_long, 1e-12), 1 - 1e-12);
+          real p = fmin(fmax(mu_long, 1e-12), 1 - 1e-12); // Role: p.
           lp_i += binomial_lpmf(y_int[n] | trials[n], p);
         }
         
@@ -737,12 +737,12 @@ real partial_joinme(
         if (P_phi > 0) eta_phi += dot_product(X_phi[n], beta_phi);
         if (n_re_phi > 0) {
           for (j in 1 : n_re_phi) {
-            vector[K_phi[j]] b = (to_vector(z_phi[j][J_phi[j, n], 1:K_phi[j]]) .* tau_phi[j][1:K_phi[j]]);
+            vector[K_phi[j]] b = (to_vector(z_phi[j][J_phi[j, n], 1:K_phi[j]]) .* tau_phi[j][1:K_phi[j]]); // Role: b.
             // b: phi random-effect coefficients for term j
             eta_phi += dot_product(Z_phi[j][n, 1:K_phi[j]], b);
           }
         }
-        real phi = (P_phi > 0 || n_re_phi > 0) ? exp(eta_phi) : phi_family[marker_to_phi_family[d]];
+        real phi = (P_phi > 0 || n_re_phi > 0) ? exp(eta_phi) : phi_family[marker_to_phi_family[d]]; // Role: precision.
         // phi: negbin dispersion
         
         if (link_d == 5) {
@@ -761,7 +761,7 @@ real partial_joinme(
         if (P_sigma > 0) eta_sigma += dot_product(X_sigma[n], beta_sigma);
         if (n_re_sigma > 0) {
           for (j in 1 : n_re_sigma) {
-            vector[K_sigma[j]] b = (to_vector(z_sigma[j][J_sigma[j, n], 1:K_sigma[j]]) .* tau_sigma[j][1:K_sigma[j]]);
+            vector[K_sigma[j]] b = (to_vector(z_sigma[j][J_sigma[j, n], 1:K_sigma[j]]) .* tau_sigma[j][1:K_sigma[j]]); // Role: b.
             // b: sigma random-effect coefficients for term j
             eta_sigma += dot_product(Z_sigma[j][n, 1:K_sigma[j]], b);
           }
@@ -776,12 +776,12 @@ real partial_joinme(
         if (P_alpha > 0) eta_alpha += dot_product(X_alpha[n], beta_alpha);
         if (n_re_alpha > 0) {
           for (j in 1 : n_re_alpha) {
-            vector[K_alpha[j]] b = (to_vector(z_alpha[j][J_alpha[j, n], 1:K_alpha[j]]) .* tau_alpha[j][1:K_alpha[j]]);
+            vector[K_alpha[j]] b = (to_vector(z_alpha[j][J_alpha[j, n], 1:K_alpha[j]]) .* tau_alpha[j][1:K_alpha[j]]); // Role: b.
             // b: alpha random-effect coefficients for term j
             eta_alpha += dot_product(Z_alpha[j][n, 1:K_alpha[j]], b);
           }
         }
-        real alpha = (P_alpha > 0 || n_re_alpha > 0) ? eta_alpha : alpha_family[marker_to_alpha_family[d]];
+        real alpha = (P_alpha > 0 || n_re_alpha > 0) ? eta_alpha : alpha_family[marker_to_alpha_family[d]]; // Role: shape.
         // alpha: skewness
         
         lp_i += skew_normal_lpdf(y_real[n] | mu_long, sig, alpha);
@@ -796,7 +796,7 @@ real partial_joinme(
         if (P_sigma > 0) eta_sigma += dot_product(X_sigma[n], beta_sigma);
         if (n_re_sigma > 0) {
           for (j in 1 : n_re_sigma) {
-            vector[K_sigma[j]] b = (to_vector(z_sigma[j][J_sigma[j, n], 1:K_sigma[j]]) .* tau_sigma[j][1:K_sigma[j]]);
+            vector[K_sigma[j]] b = (to_vector(z_sigma[j][J_sigma[j, n], 1:K_sigma[j]]) .* tau_sigma[j][1:K_sigma[j]]); // Role: b.
             // b: sigma random-effect coefficients for term j
             eta_sigma += dot_product(Z_sigma[j][n, 1:K_sigma[j]], b);
           }
@@ -811,7 +811,7 @@ real partial_joinme(
         if (P_sigma > 0) eta_sigma += dot_product(X_sigma[n], beta_sigma);
         if (n_re_sigma > 0) {
           for (j in 1 : n_re_sigma) {
-            vector[K_sigma[j]] b = (to_vector(z_sigma[j][J_sigma[j, n], 1:K_sigma[j]]) .* tau_sigma[j][1:K_sigma[j]]);
+            vector[K_sigma[j]] b = (to_vector(z_sigma[j][J_sigma[j, n], 1:K_sigma[j]]) .* tau_sigma[j][1:K_sigma[j]]); // Role: b.
             // b: sigma random-effect coefficients for term j
             eta_sigma += dot_product(Z_sigma[j][n, 1:K_sigma[j]], b);
           }
@@ -823,7 +823,7 @@ real partial_joinme(
         
         // Compute tau (asymmetry parameter, constrained to (0,1) via logit link)
         // tau = logit^-1(eta_tau) ensures 0 < tau < 1
-        real tau;
+        real tau; // Role: quantile.
         if (use_tau_fixed[d] == 1) {
           tau = tau_fixed[d];
         } else {
@@ -831,7 +831,7 @@ real partial_joinme(
           if (P_tau > 0) eta_tau += dot_product(X_tau[n], beta_tau);
           if (n_re_tau > 0) {
             for (j in 1 : n_re_tau) {
-              vector[K_tau[j]] b = (to_vector(z_tau[j][J_tau[j, n], 1:K_tau[j]]) .* tau_tau[j][1:K_tau[j]]);
+              vector[K_tau[j]] b = (to_vector(z_tau[j][J_tau[j, n], 1:K_tau[j]]) .* tau_tau[j][1:K_tau[j]]); // Role: b.
               // b: tau random-effect coefficients for term j
               eta_tau += dot_product(Z_tau[j][n, 1:K_tau[j]], b);
             }
@@ -854,12 +854,12 @@ real partial_joinme(
         if (P_kappa > 0) eta_kappa += dot_product(X_kappa[n], beta_kappa);
         if (n_re_kappa > 0) {
           for (j in 1 : n_re_kappa) {
-            vector[K_kappa[j]] b = (to_vector(z_kappa[j][J_kappa[j, n], 1:K_kappa[j]]) .* tau_kappa[j][1:K_kappa[j]]);
+            vector[K_kappa[j]] b = (to_vector(z_kappa[j][J_kappa[j, n], 1:K_kappa[j]]) .* tau_kappa[j][1:K_kappa[j]]); // Role: b.
             // b: kappa random-effect coefficients for term j
             eta_kappa += dot_product(Z_kappa[j][n, 1:K_kappa[j]], b);
           }
         }
-        real kappa = (P_kappa > 0 || n_re_kappa > 0) ? exp(eta_kappa) : kappa_family[marker_to_kappa_family[d]];
+        real kappa = (P_kappa > 0 || n_re_kappa > 0) ? exp(eta_kappa) : kappa_family[marker_to_kappa_family[d]]; // Role: sample size.
         // kappa: sample-size parameter
         
         // Convert eta to mean mu in (0,1) using configured inverse link.
@@ -888,21 +888,21 @@ real partial_joinme(
     // Supports both right-censoring and counting-process event layouts:
     // - right-censoring corresponds to one interval per subject [0, T_i]
     // - left truncation / time-split uses multiple intervals [start_e, stop_e]
-    int e_lo = event_start_idx[i];
-    int e_hi = event_end_idx[i];
-    int D_mkrs = size(v_marker);
-    int M_corr_local = num_elements(a_corr);
-    int M_vcov_local = num_elements(a_vcov);
+    int e_lo = event_start_idx[i]; // Role: e lo.
+    int e_hi = event_end_idx[i]; // Role: e hi.
+    int D_mkrs = size(v_marker); // Role: D mkrs.
+    int M_corr_local = num_elements(a_corr); // Role: derived dimension correlation local.
+    int M_vcov_local = num_elements(a_vcov); // Role: derived dimension covariance local.
 
     for (e in e_lo:e_hi) {
-      vector[n_gk] cvm_now;
-      vector[n_gk] cvm_fwd;
-      vector[n_gk] csk_raw;
-      vector[n_gk] cv_tot_tf;
-      vector[n_gk] cv_marker_tf;
-      vector[n_gk] cs_tot_tf;
-      vector[n_gk] cs_marker_tf;
-      vector[n_gk] log_h_total;
+      vector[n_gk] cvm_now; // Role: cvm now.
+      vector[n_gk] cvm_fwd; // Role: cvm forward difference.
+      vector[n_gk] csk_raw; // Role: csk unscaled.
+      vector[n_gk] cv_tot_tf; // Role: current value total transformation.
+      vector[n_gk] cv_marker_tf; // Role: current value marker transformation.
+      vector[n_gk] cs_tot_tf; // Role: current slope total transformation.
+      vector[n_gk] cs_marker_tf; // Role: current slope marker transformation.
+      vector[n_gk] log_h_total; // Role: log h total.
 
       for (j in 1:n_gk) {
         cvm_now[j] = dot_product(X_gk_now[e][j], beta_scaled)
@@ -910,11 +910,11 @@ real partial_joinme(
         cvm_fwd[j] = dot_product(X_gk_fwd[e][j], beta_scaled)
                    + dot_product(Z_id_gk_fwd[e][j], u_id[i]);
       }
-      vector[n_gk] csm_raw = eta_fd(cvm_now, cvm_fwd, eps_fd) / tmax;
+      vector[n_gk] csm_raw = eta_fd(cvm_now, cvm_fwd, eps_fd) / tmax; // Role: csm unscaled.
 
-      vector[M_corr_local] corr_terms_raw = eta_chol_corr(L_i[i]);
-      matrix[Q_idm, Q_idm] L_i_eff_assoc = diag_pre_multiply(row_scale_idm, L_i[i]);
-      vector[M_vcov_local] vcov_terms_raw = eta_vcov_weighted_const(L_i_eff_assoc, (M_vcov_local == Q_idm));
+      vector[M_corr_local] corr_terms_raw = eta_chol_corr(L_i[i]); // Role: correlation terms unscaled.
+      matrix[Q_idm, Q_idm] L_i_eff_assoc = diag_pre_multiply(row_scale_idm, L_i[i]); // Role: Cholesky factor i eff assoc.
+      vector[M_vcov_local] vcov_terms_raw = eta_vcov_weighted_const(L_i_eff_assoc, (M_vcov_local == Q_idm)); // Role: covariance terms unscaled.
 
       vector[n_gk] cv_mean_tf = apply_transform_vector(cvm_now, tf_mode_cv_mean,
         functional_ops_cv_mean, functional_iota_intercept_idx_cv_mean, functional_iota_slope_idx_cv_mean, const_data_cv_mean,
@@ -922,21 +922,21 @@ real partial_joinme(
         iota_intercept_cv_mean, iota_slope_cv_mean);
 
       for (j in 1:n_gk) {
-        real acc_cv_tot_tf = 0;
-        real acc_cv_marker_tf = 0;
-        real acc_csk_raw = 0;
-        real acc_cs_tot_tf = 0;
-        real acc_cs_marker_tf = 0;
+        real acc_cv_tot_tf = 0; // Role: acc current value total transformation.
+        real acc_cv_marker_tf = 0; // Role: acc current value marker transformation.
+        real acc_csk_raw = 0; // Role: acc csk unscaled.
+        real acc_cs_tot_tf = 0; // Role: acc current slope total transformation.
+        real acc_cs_marker_tf = 0; // Role: acc current slope marker transformation.
         for (d in 1:D_mkrs) {
-          real mk_part_now_d = 0;
-          real mk_part_fwd_d = 0;
+          real mk_part_now_d = 0; // Role: mk part now d.
+          real mk_part_fwd_d = 0; // Role: mk part forward difference d.
           if (R_mk > 0) {
             mk_part_now_d = dot_product(Z_mk_gk_now[e][j], v_marker[d]);
             mk_part_fwd_d = dot_product(Z_mk_gk_fwd[e][j], v_marker[d]);
           }
-          real cvk_now_d = mk_part_now_d + dot_product(Z_idm_gk_now[e][j], w_idm[i, d]);
-          real cvk_fwd_d = mk_part_fwd_d + dot_product(Z_idm_gk_fwd[e][j], w_idm[i, d]);
-          real cv_tot_now_d = cvm_now[j] + cvk_now_d;
+          real cvk_now_d = mk_part_now_d + dot_product(Z_idm_gk_now[e][j], w_idm[i, d]); // Role: cvk now d.
+          real cvk_fwd_d = mk_part_fwd_d + dot_product(Z_idm_gk_fwd[e][j], w_idm[i, d]); // Role: cvk forward difference d.
+          real cv_tot_now_d = cvm_now[j] + cvk_now_d; // Role: current value total now d.
 
           acc_cv_tot_tf += marker_weights_eff_cv_total[d] * apply_transform_scalar(
             cv_tot_now_d, tf_mode_cv_tot,
@@ -951,8 +951,8 @@ real partial_joinme(
             iota_intercept_cv_marker, iota_slope_cv_marker
           );
 
-          real csk_raw_d = ((cvk_fwd_d - cvk_now_d) / eps_fd) / tmax;
-          real cs_tot_raw_d = csm_raw[j] + csk_raw_d;
+          real csk_raw_d = ((cvk_fwd_d - cvk_now_d) / eps_fd) / tmax; // Role: csk unscaled d.
+          real cs_tot_raw_d = csm_raw[j] + csk_raw_d; // Role: current slope total unscaled d.
           acc_csk_raw += marker_weights_eff_cs_marker[d] * csk_raw_d;
           acc_cs_tot_tf += marker_weights_eff_cs_total[d] * apply_transform_scalar(
             cs_tot_raw_d, tf_mode_cs_tot,
@@ -989,8 +989,8 @@ real partial_joinme(
         knots_corr, coeff_corr, spline_degree_corr,
         n_iota_intercept_corr, iota_intercept_corr, n_iota_slope_corr, iota_slope_corr);
       corr_terms_tf = corr_terms_tf - corr_terms_ref;
-      real corr_assoc_scalar = dot_product(a_corr, corr_terms_tf);
-      vector[n_gk] corr_assoc = rep_vector(corr_assoc_scalar, n_gk);
+      real corr_assoc_scalar = dot_product(a_corr, corr_terms_tf); // Role: correlation assoc scalar.
+      vector[n_gk] corr_assoc = rep_vector(corr_assoc_scalar, n_gk); // Role: correlation assoc.
 
       vector[M_vcov_local] vcov_terms_tf = apply_transform_vector_by_component(vcov_terms_raw, tf_mode_vcov,
         functional_ops_vcov, functional_iota_intercept_idx_vcov, functional_iota_slope_idx_vcov, const_data_vcov,
@@ -1001,8 +1001,8 @@ real partial_joinme(
         knots_vcov, coeff_vcov, spline_degree_vcov,
         n_iota_intercept_vcov, iota_intercept_vcov, n_iota_slope_vcov, iota_slope_vcov);
       vcov_terms_tf = vcov_terms_tf - vcov_terms_ref;
-      real vcov_assoc_scalar = dot_product(a_vcov, vcov_terms_tf);
-      vector[n_gk] vcov_assoc = rep_vector(vcov_assoc_scalar, n_gk);
+      real vcov_assoc_scalar = dot_product(a_vcov, vcov_terms_tf); // Role: covariance assoc scalar.
+      vector[n_gk] vcov_assoc = rep_vector(vcov_assoc_scalar, n_gk); // Role: covariance assoc.
 
       vector[n_gk] eta_assoc_nodes = a_cv_total * cv_tot_tf
         + a_cv_mean * cv_mean_tf
@@ -1014,37 +1014,37 @@ real partial_joinme(
         + vcov_assoc;
 
       if (event_censor_type[e] == 1) {
-        int k_ev = event_type[e];
-        real eta_w_ev = 0;
+        int k_ev = event_type[e]; // Role: k ev.
+        real eta_w_ev = 0; // Role: linear predictor w ev.
         if (p_w > 0)
           eta_w_ev = dot_product(to_vector(W[e]'), gamma_w[k_ev]);
 
-        real log_h0_S = dot_product(Bs_event_c[e], bs_gamma_c[k_ev]);
+        real log_h0_S = dot_product(Bs_event_c[e], bs_gamma_c[k_ev]); // Role: log h0 S.
         real cvm_S = dot_product(X_event_now[e], beta_scaled)
                    + dot_product(Z_id_event_now[e], u_id[i]);
         real cvm_S_fwd = dot_product(X_event_fwd[e], beta_scaled)
                        + dot_product(Z_id_event_fwd[e], u_id[i]);
-        real csm_S_raw = ((cvm_S_fwd - cvm_S) / eps_fd) / tmax;
+        real csm_S_raw = ((cvm_S_fwd - cvm_S) / eps_fd) / tmax; // Role: csm S unscaled.
 
-        real cv_S_tot_tf = 0;
+        real cv_S_tot_tf = 0; // Role: current value S total transformation.
         real cv_S_mean_tf = apply_transform_scalar(cvm_S, tf_mode_cv_mean,
           functional_ops_cv_mean, functional_iota_intercept_idx_cv_mean, functional_iota_slope_idx_cv_mean, const_data_cv_mean,
           knots_cv_mean, coeff_cv_mean, spline_degree_cv_mean,
           iota_intercept_cv_mean, iota_slope_cv_mean);
-        real cv_S_marker_tf = 0;
-        real cs_S_tot_tf = 0;
-        real cs_S_marker_tf = 0;
+        real cv_S_marker_tf = 0; // Role: current value S marker transformation.
+        real cs_S_tot_tf = 0; // Role: current slope S total transformation.
+        real cs_S_marker_tf = 0; // Role: current slope S marker transformation.
 
         for (d in 1:D_mkrs) {
-          real mk_part_S_d = 0;
-          real mk_part_S_fwd_d = 0;
+          real mk_part_S_d = 0; // Role: mk part S d.
+          real mk_part_S_fwd_d = 0; // Role: mk part S forward difference d.
           if (R_mk > 0) {
             mk_part_S_d = dot_product(Z_mk_event_now[e], v_marker[d]);
             mk_part_S_fwd_d = dot_product(Z_mk_event_fwd[e], v_marker[d]);
           }
-          real cvk_S_d = mk_part_S_d + dot_product(Z_idm_event_now[e], w_idm[i, d]);
-          real cvk_S_fwd_d = mk_part_S_fwd_d + dot_product(Z_idm_event_fwd[e], w_idm[i, d]);
-          real cv_S_tot_d = cvm_S + cvk_S_d;
+          real cvk_S_d = mk_part_S_d + dot_product(Z_idm_event_now[e], w_idm[i, d]); // Role: cvk S d.
+          real cvk_S_fwd_d = mk_part_S_fwd_d + dot_product(Z_idm_event_fwd[e], w_idm[i, d]); // Role: cvk S forward difference d.
+          real cv_S_tot_d = cvm_S + cvk_S_d; // Role: current value S total d.
 
           cv_S_tot_tf += marker_weights_eff_cv_total[d] * apply_transform_scalar(
             cv_S_tot_d, tf_mode_cv_tot,
@@ -1059,8 +1059,8 @@ real partial_joinme(
             iota_intercept_cv_marker, iota_slope_cv_marker
           );
 
-          real csk_S_raw_d = ((cvk_S_fwd_d - cvk_S_d) / eps_fd) / tmax;
-          real cs_S_tot_raw_d = csm_S_raw + csk_S_raw_d;
+          real csk_S_raw_d = ((cvk_S_fwd_d - cvk_S_d) / eps_fd) / tmax; // Role: csk S unscaled d.
+          real cs_S_tot_raw_d = csm_S_raw + csk_S_raw_d; // Role: current slope S total unscaled d.
           cs_S_tot_tf += marker_weights_eff_cs_total[d] * apply_transform_scalar(
             cs_S_tot_raw_d, tf_mode_cs_tot,
             functional_ops_cs, functional_iota_intercept_idx_cs, functional_iota_slope_idx_cs, const_data_cs,
@@ -1098,9 +1098,9 @@ real partial_joinme(
       }
 
       for (j in 1:n_gk) {
-        vector[K_event] log_h_cause;
+        vector[K_event] log_h_cause; // Role: log h cause.
         for (k_ev in 1:K_event) {
-          real eta_w = 0;
+          real eta_w = 0; // Role: linear predictor w.
           if (p_w > 0)
             eta_w = dot_product(to_vector(W[e]'), gamma_w[k_ev]);
           log_h_cause[k_ev] = dot_product(Bs_gk_c[e][j], bs_gamma_c[k_ev])
@@ -1111,7 +1111,7 @@ real partial_joinme(
       }
 
       {
-        real cumhaz_interval = cumhaz(S_event[e] - S_entry[e], n_gk, log_h_total, rep_vector(0.0, n_gk));
+        real cumhaz_interval = cumhaz(S_event[e] - S_entry[e], n_gk, log_h_total, rep_vector(0.0, n_gk)); // Role: cumhaz interval.
         if (event_censor_type[e] == 0 || event_censor_type[e] == 1) {
           lp_i += -cumhaz_interval;
         } else {

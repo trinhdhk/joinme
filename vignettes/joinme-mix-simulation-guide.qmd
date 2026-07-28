@@ -1,0 +1,426 @@
+---
+title: "Guide to simulating latent-progress JoiNMe models"
+format:
+  html:
+    toc: true
+    number-sections: true
+    embed-resources: true
+  pdf:
+    toc: true
+    number-sections: true
+execute:
+  eval: false
+  warning: false
+  message: false
+---
+
+# Overview
+
+This guide describes a simulation-to-fit workflow using
+`simulate_joinme_mix()` and `joinme_mix()`. The formula, family, association
+and clustering arguments retain the fitting meanings. Additional generative
+values are collected in `class_parameters`, in the same way that
+`beta_long`, `re_params` and `assoc_coefs` provide truth for the ordinary
+simulator.
+
+# A minimal subject-level mixture
+
+```{r}
+library(joinme)
+
+simulation <- simulate_joinme_mix(
+  formulaLong = y ~ 1 + time + x1 +
+    (1 + time | id) +
+    (0 + x1 + (1 + time | id) | marker),
+  formulaEvent = survival::Surv(time, event) ~ x1 + x2,
+  n_id = 100,
+  families = c("gaussian", "student_t", "gaussian"),
+  times_obs = seq(0, 5, length.out = 8),
+  n_clusters = 2,
+  cluster_type = "subject",
+  seed = 4101
+)
+```
+
+By default, the first two available subject coordinates are clustered.
+The two component centres are placed at \(-1.25\) and \(1.25\), and the
+component scales are 0.65.
+
+```{r}
+simulation$truth$mixture$dimensions
+simulation$truth$mixture$location
+simulation$truth$mixture$scale
+table(simulation$truth$mixture$allocation$subject)
+```
+
+# Matching simulation and fitting syntax
+
+The following arguments have the same meaning in both entry points:
+
+```text
+formulaLong
+formulaEvent
+formulaVCov
+formulaDist
+transforms
+families
+fixed_marker_weights
+shared_marker_weights
+n_clusters
+formulaCluster
+cluster
+cluster_dimensions
+cluster_ordering
+seed
+```
+
+The simulation produces `dataLong` and `dataEvent`; the fitting function
+consumes them:
+
+```{r}
+fit <- joinme_mix(
+  formulaLong = simulation$truth$formulaLong,
+  dataLong = simulation$dataLong,
+  formulaEvent = simulation$truth$formulaEvent,
+  dataEvent = simulation$dataEvent,
+  formulaVCov = simulation$truth$formulaVCov,
+  families = simulation$marker_info$families,
+  n_clusters = 2,
+  cluster_type = "subject",
+  seed = 4101
+)
+```
+
+# Selecting progress coordinates
+
+`cluster_dimensions` refers to standardised coordinates at the selected level.
+
+```{r}
+simulation <- simulate_joinme_mix(
+  n_id = 120,
+  families = rep("gaussian", 3),
+  n_clusters = 3,
+  cluster_type = c("subject", "vcov"),
+  cluster_dimensions = list(
+    subject = c(1, 2),
+    vcov = c(1, 3)
+  ),
+  seed = 4102
+)
+```
+
+The packed location matrix has four columns in the order subject
+coordinates 1 and 2, then covariance-regression coordinates 1 and 3.
+
+```{r}
+simulation$truth$mixture$starts
+simulation$truth$mixture$dimensions
+```
+
+# Supplying class probabilities
+
+```{r}
+simulation <- simulate_joinme_mix(
+  n_id = 200,
+  families = rep("gaussian", 3),
+  n_clusters = 3,
+  cluster_type = "subject",
+  class_parameters = list(
+    probability = c(0.20, 0.55, 0.25)
+  ),
+  seed = 4103
+)
+```
+
+These are baseline probabilities. Realised frequencies vary by Monte Carlo
+sampling, and may also vary systematically when `formulaCluster` is active.
+
+# Class-probability regression
+
+For a shared formula and three classes, coefficients are stored against the
+design labels shown below:
+
+```{r}
+pilot <- simulate_joinme_mix(
+  n_id = 20,
+  families = rep("gaussian", 3),
+  n_clusters = 3,
+  formulaCluster = ~ treatment + age,
+  covariate_formulas = list(
+    treatment ~ rbinom(n_id, 1, 0.5),
+    age ~ rnorm(n_id, 65, 8),
+    x1 ~ rnorm(n_id),
+    x2 ~ rnorm(n_id)
+  ),
+  class_parameters = list(probability = c(0.25, 0.50, 0.25)),
+  seed = 4104
+)
+
+pilot$truth$mixture$class_design$subject$columns
+```
+
+Use those labels for robust coefficient matching:
+
+```{r}
+simulation <- simulate_joinme_mix(
+  n_id = 250,
+  families = rep("gaussian", 3),
+  n_clusters = 3,
+  formulaCluster = ~ treatment + age,
+  covariate_formulas = list(
+    treatment ~ rbinom(n_id, 1, 0.5),
+    age ~ rnorm(n_id, 65, 8),
+    x1 ~ rnorm(n_id),
+    x2 ~ rnorm(n_id)
+  ),
+  class_parameters = list(
+    probability = c(0.25, 0.50, 0.25),
+    coefficient = list(
+      subject = c(
+        "class_1:treatment" = -0.7,
+        "class_1:age" = -0.02,
+        "class_2:treatment" = 0.5,
+        "class_2:age" = 0.01
+      )
+    )
+  ),
+  seed = 4105
+)
+```
+
+Inspect the realised unit probabilities rather than assuming they equal the
+baseline simplex:
+
+```{r}
+head(simulation$truth$mixture$probability_by_unit$subject)
+```
+
+# Class-specific formulae
+
+```{r}
+simulation <- simulate_joinme_mix(
+  n_id = 180,
+  families = rep("gaussian", 3),
+  n_clusters = 3,
+  formulaCluster = list(
+    ~ treatment,
+    ~ age,
+    ~ 1
+  ),
+  cluster_ordering = "none",
+  covariate_formulas = list(
+    treatment ~ rbinom(n_id, 1, 0.5),
+    age ~ rnorm(n_id, 65, 8),
+    x1 ~ rnorm(n_id),
+    x2 ~ rnorm(n_id)
+  ),
+  seed = 4106
+)
+```
+
+A class-specific formula list defaults to no ordering. Supply an ordering
+explicitly only when the chosen truth satisfies it.
+
+# Locations and scales
+
+For two selected coordinates and three classes:
+
+```{r}
+location <- rbind(
+  c(-1.6, -0.8),
+  c( 0.0,  0.2),
+  c( 1.7,  1.0)
+)
+
+scale <- rbind(
+  c(0.45, 0.55),
+  c(0.70, 0.65),
+  c(0.50, 0.60)
+)
+
+simulation <- simulate_joinme_mix(
+  n_id = 180,
+  families = rep("gaussian", 3),
+  n_clusters = 3,
+  cluster_type = "subject",
+  cluster_dimensions = c(1, 2),
+  class_parameters = list(
+    probability = c(0.3, 0.4, 0.3),
+    location = location,
+    scale = scale
+  ),
+  seed = 4107
+)
+```
+
+Small within-class scales and distant locations create an easy classification
+problem. Recovery studies should vary both quantities.
+
+# Combined subject and covariance clustering
+
+```{r}
+simulation <- simulate_joinme_mix(
+  formulaVCov = ~ treatment + age,
+  n_id = 180,
+  families = rep("gaussian", 4),
+  n_clusters = 3,
+  cluster_type = c("subject", "vcov"),
+  cluster_dimensions = list(
+    subject = c(1, 2),
+    vcov = c(1, 2)
+  ),
+  class_parameters = list(
+    location = list(
+      subject = rbind(
+        c(-1.4, -0.7),
+        c( 0.0,  0.0),
+        c( 1.4,  0.7)
+      ),
+      vcov = rbind(
+        c(-0.8, -0.3),
+        c( 0.0,  0.0),
+        c( 0.8,  0.3)
+      )
+    ),
+    scale = 0.6
+  ),
+  covariate_formulas = list(
+    treatment ~ rbinom(n_id, 1, 0.5),
+    age ~ rnorm(n_id, 65, 8),
+    x1 ~ rnorm(n_id),
+    x2 ~ rnorm(n_id)
+  ),
+  seed = 4108
+)
+```
+
+There is one subject allocation vector:
+
+```{r}
+simulation$truth$mixture$allocation_domains$subject
+simulation$truth$mixture$allocation$subject
+```
+
+# Marker clustering with ordinary marker weights
+
+```{r}
+simulation <- simulate_joinme_mix(
+  n_id = 100,
+  families = rep("gaussian", 6),
+  assoc = c("cv_total", "cs_marker"),
+  shared_marker_weights = FALSE,
+  fixed_marker_weights = FALSE,
+  n_clusters = 2,
+  formulaCluster = ~ marker,
+  cluster_type = "marker",
+  class_parameters = list(
+    probability = c(0.5, 0.5),
+    location = list(
+      marker = matrix(c(-1.2, 1.2), nrow = 2)
+    ),
+    scale = 0.5
+  ),
+  seed = 4109
+)
+```
+
+The unshared weighted associations remain part of the survival model, whilst
+the latent classes act only on the marker random-effect block.
+
+# Alternative component families
+
+```{r}
+student_t_simulation <- simulate_joinme_mix(
+  shrinkage = 0,
+  n_clusters = 2,
+  seed = 4110
+)
+
+laplace_simulation <- simulate_joinme_mix(
+  shrinkage = 1,
+  n_clusters = 2,
+  seed = 4111
+)
+
+normal_simulation <- simulate_joinme_mix(
+  shrinkage = 2,
+  n_clusters = 2,
+  seed = 4112
+)
+```
+
+The fitting call must use the same `shrinkage` value through `...`.
+
+# Longitudinal-only simulation
+
+Set `formulaEvent = NULL` in both simulation and fitting:
+
+```{r}
+simulation <- simulate_joinme_mix(
+  formulaEvent = NULL,
+  n_id = 120,
+  families = rep("gaussian", 3),
+  n_clusters = 2,
+  cluster_type = "subject",
+  seed = 4113
+)
+
+fit <- joinme_mix(
+  formulaLong = simulation$truth$formulaLong,
+  dataLong = simulation$dataLong,
+  n_clusters = 2,
+  cluster_type = "subject"
+)
+```
+
+`simulation$dataEvent` and `simulation$truth$formulaEvent` are `NULL`.
+Association arguments are invalid because no event process exists.
+
+# Ordering
+
+Probability ordering requires increasing baseline probabilities:
+
+```{r}
+simulation <- simulate_joinme_mix(
+  n_clusters = 3,
+  cluster_ordering = "probability",
+  class_parameters = list(
+    probability = c(0.15, 0.30, 0.55)
+  ),
+  seed = 4114
+)
+```
+
+Intercept ordering checks only the packed selected random-intercept location.
+Slope locations need not be ordered.
+
+# Recommended simulation study design
+
+Vary at least:
+
+- sample size and marker count;
+- `n_clusters`;
+- minimum class prevalence;
+- location separation;
+- component scales;
+- class-regression strength;
+- shrinkage family;
+- association magnitude;
+- observation frequency;
+- response-family mixture;
+- censoring and delayed entry; and
+- fitted class-count misspecification.
+
+For every replicate, store convergence diagnostics, component parameter bias,
+interval coverage, posterior allocation probabilities, entropy, proper class
+scores, predictive performance and event-model recovery.
+
+# Common mistakes
+
+1. Do not append true labels to the fitted data.
+2. Do not compare unordered labels without permutation alignment.
+3. Do not interpret `class_parameters$probability` as realised frequency.
+4. Do not treat covariance-regression coordinates as realised covariance
+   entries; they are standardised latent predictors entering those entries.
+5. Do not use only extremely separated components when evaluating practical
+   performance.

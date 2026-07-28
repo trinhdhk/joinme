@@ -1,0 +1,672 @@
+---
+title: "JoiNMe latent-progress mixtures"
+subtitle: "Statistical specification, computation, interpretation and reporting"
+author: "JoiNMe development note"
+format:
+  html:
+    toc: true
+    number-sections: true
+    embed-resources: true
+    theme: cosmo
+  pdf:
+    toc: true
+    number-sections: true
+    colorlinks: true
+    geometry:
+      - margin=1in
+execute:
+  eval: false
+  echo: true
+  warning: false
+  message: false
+---
+
+# Executive summary
+
+This paper specifies the finite latent-progress extension to JoiNMe. JoiNMe
+models multivariate longitudinal outcomes through nested mixed effects and can
+jointly model a time-to-event process through current-value, current-slope,
+correlation and covariance associations. The extension introduces
+heterogeneity by replacing the centred distribution of selected standardised
+random effects with a finite location--scale mixture.
+
+The implementation has six defining properties.
+
+1. The public entry point is `joinme_mix()`, with fitted and predicted
+   subclasses that inherit the existing JoiNMe interface.
+2. Two latent-progress coordinates are selected per block by default.
+3. Classes are attached to random-effect allocation units: subjects for
+   subject and covariance-regression effects, markers for marker effects and
+   marker weights.
+4. Combining levels retains \(G\) classes. Compatible blocks share one
+   allocation rather than producing a Cartesian product.
+5. Discrete allocations are marginalised exactly in Stan.
+6. A longitudinal-only form removes the survival likelihood exactly whilst
+   retaining the common model-building infrastructure.
+
+The same model now has a direct generative implementation through
+`simulate_joinme_mix()`. This simulator samples the otherwise marginalised
+class allocations, generates selected standardised latent coordinates from
+their component distributions, and delegates all remaining longitudinal and
+event generation to `simulate_joinme()`. Simulation and fitting therefore
+share their formula parsing, coordinate selection, allocation domains and
+component-family convention.
+
+The result is a bespoke but restrained extension. It changes the random-effect
+distribution without duplicating the longitudinal likelihood, survival
+likelihood, transformations, prediction programme or diagnostics.
+
+# Scientific motivation
+
+Multivariate longitudinal data often show more heterogeneity than a single
+elliptical random-effect distribution can express. Two subjects may have
+similar observed values at baseline but differ systematically in their
+long-term direction. Conversely, two subjects may have similar mean
+trajectories but markedly different covariance or volatility patterns.
+Markers can also form clusters according to their population deviations or
+their importance in a survival association.
+
+A finite latent-progress distribution offers a probabilistic description of
+such heterogeneity. It is preferable to clustering estimated random effects
+after model fitting for three reasons.
+
+- Longitudinal measurement error and shrinkage are propagated into class
+  uncertainty.
+- Survival information can contribute to estimation when a joint model is
+  fitted.
+- Class locations, scales, proportions and random effects are estimated
+  jointly rather than in a sequential plug-in procedure.
+
+The word *latent* is important. A class is an unobserved component of a
+statistical distribution, not an observed diagnosis. Posterior allocation
+probabilities, sensitivity analysis and predictive assessment are therefore
+central to interpretation.
+
+# Generative latent-progress simulation
+
+## Simulation-to-fit correspondence
+
+Let \(C_j\) be the class of allocation unit \(j\). The simulator first draws
+
+\[
+C_j\sim\operatorname{Categorical}(\boldsymbol{\pi}_j)
+\]
+
+and then, for every selected packed coordinate \(r\),
+
+\[
+Z_{jr}\mid C_j=g
+\sim
+D(\mu_{gr},s_{gr}).
+\]
+
+The fitted Stan programme evaluates the marginal density
+
+\[
+p(\boldsymbol Z_j)
+=
+\sum_{g=1}^{G}
+\pi_{jg}
+\prod_{r=1}^{K}
+p_D(Z_{jr}\mid\mu_{gr},s_{gr})
+\]
+
+with `log_sum_exp`. Thus the discrete simulation and marginalised fitting
+programme describe the same probability model.
+
+The ordinary covariance transformations are applied only after component
+sampling:
+
+\[
+\boldsymbol u_i=L_u\boldsymbol z_{u,i},
+\qquad
+\boldsymbol v_d=L_v\boldsymbol z_{v,d},
+\qquad
+L_i=L_i(\boldsymbol z_{L,i}).
+\]
+
+This ordering prevents component locations from changing meaning when the
+ordinary random-effect scales change.
+
+## Generative parameters
+
+The fitting syntax is retained through `n_clusters`, `formulaCluster`,
+`cluster`, `cluster_dimensions`, and `cluster_ordering`.
+`class_parameters` supplies values that must be fixed in a data-generating
+mechanism:
+
+- baseline class probabilities;
+- class-regression coefficients;
+- component locations; and
+- positive component scales.
+
+The class probabilities are normalised to a simplex. Formula intercepts are
+excluded because the simplex already defines the zero-covariate probabilities.
+Named coefficients are aligned with the class-design columns saved in the
+truth record.
+
+## Shared allocations
+
+Subject and covariance-regression coordinates share a subject allocation.
+Marker effects use a marker allocation. This is the generative counterpart of
+the fitted model's single `log_sum_exp` per natural allocation unit.
+
+## Simulation truth and blinding
+
+The complete generative record is returned under `truth$mixture`, including
+unit-specific probabilities, realised allocations, component parameters and
+standardised draws. True labels are deliberately absent from `dataLong` and
+`dataEvent`. Recovery studies must join them only after fitting; otherwise a
+class label can inadvertently become an observed predictor.
+
+## Recovery-study estimands
+
+A rigorous study should report component-location and scale bias, interval
+coverage, baseline and covariate-dependent class-probability recovery,
+posterior probability assigned to the true class, entropy, multiclass proper
+scores, outcome prediction, survival discrimination and convergence.
+Simulation factors should include component overlap, rare classes, sample
+size, marker count, response families, shrinkage family, censoring,
+association strength and fitted class-count misspecification.
+
+# Base JoiNMe model
+
+For subject \(i\), marker \(d\), and time \(t\), the longitudinal predictor
+is
+
+\[
+\eta_{id}(t)
+=
+\boldsymbol x_{id}(t)^\top\boldsymbol\beta
++
+\boldsymbol z_i(t)^\top\boldsymbol u_i
++
+\boldsymbol z_d(t)^\top\boldsymbol v_d
++
+\boldsymbol z_{id}(t)^\top\boldsymbol w_{id}.
+\]
+
+The response follows marker-specific family \(\mathcal F_d\) with inverse link
+\(g_d^{-1}\). Ancillary parameters can have their own distributional
+regressions.
+
+The realised subject and marker effects are
+
+\[
+\boldsymbol u_i=L_u\boldsymbol z_{u,i},\qquad
+\boldsymbol v_d=L_v\boldsymbol z_{v,d}.
+\]
+
+The nested subject-by-marker effect is
+
+\[
+\boldsymbol w_{id}
+=
+\operatorname{diag}(\boldsymbol r_w)L_i\boldsymbol z_{w,id}.
+\]
+
+The subject covariance factor \(L_i\) is generated through lower-triangular
+regression predictors. For entry \(m\),
+
+\[
+\ell_{im}
+=
+\alpha_{L,m}
++
+\boldsymbol x_{\mathrm{cov},i}^{\top}\boldsymbol\beta_{L,m}
++
+\lambda_{L,m}z_{L,im}.
+\]
+
+The event hazard for cause \(k\) is
+
+\[
+h_{ik}(t)
+=
+h_{0k}(t)
+\exp\left[
+\boldsymbol x_{S,i}(t)^\top\boldsymbol\gamma_k
++
+A_i(t)
+\right],
+\]
+
+where \(A_i(t)\) is a sum of active transformed association channels.
+
+# Latent-progress model
+
+## Component distribution
+
+Let \(\mathcal K\) denote the selected standardised coordinates after the
+requested blocks have been concatenated. For class \(g\),
+
+\[
+a_{rk}\mid C_r=g,\mu_{gk},s_{gk}
+\sim D_\nu(\mu_{gk},s_{gk}),
+\qquad k\in\mathcal K.
+\]
+
+The component family is selected through the existing `shrinkage` convention:
+
+| `shrinkage` | component \(D_\nu\) |
+|---:|---|
+| 0 | Student-\(t\), 6 degrees of freedom |
+| 1 | Laplace |
+| 2 | Normal |
+
+The finite mixture is
+
+\[
+p(\boldsymbol a_r)
+=
+\sum_{g=1}^{G}
+\pi_g
+\prod_{k\in\mathcal K}
+D_\nu(a_{rk};\mu_{gk},s_{gk}).
+\]
+
+The component covariance is diagonal on the selected standardised scale. The
+existing Cholesky factors remain responsible for correlations in realised
+subject and marker random effects.
+
+## Class proportions and component priors
+
+\[
+\boldsymbol\pi\sim
+\operatorname{Dirichlet}(\boldsymbol\alpha_\pi),
+\]
+
+\[
+s_{gk}\sim\operatorname{Exponential}(1).
+\]
+
+By default, Stan orders only the first selected random-intercept location
+across classes. Slope and other location coordinates remain unrestricted.
+`cluster_ordering = "probability"` instead orders the baseline class
+probabilities, and `"none"` imposes no order. There are no anchor values or
+public anchor-scale controls.
+
+`formulaCluster` optionally regresses membership on allocation-unit covariates.
+The simplex supplies the intercept. One formula uses class \(G\) as the
+reference category; a list of \(G\) formulae supplies separate, compact
+class-specific predictors and defaults to no ordering.
+`jm_prior(class_probability = ...)` supplies
+\(\boldsymbol\alpha_\pi\), whilst `class_regression` supplies the Normal prior
+scale for the regression coefficients.
+
+## Two-dimensional default
+
+For an available block dimension \(q\), the default selected coordinates are
+
+\[
+\{1,\ldots,\min(2,q)\}.
+\]
+
+The one-dimensional special case is legitimate and is reported as such.
+`cluster_dimensions` permits an explicit alternative.
+
+# Four clustering types
+
+## Subject effects
+
+`cluster_type = "subject"` replaces the distribution of selected
+\(\boldsymbol z_{u,i}\) coordinates. This is the most direct latent progression
+model when the first two coordinates are a subject intercept and slope.
+
+## Marker effects
+
+`cluster_type = "marker"` replaces the distribution of selected
+\(\boldsymbol z_{v,d}\) coordinates. The allocation unit is a marker. Survival
+associations are not reparameterised; the class-specific marker trajectory can
+nevertheless enter a current-value or current-slope association.
+
+## Correlation effects
+
+`cluster_type = "corr"` replaces selected off-diagonal correlation coordinates
+of \(\boldsymbol z_{L,i}\). The coordinate indices refer to correlations only;
+Stan maps them to their positions in the packed lower triangle.
+
+## Variance--covariance effects
+
+`cluster_type = "vcov"` replaces selected lower-triangular coordinates of
+\(\boldsymbol z_{L,i}\), including scale coordinates. It clusters subject
+covariance profiles and does not assign a component distribution to every
+\(\boldsymbol z_{w,id}\) innovation. `corr` and `vcov` cannot be selected
+together because they describe the same latent block.
+
+# Shared allocations and the meaning of \(G\)
+
+The subject allocation domain contains `"subject"`, `"corr"`, and `"vcov"`.
+The marker allocation domain contains `"marker"`.
+
+For a combined subject-domain request:
+
+\[
+p(\boldsymbol z_{u,i},\boldsymbol z_{L,i})
+=
+\sum_{g=1}^G
+\pi_g
+p_g(\boldsymbol z_{u,i})
+p_g(\boldsymbol z_{L,i}).
+\]
+
+The same \(g\) is used in both factors. Thus \(G=3\) gives three joint
+subject-progress classes, not nine combinations.
+
+If an subject block and a marker block are selected together, both use the
+same \(G\) labels and \(\boldsymbol\pi\), but their posterior allocations are
+reported over their natural units. This avoids the incoherent notion that an
+subject and a marker share one observed allocation unit.
+
+# Marginalisation in Stan
+
+Hamiltonian Monte Carlo requires a differentiable continuous parameter space.
+For allocation unit \(r\), Stan adds
+
+\[
+\log\sum_{g=1}^G
+\exp\left\{
+\log\pi_g+\log p_g(\boldsymbol a_r)
+\right\}.
+\]
+
+Generated quantities calculate
+
+\[
+p_{rg}
+=
+\frac{\pi_gp_g(\boldsymbol a_r)}
+{\sum_{h=1}^G\pi_hp_h(\boldsymbol a_r)}.
+\]
+
+These are conditional class probabilities for each posterior draw. The
+reported probability is the posterior mean of \(p_{rg}\), with a credible
+interval. A maximum-probability class is retained only for convenient tables
+and plots.
+
+# Exact replacement of the ordinary prior
+
+The Stan model first applies the established ordinary prior. The mixture block
+then adds
+
+\[
+\log p_{\mathrm{mix}}(\boldsymbol a_r)
+-
+\log p_{\mathrm{ordinary}}(\boldsymbol a_r).
+\]
+
+For subject, marker and covariance-regression standardised effects, the
+ordinary denominator is Normal. For marker-weight perturbations it follows the
+existing shrinkage family. This is an exact prior replacement.
+
+If formula-scoped random-effect weights are present, the relevant log-density
+terms are weighted consistently in the numerator and denominator.
+
+# Survival associations under clustering
+
+The base association decomposition is unchanged.
+
+- Mean channels use fixed plus subject effects.
+- Marker channels use marker plus subject-by-marker effects.
+- Total channels add mean and marker parts.
+- Correlation and covariance channels use summaries of \(L_i\).
+
+Weighted marker aggregation follows:
+
+\[
+\bar f_{a,i}(t)
+=
+\frac{1}{D}
+\sum_{d=1}^D
+\omega_{ad}^{\mathrm{eff}}
+f_a\{r_{aid}(t)\}.
+\]
+
+Transformation occurs before marker averaging. If marker weights are
+clustered, the class component location supplies the weight perturbation for a
+class-specific association curve.
+
+The association coefficient remains common unless the underlying ordinary
+model specifies otherwise. The mixture acts through its random-effect or
+weight distribution; it does not introduce an undocumented class-specific
+association coefficient.
+
+# Longitudinal estimands
+
+## Class centre
+
+`mean_per_class` evaluates the inverse link after inserting component locations
+for the selected random-effect blocks which enter the longitudinal location.
+It answers:
+
+> What trajectory is implied by the centre of this latent component at the
+> chosen covariate profile?
+
+## Marginal within class
+
+`marginal_per_class` draws from the fitted within-component distribution and
+then applies the inverse link. It answers:
+
+> What response-scale trajectory is expected after acknowledging
+> within-component random-effect variation?
+
+These estimands are not interchangeable under a non-linear inverse link.
+
+## Covariance class
+
+If covariance regression is clustered, the dedicated display reconstructs the
+covariance matrix for every class and posterior draw over the covariance
+covariate grid. Every \(G\) curve appears in the same component panel, with a
+separate returned plot for each marker.
+
+# Longitudinal-only likelihood
+
+When both event arguments are `NULL`, the implementation creates a private
+event scaffold for common design construction, then sends zero event indicators
+and zero integration limits to Stan. The event contribution is exactly
+
+\[
+0-\int_0^0h_i(s)\,ds=0.
+\]
+
+No survival information enters inference. Association terms and marker-weight
+clustering are disallowed. Event prediction and discrimination methods explain
+that no event process was fitted, while longitudinal prediction and diagnostics
+remain inherited.
+
+# Software interface
+
+The fitted hierarchy is:
+
+```text
+JoiNMeFit
+└── JoiNMeMixFit
+
+JoiNMeDynPred
+└── JoiNMeMixDynPred
+```
+
+The following established methods remain available:
+
+- `summary()`, `print()`, `plot()`;
+- `predict()` and dynamic-prediction summaries;
+- `draws()`, `extract()`, `fixef()`, `ranef()`, and `vcov()`;
+- `posterior_linpred()`, `posterior_epred()`, and `posterior_predict()`;
+- `pp_check()`, `diagnosis()`, and `mcmc_plot()`;
+- `loo()`, `waic()`, and `elpd()`;
+- `concordance()`, `tvROC()`, and `tvAUC()` for joint fits;
+- `assoc()` and `posterior_assoc()`.
+
+Mixture-specific additions are:
+
+- `posterior_class()` for fitted units and dynamically predicted subjects;
+- `type = "class_membership"`;
+- `estimand = "mean_per_class"`;
+- `estimand = "marginal_per_class"`;
+- `type = "covariance_class"`;
+- class-specific association trajectories.
+
+# Recommended analysis protocol
+
+## Model preparation
+
+1. Establish marker families and links.
+2. Establish the nested random-effect formula.
+3. Check covariance regression without a mixture.
+4. Check event-time representation and association transforms.
+5. Fit the ordinary JoiNMe model and inspect posterior predictive adequacy.
+
+## Mixture preparation
+
+1. Name the allocation unit required by the scientific question.
+2. Identify the two coordinates and record their formula labels.
+3. Choose a small plausible range of \(G\).
+4. Set weakly informative but meaningful component priors.
+5. Decide whether Student-\(t_6\), Laplace or Normal components are defensible.
+
+## Posterior review
+
+1. Examine all sampler diagnostics.
+2. Plot mixture proportions, locations and scales by chain.
+3. Inspect posterior class probabilities.
+4. Compare class-centre and marginal curves.
+5. Inspect covariance or association curves when they define the class.
+6. Check posterior predictions by marker.
+7. Repeat under neighbouring values of \(G\) and prior settings.
+
+# Choosing the number of classes
+
+There is no single numerical criterion that establishes a scientifically valid
+class count. A considered choice should combine:
+
+- predictive measures;
+- posterior predictive adequacy;
+- stable estimation across chains;
+- effective class size;
+- posterior allocation entropy;
+- separation of class-relevant estimands;
+- sensitivity to priors and component family; and
+- subject-matter interpretability.
+
+A component containing a few observations may indicate a genuine rare
+trajectory, a heavy tail, an outlier mechanism, or overfitting. These
+possibilities should be distinguished through sensitivity analyses rather than
+resolved by a modal label alone.
+
+# Reporting template
+
+## Methods
+
+Report the nested longitudinal formula, marker families, event model,
+association channels, covariance regression, clustered levels, selected
+coordinate labels, \(G\), component family and priors. State whether survival
+was included and whether marker weights were shared.
+
+## Results
+
+Report class proportions with intervals, component locations and scales,
+allocation uncertainty, centre and marginal trajectories, and any
+class-defining covariance or association curves.
+
+## Diagnostics
+
+Report \(\widehat R\), effective sample sizes, divergent transitions,
+tree-depth behaviour, posterior predictive checks, and sensitivity analyses.
+
+## Interpretation
+
+Describe classes as posterior components of a fitted model. Avoid implying
+that they are error-free observed categories. Where decisions depend on class,
+propagate posterior probabilities.
+
+# Limitations
+
+The implementation uses diagonal component scales on the selected standardised
+coordinates. Correlation is retained through the underlying random-effect
+Cholesky factors, but the component distribution does not add a second freely
+estimated correlation matrix.
+
+Intercept or baseline-probability ordering removes the corresponding label
+permutation but does not guarantee scientifically meaningful separation. With
+`cluster_ordering = "none"`, permutation-invariant summaries and careful
+posterior inspection are particularly important.
+
+Class-specific marginal longitudinal curves integrate the selected component
+distribution. Covariance classes may primarily manifest through dispersion
+rather than a shifted conditional mean.
+
+Dynamic predictions inherit the fitted joint model and retain mixture
+metadata. More importantly, dynamically sampled coordinates use the fitted
+draw-specific component probabilities, locations and scales. The new
+subject's history therefore updates a probability vector over classes;
+the software does not treat their class as known. Combined compatible blocks
+continue to contribute to one allocation density rather than independent
+labels.
+
+# Implementation audit trail
+
+The R implementation is centred in:
+
+```text
+R/mix.R
+R/mix-methods.R
+R/standata.R
+R/r6.R
+R/plot-api.R
+R/predict.R
+```
+
+The Stan implementation is centred in:
+
+```text
+inst/stan/joinme_mix_fit_threading.stan
+inst/stan/joinme_mix_dynpred_threading.stan
+inst/stan/helper/data/fit_mixture_data.stan
+inst/stan/helper/data/dynpred_mixture_data.stan
+inst/stan/helper/parameters/joinme_fit_mixture.stan
+inst/stan/helper/functions/latent_progress_mixture.stanfunctions
+inst/stan/helper/model/fit_mixture_priors.stan
+inst/stan/helper/model/dynpred_mixture_prior.stan
+inst/stan/helper/generated_quantities/fit_mixture_outputs.stan
+inst/stan/helper/generated_quantities/dynpred_mixture_output_declarations.stan
+inst/stan/helper/generated_quantities/dynpred_mixture_output_calculations.stan
+```
+
+The ordinary entry points and common likelihood modules are:
+
+```text
+inst/stan/helper/data/fit_data.stan
+inst/stan/helper/parameters/joinme_fit_common.stan
+inst/stan/joinme_fit_threading.stan
+inst/stan/joinme_dynpred_threading.stan
+inst/stan/helper/model/fit_threaded_likelihood.stan
+inst/stan/helper/model/dynpred_threaded_likelihood.stan
+```
+
+The ordinary programmes do not include any mixture declaration or density.
+R selects one of the four entry points before compilation and filters the
+sampling data against that programme's own data contract. Thus latent-class
+support does not enlarge the generated ordinary Stan model.
+
+Transformation bytecode is a distinct, model-independent module:
+
+```text
+R/bytecode-interpreter.R
+inst/stan/helper/bytecode/interpreter.stanfunctions
+inst/stan/helper/bytecode/README.md
+```
+
+The R expression compiler consumes the module's opcode registry, and simulation
+uses the same evaluator as preprocessing and plotting. The Stan implementation
+mirrors the documented instruction protocol. Neither interpreter knows about
+longitudinal outcomes, event processes or latent classes, which makes this
+module suitable for later extraction into a separate package.
+
+Focused regression tests are in:
+
+```text
+tests/testthat/test-latent-progress-mixture.R
+```
+
+The live architecture map is `notes/docs/architecture.md`; the statistical and
+usage vignettes are under `vignettes/joinme-latent-progress-*.qmd`.

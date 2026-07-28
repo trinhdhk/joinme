@@ -27,18 +27,18 @@ vector eta_vcov_weighted_const(matrix L_i, int diagonal_only) {
   // Step 1: determine how many raw vcov features are required.
   // - diagonal_only = 1 returns the standard deviations only,
   // - diagonal_only = 0 returns off-diagonal K entries plus standard deviations.
-  int Q = rows(L_i);
-  int M = (diagonal_only == 1) ? Q : ((Q * (Q + 1)) %/% 2);
-  int m = 1;
-  vector[M] vcov_terms;
-  vector[Q] sd_terms;
+  int Q = rows(L_i); // Role: marker-by-individual dimension.
+  int M = (diagonal_only == 1) ? Q : ((Q * (Q + 1)) %/% 2); // Role: derived dimension.
+  int m = 1; // Role: element loop position.
+  vector[M] vcov_terms; // Role: covariance terms.
+  vector[Q] sd_terms; // Role: sd terms.
 
   if (Q < 1)
     return vcov_terms;
 
   // Step 2: recover subject-specific standard deviations from the row norms of L_i.
   for (r in 1 : Q) {
-    real sd_r = 0;
+    real sd_r = 0; // Role: sd r.
     for (k in 1 : r)
       sd_r += square(L_i[r, k]);
     sd_terms[r] = sqrt(sd_r);
@@ -58,7 +58,7 @@ vector eta_vcov_weighted_const(matrix L_i, int diagonal_only) {
   // Step 3b: expose the off-diagonal entries of K_i = diag(1 / sd_i) * L_i.
   for (r in 2 : Q) {
     for (c in 1 : (r - 1)) {
-      real k_rc = 0;
+      real k_rc = 0; // Role: k rc.
       if (sd_terms[r] > 1e-12)
         k_rc = L_i[r, c] / sd_terms[r];
       vcov_terms[m] = fmax(-0.999999, fmin(0.999999, k_rc));

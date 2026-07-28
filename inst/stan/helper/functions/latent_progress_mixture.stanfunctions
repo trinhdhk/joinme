@@ -1,0 +1,119 @@
+/**
+ * @file latent_progress_mixture.stanfunctions
+ * @brief Probability helpers for a marginalised finite mixture of random effects.
+ *
+ * @details
+ * Stan cannot sample a discrete allocation indicator with Hamiltonian Monte
+ * Carlo.  Every possible class is therefore evaluated and combined with
+ * `log_sum_exp`.  These small helpers keep the component-density convention
+ * identical in the fitted prior adjustment and in generated posterior class
+ * probabilities.
+ *
+ * @section simulation_counterpart Simulation counterpart
+ *
+ * The R function `simulate_joinme_mix()` uses the same statistical
+ * construction before an outcome is generated. It first samples one class for
+ * each natural allocation unit, then draws every selected standardised
+ * coordinate independently from the location and scale stored for that class.
+ * Subject and covariance-regression coordinates share the subject class;
+ * marker and marker-weight coordinates share the marker class. Stan does not
+ * receive those simulated labels during fitting. Instead, the functions below
+ * integrate over every possible label exactly, which is the marginal
+ * likelihood corresponding to that generative procedure.
+ */
+
+/**
+ * @brief Log density of one selected latent vector under one mixture component.
+ *
+ * @param latent_value Selected standardised random-effect coordinates.
+ * @param component_location Complete row of component locations.
+ * @param component_scale Complete row of positive component scales.
+ * @param segment_start First column belonging to this random-effect block.
+ * @param shrinkage_family 0 = Student-t(6), 1 = Laplace, 2 = Normal.
+ *
+ * @return The sum of independent coordinate log densities.
+ */
+real latent_progress_component_lpdf(
+  vector latent_value,
+  row_vector component_location,
+  row_vector component_scale,
+  int segment_start,
+  int shrinkage_family
+) {
+  real log_density = 0; // Role: log density.
+  int latent_dimension = num_elements(latent_value); // Role: latent dimension.
+
+  for (coordinate in 1 : latent_dimension) {
+    int mixture_coordinate = segment_start + coordinate - 1; // Role: mixture coordinate.
+    real location = component_location[mixture_coordinate]; // Role: location.
+    real scale = component_scale[mixture_coordinate]; // Role: scale.
+
+    if (shrinkage_family == 1) {
+      log_density += double_exponential_lpdf(
+        latent_value[coordinate] | location, scale
+      );
+    } else if (shrinkage_family == 2) {
+      log_density += normal_lpdf(
+        latent_value[coordinate] | location, scale
+      );
+    } else {
+      log_density += student_t_lpdf(
+        latent_value[coordinate] | 6, location, scale
+      );
+    }
+  }
+  return log_density;
+}
+
+/**
+ * @brief Log density used by the ordinary marker-weight shrinkage prior.
+ *
+ * @details
+ * The mixture is introduced as an exact density-ratio correction to the
+ * established JoiNMe prior.  Marker-weight perturbations already use the
+ * shrinkage-family switch, so their denominator must follow the same switch.
+ */
+real latent_progress_standard_shrinkage_lpdf(
+  vector latent_value,
+  int shrinkage_family
+) {
+  if (shrinkage_family == 1) {
+    return double_exponential_lpdf(latent_value | 0, 1);
+  } else if (shrinkage_family == 2) {
+    return normal_lpdf(latent_value | 0, 1);
+  }
+  return student_t_lpdf(latent_value | 6, 0, 1);
+}
+
+/**
+ * @brief Covariate-dependent class probabilities for one allocation unit.
+ *
+ * @param baseline_probability Simplex giving probabilities at zero covariates.
+ * @param class_design Non-intercept class-regression row for this unit.
+ * @param class_coefficient Concatenated coefficients requested by all classes.
+ * @param class_term_start First coefficient position belonging to each class.
+ * @param class_term_count Number of coefficients belonging to each class.
+ *
+ * @return A length-G probability vector obtained with a stable softmax.
+ */
+vector latent_progress_probability(
+  vector baseline_probability,
+  row_vector class_design,
+  vector class_coefficient,
+  array[] int class_term_start,
+  array[] int class_term_count
+) {
+  int number_classes = num_elements(baseline_probability); // number of latent components over which the discrete allocation is marginalised
+  vector[number_classes] class_logit = log(baseline_probability); // zero-covariate component log probabilities before class regression
+  for (group in 1 : number_classes) {
+    int term_count = class_term_count[group]; // number of concatenated regression coefficients used by this class formula
+    if (term_count > 0) {
+      int term_start = class_term_start[group]; // first concatenated regression coefficient belonging to this class
+      class_logit[group] += dot_product(
+        to_vector(segment(class_design, term_start, term_count)),
+        segment(class_coefficient, term_start, term_count)
+      );
+    }
+  }
+  return softmax(class_logit);
+}

@@ -2586,6 +2586,41 @@ gk_quadrature <- function(nodes = 15L) {
   sd
 }
 
+#' Preserve zero-length mixture arrays for Stan data writers
+#'
+#' @description
+#' RStan and CmdStan's JSON writer both need a one-dimensional array shape for
+#' data declared as a Stan array, including the inactive zero-length case.
+#' Keeping this conversion separate from the ordinary time-index conversion
+#' makes the no-mixture path explicit and leaves class-design matrices
+#' untouched.
+#'
+#' @param sd Prepared Stan data.
+#'
+#' @return `sd` with mixture index vectors and the Dirichlet prior represented
+#'   as one-dimensional arrays.
+#' @keywords internal
+#' @noRd
+.coerce_rstan_mixture_data <- function(sd) {
+  index_fields <- c(
+    "mix_idx_subject",
+    "mix_idx_marker",
+    "mix_idx_covariance"
+  )
+  for (field in index_fields) {
+    value <- as.integer(sd[[field]] %||% integer(0))
+    sd[[field]] <- array(value, dim = length(value))
+  }
+  if (!is.null(sd$mix_probability_prior)) {
+    probability_prior <- as.numeric(sd$mix_probability_prior)
+    sd$mix_probability_prior <- array(
+      probability_prior,
+      dim = length(probability_prior)
+    )
+  }
+  sd
+}
+
 #' Coerce vector fields to 1D arrays for rstan
 #' @keywords internal
 #' @noRd

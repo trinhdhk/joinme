@@ -25,17 +25,17 @@
     // an internal knot. For an intercept-free B-spline basis of degree p, Stan
     // needs the repeated-boundary knot sequence that splines::bs(...,
     // intercept = FALSE) would use internally.
-    int n_total_knots = num_elements(knots);
-    int n_internal = n_total_knots - 2;
-    int left_reps = degree + 1;
-    int n_basis = n_internal + degree;
-    int n_basis_complete = n_basis + 1;
-    int n_basis_zero = n_basis_complete + degree;
-    vector[n_basis_zero + 1] knot_seq;
-    vector[n_basis_zero] basis_prev = rep_vector(0, n_basis_zero);
-    real lower_bound = knots[1];
-    real upper_bound = knots[n_total_knots];
-    real x_use = fmin(fmax(x, lower_bound), upper_bound);
+    int n_total_knots = num_elements(knots); // Role: number of total knots.
+    int n_internal = n_total_knots - 2; // Role: number of internal.
+    int left_reps = degree + 1; // Role: left reps.
+    int n_basis = n_internal + degree; // Role: number of basis.
+    int n_basis_complete = n_basis + 1; // Role: number of basis complete.
+    int n_basis_zero = n_basis_complete + degree; // Role: number of basis zero.
+    vector[n_basis_zero + 1] knot_seq; // Role: knot seq.
+    vector[n_basis_zero] basis_prev = rep_vector(0, n_basis_zero); // Role: basis prev.
+    real lower_bound = knots[1]; // Role: lower bound.
+    real upper_bound = knots[n_total_knots]; // Role: upper bound.
+    real x_use = fmin(fmax(x, lower_bound), upper_bound); // Role: x whether to use.
 
     if (n_total_knots < 2 || n_basis < 1) {
       return rep_vector(0, 0);
@@ -69,10 +69,10 @@
     // functions using the local knot-span geometry.
     if (degree > 0) {
       for (p in 1:degree) {
-        vector[n_basis_zero] basis_curr = rep_vector(0, n_basis_zero);
+        vector[n_basis_zero] basis_curr = rep_vector(0, n_basis_zero); // Role: basis curr.
         for (i in 1:(n_basis_zero - p)) {
-          real denom_left = knot_seq[i + p] - knot_seq[i];
-          real denom_right = knot_seq[i + p + 1] - knot_seq[i + 1];
+          real denom_left = knot_seq[i + p] - knot_seq[i]; // Role: denom left.
+          real denom_right = knot_seq[i + p + 1] - knot_seq[i + 1]; // Role: denom right.
           if (denom_left > 0) {
             basis_curr[i] += ((x_use - knot_seq[i]) / denom_left) * basis_prev[i];
           }
@@ -113,16 +113,16 @@
     // Step 1: establish the spline order and clamp the evaluation point to the
     // declared boundary interval. This is the same boundary behaviour used by
     // simulation and plotting for expit-domain and raw-domain I-splines.
-    int n_knots = num_elements(knots);
-    int n_basis = num_elements(coeff);
-    int n_internal = n_knots - 2;
-    int ord = degree + 1;
-    vector[n_basis] bs_vec;
-    vector[n_basis] is_vec;
-    real lower_bound;
-    real upper_bound;
-    real x_use;
-    int j;
+    int n_knots = num_elements(knots); // Role: number of knots.
+    int n_basis = num_elements(coeff); // Role: number of basis.
+    int n_internal = n_knots - 2; // Role: number of internal.
+    int ord = degree + 1; // Role: ordinal.
+    vector[n_basis] bs_vec; // Role: spline basis vector.
+    vector[n_basis] is_vec; // Role: is vector.
+    real lower_bound; // Role: lower bound.
+    real upper_bound; // Role: upper bound.
+    real x_use; // Role: x whether to use.
+    int j; // Role: j.
 
     if (n_knots < 2 || n_basis < 2) {
       return (n_basis >= 1) ? coeff[1] : 0.0;
@@ -163,7 +163,7 @@
     // that rise monotonically from 0 toward 1.
     if (j > 1) {
       for (kk in 1:(j - 1)) {
-        int idx = j - kk;
+        int idx = j - kk; // Role: index.
         is_vec[idx] = is_vec[idx] + is_vec[idx + 1];
       }
     }
@@ -191,8 +191,8 @@
    * @return Vector of evaluations
    */
   vector ispline_eval_vec(vector x, vector knots, int degree, vector coeff) {
-    int n = num_elements(x);
-    vector[n] result;
+    int n = num_elements(x); // Role: number of.
+    vector[n] result; // Role: result.
     
     for (i in 1:n) {
       result[i] = ispline_eval(x[i], knots, degree, coeff);
@@ -215,7 +215,7 @@
    * @return Interpolated y-value
    */
   real pwlin_eval(vector x_knots, vector y_knots, real x) {
-    int K = num_elements(x_knots);
+    int K = num_elements(x_knots); // Role: dimension.
     
     if (K < 2) {
       return (K == 1) ? y_knots[1] : 0.0;
@@ -235,8 +235,8 @@
     // Interpolate within bounds
     for (k in 1:(K - 1)) {
       if (x_knots[k] <= x && x <= x_knots[k + 1]) {
-        real dx = x_knots[k + 1] - x_knots[k];
-        real w = (x - x_knots[k]) / dx;
+        real dx = x_knots[k + 1] - x_knots[k]; // Role: dx.
+        real w = (x - x_knots[k]) / dx; // Role: w.
         return (1 - w) * y_knots[k] + w * y_knots[k + 1];
       }
     }
@@ -253,8 +253,8 @@
    * @return Vector of interpolated y-values
    */
   vector pwlin_eval_vec(vector x_knots, vector y_knots, vector x) {
-    int n = num_elements(x);
-    vector[n] result;
+    int n = num_elements(x); // Role: number of.
+    vector[n] result; // Role: result.
     
     for (i in 1:n) {
       result[i] = pwlin_eval(x_knots, y_knots, x[i]);

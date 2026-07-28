@@ -16,6 +16,16 @@ longitudinal_plot <- function(object,
                               ...) {
   # Step 1: For a fitted model, evaluate posterior trajectories on the explicit
   # or default smooth time design before constructing the longitudinal display.
+  if (inherits(object, "JoiNMeMixFit")) {
+    return(plot.JoiNMeMixFit(
+      object,
+      type = "longitudinal",
+      longitudinal_times = longitudinal_times,
+      longitudinal_points = longitudinal_points,
+      ...,
+      .use_wrapper_dispatch = FALSE
+    ))
+  }
   if (inherits(object, "JoiNMeFit")) {
     return(plot.JoiNMeFit(
       object,
@@ -45,8 +55,14 @@ longitudinal_plot <- function(object,
 #' @return A `ggplot` object, a combined plot, or a named list of plots.
 #' @export
 survival_plot <- function(object, ...) {
+  if (inherits(object, "JoiNMeMixFit")) {
+    return(plot.JoiNMeMixFit(object, type = "survival", ..., .use_wrapper_dispatch = FALSE))
+  }
   if (inherits(object, "JoiNMeFit")) {
     return(plot.JoiNMeFit(object, type = "survival", ..., .use_wrapper_dispatch = FALSE))
+  }
+  if (inherits(object, "JoiNMeMixDynPred")) {
+    return(plot.JoiNMeMixDynPred(object, type = "survival", ..., .use_wrapper_dispatch = FALSE))
   }
   if (inherits(object, "JoiNMeDynPred")) {
     return(plot.JoiNMeDynPred(object, type = "survival", ..., .use_wrapper_dispatch = FALSE))
@@ -62,8 +78,14 @@ survival_plot <- function(object, ...) {
 #' @return A `ggplot` object, a combined plot, or a named list of plots.
 #' @export
 cumhaz_plot <- function(object, ...) {
+  if (inherits(object, "JoiNMeMixFit")) {
+    return(plot.JoiNMeMixFit(object, type = "cumhaz", ..., .use_wrapper_dispatch = FALSE))
+  }
   if (inherits(object, "JoiNMeFit")) {
     return(plot.JoiNMeFit(object, type = "cumhaz", ..., .use_wrapper_dispatch = FALSE))
+  }
+  if (inherits(object, "JoiNMeMixDynPred")) {
+    return(plot.JoiNMeMixDynPred(object, type = "cumhaz", ..., .use_wrapper_dispatch = FALSE))
   }
   if (inherits(object, "JoiNMeDynPred")) {
     return(plot.JoiNMeDynPred(object, type = "cumhaz", ..., .use_wrapper_dispatch = FALSE))
@@ -81,6 +103,14 @@ cumhaz_plot <- function(object, ...) {
 association_plot <- function(object, ...) {
   if (!inherits(object, "JoiNMeFit")) {
     cli::cli_abort("{.arg object} must be a JoiNMeFit object for association plotting.")
+  }
+  if (inherits(object, "JoiNMeMixFit")) {
+    return(plot.JoiNMeMixFit(
+      object,
+      type = "association",
+      ...,
+      .use_wrapper_dispatch = FALSE
+    ))
   }
   plot.JoiNMeFit(object, type = "association", ..., .use_wrapper_dispatch = FALSE)
 }

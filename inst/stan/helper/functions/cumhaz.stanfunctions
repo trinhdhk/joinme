@@ -23,8 +23,8 @@
  * @return Cumulative hazard value Lambda(S).
  */
 vector gk_expand_weights(vector wi_half) {
-  int n_half = num_elements(wi_half);
-  vector[2 * n_half - 1] wi_full;
+  int n_half = num_elements(wi_half); // Role: number of half.
+  vector[2 * n_half - 1] wi_full; // Role: wi full.
 
   // Mirror the positive half-weights (excluding the first at 0).
   for (j in 1:(n_half - 1)) {
@@ -184,14 +184,14 @@ vector gk_weights_from_n(int n_gk) {
 
 real cumhaz(real S, int n_gk, vector log_h0_nodes, vector eta_nodes) {
   // Lookup hardcoded GK weights once per call.
-  vector[n_gk] gk_weights = gk_weights_from_n(n_gk);
+  vector[n_gk] gk_weights = gk_weights_from_n(n_gk); // Role: Gauss-Kronrod weights.
 
   // Combined log hazard at nodes
-  vector[n_gk] z = log_h0_nodes + eta_nodes;
-  real zmax = max(z);
+  vector[n_gk] z = log_h0_nodes + eta_nodes; // Role: standardised latent value.
+  real zmax = max(z); // Role: zmax.
 
   // Stable weighted sum of exp(z)
-  real acc = 0;
+  real acc = 0; // Role: running accumulator.
   for (j in 1 : n_gk)
     acc += gk_weights[j] * exp(z[j] - zmax);
 

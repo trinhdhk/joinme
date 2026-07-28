@@ -61,8 +61,13 @@ docs
 *.csv
 *.txt
 
-# internal notes
-notes/
+# Internal notes remain private by default, except for the two design documents
+# which form part of the maintained latent-progress model specification.
+notes/*
+!notes/docs/
+notes/docs/*
+!notes/docs/architecture.md
+!notes/joinme-whitepaper.qmd
 
 # rstan crap
 src/

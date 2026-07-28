@@ -78,14 +78,14 @@
    * parameterisation and its shrinkage-family prior.  Piecewise-linear modes
    * omit them because those modes use the explicit simplexes declared below.
    */
-  vector[(tf_mode_cv_tot == 3 || tf_mode_cv_tot == 7) ? 0 : n_free_spline_cv] z_spline_cv;
-  vector[(tf_mode_cs_tot == 3 || tf_mode_cs_tot == 7) ? 0 : n_free_spline_cs] z_spline_cs;
-  matrix[M_corr, (tf_mode_corr == 3 || tf_mode_corr == 7) ? 0 : n_free_spline_corr] z_spline_corr;
-  matrix[M_vcov, (tf_mode_vcov == 3 || tf_mode_vcov == 7) ? 0 : n_free_spline_vcov] z_spline_vcov;
-  vector[(tf_mode_cv_mean == 3 || tf_mode_cv_mean == 7) ? 0 : n_free_spline_cv_mean] z_spline_cv_mean;
-  vector[(tf_mode_cv_marker == 3 || tf_mode_cv_marker == 7) ? 0 : n_free_spline_cv_marker] z_spline_cv_marker;
-  vector[(tf_mode_cs_mean == 3 || tf_mode_cs_mean == 7) ? 0 : n_free_spline_cs_mean] z_spline_cs_mean;
-  vector[(tf_mode_cs_marker == 3 || tf_mode_cs_marker == 7) ? 0 : n_free_spline_cs_marker] z_spline_cs_marker;
+  vector[(tf_mode_cv_tot == 3 || tf_mode_cv_tot == 7) ? 0 : n_free_spline_cv] z_spline_cv; // Role: standardised latent value spline current value.
+  vector[(tf_mode_cs_tot == 3 || tf_mode_cs_tot == 7) ? 0 : n_free_spline_cs] z_spline_cs; // Role: standardised latent value spline current slope.
+  matrix[M_corr, (tf_mode_corr == 3 || tf_mode_corr == 7) ? 0 : n_free_spline_corr] z_spline_corr; // Role: standardised latent value spline correlation.
+  matrix[M_vcov, (tf_mode_vcov == 3 || tf_mode_vcov == 7) ? 0 : n_free_spline_vcov] z_spline_vcov; // Role: standardised latent value spline covariance.
+  vector[(tf_mode_cv_mean == 3 || tf_mode_cv_mean == 7) ? 0 : n_free_spline_cv_mean] z_spline_cv_mean; // Role: standardised latent value spline current value mean.
+  vector[(tf_mode_cv_marker == 3 || tf_mode_cv_marker == 7) ? 0 : n_free_spline_cv_marker] z_spline_cv_marker; // Role: standardised latent value spline current value marker.
+  vector[(tf_mode_cs_mean == 3 || tf_mode_cs_mean == 7) ? 0 : n_free_spline_cs_mean] z_spline_cs_mean; // Role: standardised latent value spline current slope mean.
+  vector[(tf_mode_cs_marker == 3 || tf_mode_cs_marker == 7) ? 0 : n_free_spline_cs_marker] z_spline_cs_marker; // Role: standardised latent value spline current slope marker.
 
   /**
    * @brief Simplex increments for ordered piecewise-linear associations.
@@ -96,32 +96,32 @@
    * which has no free parameter and permits one compiled model to cover every
    * transform choice without changing existing I-spline parameters.
    */
-  simplex[(tf_mode_cv_tot == 3 || tf_mode_cv_tot == 7) ? n_free_spline_cv : 1] pwlin_simplex_cv;
-  simplex[(tf_mode_cs_tot == 3 || tf_mode_cs_tot == 7) ? n_free_spline_cs : 1] pwlin_simplex_cs;
-  array[M_corr] simplex[(tf_mode_corr == 3 || tf_mode_corr == 7) ? n_free_spline_corr : 1] pwlin_simplex_corr;
-  array[M_vcov] simplex[(tf_mode_vcov == 3 || tf_mode_vcov == 7) ? n_free_spline_vcov : 1] pwlin_simplex_vcov;
-  simplex[(tf_mode_cv_mean == 3 || tf_mode_cv_mean == 7) ? n_free_spline_cv_mean : 1] pwlin_simplex_cv_mean;
-  simplex[(tf_mode_cv_marker == 3 || tf_mode_cv_marker == 7) ? n_free_spline_cv_marker : 1] pwlin_simplex_cv_marker;
-  simplex[(tf_mode_cs_mean == 3 || tf_mode_cs_mean == 7) ? n_free_spline_cs_mean : 1] pwlin_simplex_cs_mean;
-  simplex[(tf_mode_cs_marker == 3 || tf_mode_cs_marker == 7) ? n_free_spline_cs_marker : 1] pwlin_simplex_cs_marker;
+  simplex[(tf_mode_cv_tot == 3 || tf_mode_cv_tot == 7) ? n_free_spline_cv : 1] pwlin_simplex_cv; // Role: piecewise-linear simplex current value.
+  simplex[(tf_mode_cs_tot == 3 || tf_mode_cs_tot == 7) ? n_free_spline_cs : 1] pwlin_simplex_cs; // Role: piecewise-linear simplex current slope.
+  array[M_corr] simplex[(tf_mode_corr == 3 || tf_mode_corr == 7) ? n_free_spline_corr : 1] pwlin_simplex_corr; // Role: piecewise-linear simplex correlation.
+  array[M_vcov] simplex[(tf_mode_vcov == 3 || tf_mode_vcov == 7) ? n_free_spline_vcov : 1] pwlin_simplex_vcov; // Role: piecewise-linear simplex covariance.
+  simplex[(tf_mode_cv_mean == 3 || tf_mode_cv_mean == 7) ? n_free_spline_cv_mean : 1] pwlin_simplex_cv_mean; // Role: piecewise-linear simplex current value mean.
+  simplex[(tf_mode_cv_marker == 3 || tf_mode_cv_marker == 7) ? n_free_spline_cv_marker : 1] pwlin_simplex_cv_marker; // Role: piecewise-linear simplex current value marker.
+  simplex[(tf_mode_cs_mean == 3 || tf_mode_cs_mean == 7) ? n_free_spline_cs_mean : 1] pwlin_simplex_cs_mean; // Role: piecewise-linear simplex current slope mean.
+  simplex[(tf_mode_cs_marker == 3 || tf_mode_cs_marker == 7) ? n_free_spline_cs_marker : 1] pwlin_simplex_cs_marker; // Role: piecewise-linear simplex current slope marker.
 
   /* fit-only affine-shift parameters for functional transforms */
-  vector[estimate_iota_intercept_cv] z_iota_intercept_cv;
-  vector[estimate_iota_slope_cv] z_iota_slope_cv;
-  vector[estimate_iota_intercept_cs] z_iota_intercept_cs;
-  vector[estimate_iota_slope_cs] z_iota_slope_cs;
-  vector[M_corr * estimate_iota_intercept_corr] z_iota_intercept_corr;
-  vector[M_corr * estimate_iota_slope_corr] z_iota_slope_corr;
-  vector[M_vcov * estimate_iota_intercept_vcov] z_iota_intercept_vcov;
-  vector[M_vcov * estimate_iota_slope_vcov] z_iota_slope_vcov;
-  vector[estimate_iota_intercept_cv_mean] z_iota_intercept_cv_mean;
-  vector[estimate_iota_slope_cv_mean] z_iota_slope_cv_mean;
-  vector[estimate_iota_intercept_cv_marker] z_iota_intercept_cv_marker;
-  vector[estimate_iota_slope_cv_marker] z_iota_slope_cv_marker;
-  vector[estimate_iota_intercept_cs_mean] z_iota_intercept_cs_mean;
-  vector[estimate_iota_slope_cs_mean] z_iota_slope_cs_mean;
-  vector[estimate_iota_intercept_cs_marker] z_iota_intercept_cs_marker;
-  vector[estimate_iota_slope_cs_marker] z_iota_slope_cs_marker;
+  vector[estimate_iota_intercept_cv] z_iota_intercept_cv; // Role: standardised latent value affine transformation intercept current value.
+  vector[estimate_iota_slope_cv] z_iota_slope_cv; // Role: standardised latent value affine transformation slope current value.
+  vector[estimate_iota_intercept_cs] z_iota_intercept_cs; // Role: standardised latent value affine transformation intercept current slope.
+  vector[estimate_iota_slope_cs] z_iota_slope_cs; // Role: standardised latent value affine transformation slope current slope.
+  vector[M_corr * estimate_iota_intercept_corr] z_iota_intercept_corr; // Role: standardised latent value affine transformation intercept correlation.
+  vector[M_corr * estimate_iota_slope_corr] z_iota_slope_corr; // Role: standardised latent value affine transformation slope correlation.
+  vector[M_vcov * estimate_iota_intercept_vcov] z_iota_intercept_vcov; // Role: standardised latent value affine transformation intercept covariance.
+  vector[M_vcov * estimate_iota_slope_vcov] z_iota_slope_vcov; // Role: standardised latent value affine transformation slope covariance.
+  vector[estimate_iota_intercept_cv_mean] z_iota_intercept_cv_mean; // Role: standardised latent value affine transformation intercept current value mean.
+  vector[estimate_iota_slope_cv_mean] z_iota_slope_cv_mean; // Role: standardised latent value affine transformation slope current value mean.
+  vector[estimate_iota_intercept_cv_marker] z_iota_intercept_cv_marker; // Role: standardised latent value affine transformation intercept current value marker.
+  vector[estimate_iota_slope_cv_marker] z_iota_slope_cv_marker; // Role: standardised latent value affine transformation slope current value marker.
+  vector[estimate_iota_intercept_cs_mean] z_iota_intercept_cs_mean; // Role: standardised latent value affine transformation intercept current slope mean.
+  vector[estimate_iota_slope_cs_mean] z_iota_slope_cs_mean; // Role: standardised latent value affine transformation slope current slope mean.
+  vector[estimate_iota_intercept_cs_marker] z_iota_intercept_cs_marker; // Role: standardised latent value affine transformation intercept current slope marker.
+  vector[estimate_iota_slope_cs_marker] z_iota_slope_cs_marker; // Role: standardised latent value affine transformation slope current slope marker.
 
   /* association scales */
   real<lower=0> sd_alpha_cv_total;     // scale for total CV association

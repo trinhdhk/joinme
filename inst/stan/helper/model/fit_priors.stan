@@ -101,7 +101,7 @@
   
   /* Covariance regression priors */
   {
-    real vcov_lp_scale = 1;
+    real vcov_lp_scale = 1; // Role: covariance lp scale.
     alpha_L ~ student_t(6, 0, vcov_lp_scale);
     for (m in 1 : M_cov) 
       beta_L[m] ~ student_t(6, 0, vcov_lp_scale);

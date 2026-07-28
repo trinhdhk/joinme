@@ -115,6 +115,81 @@ Posterior draws are available through a dedicated renamed-draw interface:
 - `longitudinal_plot()`, `survival_plot()`, `cumhaz_plot()`,
   `association_plot()`, and `diagnostic_plot()` provide entry points to the main `plot()` methods.
 
+### Latent-progress mixtures
+
+`joinme_mix()` fits a finite mixture on selected standardised random-effect
+blocks while retaining the ordinary JoiNMe formula, likelihood, association,
+prediction and diagnostic infrastructure:
+
+```r
+sim <- simulate_joinme_mix(
+  formulaLong = formulaLong,
+  formulaEvent = formulaEvent,
+  n_id = 120,
+  families = rep("gaussian", 3),
+  n_clusters = 3,
+  cluster_type = c("subject", "vcov"),
+  formulaCluster = ~ x1 + x2,
+  class_parameters = list(
+    probability = c(0.25, 0.45, 0.30),
+    location = list(
+      subject = rbind(
+        c(-1.5, -0.7),
+        c(0, 0),
+        c(1.5, 0.7)
+      ),
+      vcov = rbind(
+        c(-0.8, -0.3),
+        c(0, 0),
+        c(0.8, 0.3)
+      )
+    ),
+    scale = 0.65
+  ),
+  seed = 701
+)
+
+mixture_fit <- joinme_mix(
+  formulaLong = formulaLong,
+  dataLong = sim$dataLong,
+  formulaEvent = formulaEvent,
+  dataEvent = sim$dataEvent,
+  n_clusters = 3,
+  cluster_type = c("subject", "vcov"),
+  formulaCluster = ~ x1 + x2,
+  priors = jm_prior(
+    class_probability = rep(2, 3),
+    class_regression = 1
+  ),
+  assoc = c("cv_mean", "vcov")
+)
+```
+
+The first two coordinates of each selected block define the progress plane by
+default. Compatible types share one allocation, so `n_clusters = 3` means three
+classes rather than nine combinations. The only supported values of
+`cluster_type` are `"subject"`, `"marker"`, `"corr"`, and `"vcov"`. By default,
+only the selected
+random-intercept location is ordered; slope locations remain unrestricted.
+`cluster_ordering` can instead order baseline class probabilities or impose no
+order. `formulaCluster` may regress class probabilities on covariates that are
+constant within the relevant subject or marker, and a list of three
+formulae supplies separate predictors when `n_clusters = 3`.
+
+Mixture fits inherit ordinary methods and add:
+
+- `posterior_class()` for subject or marker class probabilities;
+- mixture-aware dynamic prediction with conditional class probabilities;
+- `longitudinal_plot(..., estimand = "mean_per_class")`;
+- `longitudinal_plot(..., estimand = "marginal_per_class")`;
+- `plot(..., type = "covariance_class")`; and
+- `association_plot(..., estimand = "mean_per_class")`.
+
+Omitting both event arguments fits a longitudinal-only mixture. See the
+theory, usage and worked-example vignettes under
+`vignettes/joinme-latent-progress-*.qmd`. Dedicated simulation theory, usage
+and recovery examples are in `vignettes/joinme-mix-simulation-*.qmd`.
+
 <!--
 Summary-scale consistency:
 

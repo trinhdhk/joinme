@@ -132,6 +132,9 @@
 #'   Only the node count is passed to Stan; GK nodes/weights are fixed in Stan.
 #' @param vcov_diag_link Link for the subject-specific standard deviation regression:
 #'   "softplus" or "exp".
+#' @param mixture Internal latent-progress mixture specification. The public
+#'   interface is [joinme_mix()]; ordinary [joinme()] calls leave this as
+#'   `NULL`, which contributes no mixture parameters or mixture prior.
 #' @param seed Optional random seed for deterministic components of standata.
 #' @export
 # File overview:
@@ -169,6 +172,7 @@ joinme_standata <- function(
   tau_spline = 0.4,
   quadrature_nodes = NULL,
   vcov_diag_link = c("softplus", "exp"),
+  mixture = NULL,
   seed = .Random.seed[[1]]
 ) {
   assertthat::assert_that(is.data.frame(dataLong), msg = "dataLong must be a data.frame")
@@ -1182,5 +1186,24 @@ joinme_standata <- function(
     dist_formulas = dist_formulas
   )
 
-  c(standata_base, functional_tf_data)
+  # Add the latent-progress fields last.  Keeping this construction separate
+  # from the already established design-matrix work is deliberate: an ordinary
+  # JoiNMe fit receives zero-dimensional mixture fields, whereas `joinme_mix()`
+  # supplies a checked specification that activates only the requested
+  # random-effect blocks.  In either case the same Stan likelihood is used.
+  standata_complete <- c(standata_base, functional_tf_data)
+  mixture_standata <- .build_mixture_standata(
+    stan_data = standata_complete,
+    mixture = mixture
+  )
+  if (
+    !is.null(mixture_standata$mixture) &&
+      !isTRUE(mixture_standata$mixture$include_survival)
+  ) {
+    standata_complete$S_entry[] <- 0
+    standata_complete$S_event[] <- 0
+    standata_complete$d_event[] <- 0L
+    standata_complete$event_censor_type[] <- 0L
+  }
+  c(standata_complete, mixture_standata)
 }
