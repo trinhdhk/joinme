@@ -186,31 +186,7 @@ value below 0.5 indicates systematic reversal. These descriptions
 concern ranking only and do not establish calibration or clinical
 usefulness.
 
-### 3.2 Why both curves are evaluated at the same time
-
-It may appear attractive to assign each subject the value \widehat
-S_i(R_i) and rank subjects by those values. That construction is not a
-valid prognostic score because every score is evaluated at its own
-observed response time. Even identical survival curves decline with
-time, so a subject with long follow-up can receive a smaller survival
-value merely because their curve was evaluated later. The outcome would
-therefore enter the construction of the predictor being assessed.
-
-The same problem applies to a proposed score that subtracts survival
-under a baseline-hazard-only model from survival under the full model at
-each subject’s own R_i. Such a difference can be scientifically
-interesting as a description of the fitted association contribution, but
-it is response-dependent and is not an outcome-independent
-discrimination score.
-
-If the purpose is to quantify the incremental discrimination supplied by
-\mathbf X_i or \mathcal H_i, the defensible approach is to fit a
-pre-specified reduced model and a full model, calculate the same
-concordance estimand for both on held-out subjects, and report their
-difference with an appropriate resampling or posterior uncertainty
-analysis.
-
-### 3.3 Comparable pairs and censoring
+### 3.2 Comparable pairs and censoring
 
 Censoring does not imply long survival. It only limits which temporal
 orderings are observed. JoiNMe follows the risk-set convention described
@@ -238,7 +214,7 @@ unexplained by the fitted data can bias discrimination estimates. No
 comparison rule alone can identify the ordering of two latent event
 times after observation has ceased.
 
-### 3.4 Event-time weighting
+### 3.3 Event-time weighting
 
 The `type_weights` argument selects an event-time weighting schedule.
 JoiNMe asks `survival::concordance(..., ranks = TRUE)` for its
@@ -265,7 +241,7 @@ therefore be described as an Uno-style censoring-weighted Antolini
 comparison, not as a claim that the implementation is identical in every
 respect to a conventional static-score Uno estimator.
 
-### 3.5 Choice of prediction origin
+### 3.4 Choice of prediction origin
 
 By default, `concordance(fit)` chooses
 
@@ -321,7 +297,7 @@ Subject-specific origins are appropriate only when the scientific target
 is remaining time from those origins. They should not be presented as
 concordance on a common absolute study-time scale.
 
-### 3.6 Cause-specific analysis and competing events
+### 3.5 Cause-specific analysis and competing events
 
 The `cause` argument identifies the failure type that generates
 comparable event pairs. Other event causes are treated as censoring at
@@ -771,7 +747,7 @@ Code
 
 ``` r
 
-validation_c <- concordance(
+cIndex <- concordance(
   fit,
   newdataLong = validation_long,
   newdataEvent = validation_event,

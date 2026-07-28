@@ -258,14 +258,8 @@ c_{ij}
 }.
 </span></p>
 <p>A value of <span class="math inline">0.5</span> represents chance ordering under continuous predictions, a value approaching <span class="math inline">1</span> represents increasingly correct ordering, and a value below <span class="math inline">0.5</span> indicates systematic reversal. These descriptions concern ranking only and do not establish calibration or clinical usefulness.</p>
-</section><section class="level2" data-number="3.2"><h3 data-number="3.2" id="why-both-curves-are-evaluated-at-the-same-time">
-<span class="header-section-number">3.2</span> Why both curves are evaluated at the same time<a class="anchor" aria-label="anchor" href="#why-both-curves-are-evaluated-at-the-same-time"></a>
-</h3>
-<p>It may appear attractive to assign each subject the value <span class="math inline">\widehat S_i(R_i)</span> and rank subjects by those values. That construction is not a valid prognostic score because every score is evaluated at its own observed response time. Even identical survival curves decline with time, so a subject with long follow-up can receive a smaller survival value merely because their curve was evaluated later. The outcome would therefore enter the construction of the predictor being assessed.</p>
-<p>The same problem applies to a proposed score that subtracts survival under a baseline-hazard-only model from survival under the full model at each subject’s own <span class="math inline">R_i</span>. Such a difference can be scientifically interesting as a description of the fitted association contribution, but it is response-dependent and is not an outcome-independent discrimination score.</p>
-<p>If the purpose is to quantify the incremental discrimination supplied by <span class="math inline">\mathbf X_i</span> or <span class="math inline">\mathcal H_i</span>, the defensible approach is to fit a pre-specified reduced model and a full model, calculate the same concordance estimand for both on held-out subjects, and report their difference with an appropriate resampling or posterior uncertainty analysis.</p>
-</section><section class="level2" data-number="3.3"><h3 data-number="3.3" id="comparable-pairs-and-censoring">
-<span class="header-section-number">3.3</span> Comparable pairs and censoring<a class="anchor" aria-label="anchor" href="#comparable-pairs-and-censoring"></a>
+</section><section class="level2" data-number="3.2"><h3 data-number="3.2" id="comparable-pairs-and-censoring">
+<span class="header-section-number">3.2</span> Comparable pairs and censoring<a class="anchor" aria-label="anchor" href="#comparable-pairs-and-censoring"></a>
 </h3>
 <p>Censoring does not imply long survival. It only limits which temporal orderings are observed. JoiNMe follows the risk-set convention described for <a href="https://stat.ethz.ch/R-manual/R-devel/library/survival/html/concordance.html" class="external-link"><code>survival::concordance()</code></a>. For an event of interest at residual time <span class="math inline">r</span>:</p>
 <table class="table caption-top">
@@ -323,8 +317,8 @@ c_{ij}
 </table>
 <p>This pairwise rule uses a prematurely censored subject whenever its observed history is sufficient for a particular earlier comparison, and excludes it after its censoring time. It neither declares the subject a late survivor nor imputes an unobserved failure order.</p>
 <p>The interpretation relies on the censoring assumptions appropriate to the chosen weighting method. Informative loss to follow-up that remains unexplained by the fitted data can bias discrimination estimates. No comparison rule alone can identify the ordering of two latent event times after observation has ceased.</p>
-</section><section class="level2" data-number="3.4"><h3 data-number="3.4" id="event-time-weighting">
-<span class="header-section-number">3.4</span> Event-time weighting<a class="anchor" aria-label="anchor" href="#event-time-weighting"></a>
+</section><section class="level2" data-number="3.3"><h3 data-number="3.3" id="event-time-weighting">
+<span class="header-section-number">3.3</span> Event-time weighting<a class="anchor" aria-label="anchor" href="#event-time-weighting"></a>
 </h3>
 <p>The <code>type_weights</code> argument selects an event-time weighting schedule. JoiNMe asks <code>survival::concordance(..., ranks = TRUE)</code> for its documented event-time weights and divides each event weight by the number at risk at that event time. This produces the pair weight <span class="math inline">a_i</span> used in the survival-curve comparisons.</p>
 <table class="table caption-top">
@@ -365,8 +359,8 @@ c_{ij}
 </table>
 <p>For <code>"n"</code>, the event-time weight returned by <code>survival</code> equals the risk-set size, so division by that size gives unit weight to every pair. The other options change the relative contribution of event times.</p>
 <p>The <code>"n/G2"</code> option reuses the event-time weighting associated with Uno’s concordance in <code>survival</code>; the subject scores in JoiNMe remain the time-dependent survival-curve comparisons defined above. It should therefore be described as an Uno-style censoring-weighted Antolini comparison, not as a claim that the implementation is identical in every respect to a conventional static-score Uno estimator.</p>
-</section><section class="level2" data-number="3.5"><h3 data-number="3.5" id="choice-of-prediction-origin">
-<span class="header-section-number">3.5</span> Choice of prediction origin<a class="anchor" aria-label="anchor" href="#choice-of-prediction-origin"></a>
+</section><section class="level2" data-number="3.4"><h3 data-number="3.4" id="choice-of-prediction-origin">
+<span class="header-section-number">3.4</span> Choice of prediction origin<a class="anchor" aria-label="anchor" href="#choice-of-prediction-origin"></a>
 </h3>
 <p>By default, <code>concordance(fit)</code> chooses</p>
 <p><span class="math display">
@@ -403,8 +397,8 @@ T_{0i}
 </details>
 </div>
 <p>Subject-specific origins are appropriate only when the scientific target is remaining time from those origins. They should not be presented as concordance on a common absolute study-time scale.</p>
-</section><section class="level2" data-number="3.6"><h3 data-number="3.6" id="cause-specific-analysis-and-competing-events">
-<span class="header-section-number">3.6</span> Cause-specific analysis and competing events<a class="anchor" aria-label="anchor" href="#cause-specific-analysis-and-competing-events"></a>
+</section><section class="level2" data-number="3.5"><h3 data-number="3.5" id="cause-specific-analysis-and-competing-events">
+<span class="header-section-number">3.5</span> Cause-specific analysis and competing events<a class="anchor" aria-label="anchor" href="#cause-specific-analysis-and-competing-events"></a>
 </h3>
 <p>The <code>cause</code> argument identifies the failure type that generates comparable event pairs. Other event causes are treated as censoring at their observed times. They may serve as comparators before their competing event, but not after it.</p>
 <p>The current <code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> result used as the score is the fitted event-free <code>Survival</code>, which reflects the complete fitted event process. Consequently, with competing risks, the pair construction is cause-specific but its ranking quantity is overall event-free survival. This is transparent and reproducible, but it is not the same estimand as a cause-specific cumulative-incidence concordance. A scientific question about cumulative incidence in the presence of competing risks requires a dedicated competing-risk discrimination estimator.</p>
@@ -857,7 +851,7 @@ n_1n_0
 </h3>
 <div class="cell">
 <details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb7"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">validation_c</span> <span class="op">&lt;-</span> <span class="fu">concordance</span><span class="op">(</span></span>
+<code class="sourceCode R"><span><span class="va">cIndex</span> <span class="op">&lt;-</span> <span class="fu">concordance</span><span class="op">(</span></span>
 <span>  <span class="va">fit</span>,</span>
 <span>  newdataLong <span class="op">=</span> <span class="va">validation_long</span>,</span>
 <span>  newdataEvent <span class="op">=</span> <span class="va">validation_event</span>,</span>
