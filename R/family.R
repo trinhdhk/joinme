@@ -94,6 +94,22 @@ joinme_family <- function(name, link = NULL, inv_link = NULL) {
 #' @export
 jm_family <- joinme_family
 
+#' Method for printing a `JoiNMe_family_spec` object
+#' 
+#' @description Print out the spec details of a `JoiNMe_family_spec` object.
+#' @param x An object of class `JoiNMe_family_spec`.
+#' @param ... Additional arguments (currently unused).
+#' @return Invisibly returns the input object `x`.
+#' @method print JoiNMe_family_spec
+#' @export
+print.JoiNMe_family_spec <- function(x, ...){
+  cat('Joint Nested Mixed-effects Longitudinal Family Specification:\n')
+  cat('  Family: ', x$family, '\n', sep = '')
+  cat('  Link: ', x$link, '\n', sep = '')
+  cat('  Inverse Link: ', x$inv_link, '\n', sep = '')
+  invisible(x)
+}
+
 #' Normalise a named forward link
 #'
 #' @param link Character scalar containing a supported forward-link name or
