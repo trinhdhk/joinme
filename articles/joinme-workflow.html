@@ -273,8 +273,8 @@
 <span><span class="co">#&gt; </span></span>
 <span><span class="co">#&gt; SAMPLING FOR MODEL 'joinme_fit_threading' NOW (CHAIN 1).</span></span>
 <span><span class="co">#&gt; Chain 1: </span></span>
-<span><span class="co">#&gt; Chain 1: Gradient evaluation took 0.006726 seconds</span></span>
-<span><span class="co">#&gt; Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 67.26 seconds.</span></span>
+<span><span class="co">#&gt; Chain 1: Gradient evaluation took 0.005037 seconds</span></span>
+<span><span class="co">#&gt; Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 50.37 seconds.</span></span>
 <span><span class="co">#&gt; Chain 1: Adjust your expectations accordingly!</span></span>
 <span><span class="co">#&gt; Chain 1: </span></span>
 <span><span class="co">#&gt; Chain 1: </span></span>
@@ -291,9 +291,9 @@
 <span><span class="co">#&gt; Chain 1: Iteration: 101 / 200 [ 50%]  (Sampling)</span></span>
 <span><span class="co">#&gt; Chain 1: Iteration: 200 / 200 [100%]  (Sampling)</span></span>
 <span><span class="co">#&gt; Chain 1: </span></span>
-<span><span class="co">#&gt; Chain 1:  Elapsed Time: 49.093 seconds (Warm-up)</span></span>
-<span><span class="co">#&gt; Chain 1:                81.523 seconds (Sampling)</span></span>
-<span><span class="co">#&gt; Chain 1:                130.616 seconds (Total)</span></span>
+<span><span class="co">#&gt; Chain 1:  Elapsed Time: 28.854 seconds (Warm-up)</span></span>
+<span><span class="co">#&gt; Chain 1:                41.992 seconds (Sampling)</span></span>
+<span><span class="co">#&gt; Chain 1:                70.846 seconds (Total)</span></span>
 <span><span class="co">#&gt; Chain 1:</span></span>
 <span></span>
 <span><span class="co"># Counting-process fit with left truncation/time-split covariates:</span></span>
@@ -308,8 +308,8 @@
 <span><span class="co">#&gt; </span></span>
 <span><span class="co">#&gt; SAMPLING FOR MODEL 'joinme_fit_threading' NOW (CHAIN 1).</span></span>
 <span><span class="co">#&gt; Chain 1: </span></span>
-<span><span class="co">#&gt; Chain 1: Gradient evaluation took 0.010781 seconds</span></span>
-<span><span class="co">#&gt; Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 107.81 seconds.</span></span>
+<span><span class="co">#&gt; Chain 1: Gradient evaluation took 0.009364 seconds</span></span>
+<span><span class="co">#&gt; Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 93.64 seconds.</span></span>
 <span><span class="co">#&gt; Chain 1: Adjust your expectations accordingly!</span></span>
 <span><span class="co">#&gt; Chain 1: </span></span>
 <span><span class="co">#&gt; Chain 1: </span></span>
@@ -326,9 +326,9 @@
 <span><span class="co">#&gt; Chain 1: Iteration: 101 / 200 [ 50%]  (Sampling)</span></span>
 <span><span class="co">#&gt; Chain 1: Iteration: 200 / 200 [100%]  (Sampling)</span></span>
 <span><span class="co">#&gt; Chain 1: </span></span>
-<span><span class="co">#&gt; Chain 1:  Elapsed Time: 176.073 seconds (Warm-up)</span></span>
-<span><span class="co">#&gt; Chain 1:                109.452 seconds (Sampling)</span></span>
-<span><span class="co">#&gt; Chain 1:                285.525 seconds (Total)</span></span>
+<span><span class="co">#&gt; Chain 1:  Elapsed Time: 82.625 seconds (Warm-up)</span></span>
+<span><span class="co">#&gt; Chain 1:                55.073 seconds (Sampling)</span></span>
+<span><span class="co">#&gt; Chain 1:                137.698 seconds (Total)</span></span>
 <span><span class="co">#&gt; Chain 1:</span></span></code></pre></div>
 </details>
 </div>
@@ -357,11 +357,11 @@
 <span>  <span class="fu">default_convergence_measures</span><span class="op">(</span><span class="op">)</span></span>
 <span><span class="op">)</span></span>
 <span><span class="co">#&gt; # A tibble: 3 × 10</span></span>
-<span><span class="co">#&gt;   variable     mean median    sd    mad      q5   q95  rhat ess_bulk ess_tail</span></span>
-<span><span class="co">#&gt;   &lt;chr&gt;       &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt;   &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;</span></span>
-<span><span class="co">#&gt; 1 (Intercept) 1.03  1.16   0.575 0.539  0.110   1.83  1.01     102.      57.6</span></span>
-<span><span class="co">#&gt; 2 time        0.253 0.264  0.111 0.131  0.0839  0.431 0.998     87.9     71.3</span></span>
-<span><span class="co">#&gt; 3 cv_total    0.149 0.0804 0.234 0.0876 0.00460 0.425 1.01      51.5     76.6</span></span></code></pre></div>
+<span><span class="co">#&gt;   variable     mean median    sd   mad     q5   q95  rhat ess_bulk ess_tail</span></span>
+<span><span class="co">#&gt;   &lt;chr&gt;       &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;</span></span>
+<span><span class="co">#&gt; 1 (Intercept) 1.08   1.06  0.498 0.418 0.270  1.93  1.02      96.4     74.7</span></span>
+<span><span class="co">#&gt; 2 time        0.288  0.285 0.110 0.102 0.103  0.472 1.04      85.1     73.6</span></span>
+<span><span class="co">#&gt; 3 cv_total    0.175  0.118 0.235 0.122 0.0158 0.447 0.990     67.4     52.5</span></span></code></pre></div>
 </details>
 </div>
 </section><section class="level2" data-number="5.2"><h3 data-number="5.2" id="traceplots">
@@ -427,11 +427,11 @@
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">preds</span><span class="op">$</span><span class="va">predictions</span><span class="op">$</span><span class="va">survival</span><span class="op">)</span></span>
 <span><span class="co">#&gt;     id     time  Survival    Median  Est.Error       L95       U95</span></span>
 <span><span class="co">#&gt; 7.1  7 4.000000 1.0000000 1.0000000 0.00000000 1.0000000 1.0000000</span></span>
-<span><span class="co">#&gt; 7.2  7 4.137931 0.9813482 0.9848616 0.01081059 0.9482546 0.9914852</span></span>
-<span><span class="co">#&gt; 7.3  7 4.275862 0.9629472 0.9697253 0.02141386 0.8966224 0.9830937</span></span>
-<span><span class="co">#&gt; 7.4  7 4.413793 0.9447983 0.9546153 0.03178993 0.8453193 0.9748782</span></span>
-<span><span class="co">#&gt; 7.5  7 4.551724 0.9269025 0.9395565 0.04191772 0.7951691 0.9666450</span></span>
-<span><span class="co">#&gt; 7.6  7 4.689655 0.9092609 0.9246760 0.05177424 0.7461024 0.9583546</span></span></code></pre></div>
+<span><span class="co">#&gt; 7.2  7 4.137931 0.9804321 0.9828219 0.01082606 0.9532528 0.9947695</span></span>
+<span><span class="co">#&gt; 7.3  7 4.275862 0.9611274 0.9657937 0.02129683 0.9083663 0.9896266</span></span>
+<span><span class="co">#&gt; 7.4  7 4.413793 0.9420776 0.9486777 0.03142971 0.8647916 0.9845616</span></span>
+<span><span class="co">#&gt; 7.5  7 4.551724 0.9232745 0.9318936 0.04124034 0.8232536 0.9795635</span></span>
+<span><span class="co">#&gt; 7.6  7 4.689655 0.9047106 0.9155442 0.05074103 0.7833432 0.9746200</span></span></code></pre></div>
 </details>
 </div>
 <p><code>concordance(fit)</code> is a follow-up-wide survival-curve concordance rather than an AUC at a selected horizon. By default, residual follow-up for subject (i) starts at their final longitudinal measurement strictly before the observed event or censoring time, (T_{0i}). For an event at residual time (r_i=T_i-T_{0i}), the event subject is compared with every subject known to survive longer. The pair is concordant when (S_i(r_i)&lt;S_j(r_i)): both conditional survival curves are evaluated at the same earlier event time. This is the survival-curve concordance proposed by Antolini and colleagues and does not use the outcome time to construct a fixed subject score.</p>
@@ -471,12 +471,12 @@
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">renamed_draws</span><span class="op">)</span></span>
 <span><span class="co">#&gt; # A draws_df: 6 iterations, 1 chains, and 2 variables</span></span>
 <span><span class="co">#&gt;   time cv_total</span></span>
-<span><span class="co">#&gt; 1 0.32   0.0079</span></span>
-<span><span class="co">#&gt; 2 0.35   0.0704</span></span>
-<span><span class="co">#&gt; 3 0.29   0.0444</span></span>
-<span><span class="co">#&gt; 4 0.37   0.1085</span></span>
-<span><span class="co">#&gt; 5 0.28   2.0446</span></span>
-<span><span class="co">#&gt; 6 0.44   0.0792</span></span>
+<span><span class="co">#&gt; 1 0.29    0.193</span></span>
+<span><span class="co">#&gt; 2 0.44    0.076</span></span>
+<span><span class="co">#&gt; 3 0.15    0.031</span></span>
+<span><span class="co">#&gt; 4 0.13    0.212</span></span>
+<span><span class="co">#&gt; 5 0.36    0.127</span></span>
+<span><span class="co">#&gt; 6 0.27    0.131</span></span>
 <span><span class="co">#&gt; # ... hidden reserved variables {'.chain', '.iteration', '.draw'}</span></span>
 <span></span>
 <span><span class="fu"><a href="https://trinhdhk.github.io/joinme/reference/mcmc_plot.html">mcmc_plot</a></span><span class="op">(</span><span class="va">fit</span>, variable <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"time"</span>, <span class="st">"cv_total"</span><span class="op">)</span>, type <span class="op">=</span> <span class="st">"intervals"</span><span class="op">)</span></span></code></pre></div>
