@@ -25,7 +25,15 @@ flowchart LR
   K --> M[JoiNMeMixDynPred]
 ```
 
-`joinme()` is the ordinary joint-model entry point. `joinme_mix()` is a
+`joinme()` is the ordinary model entry point. It accepts either a complete
+survival formula--data pair or neither event argument. In the latter case,
+`.longitudinal_only_event_scaffold()` supplies one administrative, event-free
+row per subject and `include_survival = 0` removes every event likelihood
+contribution. This retains a single design and sampling pathway whilst the
+returned configuration records that only the nested longitudinal model was
+fitted.
+
+`joinme_mix()` is a
 separate public entry point because a mixture changes the prior distribution,
 posterior output and interpretation. It nevertheless delegates ordinary design
 construction and sampling control to `joinme()`. Immediately before
@@ -35,7 +43,7 @@ prediction.
 
 `simulate_joinme()` and `simulate_joinme_mix()` form the corresponding
 generative pair. The mixture simulator has the formula, family, marker-weight
-and clustering arguments used by `joinme_mix()`, plus the ordinary simulator's
+and class arguments used by `joinme_mix()`, plus the ordinary simulator's
 generative coefficient controls. It delegates to `simulate_joinme()` through a
 private mixture specification. Thus there is one implementation of response
 sampling, distributional regression, censoring, delayed entry, baseline
@@ -47,7 +55,7 @@ from `joinme_mix()`. Ordinary fits receive:
 
 ```text
 use_mixture = 0
-n_clusters       = 1
+n_classes       = 1
 K_mix       = 0
 ```
 
@@ -60,6 +68,8 @@ selected programme, so mixture arrays are absent from ordinary Stan input.
 ### `R/fit.R`
 
 - validates ordinary fit controls;
+- distinguishes joint and longitudinal-only fits and constructs the neutral
+  event scaffold when required;
 - calls `joinme_standata()`;
 - identifies the Stan programme and engine;
 - constructs `id_start`, `id_end`, and `grainsize`;
@@ -76,6 +86,8 @@ while ordinary fitting discards those fields before sampling.
 - builds observation, event and quadrature designs;
 - builds covariance-regression and distributional-regression data;
 - resolves association channels and marker-weight sets;
+- records `include_survival` and zeros event integration limits, indicators,
+  and censoring codes for longitudinal-only fits;
 - appends `.build_mixture_standata()` output.
 
 For a longitudinal-only mixture, the outer builder sets event indicators and
@@ -86,13 +98,13 @@ integration times to zero after all common designs have been created.
 - defines and documents `joinme_mix()`;
 - validates paired event inputs;
 - builds a likelihood-neutral event scaffold when survival is absent;
-- validates the four public clustering types;
+- validates the four public class types;
 - resolves progress-plane coordinate indices;
 - lays selected coordinates into one common component vector;
 - builds component priors and R reporting metadata;
 - marks the common Stan-data holder so sampling returns `JoiNMeMixFit`.
 
-`.canonical_cluster_types()` deliberately accepts only:
+`.canonical_class_types()` deliberately accepts only:
 
 ```text
 subject
@@ -105,8 +117,8 @@ vcov
 
 - defines and documents `simulate_joinme_mix()`;
 - preserves the ordinary `simulate_joinme()` call syntax;
-- validates `n_clusters`, `formulaCluster`, `cluster_type`,
-  `cluster_dimensions`, and `cluster_ordering` through the fitting helpers;
+- validates `n_classes`, `formulaClass`, `class_type`,
+  `class_dimensions`, and `class_ordering` through the fitting helpers;
 - reuses `.build_mixture_standata()` to obtain the exact fitting coordinate
   layout;
 - resolves fixed generative class probabilities, regression coefficients,
@@ -130,6 +142,15 @@ subject          -> z_id before the L_u covariance factor
 marker           -> z_marker before the L_v covariance factor
 corr/vcov        -> selected canonical z_cov coordinates before covariance regression
 ```
+
+For covariance regression, coordinate \(m\) corresponds to one packed
+lower-triangular entry. Stan stores `lambda_L` as a vector with one
+non-negative scalar `lambda_L[m]` per coordinate. Its action is diagonal:
+`diag_matrix(lambda_L) * z_L[i]`. It is not a dense loading matrix and cannot
+move latent coordinate \(m\) into another covariance coordinate. Diagonal
+coordinates are subsequently mapped through the selected positive link;
+off-diagonal coordinates are mapped through `tanh` and the row-wise
+partial-correlation reconstruction.
 
 No response or event likelihood is duplicated. The simulator exposes
 `truth$mixture$standardised_draws` because this is the scale on which Stan
@@ -161,12 +182,39 @@ Its existing `sample()` method chooses the fitted subclass after sampling.
 - inherited prediction wrapped as `JoiNMeMixDynPred`;
 - class-centre and marginal longitudinal plots;
 - class-specific covariance-regression plots;
-- class-specific association trajectories;
+- class-specific association trajectories and compact posterior association
+  tables only when the fitted class block changes that association source;
 - survival-method guards for longitudinal-only fits.
 
 Methods which need no mixture-specific calculation continue to dispatch to the
 parent class. This includes posterior predictive checking, draw extraction,
 random-effect summaries, MCMC plots and model diagnostics.
+
+The augmented summary retains unique Stan variable names as internal keys and
+uses scientific labels only for display. This separation is essential because
+the same covariate and random-effect coordinate labels recur in several
+classes. A positional one-to-one match attaches R-hat and effective sample
+sizes to each variable; joining on repeated display labels would multiply rows
+and incorrectly repeat the first class estimate.
+
+Mixture output is divided into baseline probabilities, standardised latent
+locations, standardised within-class scales, class-membership regression, and
+a compact posterior distribution of expected allocation counts. Means,
+medians, standard deviations and both central interval limits occupy distinct
+numeric columns. Full unit-by-class probabilities remain the responsibility
+of `posterior_class()`. The hard maximum-probability allocation count is
+retained beside each soft count distribution. Headline
+diagnostic extrema include all sampler variables, and displayed-parameter
+threshold counts include the mixture tables.
+
+`diagnosis.JoiNMeMixFit()` additionally reads the retained sampler-state array
+from either backend. It reports E-BFMI, energy lag-one correlation, tree depth,
+leapfrog count, acceptance and step size by chain. It then aligns posterior and
+sampler iterations to calculate exploratory energy associations. A separate
+scale-trade-off table compares the logarithmic geometric mean of each selected
+ordinary scale (`tau_u`, `tau_v`, or `lambda_L`) with the corresponding
+`mix_scale` block. This makes the unanchored likelihood ridge visible without
+changing the fitted statistical model.
 
 ## Statistical data flow
 
@@ -219,7 +267,7 @@ ordinary Student-\(t_6\), Laplace or Normal shrinkage draw.
 The truth record contains:
 
 ```text
-n_clusters
+n_classes
 levels, dimensions, starts, total_dimension
 ordering, ordered_location_coordinate
 probability, coefficient, probability_by_unit
@@ -254,8 +302,8 @@ An inactive block has dimension zero, an empty index array, and start zero.
 Suppose the request is:
 
 ```r
-cluster_type = c("subject", "vcov")
-cluster_dimensions = list(
+class_type = c("subject", "vcov")
+class_dimensions = list(
   subject = c(1, 2),
   vcov = c(1, 3)
 )
@@ -344,10 +392,10 @@ flowchart TD
 
 `helper/data/fit_mixture_data.stan` declares:
 
-- `use_mixture`, `n_clusters`, and `K_mix`;
-- one flag, dimension, index array and start per clusterable block;
+- `use_mixture`, `n_classes`, and `K_mix`;
+- one flag, dimension, index array and start per class-eligible block;
 - `mix_probability_prior`;
-- subject and marker `formulaCluster` design matrices; and
+- subject and marker `formulaClass` design matrices; and
 - the class-regression prior scale.
 
 ### Mixture parameters
@@ -355,12 +403,12 @@ flowchart TD
 `helper/parameters/joinme_fit_mixture.stan` declares:
 
 ```stan
-simplex[n_clusters] mix_probability;
+simplex[n_classes] mix_probability;
 array[mix_ordered_location_coordinate > 0 ? 1 : 0]
-  ordered[n_clusters] mix_location_ordered;
-matrix[n_clusters, K_mix - (mix_ordered_location_coordinate > 0 ? 1 : 0)]
+  ordered[n_classes] mix_location_ordered;
+matrix[n_classes, K_mix - (mix_ordered_location_coordinate > 0 ? 1 : 0)]
   mix_location_unordered;
-matrix<lower=1e-8>[n_clusters, K_mix] mix_scale;
+matrix<lower=1e-8>[n_classes, K_mix] mix_scale;
 vector[P_class_subject] mix_class_coefficient_subject;
 vector[P_class_marker] mix_class_coefficient_marker;
 ```
@@ -375,7 +423,7 @@ This parameter module is never included by the ordinary fitting programme.
 - the matching ordinary marker-weight density used as the denominator of the
   density-ratio correction; and
 - compact shared or class-specific multinomial-logit calculations for
-  `formulaCluster`.
+  `formulaClass`.
 
 The same component evaluator is used in the model and generated quantities.
 
@@ -478,14 +526,14 @@ Class-specific R plots mirror this structure:
 
 ## Longitudinal plotting estimands
 
-`mean_per_class` uses component locations for clustered blocks that enter the
+`mean_per_class` uses component locations for class-specific blocks that enter the
 longitudinal location. It is a conditional class-centre curve.
 
 `marginal_per_class` samples from the fitted within-component location--scale
 distribution before applying each marker's inverse link. It is therefore on the
 response scale and retains posterior and within-class uncertainty.
 
-Covariance clustering primarily alters dispersion and covariance; its dedicated curve is
+Covariance classes primarily alter dispersion and covariance; the dedicated curve is
 `type = "covariance_class"`.
 
 ## Prediction and validation inheritance
@@ -500,11 +548,11 @@ implementation unless a class-specific calculation is needed:
 | `predict()` | fitted component priors propagated to new latent effects; mixture subclass retained |
 | `pp_check()` | inherited longitudinal check |
 | `mcmc_plot()` | inherited, mixture variables selectable |
-| `diagnosis()` | inherited sampler and model diagnostics |
+| `diagnosis()` | inherited diagnostics plus chain-specific energy, scale-trade-off and energy-association tables |
 | `concordance()` | inherited for joint fits; guarded for longitudinal-only |
 | `tvROC()`, `tvAUC()` | inherited for joint fits; guarded for longitudinal-only |
-| `assoc()` | ordinary coefficient output plus trajectory option |
-| `posterior_class()` | fitted-unit and conditional new-unit allocation probabilities |
+| `assoc()` | common coefficient output plus relevant class-specific contribution tables and a dense trajectory option |
+| `posterior_class()` | fitted-unit and conditional new-unit allocation probabilities, compact printing and interval plotting |
 
 ### Dynamic prediction and latent classes
 
@@ -534,7 +582,7 @@ prediction distribution.
 
 Future changes should preserve the following boundaries.
 
-1. Add new clusterable blocks in `.build_mixture_standata()` and the two
+1. Add new class-eligible blocks in `.build_mixture_standata()` and the two
    mixture Stan includes, not inside the likelihood reducer.
 2. Keep class allocations marginalised.
 3. Keep generated probability calculations algebraically identical to the

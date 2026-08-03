@@ -105,7 +105,11 @@
     alpha_L ~ student_t(6, 0, vcov_lp_scale);
     for (m in 1 : M_cov) 
       beta_L[m] ~ student_t(6, 0, vcov_lp_scale);
-    // lambda_L is constrained nonnegative; the sign alias is absorbed into z_L.
+    // Each lambda_L[m] is the residual standard deviation on one untransformed
+    // covariance-predictor coordinate because ordinary z_L[i][m] is standard
+    // Normal. The vector acts element-wise, equivalently through a diagonal
+    // loading matrix. It is constrained nonnegative because its sign can
+    // always be absorbed into the symmetric latent z_L coordinate.
     lambda_L ~ student_t(6, 0, vcov_lp_scale);
     for (i in 1 : n_id)
       target += re_weight_L[i] * std_normal_lpdf(z_L[i]);

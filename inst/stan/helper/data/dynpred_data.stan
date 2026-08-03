@@ -135,7 +135,7 @@
   int<lower=0> num_unique_cov_entries;         // unique elements in L_i
   array[n_draws] vector[num_unique_cov_entries] alpha_vcov_reg; // intercepts
   array[n_draws] vector[num_unique_cov_entries * n_cov_vcov] beta_vcov_reg_flat; // flattened slopes
-  array[n_draws] vector[num_unique_cov_entries] lambda_vcov_reg; // effective loadings
+  array[n_draws] vector[num_unique_cov_entries] lambda_vcov_reg; // one nonnegative scalar latent-heterogeneity loading per packed covariance coordinate and retained fit draw
 
   int<lower=1> K_event;                        // number of competing risks
   array[n_draws, K_event] vector[n_basehaz_basis] bs_gamma_c; // spline coeffs

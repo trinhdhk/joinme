@@ -2,14 +2,17 @@
 #'
 #' @description
 #' Returns posterior class probabilities for the natural allocation domains of
-#' a [joinme_mix()] model. Subject, correlation and covariance clustering are
-#' reported by subject; marker clustering is reported by marker.
+#' a [joinme_mix()] model. Subject, correlation and covariance classes are
+#' reported by subject; marker classes are reported by marker.
 #'
 #' @param object A `JoiNMeMixFit` object.
 #' @param draws Optional number of posterior draws.
 #' @param seed Seed used for reproducible posterior subsetting.
-#' @param summary If `TRUE`, return posterior means, interval bounds, and the
-#'   maximum-probability class.  If `FALSE`, return draw matrices.
+#' @param digits Number of decimal places used for posterior summaries.
+#' @param summary If `TRUE`, return the posterior mean (`Estimate`), posterior
+#'   standard deviation (`Est.Error`), interval bounds, available sampling
+#'   diagnostics, and the maximum-probability class. If `FALSE`, return draw
+#'   matrices.
 #'
 #' @return A named list with `subject` and/or `marker` entries.
 #' @export
@@ -23,15 +26,23 @@ posterior_class.JoiNMeMixFit <- function(
   object,
   draws = NULL,
   seed = 1,
+  digits = 3,
   summary = TRUE
 ) {
   if (!inherits(object, "JoiNMeMixFit")) {
     cli::cli_abort("{.arg object} must be a JoiNMeMixFit object.")
   }
   mixture <- object$mixture %||% object$config$mixture %||% list()
-  number_classes <- as.integer(mixture$n_clusters %||% 0L)
+  number_classes <- as.integer(mixture$n_classes %||% 0L)
   if (number_classes < 2L) {
     cli::cli_abort("The fitted mixture metadata is unavailable.")
+  }
+  if (
+    length(digits) != 1L ||
+      !is.finite(digits) ||
+      digits < 0
+  ) {
+    cli::cli_abort("{.arg digits} must be a non-negative number.")
   }
 
   allocation_domains <- mixture$allocation_domains %||% list()
@@ -45,6 +56,7 @@ posterior_class.JoiNMeMixFit <- function(
       number_classes = number_classes,
       draws = draws,
       seed = seed,
+      digits = digits,
       summary = summary
     )
   }
@@ -60,14 +72,34 @@ posterior_class.JoiNMeMixFit <- function(
       number_classes = number_classes,
       draws = draws,
       seed = seed,
+      digits = digits,
       summary = summary
     )
   }
+  available_draws <- tryCatch(
+    posterior::ndraws(.get_draws_obj(object$fit)),
+    error = function(error) NA_integer_
+  ) # total post-warm-up draws stored by the fitted backend
+  retained_draws <- if (
+    is.null(draws) || !is.finite(draws)
+  ) {
+    available_draws
+  } else {
+    min(as.integer(draws), available_draws, na.rm = TRUE)
+  } # posterior draws represented in the returned probabilities
   structure(
     output,
     class = c("JoiNMePosteriorClass", "list"),
     mixture = mixture,
-    summary = isTRUE(summary)
+    summary = isTRUE(summary),
+    metadata = list(
+      summary = isTRUE(summary),
+      draws = retained_draws,
+      digits = as.integer(digits),
+      n_classes = number_classes,
+      class_type = mixture$class_type %||% character(0),
+      source = "fitted model"
+    )
   )
 }
 
@@ -91,21 +123,29 @@ posterior_class.JoiNMeMixDynPred <- function(
   object,
   draws = NULL,
   seed = 1,
+  digits = 3,
   summary = TRUE
 ) {
   conditional_draws <- object$draws$posterior_class %||% list()
   if (length(conditional_draws) == 0L) {
     cli::cli_abort(c(
       x = "Conditional class probabilities are unavailable.",
-      i = "The parent mixture may contain no dynamically sampled clustered block."
+      i = "The parent mixture may contain no dynamically sampled class-specific block."
     ))
   }
 
   number_classes <- as.integer(
-    (object$mixture %||% object$metadata$mixture)$n_clusters %||% 0L
+    (object$mixture %||% object$metadata$mixture)$n_classes %||% 0L
   )
   if (number_classes < 2L) {
     cli::cli_abort("The prediction's mixture metadata is unavailable.")
+  }
+  if (
+    length(digits) != 1L ||
+      !is.finite(digits) ||
+      digits < 0
+  ) {
+    cli::cli_abort("{.arg digits} must be a non-negative number.")
   }
 
   subset_first_dimension <- function(values, subject_offset) {
@@ -177,11 +217,31 @@ posterior_class.JoiNMeMixDynPred <- function(
     if (length(raw_marker) > 0L) {
       raw_output$marker <- raw_marker
     }
+    represented_draws <- NA_integer_ # retained conditional draws in the raw result
+    if (length(selected_draws) > 0L) {
+      first_subject_draws <- Filter(
+        Negate(is.null),
+        unname(selected_draws[[1L]])
+      ) # available allocation-domain arrays for the first predicted subject
+      if (length(first_subject_draws) > 0L) {
+        represented_draws <- dim(first_subject_draws[[1L]])[1L]
+      }
+    }
     return(structure(
       raw_output,
       class = c("JoiNMePosteriorClass", "list"),
       mixture = object$mixture %||% object$metadata$mixture,
-      summary = FALSE
+      summary = FALSE,
+      metadata = list(
+        summary = FALSE,
+        draws = represented_draws,
+        digits = as.integer(digits),
+        n_classes = number_classes,
+        class_type = (
+          object$mixture %||% object$metadata$mixture
+        )$class_type %||% character(0),
+        source = "dynamic prediction"
+      )
     ))
   }
 
@@ -208,9 +268,13 @@ posterior_class.JoiNMeMixDynPred <- function(
         subject_rows[[length(subject_rows) + 1L]] <- data.frame(
           unit = subject_name,
           class = paste0("class_", group),
-          probability = mean(values, na.rm = TRUE),
-          lower = bounds[1L],
-          upper = bounds[2L],
+          Estimate = mean(values, na.rm = TRUE),
+          Est.Error = stats::sd(values, na.rm = TRUE),
+          Q2.5 = bounds[1L],
+          Q97.5 = bounds[2L],
+          Rhat = NA_real_,
+          ess_bulk = NA_real_,
+          ess_tail = NA_real_,
           assigned_class = paste0("class_", assigned_class),
           stringsAsFactors = FALSE
         )
@@ -242,9 +306,13 @@ posterior_class.JoiNMeMixDynPred <- function(
             subject = subject_name,
             unit = marker_labels[marker_index],
             class = paste0("class_", group),
-            probability = mean(values, na.rm = TRUE),
-            lower = bounds[1L],
-            upper = bounds[2L],
+            Estimate = mean(values, na.rm = TRUE),
+            Est.Error = stats::sd(values, na.rm = TRUE),
+            Q2.5 = bounds[1L],
+            Q97.5 = bounds[2L],
+            Rhat = NA_real_,
+            ess_bulk = NA_real_,
+            ess_tail = NA_real_,
             assigned_class = paste0("class_", assigned_class),
             stringsAsFactors = FALSE
           )
@@ -255,16 +323,46 @@ posterior_class.JoiNMeMixDynPred <- function(
 
   output <- list()
   if (length(subject_rows) > 0L) {
-    output$subject <- do.call(rbind, subject_rows)
+    output$subject <- .round_summary_table(
+      do.call(rbind, subject_rows),
+      digits = digits
+    )
   }
   if (length(marker_rows) > 0L) {
-    output$marker <- do.call(rbind, marker_rows)
+    output$marker <- .round_summary_table(
+      do.call(rbind, marker_rows),
+      digits = digits
+    )
   }
+  represented_draws <- if (length(selected_draws) > 0L) {
+    first_subject_draws <- Filter(
+      Negate(is.null),
+      unname(selected_draws[[1L]])
+    ) # available allocation-domain arrays for the first predicted subject
+    first_domain <- if (length(first_subject_draws) > 0L) {
+      first_subject_draws[[1L]]
+    } else {
+      NULL
+    } # first available probability array used only to report retained draws
+    if (is.null(first_domain)) NA_integer_ else dim(first_domain)[1L]
+  } else {
+    NA_integer_
+  } # retained prediction draws represented in the membership summaries
   structure(
     output,
     class = c("JoiNMePosteriorClass", "list"),
     mixture = object$mixture %||% object$metadata$mixture,
-    summary = TRUE
+    summary = TRUE,
+    metadata = list(
+      summary = TRUE,
+      draws = represented_draws,
+      digits = as.integer(digits),
+      n_classes = number_classes,
+      class_type = (
+        object$mixture %||% object$metadata$mixture
+      )$class_type %||% character(0),
+      source = "dynamic prediction"
+    )
   )
 }
 
@@ -280,6 +378,7 @@ posterior_class.JoiNMeMixDynPred <- function(
   number_classes,
   draws,
   seed,
+  digits,
   summary
 ) {
   variables <- as.vector(outer(
@@ -297,15 +396,26 @@ posterior_class.JoiNMeMixDynPred <- function(
       )
     }
   ))
-  probability_draws <- .get_draws_matrix(
+  if (!isTRUE(summary)) {
+    return(.get_draws_matrix(
+      object$fit,
+      variables = variables,
+      draws = draws,
+      seed = seed
+    ))
+  }
+
+  probability_draws <- .get_draws_array(
     object$fit,
     variables = variables,
     draws = draws,
     seed = seed
-  )
-  if (!isTRUE(summary)) {
-    return(probability_draws)
-  }
+  ) # iteration-by-chain draws retain the structure needed for R-hat and ESS
+  probability_summary <- .assoc_summary_from_draw_array(
+    probability_draws,
+    term_labels = variables,
+    digits = digits
+  ) # one diagnostic-aware summary row for every unit-by-class probability
 
   rows <- vector("list", number_units * number_classes)
   row_position <- 1L
@@ -325,16 +435,21 @@ posterior_class.JoiNMeMixDynPred <- function(
         group,
         "]"
       )
-      values <- as.numeric(probability_draws[, variable])
-      posterior_means[unit, group] <- mean(values)
-      rows[[row_position]] <- data.frame(
+      summary_position <- match(
+        variable,
+        probability_summary$term
+      ) # exact Stan generated-quantity row for this allocation probability
+      probability_row <- probability_summary[
+        summary_position,
+        setdiff(names(probability_summary), "term"),
+        drop = FALSE
+      ]
+      posterior_means[unit, group] <- probability_row$Estimate
+      rows[[row_position]] <- cbind(data.frame(
         unit = as.character(unit_labels[unit]),
         class = paste0("class_", group),
-        probability = mean(values),
-        lower = stats::quantile(values, 0.025, names = FALSE),
-        upper = stats::quantile(values, 0.975, names = FALSE),
         stringsAsFactors = FALSE
-      )
+      ), probability_row)
       row_position <- row_position + 1L
     }
   }
@@ -344,16 +459,88 @@ posterior_class.JoiNMeMixDynPred <- function(
     "class_",
     maximum_class[match(table$unit, unit_labels)]
   )
-  table
+  .round_summary_table(
+    table,
+    digits = digits
+  )
 }
 
+#' Print posterior class probabilities
+#'
+#' @param x A `JoiNMePosteriorClass` object returned by [posterior_class()].
+#' @param max_rows Maximum number of unit-by-class probability rows printed for
+#'   each allocation domain. The returned object always retains the full table.
+#' @param ... Unused.
+#'
+#' @return Invisibly returns `x`.
 #' @export
-print.JoiNMePosteriorClass <- function(x, ...) {
-  .cli_summary_heading("Posterior latent-progress classification", level = 1L)
+print.JoiNMePosteriorClass <- function(x, max_rows = 50L, ...) {
+  metadata <- attr(x, "metadata") %||% list(
+    summary = isTRUE(attr(x, "summary")),
+    n_classes = (attr(x, "mixture") %||% list())$n_classes,
+    class_type = (attr(x, "mixture") %||% list())$class_type
+  ) # presentation metadata retained when the posterior probabilities were built
+  .cli_summary_heading("Posterior class membership", level = 1L)
+  .cli_print_bullets(c(
+    paste0("Source: ", metadata$source %||% "fitted model"),
+    paste0("Classes: ", metadata$n_classes %||% NA_integer_),
+    if (length(metadata$class_type %||% character(0)) > 0L) {
+      paste0(
+        "Class types: ",
+        paste(metadata$class_type, collapse = ", ")
+      )
+    } else {
+      NULL
+    },
+    paste0("Posterior draws: ", metadata$draws %||% NA_integer_),
+    if (isTRUE(metadata$summary)) {
+      "Probabilities use Estimate, Est.Error, Q2.5 and Q97.5; chain diagnostics are reported when available."
+    } else {
+      "Raw posterior probability draws are retained."
+    }
+  ))
   for (domain in names(x)) {
-    .cli_summary_heading(domain, level = 2L)
+    .cli_summary_heading(
+      paste0(tools::toTitleCase(domain), " allocation"),
+      level = 2L
+    )
     if (is.data.frame(x[[domain]])) {
-      .cli_print_table(x[[domain]])
+      domain_table <- x[[domain]] # complete unit-by-class posterior summary
+      allocation_identifiers <- intersect(
+        c("subject", "unit", "assigned_class"),
+        names(domain_table)
+      ) # columns identifying each natural allocation and its modal class
+      if ("assigned_class" %in% allocation_identifiers) {
+        allocation_table <- unique(domain_table[, allocation_identifiers, drop = FALSE])
+        allocation_counts <- as.data.frame(table(
+          allocation_table$assigned_class
+        )) # compact count of maximum-posterior-probability allocations
+        names(allocation_counts) <- c("assigned_class", "units")
+        .cli_print_table_section(
+          "Maximum-probability allocation counts",
+          allocation_counts,
+          level = 3L
+        )
+      }
+      probability_table <- domain_table[, setdiff(
+        names(domain_table),
+        "assigned_class"
+      ), drop = FALSE] # probability summaries without a repeated modal-class column
+      printed_table <- utils::head(
+        probability_table,
+        as.integer(max_rows)
+      ) # concise console view; the full returned object is unchanged
+      .cli_print_table_section(
+        "Unit-by-class probabilities",
+        printed_table,
+        level = 3L
+      )
+      if (nrow(probability_table) > nrow(printed_table)) {
+        .cli_print_bullets(paste0(
+          nrow(probability_table) - nrow(printed_table),
+          " further rows are retained in the returned object."
+        ))
+      }
     } else if (is.list(x[[domain]])) {
       .cli_print_bullets(
         paste0(
@@ -375,11 +562,108 @@ print.JoiNMePosteriorClass <- function(x, ...) {
   invisible(x)
 }
 
+#' Plot posterior class probabilities
+#'
+#' @description
+#' Displays posterior mean class probabilities and their central 95% intervals
+#' with a common colour for each latent class. Subject and marker allocation
+#' domains are returned separately because they have different natural
+#' observational units.
+#'
+#' @param x A summary-form `JoiNMePosteriorClass` object.
+#' @param domain Optional allocation domain, either `"subject"` or `"marker"`.
+#' @param ... Unused.
+#'
+#' @return A ggplot when one domain is requested or available; otherwise a
+#'   named list of ggplots.
+#' @export
+plot.JoiNMePosteriorClass <- function(x, domain = NULL, ...) {
+  metadata <- attr(x, "metadata") %||% list(
+    summary = isTRUE(attr(x, "summary"))
+  ) # membership representation and fitted-class metadata
+  if (!isTRUE(metadata$summary)) {
+    cli::cli_abort(c(
+      x = "Raw class-probability draws cannot be plotted directly.",
+      i = "Call {.fn posterior_class} with {.arg summary = TRUE}."
+    ))
+  }
+  available_domains <- names(x)[vapply(
+    x,
+    is.data.frame,
+    logical(1)
+  )] # allocation domains with plottable posterior summary tables
+  if (!is.null(domain)) {
+    domain <- match.arg(domain, available_domains)
+    available_domains <- domain
+  }
+  if (length(available_domains) == 0L) {
+    cli::cli_abort("No posterior class-probability summary is available.")
+  }
+
+  plots <- lapply(available_domains, function(domain_name) {
+    plot_data <- x[[domain_name]] # full unit-by-class probability summary
+    plot_data$entity <- if ("subject" %in% names(plot_data)) {
+      paste(plot_data$subject, plot_data$unit, sep = ": ")
+    } else {
+      as.character(plot_data$unit)
+    } # natural allocation label used for colour and grouping
+    ggplot2::ggplot(
+      plot_data,
+      ggplot2::aes(
+        x = .data$entity,
+        y = .data$Estimate,
+        ymin = .data$Q2.5,
+        ymax = .data$Q97.5,
+        colour = .data$class,
+        group = .data$class
+      )
+    ) +
+      ggplot2::geom_pointrange(
+        position = ggplot2::position_dodge(width = 0.45),
+        linewidth = 0.4
+      ) +
+      ggplot2::labs(
+        title = paste0(
+          tools::toTitleCase(domain_name),
+          " posterior class probabilities"
+        ),
+        x = tools::toTitleCase(domain_name),
+        y = "Posterior probability",
+        colour = "Latent class"
+      ) +
+      ggplot2::coord_cartesian(ylim = c(0, 1)) +
+      ggplot2::theme_bw() +
+      ggplot2::theme(
+        axis.text.x = ggplot2::element_text(
+          angle = 45,
+          hjust = 1
+        )
+      )
+  })
+  names(plots) <- available_domains
+  if (length(plots) == 1L) {
+    return(plots[[1L]])
+  }
+  plots
+}
+
 #' Summarise a latent-progress mixture fit
+#'
+#' @description
+#' Extends the ordinary JoiNMe summary with baseline class probabilities,
+#' selected component locations and scales, class-membership regression, and a
+#' compact posterior allocation-count distribution. The allocation table
+#' contains one row per class and active allocation domain; use
+#' [posterior_class()] when subject-by-class or marker-by-class probabilities
+#' are required.
 #'
 #' @inheritParams summary.JoiNMeFit
 #' @return A `summary_JoiNMeMixFit` object inheriting from
-#'   `summary_JoiNMeFit`.
+#'   `summary_JoiNMeFit`. Full location and scale summaries are retained in
+#'   the separate `tables$class_location` and `tables$class_scale` elements.
+#'   The console reports compact expected and hard allocation counts;
+#'   unit-level posterior membership remains available through
+#'   [posterior_class()].
 #' @export
 summary.JoiNMeMixFit <- function(
   object,
@@ -390,7 +674,7 @@ summary.JoiNMeMixFit <- function(
   ...
 ) {
   cache_key <- paste0(
-    "mixture_summary_draws=",
+    "mixture_summary_schema=4_draws=",
     draws,
     "_seed=",
     seed,
@@ -427,7 +711,7 @@ summary.JoiNMeMixFit <- function(
     output$tables$piecewise_ordinates <- NULL
     output$metadata$event_process <- "not fitted"
   }
-  number_classes <- as.integer(mixture$n_clusters)
+  number_classes <- as.integer(mixture$n_classes)
   total_dimension <- as.integer(mixture$total_dimension)
 
   probability_variables <- paste0(
@@ -446,6 +730,10 @@ summary.JoiNMeMixFit <- function(
     term_labels = paste0("class_", seq_len(number_classes)),
     digits = digits
   )
+  class_probability <- .mixture_summary_columns(
+    class_probability,
+    identifier_columns = "term"
+  ) # explicit mean, median, spread, interval and convergence columns by class
 
   class_location <- NULL
   class_scale <- NULL
@@ -512,12 +800,29 @@ summary.JoiNMeMixFit <- function(
     Negate(is.null),
     output$tables$class_regression
   )
-  output$tables$class_membership <- posterior_class(
+  full_class_membership <- posterior_class(
     object,
     draws = draws,
     seed = seed,
     summary = TRUE
   )
+  full_class_membership_draws <- posterior_class(
+    object,
+    draws = draws,
+    seed = seed,
+    summary = FALSE
+  ) # draw-level probabilities needed for posterior allocation-count intervals
+  output$tables$class_membership <- .mixture_membership_overview(
+    class_membership = full_class_membership,
+    class_membership_draws = full_class_membership_draws,
+    digits = digits
+  )
+  output$tables$diagnostics <- .summary_diagnostics_table(
+    sampler_diagnostics = output$diagnostics %||% list(),
+    reported_tables = output$tables[
+      setdiff(names(output$tables), "diagnostics")
+    ]
+  ) # include mixture parameters in headline convergence counts and extrema
   output$metadata$mixture <- mixture
   class(output) <- unique(c(
     "summary_JoiNMeMixFit",
@@ -526,6 +831,120 @@ summary.JoiNMeMixFit <- function(
   ))
   object$cache_set(cache_key, output)
   output
+}
+
+#' Summarise allocation probabilities without printing every unit-class pair
+#'
+#' @description
+#' `posterior_class()` deliberately returns one row for every allocation unit
+#' and latent class because those probabilities are useful for classification
+#' and uncertainty assessment. Repeating that complete table inside
+#' `summary()` makes an otherwise concise model summary grow in proportion to
+#' the number of subjects or markers. This helper therefore reduces each
+#' active allocation domain to one row per fitted class. For every posterior
+#' draw, the expected class count is the sum of that draw's soft allocation
+#' probabilities. The returned estimate, posterior standard deviation and
+#' interval therefore describe posterior uncertainty in the expected count. The
+#' assigned count separately uses each unit's maximum posterior-mean class.
+#'
+#' @param class_membership Named posterior-class tables returned by
+#'   `posterior_class(summary = TRUE)`.
+#' @param class_membership_draws Named draw matrices returned by
+#'   `posterior_class(summary = FALSE)`.
+#' @param digits Number of decimal places retained in posterior summaries.
+#'
+#' @return A named list containing one compact data frame per active allocation
+#'   domain. Inactive domains are absent.
+#' @keywords internal
+#' @noRd
+.mixture_membership_overview <- function(
+  class_membership,
+  class_membership_draws = NULL,
+  digits = 3
+) {
+  output <- lapply(names(class_membership), function(domain) {
+    membership <- class_membership[[domain]] # unit-by-class posterior summary for one active allocation domain
+    membership_draws <- as.matrix(
+      class_membership_draws[[domain]] %||% matrix(numeric(0), 0L, 0L)
+    ) # draws by unit-class probabilities for the same allocation domain
+    required_columns <- c(
+      "unit",
+      "class",
+      "assigned_class"
+    ) # fields required to form class-level assigned counts
+    if (
+      !is.data.frame(membership) ||
+        !all(required_columns %in% names(membership)) ||
+        nrow(membership) == 0L ||
+        nrow(membership_draws) == 0L ||
+        ncol(membership_draws) == 0L
+    ) {
+      return(NULL)
+    }
+
+    class_names <- unique(
+      as.character(membership$class)
+    ) # fitted class labels in their established reporting order
+    draw_variable_names <- colnames(membership_draws) %||%
+      character(0) # Stan probability names carrying unit and class indices
+    draw_class_index <- suppressWarnings(as.integer(sub(
+      "^.*\\[[0-9]+,([0-9]+)\\]$",
+      "\\1",
+      draw_variable_names
+    ))) # fitted class index parsed from each unit-class probability variable
+    if (
+      length(draw_class_index) != ncol(membership_draws) ||
+        any(!is.finite(draw_class_index))
+    ) {
+      cli::cli_abort(
+        "Could not identify class indices in posterior allocation draws for {domain}."
+      )
+    }
+
+    rows <- lapply(seq_along(class_names), function(class_index) {
+      class_name <- class_names[[class_index]] # display label of this fitted class
+      class_rows <- membership[
+        as.character(membership$class) == class_name,
+        ,
+        drop = FALSE
+      ] # exactly one posterior-probability row per unit for this class
+      assigned_units <- unique(
+        as.character(
+          class_rows$unit[
+            as.character(class_rows$assigned_class) == class_name
+          ]
+        )
+      ) # units whose maximum posterior probability selects this class
+      expected_count_by_draw <- rowSums(
+        membership_draws[
+          ,
+          draw_class_index == class_index,
+          drop = FALSE
+        ]
+      ) # soft number of allocation units belonging to this class in each draw
+      count_summary <- .summarize_draw_col(
+        expected_count_by_draw
+      ) # posterior distribution of the draw-specific expected class count
+      data.frame(
+        class = class_name,
+        Estimate = unname(count_summary[["Estimate"]]),
+        Est.Error = unname(count_summary[["Est.Error"]]),
+        Q2.5 = unname(count_summary[["Q2.5"]]),
+        Q97.5 = unname(count_summary[["Q97.5"]]),
+        Rhat = NA_real_,
+        ess_bulk = NA_real_,
+        ess_tail = NA_real_,
+        assigned_units = length(assigned_units),
+        stringsAsFactors = FALSE
+      )
+    })
+    .round_summary_table(
+      do.call(rbind, rows),
+      digits = digits
+    )
+  })
+  names(output) <- names(class_membership)
+  Filter(Negate(is.null), output)
 }
 
 #' Summarise class-membership regression coefficients
@@ -576,10 +995,33 @@ summary.JoiNMeMixFit <- function(
   output$domain <- domain
   output$class <- paste0("class_", coefficient_class)
   output$covariate <- coefficient_labels
-  output[, c(
-    "domain",
-    "class",
-    "covariate",
+  .mixture_summary_columns(
+    output,
+    identifier_columns = c("domain", "class", "covariate")
+  )
+}
+
+#' Select explicit posterior columns for latent-class reporting
+#'
+#' @description
+#' This helper gives every mixture table the same compact schema as the
+#' ordinary JoiNMe summary: posterior mean (`Estimate`), posterior standard
+#' deviation (`Est.Error`), central interval and MCMC diagnostics. Duplicate
+#' mean, median and standard-deviation aliases are intentionally excluded.
+#'
+#' @param table Posterior summary table returned by
+#'   [.assoc_summary_from_draw_array()].
+#' @param identifier_columns Columns identifying the scientific estimand.
+#'
+#' @return The mixture-specific reporting columns in a stable order.
+#' @keywords internal
+#' @noRd
+.mixture_summary_columns <- function(table, identifier_columns) {
+  if (is.null(table)) {
+    return(NULL)
+  }
+  required_columns <- c(
+    identifier_columns,
     "Estimate",
     "Est.Error",
     "Q2.5",
@@ -587,7 +1029,17 @@ summary.JoiNMeMixFit <- function(
     "Rhat",
     "ess_bulk",
     "ess_tail"
-  ), drop = FALSE]
+  ) # compact inferential schema shown for every latent-class parameter
+  missing_columns <- setdiff(
+    required_columns,
+    names(table)
+  ) # absent columns indicate a malformed or obsolete summary source
+  if (length(missing_columns) > 0L) {
+    cli::cli_abort(
+      "Mixture summary is missing column{?s}: {paste(missing_columns, collapse = ', ')}."
+    )
+  }
+  table[, required_columns, drop = FALSE]
 }
 
 #' Label mixture coordinates in their original random-effect blocks
@@ -659,17 +1111,17 @@ summary.JoiNMeMixFit <- function(
   labels
 }
 
-#' Identify the selected covariance-regression clustering representation
+#' Identify the selected covariance-regression class representation
 #'
 #' @param mixture Fitted latent-progress metadata.
 #'
 #' @return `"corr"` or `"vcov"` when selected, otherwise an empty string.
 #' @keywords internal
 #' @noRd
-.mixture_covariance_cluster_type <- function(mixture) {
+.mixture_covariance_class_type <- function(mixture) {
   selected <- intersect(
     c("corr", "vcov"),
-    mixture$cluster_type %||% character(0)
+    mixture$class_type %||% character(0)
   ) # public covariance representation active in the shared Stan latent block
   if (length(selected) == 1L) selected[[1L]] else ""
 }
@@ -708,18 +1160,10 @@ summary.JoiNMeMixFit <- function(
   )
   output$coordinate <- term_labels
   output$parameter <- parameter
-  output[, c(
-    "class",
-    "coordinate",
-    "parameter",
-    "Estimate",
-    "Est.Error",
-    "Q2.5",
-    "Q97.5",
-    "Rhat",
-    "ess_bulk",
-    "ess_tail"
-  ), drop = FALSE]
+  .mixture_summary_columns(
+    output,
+    identifier_columns = c("class", "coordinate", "parameter")
+  )
 }
 
 #' @export
@@ -733,13 +1177,17 @@ print.summary_JoiNMeMixFit <- function(x, ...) {
   mixture <- x$metadata$mixture %||% list()
   .cli_summary_heading("Latent-progress mixture", level = 2L)
   .cli_print_bullets(c(
-    paste0("Classes: ", mixture$n_clusters %||% NA_integer_),
+    paste0("Classes: ", mixture$n_classes %||% NA_integer_),
     paste0(
-      "Clustering types: ",
-      paste(mixture$cluster_type %||% character(0), collapse = ", ")
+      "Class types: ",
+      paste(mixture$class_type %||% character(0), collapse = ", ")
     ),
     paste0("Class ordering: ", mixture$ordering %||% "none"),
     paste0("Component family: ", mixture$distribution %||% "unknown")
+  ))
+  .cli_print_bullets(c(
+    "Class locations are centres of the selected latent random-effect coordinates; they are not response-scale means.",
+    "Within-class scales describe dispersion around those centres before the ordinary random-effect covariance transformation is applied."
   ))
   .cli_print_table_section(
     "Baseline class probabilities (class covariates equal zero)",
@@ -747,28 +1195,46 @@ print.summary_JoiNMeMixFit <- function(x, ...) {
     level = 3L
   )
   .cli_print_table_section(
-    "Class locations",
+    "Class locations on the standardised latent random-effect scale",
     x$tables$class_location,
     level = 3L
   )
   .cli_print_table_section(
-    "Class scales",
+    "Within-class scales on the standardised latent random-effect scale",
     x$tables$class_scale,
     level = 3L
   )
   class_regression <- x$tables$class_regression %||% list()
   for (domain in names(class_regression)) {
+    class_design <- mixture$class_design[[domain]] %||%
+      list() # fitted formula structure for this allocation domain
+    if (!isTRUE(class_design$class_specific)) {
+      .cli_print_bullets(
+        paste0(
+          "For the shared ",
+          domain,
+          " class formula, class_",
+          mixture$n_classes,
+          " is the zero-coefficient reference and is intentionally absent from the regression table."
+        )
+      )
+    }
     .cli_print_table_section(
       paste0("Class-membership regression: ", domain),
       class_regression[[domain]],
       level = 3L
     )
   }
-  memberships <- x$tables$class_membership %||% list()
-  for (domain in names(memberships)) {
+  membership_overviews <- x$tables$class_membership %||% list()
+  if (length(membership_overviews) > 0L) {
+    .cli_print_bullets(
+      "Allocation Estimate, Est.Error and interval columns describe the posterior expected class count; assigned_units is the maximum-probability hard count."
+    )
+  }
+  for (domain in names(membership_overviews)) {
     .cli_print_table_section(
-      paste0("Posterior class membership: ", domain),
-      memberships[[domain]],
+      paste0("Posterior allocation counts: ", domain),
+      membership_overviews[[domain]],
       level = 3L
     )
   }
@@ -809,7 +1275,7 @@ predict.JoiNMeMixFit <- function(
       ))
     }
     if (is.null(newdataEvent)) {
-      newdataEvent <- .mixture_event_scaffold(
+      newdataEvent <- .longitudinal_only_event_scaffold(
         data_long = newdataLong,
         id_variable = .JoiNMefit_call_arg_chr(object$call, "id_var", "id"),
         time_variable = .JoiNMefit_call_arg_chr(
@@ -852,9 +1318,9 @@ print.JoiNMeMixDynPred <- function(x, ...) {
   mixture <- x$mixture %||% x$metadata$mixture
   cat(
     "Latent classes: ",
-    mixture$n_clusters %||% NA_integer_,
+    mixture$n_classes %||% NA_integer_,
     " (",
-    paste(mixture$cluster_type %||% character(0), collapse = ", "),
+    paste(mixture$class_type %||% character(0), collapse = ", "),
     ")\n",
     sep = ""
   )
@@ -883,9 +1349,9 @@ print.summary_JoiNMeMixDynPred <- function(x, ...) {
   .cli_print_bullets(
     paste0(
       "Parent mixture: ",
-      mixture$n_clusters %||% NA_integer_,
+      mixture$n_classes %||% NA_integer_,
       " classes over ",
-      paste(mixture$cluster_type %||% character(0), collapse = ", ")
+      paste(mixture$class_type %||% character(0), collapse = ", ")
     )
   )
   memberships <- x$tables$class_membership %||% list()
@@ -905,13 +1371,13 @@ print.summary_JoiNMeMixDynPred <- function(x, ...) {
 #' Adds four mixture displays to the inherited JoiNMe plotting interface:
 #'
 #' - `type = "longitudinal"` with `estimand = "mean_per_class"` evaluates the
-#'   fixed-effects trajectory plus the centre of every clustered random-effect
+#'   fixed-effects trajectory plus the centre of every class-specific random-effect
 #'   block;
 #' - `estimand = "marginal_per_class"` averages the inverse-link trajectory over
 #'   the estimated within-class random-effect distribution;
 #' - `type = "class_membership"` shows posterior allocation probabilities;
 #' - `type = "covariance_class"` shows class-specific covariance-regression
-#'   curves, with all \(G\) clusters in each panel.
+#'   curves, with all \(G\) classes in each panel.
 #'
 #' All other plot types are delegated to [plot.JoiNMeFit()].
 #'
@@ -1106,15 +1572,15 @@ plot.JoiNMeMixDynPred <- function(x, ...) {
       plot_data,
       ggplot2::aes(
         x = .data$class,
-        y = .data$probability,
+        y = .data$Estimate,
         colour = .data$entity,
         group = .data$entity
       )
     ) +
       ggplot2::geom_pointrange(
         ggplot2::aes(
-          ymin = .data$lower,
-          ymax = .data$upper
+          ymin = .data$Q2.5,
+          ymax = .data$Q97.5
         ),
         position = ggplot2::position_dodge(width = 0.35)
       ) +
@@ -1213,7 +1679,7 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
       data,
       ggplot2::aes(
         x = .data$unit,
-        y = .data$probability,
+        y = .data$Estimate,
         fill = .data$class
       )
     ) +
@@ -1298,7 +1764,7 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
 ) {
   stan_data <- object$stan_data
   mixture <- object$mixture %||% object$config$mixture
-  number_classes <- as.integer(mixture$n_clusters)
+  number_classes <- as.integer(mixture$n_classes)
   marker_levels <- as.character(
     stan_data$marker_levels %||%
       seq_len(as.integer(stan_data$D))
@@ -1629,7 +2095,7 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
           mixture = mixture,
           level = {
             selected_covariance_type <-
-              .mixture_covariance_cluster_type(mixture)
+              .mixture_covariance_class_type(mixture)
             if (nzchar(selected_covariance_type)) {
               selected_covariance_type
             } else {
@@ -1721,7 +2187,7 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
 
     # The nested marker effect is centred through `z_w_lat`, but marker
     # cross-correlation can give it a non-zero class centre whenever marker
-    # effects are clustered.  For a marginal trajectory, `nested_noise`
+    # effects have latent classes.  For a marginal trajectory, `nested_noise`
     # contributes one standard-Normal innovation per marker and posterior draw.
     if (q_dimension > 0L) {
       if (is.null(nested_noise)) {
@@ -2194,7 +2660,8 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
       marker = marker,
       ci_levels = ci_levels,
       theme_fn = theme_fn,
-      association_term = association_term
+      association_term = association_term,
+      association_points = longitudinal_points
     ))
   }
 
@@ -2337,8 +2804,10 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
         )
         for (marker_position in seq_along(marker_levels)) {
           weighted_average <- weighted_average +
-            transformed_by_marker[[marker_position]] *
+            .mixture_weight_draw_trajectory(
+              transformed_by_marker[[marker_position]],
               weight_draws[, marker_position]
+            ) # multiply each draw's complete time curve by its matching weight
         }
         weighted_average / length(marker_levels)
       }
@@ -2354,6 +2823,7 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
         class = paste0("class_", group),
         time = common_times[time_position],
         mean = mean(curve, na.rm = TRUE),
+        sd = stats::sd(curve, na.rm = TRUE),
         lower = stats::quantile(
           curve,
           (1 - max(ci_levels)) / 2,
@@ -2364,6 +2834,18 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
         upper = stats::quantile(
           curve,
           1 - (1 - max(ci_levels)) / 2,
+          na.rm = TRUE,
+          names = FALSE
+        ),
+        Q2.5 = stats::quantile(
+          curve,
+          0.025,
+          na.rm = TRUE,
+          names = FALSE
+        ),
+        Q97.5 = stats::quantile(
+          curve,
+          0.975,
           na.rm = TRUE,
           names = FALSE
         ),
@@ -2483,6 +2965,41 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
   output
 }
 
+#' Apply one posterior marker weight to each posterior trajectory
+#'
+#' @description
+#' `posterior::draws_matrix` deliberately preserves matrix dimensions when one
+#' column is selected. Base array multiplication then rejects a draws-by-time
+#' trajectory and a draws-by-one weight matrix as non-conformable. Coercing the
+#' weights to a vector and using an explicit row-wise sweep preserves the
+#' intended draw pairing for both ordinary matrices and posterior draw classes.
+#'
+#' @param trajectory A draws-by-time numeric matrix.
+#' @param weight One marker weight per posterior draw.
+#'
+#' @return A draws-by-time matrix with draw-matched marker weighting.
+#' @keywords internal
+#' @noRd
+.mixture_weight_draw_trajectory <- function(trajectory, weight) {
+  trajectory <- as.matrix(
+    trajectory
+  ) # posterior association feature evaluated for every draw and time
+  weight <- as.numeric(
+    weight
+  ) # draw-matched marker weights stripped of backend-specific matrix classes
+  if (nrow(trajectory) != length(weight)) {
+    cli::cli_abort(
+      "The marker-weight draws do not align with the class trajectory draws."
+    )
+  }
+  sweep(
+    trajectory,
+    MARGIN = 1L,
+    STATS = weight,
+    FUN = "*"
+  )
+}
+
 #' Align cached association quantities with trajectory posterior draws
 #'
 #' @description
@@ -2566,7 +3083,7 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
 #' Obtain effective marker weights for one latent class
 #'
 #' @description
-#' Marker weights are not a latent-progress clustering type. The established
+#' Marker weights are not a latent-progress class type. The established
 #' posterior effective-weight extractor is therefore used unchanged for every
 #' class, preserving the ordinary JoiNMe association definition.
 #'
@@ -2609,7 +3126,8 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
   marker,
   ci_levels,
   theme_fn,
-  association_term = NULL
+  association_term = NULL,
+  association_points = 80L
 ) {
   if (!is.null(association_term)) {
     return(.plot_mixture_covariance_association(
@@ -2618,14 +3136,15 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
       draws = draws,
       seed = seed,
       ci_levels = ci_levels,
-      theme_fn = theme_fn
+      theme_fn = theme_fn,
+      points = association_points
     ))
   }
   mixture <- object$mixture %||% object$config$mixture
-  if (!nzchar(.mixture_covariance_cluster_type(mixture))) {
+  if (!nzchar(.mixture_covariance_class_type(mixture))) {
     cli::cli_abort(c(
-      x = "The covariance block was not clustered.",
-      i = "Fit with {.arg cluster_type = 'corr'} or {.arg cluster_type = 'vcov'} to request class-specific covariance curves."
+      x = "The covariance block was not assigned latent classes.",
+      i = "Fit with {.arg class_type = 'corr'} or {.arg class_type = 'vcov'} to request class-specific covariance curves."
     ))
   }
   stan_data <- object$stan_data
@@ -2633,7 +3152,7 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
   covariance_dimension <- length(
     .mixture_covariance_coordinate_labels(stan_data)
   )
-  number_classes <- as.integer(mixture$n_clusters)
+  number_classes <- as.integer(mixture$n_classes)
   class_mean <- .mixture_matrix_draws(
     object,
     "class_mean_covariance",
@@ -2924,13 +3443,14 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
   draws,
   seed,
   ci_levels,
-  theme_fn
+  theme_fn,
+  points = 80L
 ) {
   mixture <- object$mixture %||% object$config$mixture
-  if (!nzchar(.mixture_covariance_cluster_type(mixture))) {
+  if (!nzchar(.mixture_covariance_class_type(mixture))) {
     cli::cli_abort(c(
-      x = "The covariance block was not clustered.",
-      i = "Fit with {.arg cluster_type = 'corr'} or {.arg cluster_type = 'vcov'} for class-specific covariance associations."
+      x = "The covariance block was not assigned latent classes.",
+      i = "Fit with {.arg class_type = 'corr'} or {.arg class_type = 'vcov'} for class-specific covariance associations."
     ))
   }
   term_key <- sub("\\[.*$", "", association_term)
@@ -2972,7 +3492,7 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
   covariance_dimension <- length(
     .mixture_covariance_coordinate_labels(stan_data)
   )
-  number_classes <- as.integer(mixture$n_clusters)
+  number_classes <- as.integer(mixture$n_classes)
   class_mean <- .mixture_matrix_draws(
     object,
     "class_mean_covariance",
@@ -3018,11 +3538,15 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
       dim = c(number_draws, covariance_dimension, 0L)
     )
   }
+  points <- max(
+    2L,
+    as.integer(points)
+  ) # number of covariance-covariate reference values used in this display
   x_grid <- if (k_covariates > 0L) {
     observed <- as.numeric(stan_data$Xcov[, 1L])
-    seq(min(observed), max(observed), length.out = 80L)
+    seq(min(observed), max(observed), length.out = points)
   } else {
-    seq(0, 1, length.out = 80L)
+    seq(0, 1, length.out = points)
   }
 
   # Current-slope coordinates are placed back on the original time scale
@@ -3143,6 +3667,7 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
         ),
         x = x_grid[x_position],
         mean = mean(values),
+        sd = stats::sd(values),
         median = stats::median(values),
         lower = stats::quantile(
           values,
@@ -3154,6 +3679,8 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
           1 - (1 - interval) / 2,
           names = FALSE
         ),
+        Q2.5 = stats::quantile(values, 0.025, names = FALSE),
+        Q97.5 = stats::quantile(values, 0.975, names = FALSE),
         stringsAsFactors = FALSE
       )
       result_position <- result_position + 1L
@@ -3206,10 +3733,18 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
 #' @param longitudinal_times,longitudinal_points Time-grid controls.
 #' @param marginal_samples Within-component Monte Carlo values per posterior
 #'   draw for a marginal class trajectory.
+#' @param class_specific Logical. If `TRUE`, coefficient summaries also carry
+#'   compact class-specific association contributions for terms affected by a
+#'   fitted class-specific random-effect block.
+#' @param class_points Number of reference time or covariance-covariate values
+#'   used in the compact class-specific association tables. The plotting method
+#'   continues to use its requested full grid.
 #'
 #' @return A `PosteriorAssoc` object, or a class-trajectory ggplot when
-#'   `trajectory = TRUE`.  The plotted numerical values remain available in
-#'   the ggplot's `data` field.
+#'   `trajectory = TRUE`. For summary-form mixture output, relevant compact
+#'   class contributions are retained in the `class_association` attribute and
+#'   printed beneath the common coefficient tables. The plotted numerical
+#'   values remain available in the ggplot's `data` field.
 #' @export
 assoc.JoiNMeMixFit <- function(
   object,
@@ -3222,6 +3757,8 @@ assoc.JoiNMeMixFit <- function(
   longitudinal_times = NULL,
   longitudinal_points = 80L,
   marginal_samples = 32L,
+  class_specific = TRUE,
+  class_points = 3L,
   ...
 ) {
   .require_mixture_survival(object, "posterior_assoc")
@@ -3234,11 +3771,43 @@ assoc.JoiNMeMixFit <- function(
       summary = summary,
       ...
     )
-    attr(output, "metadata")$mixture <- object$mixture
+    attr(output, "metadata")$mixture <- object$mixture %||%
+      object$config$mixture
+    attr(output, "metadata")$class_association_estimand <- match.arg(
+      estimand
+    )
+    attr(output, "metadata")$class_specific_requested <- isTRUE(
+      class_specific
+    )
     # Keep a plotting reference only on the mixture-facing return value.  This
     # lets `plot(posterior_assoc(fit))` recover the fitted transforms and class
     # locations without changing the established PosteriorAssoc table layout.
     attr(output, "mixture_fit") <- object
+    if (isTRUE(summary) && isTRUE(class_specific)) {
+      class_points <- as.integer(
+        class_points
+      ) # number of compact reference abscissae requested for console reporting
+      if (
+        length(class_points) != 1L ||
+          !is.finite(class_points) ||
+          class_points < 2L
+      ) {
+        cli::cli_abort("{.arg class_points} must be an integer of at least two.")
+      }
+      class_association <- .mixture_class_association_summary(
+        object = object,
+        association_output = output,
+        estimand = match.arg(estimand),
+        draws = draws %||% object$config$draws_default %||% 400L,
+        seed = seed,
+        digits = digits,
+        longitudinal_times = longitudinal_times,
+        class_points = class_points,
+        marginal_samples = marginal_samples,
+        ...
+      ) # compact per-class log-hazard contributions for scientifically relevant terms
+      attr(output, "class_association") <- class_association
+    }
     return(output)
   }
   estimand <- match.arg(estimand)
@@ -3256,6 +3825,188 @@ assoc.JoiNMeMixFit <- function(
     ...
   )
   plot_object
+}
+
+#' Determine whether a fitted class block changes an association estimand
+#'
+#' @param object A fitted latent-progress mixture.
+#' @param association_term One fitted association term or covariance component.
+#' @param estimand Either `"mean_per_class"` or `"marginal_per_class"`.
+#'
+#' @return `TRUE` when a fitted class-specific block enters the requested
+#'   association contribution.
+#' @keywords internal
+#' @noRd
+.mixture_class_changes_association <- function(
+  object,
+  association_term,
+  estimand
+) {
+  mixture <- object$mixture %||%
+    object$config$mixture # fitted latent-progress specification
+  class_types <- as.character(
+    mixture$class_type %||% character(0)
+  ) # random-effect blocks assigned latent classes
+  term_key <- sub(
+    "\\[.*$",
+    "",
+    association_term
+  ) # association channel without a covariance component suffix
+  covariance_class <- any(
+    class_types %in% c("corr", "vcov")
+  ) # whether covariance-regression latent coordinates vary by class
+
+  if (term_key %in% c("corr", "vcov")) {
+    return(covariance_class)
+  }
+  source_channel <- sub(
+    "^(cv|cs)_",
+    "",
+    term_key
+  ) # longitudinal source entering the current-value or current-slope channel
+  directly_relevant <- switch(
+    source_channel,
+    mean = "subject" %in% class_types,
+    marker = "marker" %in% class_types,
+    total = any(c("subject", "marker") %in% class_types),
+    FALSE
+  ) # class centres which alter the corresponding latent longitudinal source
+  marginal_covariance_relevance <- identical(
+    estimand,
+    "marginal_per_class"
+  ) && covariance_class && source_channel %in% c("marker", "total")
+  isTRUE(directly_relevant || marginal_covariance_relevance)
+}
+
+#' Build compact class-specific posterior association tables
+#'
+#' @description
+#' Global association coefficients are shared across classes.  Their realised
+#' contribution to log hazard can nevertheless differ because a class-specific
+#' random-effect block changes the longitudinal or covariance feature being
+#' multiplied by that coefficient.  This helper evaluates only such terms and
+#' reports a small, interpretable set of reference points; the plotting method
+#' remains the interface for a dense trajectory.
+#'
+#' @param object A fitted latent-progress mixture.
+#' @param association_output The ordinary `PosteriorAssoc` coefficient object.
+#' @param estimand Class-trajectory estimand.
+#' @param draws Number of posterior draws used for the derived contribution.
+#' @param seed Reproducible posterior-subsetting seed.
+#' @param digits Number of displayed decimal places.
+#' @param longitudinal_times Optional user-supplied time values.
+#' @param class_points Number of automatically selected reference values.
+#' @param marginal_samples Within-class Monte Carlo values per posterior draw.
+#' @param ... Optional association-term selection.
+#'
+#' @return A named list of posterior summary tables, one for every relevant
+#'   fitted association term or covariance component.
+#' @keywords internal
+#' @noRd
+.mixture_class_association_summary <- function(
+  object,
+  association_output,
+  estimand,
+  draws,
+  seed,
+  digits,
+  longitudinal_times,
+  class_points,
+  marginal_samples,
+  ...
+) {
+  dot_arguments <- list(
+    ...
+  ) # optional association component requested by the caller
+  requested_term <- dot_arguments$association_term %||%
+    dot_arguments$term # optional single association term or covariance component
+  dot_arguments$association_term <- NULL
+  dot_arguments$term <- NULL
+
+  association_terms <- unlist(lapply(
+    names(association_output),
+    function(term_name) {
+      if (term_name %in% c("corr", "vcov")) {
+        term_table <- association_output[[term_name]] # component-labelled covariance association table
+        as.character(term_table$term %||% term_name)
+      } else {
+        term_name
+      }
+    }
+  ), use.names = FALSE) # every fitted scalar channel or covariance component
+  if (!is.null(requested_term)) {
+    association_terms <- intersect(
+      association_terms,
+      as.character(requested_term)
+    ) # caller-selected association term, when present
+  }
+  association_terms <- association_terms[vapply(
+    association_terms,
+    function(association_term) {
+      .mixture_class_changes_association(
+        object,
+        association_term = association_term,
+        estimand = estimand
+      )
+    },
+    logical(1)
+  )] # only terms whose realised contribution can differ across fitted classes
+  if (length(association_terms) == 0L) {
+    return(list())
+  }
+
+  reference_times <- if (is.null(longitudinal_times)) {
+    NULL
+  } else {
+    sort(unique(as.numeric(longitudinal_times)))
+  } # optional scientifically chosen reference times supplied by the caller
+  output <- list() # class-specific contribution table for each relevant term
+  for (association_term in association_terms) {
+    plot_arguments <- c(
+      list(
+        object = object,
+        estimand = estimand,
+        draws = draws,
+        seed = seed,
+        longitudinal_times = reference_times,
+        longitudinal_points = class_points,
+        marginal_samples = marginal_samples,
+        ci_levels = 0.95,
+        marker = NULL,
+        theme_fn = ggplot2::theme_bw,
+        association_term = association_term
+      ),
+      dot_arguments
+    ) # exact class-trajectory calculation with a compact reference grid
+    association_plot <- do.call(
+      .plot_mixture_association_trajectory,
+      plot_arguments
+    ) # ggplot whose data contain the derived posterior contribution summaries
+    plot_data <- association_plot$data # numerical values underlying the class curve
+    abscissa_name <- if ("time" %in% names(plot_data)) {
+      "time"
+    } else {
+      "x"
+    } # time for longitudinal channels or covariance covariate/reference profile
+    class_table <- data.frame(
+      class = as.character(plot_data$class),
+      reference = as.numeric(plot_data[[abscissa_name]]),
+      Estimate = as.numeric(plot_data$mean),
+      Est.Error = as.numeric(plot_data$sd),
+      Q2.5 = as.numeric(plot_data$Q2.5),
+      Q97.5 = as.numeric(plot_data$Q97.5),
+      Rhat = NA_real_,
+      ess_bulk = NA_real_,
+      ess_tail = NA_real_,
+      stringsAsFactors = FALSE
+    ) # common posterior reporting schema for class-specific log-hazard contributions
+    names(class_table)[2L] <- abscissa_name
+    output[[association_term]] <- .round_summary_table(
+      class_table,
+      digits = digits
+    )
+  }
+  output
 }
 
 #' Plot posterior association output from a latent-progress fit

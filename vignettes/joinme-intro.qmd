@@ -208,6 +208,25 @@ fit <- joinme(
 )
 ```
 
+To fit only the multivariate nested longitudinal process, omit both event
+arguments. The formula continues to define population, subject, marker, and
+subject-by-marker effects, but no survival likelihood or association
+coefficient is introduced.
+
+```{r intro-longitudinal-only, eval=FALSE}
+longitudinal_fit <- joinme(
+  formulaLong = formulaLong,
+  dataLong = sim$dataLong,
+  families = "student_t",
+  control = list(engine = "cmdstanr")
+)
+```
+
+Longitudinal summaries, posterior predictions and trajectory plots retain
+their ordinary interpretation. Event prediction, survival plots,
+concordance, and time-dependent ROC/AUC are deliberately unavailable because
+no event outcome contributed to the likelihood.
+
 ### Step 5: Summarise fixed effects and associations
 
 ```{r intro-summaries}

@@ -28,7 +28,8 @@ NULL
 #'   rows (`Surv(start, stop, status)` layout). Left- and interval-censored
 #'   survival encodings (`type = "left"`, `type = "interval2"`) are accepted.
 #'   When interval rows are supplied, dynamic prediction uses the latest row per
-#'   subject for event-side covariates.
+#'   subject for event-side covariates. This argument may be omitted for a
+#'   longitudinal-only fit; neutral event rows are then constructed internally.
 #' @param process Character vector specifying which predictions to compute.
 #' Options: "longitudinal" (future trajectory), "event" (conditional survival probability). Default: both.
 #' @param pred_type Character. Type of longitudinal predictions:
@@ -137,7 +138,7 @@ NULL
 #' @export
 predict.JoiNMeFit <- function(object,
                            newdataLong,
-                           newdataEvent,
+                           newdataEvent = NULL,
                            process = c("longitudinal", "event"),
                            pred_type = c("per_marker_id", "marginal_marker", "marginal_id", "marker_subject", "subject_marker"),
                            scale = c("epred", "linpred", "predict"),
@@ -154,6 +155,39 @@ predict.JoiNMeFit <- function(object,
             x = "Object must be a {.cls JoiNMeFit} fit.",
             i = "Fit the model with joinme() before predicting."
         ))
+    }
+    has_survival_process <- .fit_includes_survival(
+        object
+    ) # whether event observations contributed to the original fitted model
+    if (!has_survival_process) {
+        if (missing(process)) {
+            process <- "longitudinal"
+        }
+        if ("event" %in% process) {
+            cli::cli_abort(c(
+                x = "Event prediction is unavailable for a longitudinal-only fit.",
+                i = "Use {.arg process = 'longitudinal'}."
+            ))
+        }
+        if (is.null(newdataEvent)) {
+            newdataEvent <- .longitudinal_only_event_scaffold(
+                data_long = newdataLong,
+                id_variable = .JoiNMefit_call_arg_chr(
+                    object$call,
+                    "id_var",
+                    "id"
+                ),
+                time_variable = .JoiNMefit_call_arg_chr(
+                    object$call,
+                    "time_var",
+                    "time"
+                )
+            )
+        }
+    } else if (is.null(newdataEvent)) {
+        cli::cli_abort(
+            "{.arg newdataEvent} is required because the fitted model includes a survival process."
+        )
     }
     process <- match.arg(process, several.ok = TRUE)
     pred_type <- match.arg(pred_type)
@@ -711,7 +745,7 @@ predict.JoiNMeFit <- function(object,
             if (as.integer(sd_pred$use_dynamic_mixture %||% 0L) == 1L) {
                 class_draws_for_subject <- list()
                 number_classes <- as.integer(
-                    sd_pred$dynamic_n_clusters %||% 1L
+                    sd_pred$dynamic_n_classes %||% 1L
                 )
                 if (
                     as.integer(sd_pred$dynamic_mix_subject %||% 0L) == 1L ||
@@ -1188,7 +1222,7 @@ predict.JoiNMeFit <- function(object,
     # be shortened to its first coordinate.
     structural_mixture_fields <- c(
         "use_dynamic_mixture",
-        "dynamic_n_clusters",
+        "dynamic_n_classes",
         "dynamic_mix_dimension",
         "dynamic_mix_family",
         "dynamic_mix_subject",
@@ -1924,18 +1958,18 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
     # component and one inert coordinate so the dynamic data structure remains
     # simple and robust across Stan interfaces.
     use_dynamic_mixture <- as.integer(sd$use_mixture %||% 0L)
-    dynamic_n_clusters <- max(1L, as.integer(sd$n_clusters %||% 1L))
+    dynamic_n_classes <- max(1L, as.integer(sd$n_classes %||% 1L))
     fitted_mix_dimension <- max(0L, as.integer(sd$K_mix %||% 0L))
     dynamic_mix_dimension <- max(1L, fitted_mix_dimension)
 
     dynamic_mix_probability <- matrix(
-        1 / dynamic_n_clusters,
+        1 / dynamic_n_classes,
         nrow = n,
-        ncol = dynamic_n_clusters
+        ncol = dynamic_n_classes
     )
     probability_names <- paste0(
         "mix_probability[",
-        seq_len(dynamic_n_clusters),
+        seq_len(dynamic_n_classes),
         "]"
     )
     if (
@@ -1984,14 +2018,14 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
 
     dynamic_mix_location <- array(
         0,
-        dim = c(n, dynamic_n_clusters, dynamic_mix_dimension)
+        dim = c(n, dynamic_n_classes, dynamic_mix_dimension)
     )
     dynamic_mix_scale <- array(
         1,
-        dim = c(n, dynamic_n_clusters, dynamic_mix_dimension)
+        dim = c(n, dynamic_n_classes, dynamic_mix_dimension)
     )
     if (use_dynamic_mixture == 1L && fitted_mix_dimension > 0L) {
-        for (group in seq_len(dynamic_n_clusters)) {
+        for (group in seq_len(dynamic_n_classes)) {
             for (coordinate in seq_len(fitted_mix_dimension)) {
                 location_name <- paste0(
                     "mix_location[",
@@ -2100,7 +2134,7 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         coeff_cs_mean = get_transform_coeff_draws("coeff_cs_mean_eff", sd$coeff_cs_mean, sd$n_coeff_cs_mean),
         coeff_cs_marker = get_transform_coeff_draws("coeff_cs_marker_eff", sd$coeff_cs_marker, sd$n_coeff_cs_marker),
         use_dynamic_mixture = use_dynamic_mixture,
-        dynamic_n_clusters = dynamic_n_clusters,
+        dynamic_n_classes = dynamic_n_classes,
         dynamic_mix_dimension = dynamic_mix_dimension,
         dynamic_mix_family = as.integer(sd$shrinkage %||% 0L),
         dynamic_mix_probability = dynamic_mix_probability,
@@ -2169,7 +2203,7 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
 
     mixture_metadata <- sd$mixture # fitted latent-progress design metadata, when present
     baseline_class_probability <- draws_list$dynamic_mix_probability
-    number_dynamic_clusters <- draws_list$dynamic_n_clusters
+    number_dynamic_classes <- draws_list$dynamic_n_classes
     number_fitted_markers <- as.integer(
         sd$D
     ) # marker allocation units represented in the fitted model
@@ -2221,15 +2255,15 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         class_design = subject_class_design,
         class_term_start =
             mixture_metadata$class_design$subject$class_term_start %||%
-              rep.int(1L, number_dynamic_clusters),
+              rep.int(1L, number_dynamic_classes),
         class_term_count =
             mixture_metadata$class_design$subject$class_term_count %||%
-              integer(number_dynamic_clusters)
+              integer(number_dynamic_classes)
     ) # draw-specific prior class probabilities for this new subject
     dynamic_mix_probability_subject <- matrix(
         subject_class_probability_array[, 1L, ],
         nrow = nrow(baseline_class_probability),
-        ncol = number_dynamic_clusters
+        ncol = number_dynamic_classes
     ) # Stan matrix form of the single subject allocation domain
     dynamic_mix_probability_marker <- .mixture_class_probability(
         baseline_probability = baseline_class_probability,
@@ -2237,10 +2271,10 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         class_design = marker_class_design,
         class_term_start =
             mixture_metadata$class_design$marker$class_term_start %||%
-              rep.int(1L, number_dynamic_clusters),
+              rep.int(1L, number_dynamic_classes),
         class_term_count =
             mixture_metadata$class_design$marker$class_term_count %||%
-              integer(number_dynamic_clusters)
+              integer(number_dynamic_classes)
     ) # draw-by-marker class probabilities under the fitted marker formula
 
     dL[[time_var]] <- dL[[time_var]] / tmax
@@ -2710,7 +2744,7 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         # coordinate layout used during fitting, so compatible blocks share
         # one allocation rather than receiving independent class labels.
         use_dynamic_mixture = draws_list$use_dynamic_mixture,
-        dynamic_n_clusters = draws_list$dynamic_n_clusters,
+        dynamic_n_classes = draws_list$dynamic_n_classes,
         dynamic_mix_dimension = draws_list$dynamic_mix_dimension,
         dynamic_mix_family = draws_list$dynamic_mix_family,
         dynamic_mix_probability_subject =

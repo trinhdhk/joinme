@@ -108,7 +108,7 @@ standard deviations or correlation matrices change.
 
 # Component model
 
-Let \(G=\texttt{n_clusters}\), and let \(C_j\) denote the latent class for an
+Let \(G=\texttt{n_classes}\), and let \(C_j\) denote the latent class for an
 allocation unit \(j\). For packed mixture coordinate \(r=1,\ldots,K\),
 
 \[
@@ -193,8 +193,8 @@ At zero covariates, the class probabilities are
 }.
 \]
 
-`formulaCluster` constructs the design vectors. A shared formula uses the same
-formulaic structure for every non-reference class. A list of `n_clusters`
+`formulaClass` constructs the design vectors. A shared formula uses the same
+formulaic structure for every non-reference class. A list of `n_classes`
 formulae permits a different predictor for each class. A named list separates
 the subject and marker domains.
 
@@ -207,12 +207,12 @@ The formula intercept is removed. Baseline class frequencies belong in
 Mixture likelihoods are invariant to permutation of class labels unless an
 identification convention is imposed.
 
-- `cluster_ordering = "intercept"` requires strict ordering of the selected
+- `class_ordering = "intercept"` requires strict ordering of the selected
   random-intercept component locations. Only that coordinate is constrained;
   slope and other locations remain unrestricted.
-- `cluster_ordering = "probability"` requires strictly increasing baseline
+- `class_ordering = "probability"` requires strictly increasing baseline
   probabilities.
-- `cluster_ordering = "none"` imposes no ordering.
+- `class_ordering = "none"` imposes no ordering.
 
 For class-specific formula lists, the default is `"none"`. Otherwise the
 default is `"intercept"`, matching `joinme_mix()`.
@@ -245,7 +245,7 @@ effects or marker weights. There is no additional direct class coefficient
 unless the analyst deliberately supplies an equivalent observed covariate in
 the event formula.
 
-Event times are drawn by inverse-transform sampling. Thus, when a clustered
+Event times are drawn by inverse-transform sampling. Thus, when a class-specific
 block contributes to an association, event information can become informative
 about posterior class membership during fitting.
 

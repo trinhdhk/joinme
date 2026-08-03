@@ -1311,6 +1311,19 @@ plot.JoiNMeFit <- function(x,
             i = "Use one or more of: {paste(c(diagnostic_types, fitted_types, 'mcmc'), collapse = ', ')}."
         ))
     })
+    survival_specific_types <- intersect(
+        type,
+        c("survival", "cumhaz", "association")
+    ) # fitted displays that require an observed event process
+    if (
+        length(survival_specific_types) > 0L &&
+            !.fit_includes_survival(x)
+    ) {
+        cli::cli_abort(c(
+            x = "Event-process plots are unavailable for a longitudinal-only fit.",
+            i = "Available fitted-data displays include {.val longitudinal} and {.val longitudinal_heatmap}."
+        ))
+    }
     association_dots <- dots[intersect(names(dots), association_dot_arguments)]
     if (length(association_dots) > 0L && !any(type == "association")) {
         cli::cli_abort(

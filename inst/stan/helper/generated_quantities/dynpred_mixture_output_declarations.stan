@@ -15,12 +15,12 @@
  * informs `z_u`, `z_L`, and (under the established dynamic programme) `z_v`.
  * Inactive allocation domains retain the neutral probability 1/G.
  */
-matrix[n_draws, dynamic_n_clusters]
+matrix[n_draws, dynamic_n_classes]
   posterior_class_probability_new_subject =
     rep_matrix(
-      1.0 / dynamic_n_clusters,
+      1.0 / dynamic_n_classes,
       n_draws,
-      dynamic_n_clusters
+      dynamic_n_classes
     );
-array[n_draws] matrix[n_marker_types, dynamic_n_clusters]
+array[n_draws] matrix[n_marker_types, dynamic_n_classes]
   posterior_class_probability_new_marker;

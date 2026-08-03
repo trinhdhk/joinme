@@ -47,6 +47,14 @@
 #' `cmdstanr::save_object()` so later `saveRDS()` calls do not rely on the
 #' original CmdStan CSV files remaining on disk.
 #'
+#' `joinme()` can also fit the nested multivariate longitudinal model without
+#' an event process. Leave both `formulaEvent` and `dataEvent` as `NULL`. The
+#' longitudinal likelihood and every random-effect block are retained, whereas
+#' the survival likelihood and longitudinal--survival association are removed.
+#' Internally, a likelihood-neutral event scaffold is used only to reuse the
+#' common design and Stan infrastructure. Its event parameters are not reported
+#' as fitted scientific results.
+#'
 #' Formula-scoped subject weighting is supported in random-effect grouping terms via
 #' `weighted(group, weights = <column>)`. For example:
 #' - `(1 + time | weighted(id, weights = id_w))`
@@ -152,15 +160,19 @@
 #'   formula-scoped subject/group weights.
 #' @param dataLong Long-format longitudinal data with columns for id, marker, time,
 #'   outcome, and covariates referenced in `formulaLong`.
-#' @param formulaEvent Survival formula for baseline covariates and event model.
+#' @param formulaEvent Optional survival formula for baseline covariates and
+#'   the event model. Supply it together with `dataEvent`, or leave both `NULL`
+#'   to fit only the nested longitudinal mixed model.
 #'   Supported LHS forms are `survival::Surv(time, status)`,
 #'   `survival::Surv(start, stop, status)`,
 #'   `survival::Surv(time, status, type = "left")`, and
 #'   `survival::Surv(time1, time2, type = "interval2")`.
 #'   The legacy `type = "interval"` representation is not supported.
-#' @param dataEvent Event-process data with either one row per id
+#' @param dataEvent Optional event-process data with either one row per id
 #'   (`Surv(time, status)`) or multiple interval rows per id
-#'   (`Surv(start, stop, status)`). Covariates in `formulaEvent` may vary by interval.
+#'   (`Surv(start, stop, status)`). Covariates in `formulaEvent` may vary by
+#'   interval. Leave this and `formulaEvent` as `NULL` for longitudinal-only
+#'   fitting.
 #' @param formulaVCov Covariance regression formula for id-specific marker-by-id effects.
 #'   If the marker block omits the inner `( ... | id )`, marker-by-id effects are
 #'   absent and covariance-style associations (`corr`, `vcov`) are not allowed.
@@ -253,6 +265,13 @@
 #'
 #' @examples
 #' \dontrun{
+#' longitudinal_fit <- joinme(
+#'   formulaLong = y ~ time + (1 + time | id) +
+#'     (1 + time + (1 + time | id) | marker),
+#'   dataLong = dataLong,
+#'   families = rep("gaussian", 3)
+#' )
+#'
 #' formulaDist <- list(
 #'   sigma[family=student_t] ~ 1 + time + (1 | id),
 #'   sigma[family=gaussian] ~ 1 + x1,
@@ -269,11 +288,12 @@
 # - Validate inputs and build Stan data.
 # - Resolve threading/engine settings and select the Stan program.
 # - Fit with cmdstanr/rstan and wrap results in a JoiNMeFit object.
+
 joinme <- function(
   formulaLong,
   dataLong,
-  formulaEvent,
-  dataEvent,
+  formulaEvent = NULL,
+  dataEvent = NULL,
   formulaVCov = ~1,
   formulaDist = NULL,
   control = list(),
@@ -288,6 +308,55 @@ joinme <- function(
   seed = NULL,
   ...
 ) {
+  # Step 1: identify whether the user supplied a complete event process before
+  # constructing any internal scaffold. A formula without event data, or event
+  # data without its formula, has no unambiguous statistical interpretation and
+  # is therefore rejected rather than silently treated as longitudinal-only.
+  has_survival_process <- !is.null(formulaEvent) || !is.null(dataEvent)
+  if (xor(is.null(formulaEvent), is.null(dataEvent))) {
+    cli::cli_abort(c(
+      x = "{.arg formulaEvent} and {.arg dataEvent} must be supplied together.",
+      i = "Leave both NULL to fit only the nested longitudinal mixed model."
+    ))
+  }
+
+  # Step 2: resolve association terms before calling `joinme_standata()`,
+  # whose historical default is `cv_mean`. That default remains appropriate
+  # for a joint longitudinal--survival model, but it must not accidentally
+  # introduce a prior-only association parameter in a longitudinal-only fit.
+  dot_arguments <- list(...)
+  association_terms <- dot_arguments$assoc
+  if (is.null(association_terms)) {
+    association_terms <- if (has_survival_process) {
+      "cv_mean"
+    } else {
+      character(0)
+    }
+  }
+  if (!has_survival_process && length(association_terms) > 0L) {
+    cli::cli_abort(c(
+      x = "Association terms require a survival process.",
+      i = "Remove {.arg assoc}, or supply both {.arg formulaEvent} and {.arg dataEvent}."
+    ))
+  }
+  dot_arguments$assoc <- association_terms
+
+  # Step 3: construct one administrative, event-free row per subject when the
+  # analysis contains no survival outcome. Positive follow-up keeps the common
+  # time-design code well-defined; `include_survival = FALSE` below then sets
+  # all event likelihood contributions to exactly zero before sampling.
+  if (!has_survival_process) {
+    dataEvent <- .longitudinal_only_event_scaffold(
+      data_long = dataLong,
+      id_variable = dot_arguments$id_var %||% "id",
+      time_variable = dot_arguments$time_var %||% "time"
+    )
+    formulaEvent <- survival::Surv(
+      .joinme_follow_up,
+      .joinme_event
+    ) ~ 1
+  }
+
   if (!is.list(control)) {
     cli::cli_abort(c(
       x = "{.arg control} must be a named list.",
@@ -321,7 +390,7 @@ joinme <- function(
     msg = "{.arg basehaz} must be a {.cls joinme_basehaz} object, created by {.fn joinme_basehaz()} or {.fn jm_basehaz()}."
   )
 
-  arg_list <- list(...)
+  arg_list <- dot_arguments
   arg_list <- arg_list[names(arg_list) %in% names(formals(joinme_standata))]
   arg_list <- modifyList(
     arg_list,
@@ -330,6 +399,7 @@ joinme <- function(
       dataLong = dataLong,
       formulaEvent = formulaEvent,
       dataEvent = dataEvent,
+      include_survival = has_survival_process,
       formulaVCov = formulaVCov,
       formulaDist = formulaDist,
       families = families,
@@ -644,4 +714,116 @@ joinme <- function(
   }
 
   jm_sd$sample()
+}
+
+#' Construct a likelihood-neutral event scaffold
+#'
+#' @param data_long Long-format longitudinal data.
+#' @param id_variable Name of the subject identifier.
+#' @param time_variable Name of the longitudinal time variable.
+#'
+#' @return One data-frame row per subject, with positive administrative
+#'   follow-up and a zero event indicator.
+#' @keywords internal
+#' @noRd
+.longitudinal_only_event_scaffold <- function(
+  data_long,
+  id_variable,
+  time_variable
+) {
+  if (!is.data.frame(data_long)) {
+    cli::cli_abort("{.arg dataLong} must be a data frame.")
+  }
+  missing_variables <- setdiff(
+    c(id_variable, time_variable),
+    names(data_long)
+  ) # longitudinal columns required to identify subjects and follow-up
+  if (length(missing_variables) > 0L) {
+    cli::cli_abort(
+      "Longitudinal-only fitting requires columns: {paste(missing_variables, collapse = ', ')}."
+    )
+  }
+
+  valid_rows <- !is.na(data_long[[id_variable]]) &
+    is.finite(
+      as.numeric(data_long[[time_variable]])
+    ) # observations carrying both an identifier and a finite measurement time
+  observed_data <- data_long[
+    valid_rows,
+    ,
+    drop = FALSE
+  ] # eligible longitudinal rows from which subject records can be copied
+  if (nrow(observed_data) == 0L) {
+    cli::cli_abort("No finite longitudinal observation time is available.")
+  }
+
+  ordered_rows <- order(
+    as.character(observed_data[[id_variable]]),
+    as.numeric(observed_data[[time_variable]])
+  ) # subject-major ordering with the latest observation last
+  observed_data <- observed_data[
+    ordered_rows,
+    ,
+    drop = FALSE
+  ]
+  scaffold <- observed_data[
+    !duplicated(
+      as.character(observed_data[[id_variable]]),
+      fromLast = TRUE
+    ),
+    ,
+    drop = FALSE
+  ] # one covariate-complete row copied from the last observation of each subject
+  overall_follow_up <- max(
+    as.numeric(observed_data[[time_variable]]),
+    na.rm = TRUE
+  ) # common positive administrative time needed only by the design builder
+  if (!is.finite(overall_follow_up) || overall_follow_up <= 0) {
+    overall_follow_up <- 1
+  }
+  scaffold$.joinme_follow_up <-
+    overall_follow_up # neutral administrative endpoint for every subject
+  scaffold$.joinme_event <- 0L # zero event indicator removing endpoint hazards
+  rownames(scaffold) <- NULL
+  scaffold
+}
+
+#' Determine whether a fitted model contains an observed event process
+#'
+#' @param object A fitted JoiNMe object carrying configuration or Stan data.
+#'
+#' @return A single logical value. Objects created before longitudinal-only
+#'   support are conservatively treated as joint models.
+#' @keywords internal
+#' @noRd
+.fit_includes_survival <- function(object) {
+  if (inherits(object, "JoiNMeMixFit")) {
+    mixture_specification <- object$mixture %||%
+      object$config$mixture # checked latent-class model description
+    if (!is.null(mixture_specification$include_survival)) {
+      return(isTRUE(mixture_specification$include_survival))
+    }
+  }
+  isTRUE(
+    object$config$include_survival %||%
+      (as.integer(object$stan_data$include_survival %||% 1L) == 1L)
+  )
+}
+
+#' Require an observed event process for a survival-specific operation
+#'
+#' @param object A fitted JoiNMe object.
+#' @param operation Plain-language name of the requested operation.
+#'
+#' @return The input object, invisibly, when the requirement is met.
+#' @keywords internal
+#' @noRd
+.require_fitted_survival_process <- function(object, operation) {
+  if (!.fit_includes_survival(object)) {
+    cli::cli_abort(c(
+      x = "{operation} is unavailable for a longitudinal-only fit.",
+      i = "Fit with both {.arg formulaEvent} and {.arg dataEvent} to model an event process."
+    ))
+  }
+  invisible(object)
 }

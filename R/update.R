@@ -24,7 +24,7 @@
 #'   when `object` is a latent-progress mixture.
 #'
 #' @return A refitted JoiNMe object. Mixture fits retain their mixture entry
-#'   point and class specification; longitudinal-only mixtures remain
+#'   point and class specification. Any longitudinal-only fit remains
 #'   longitudinal only unless new event inputs are supplied explicitly.
 #' @method update JoiNMeFit
 #' @seealso [update()]
@@ -46,20 +46,19 @@ update.JoiNMeFit <- function(
   ...
 ) {
   mixture_fit <- inherits(object, "JoiNMeMixFit")
-  longitudinal_only_mixture <- mixture_fit &&
-    !isTRUE(
-      (object$mixture %||% object$config$mixture)$include_survival
-    )
+  longitudinal_only_fit <- !.fit_includes_survival(
+    object
+  ) # whether the stored call intentionally omitted the event process
   call_obj <- object$call
   if (is.null(call_obj) || !is.call(call_obj)) {
     call_obj <- call(
-      if (mixture_fit) "joinme_mix" else "JoiNMe"
+      if (mixture_fit) "joinme_mix" else "joinme"
     )
   }
   call_obj[[1]] <- if (mixture_fit) {
     quote(joinme_mix)
   } else {
-    quote(JoiNMe)
+    quote(joinme)
   }
 
   update_formula <- function(current, updated, name) {
@@ -107,7 +106,7 @@ update.JoiNMeFit <- function(
 
   call_obj$formulaLong <- update_formula(object$formulaLong, formulaLong, "formulaLong")
   call_obj$formulaEvent <- if (
-    longitudinal_only_mixture &&
+    longitudinal_only_fit &&
       is.null(formulaEvent)
   ) {
     NULL
@@ -159,7 +158,7 @@ update.JoiNMeFit <- function(
   }
   if (
     is.null(call_obj$dataEvent) &&
-      !longitudinal_only_mixture
+      !longitudinal_only_fit
   ) {
     cli::cli_abort("{.arg dataEvent} must be supplied when it is not available in the stored call.")
   }

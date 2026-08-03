@@ -1,6 +1,10 @@
 # Bayesian joint mixed-effects (JoiNMe) model using Stan
 
-`JoiNMe` (with package name styled as `joinme` for deliberate ambiguity) fits Bayesian joint mixed-effects models for multivariate longitudinal markers and time-to-event outcomes. It supports multiple outcome families (Gaussian, Student-t, binary, count, beta, ordinal, skewed families), irregular measurement schedule.
+`JoiNMe` (with package name styled as `joinme` for deliberate ambiguity)
+fits Bayesian nested mixed-effects models for multivariate longitudinal
+markers, either alone or jointly with time-to-event outcomes. It supports
+multiple outcome families (Gaussian, Student-t, binary, count, beta, ordinal,
+skewed families) and irregular measurement schedules.
 
 Current implementation experiments with flexible association structures, covariance regression, transform-based modelling for nonlinear effects, and dynamic prediction.
 
@@ -115,6 +119,26 @@ Posterior draws are available through a dedicated renamed-draw interface:
 - `longitudinal_plot()`, `survival_plot()`, `cumhaz_plot()`,
   `association_plot()`, and `diagnostic_plot()` provide entry points to the main `plot()` methods.
 
+### Nested longitudinal model without survival
+
+`joinme()` also fits the multivariate nested longitudinal model on its own.
+Omit both event arguments; association terms are then unavailable because
+there is no event process to associate with the marker trajectories.
+
+```r
+longitudinal_fit <- joinme(
+  formulaLong = y ~ time + (1 + time | id) +
+    (1 + time + (1 + time | id) | marker),
+  dataLong = dataLong,
+  families = rep("gaussian", 3)
+)
+```
+
+The usual longitudinal summaries, random effects, diagnostics, posterior
+prediction, and longitudinal plots remain available. Survival, cumulative
+hazard, association, concordance, and time-dependent ROC/AUC methods give a
+clear error for this model form.
+
 ### Latent-progress mixtures
 
 `joinme_mix()` fits a finite mixture on selected standardised random-effect
@@ -127,9 +151,9 @@ sim <- simulate_joinme_mix(
   formulaEvent = formulaEvent,
   n_id = 120,
   families = rep("gaussian", 3),
-  n_clusters = 3,
-  cluster_type = c("subject", "vcov"),
-  formulaCluster = ~ x1 + x2,
+  n_classes = 3,
+  class_type = c("subject", "vcov"),
+  formulaClass = ~ x1 + x2,
   class_parameters = list(
     probability = c(0.25, 0.45, 0.30),
     location = list(
@@ -154,9 +178,9 @@ mixture_fit <- joinme_mix(
   dataLong = sim$dataLong,
   formulaEvent = formulaEvent,
   dataEvent = sim$dataEvent,
-  n_clusters = 3,
-  cluster_type = c("subject", "vcov"),
-  formulaCluster = ~ x1 + x2,
+  n_classes = 3,
+  class_type = c("subject", "vcov"),
+  formulaClass = ~ x1 + x2,
   priors = jm_prior(
     class_probability = rep(2, 3),
     class_regression = 1
@@ -166,15 +190,15 @@ mixture_fit <- joinme_mix(
 ```
 
 The first two coordinates of each selected block define the progress plane by
-default. Compatible types share one allocation, so `n_clusters = 3` means three
+default. Compatible types share one allocation, so `n_classes = 3` means three
 classes rather than nine combinations. The only supported values of
-`cluster_type` are `"subject"`, `"marker"`, `"corr"`, and `"vcov"`. By default,
+`class_type` are `"subject"`, `"marker"`, `"corr"`, and `"vcov"`. By default,
 only the selected
 random-intercept location is ordered; slope locations remain unrestricted.
-`cluster_ordering` can instead order baseline class probabilities or impose no
-order. `formulaCluster` may regress class probabilities on covariates that are
+`class_ordering` can instead order baseline class probabilities or impose no
+order. `formulaClass` may regress class probabilities on covariates that are
 constant within the relevant subject or marker, and a list of three
-formulae supplies separate predictors when `n_clusters = 3`.
+formulae supplies separate predictors when `n_classes = 3`.
 
 Mixture fits inherit ordinary methods and add:
 

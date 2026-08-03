@@ -29,27 +29,27 @@
 #' standard Normal.
 #'
 #' Subject and covariance-regression coordinates share one subject-level
-#' allocation. Combining compatible types consequently retains exactly `n_clusters`
+#' allocation. Combining compatible types consequently retains exactly `n_classes`
 #' components rather than constructing a Cartesian product.
 #'
-#' `formulaCluster` is evaluated using the same allocation-unit design builder
+#' `formulaClass` is evaluated using the same allocation-unit design builder
 #' as [joinme_mix()]. A shared formula is applied to every active allocation
 #' domain. A named list may supply separate `subject` and `marker`
-#' formulae. A list of exactly `n_clusters` formulae supplies class-specific
+#' formulae. A list of exactly `n_classes` formulae supplies class-specific
 #' predictors. The formula intercept is omitted because `probability` in
 #' `class_parameters` already specifies the zero-covariate probabilities.
 #'
 #' `class_parameters` is a named list with the following entries:
 #'
-#' - `probability`: a positive vector of length `n_clusters`, normalised to sum
+#' - `probability`: a positive vector of length `n_classes`, normalised to sum
 #'   to one. The default is uniform, except under probability ordering where a
 #'   strictly increasing sequence is used.
 #' - `coefficient`: class-regression coefficients. Supply a named list with
 #'   `subject` and/or `marker` vectors. Named vectors are matched to the
 #'   columns recorded in `truth$mixture$class_design`; unnamed vectors must
 #'   have the exact required length.
-#' - `location`: an `n_clusters` by \(K\) matrix in the packed coordinate
-#'   order, or a named list containing matrices for selected clustering
+#' - `location`: an `n_classes` by \(K\) matrix in the packed coordinate
+#'   order, or a named list containing matrices for selected class
 #'   types. The default places ordered, equally spaced component centres
 #'   between -1.25 and 1.25 on every selected coordinate.
 #' - `scale`: a positive scalar, vector, matrix, or named level list matching
@@ -57,9 +57,12 @@
 #'
 #' The returned `truth$mixture` record contains the realised class
 #' probabilities, allocations, component parameters, coordinate layout and
-#' standardised latent draws. Class labels are kept out of `dataLong` and
-#' `dataEvent` so that an analysis cannot accidentally use the simulated truth
-#' as an observed predictor.
+#' standardised latent draws. Its `stan_data_contract` entry records the exact
+#' mixture dimensions, source indices, packed starts, ordering code and
+#' class-design segments expected from a corresponding `joinme_mix(...,
+#' fit = FALSE)` call. Class labels are kept out of `dataLong` and `dataEvent`
+#' so that an analysis cannot accidentally use the simulated truth as an
+#' observed predictor.
 #'
 #' A longitudinal-only simulation is requested with `formulaEvent = NULL`,
 #' matching [joinme_mix()]. The common engine then uses an internal
@@ -68,15 +71,15 @@
 #' association terms are not permitted in this mode.
 #'
 #' @inheritParams simulate_joinme
-#' @param n_clusters Number of latent classes \(G\); must be an integer of at
+#' @param n_classes Number of latent classes \(G\); must be an integer of at
 #'   least two. This has the same meaning as in [joinme_mix()].
-#' @param formulaCluster One-sided shared, domain-specific, or class-specific
+#' @param formulaClass One-sided shared, domain-specific, or class-specific
 #'   class-membership formula, following [joinme_mix()].
-#' @param cluster_type Character vector selecting only `"subject"`, `"marker"`,
+#' @param class_type Character vector selecting only `"subject"`, `"marker"`,
 #'   `"corr"` and/or `"vcov"`, with the same meaning as in [joinme_mix()].
-#' @param cluster_dimensions Optional coordinate selection with the same
+#' @param class_dimensions Optional coordinate selection with the same
 #'   syntax as [joinme_mix()].
-#' @param cluster_ordering Class-label identification rule: `"intercept"`,
+#' @param class_ordering Class-label identification rule: `"intercept"`,
 #'   `"probability"` or `"none"`. The contextual default is identical to
 #'   [joinme_mix()].
 #' @param class_parameters Generative class probabilities, regression
@@ -95,9 +98,9 @@
 #'   formulaEvent = survival::Surv(time, event) ~ x1 + x2,
 #'   n_id = 80,
 #'   families = c("gaussian", "student_t", "gaussian"),
-#'   n_clusters = 3,
-#'   formulaCluster = ~ x1,
-#'   cluster_type = c("subject", "vcov"),
+#'   n_classes = 3,
+#'   formulaClass = ~ x1,
+#'   class_type = c("subject", "vcov"),
 #'   class_parameters = list(
 #'     probability = c(0.25, 0.45, 0.30),
 #'     coefficient = list(subject = c(
@@ -121,9 +124,9 @@
 #'   dataEvent = simulated$dataEvent,
 #'   formulaVCov = simulated$truth$formulaVCov,
 #'   families = simulated$marker_info$families,
-#'   n_clusters = 3,
-#'   formulaCluster = ~ x1,
-#'   cluster_type = c("subject", "vcov")
+#'   n_classes = 3,
+#'   formulaClass = ~ x1,
+#'   class_type = c("subject", "vcov")
 #' )
 #' }
 #' @export
@@ -210,11 +213,11 @@ simulate_joinme_mix <- function(
   y_var = "y",
   event_time_var = "time",
   event_var = "event",
-  n_clusters = 2L,
-  formulaCluster = ~1,
-  cluster_type = "subject",
-  cluster_dimensions = NULL,
-  cluster_ordering = NULL,
+  n_classes = 2L,
+  formulaClass = ~1,
+  class_type = "subject",
+  class_dimensions = NULL,
+  class_ordering = NULL,
   class_parameters = list()
 ) {
   longitudinal_only <- is.null(
@@ -223,18 +226,12 @@ simulate_joinme_mix <- function(
   supplied_call <- match.call(
     expand.dots = TRUE
   ) # original call retained to distinguish defaults from explicit requests
-  if ("cluster" %in% names(supplied_call)) {
-    cli::cli_abort(c(
-      x = "{.arg cluster} is no longer an argument to {.fn simulate_joinme_mix}.",
-      i = "Use {.arg cluster_type} with subject, marker, corr, or vcov."
-    ))
-  }
-  selected_cluster_types <- .canonical_cluster_types(
-    cluster_type
-  ) # checked public clustering types before ordinary simulation work begins
-  if (length(selected_cluster_types) == 0L) {
+  selected_class_types <- .canonical_class_types(
+    class_type
+  ) # checked public class types before ordinary simulation work begins
+  if (length(selected_class_types) == 0L) {
     cli::cli_abort(
-      "{.arg cluster_type} must select at least one clustering type."
+      "{.arg class_type} must select at least one class type."
     )
   }
   if (
@@ -263,11 +260,11 @@ simulate_joinme_mix <- function(
   # formula-derived dimensions after it has built the same random-effect
   # design matrices used for data generation.
   mixture_specification <- list(
-    n_clusters = n_clusters, # requested number of latent components
-    formulaCluster = formulaCluster, # covariate model for component membership
-    cluster_type = selected_cluster_types, # random-effect blocks receiving mixture distributions
-    cluster_dimensions = cluster_dimensions, # selected coordinates by block
-    cluster_ordering = cluster_ordering, # label-identification convention
+    n_classes = n_classes, # requested number of latent components
+    formulaClass = formulaClass, # covariate model for component membership
+    class_type = selected_class_types, # random-effect blocks receiving mixture distributions
+    class_dimensions = class_dimensions, # selected coordinates by block
+    class_ordering = class_ordering, # label-identification convention
     class_parameters = class_parameters # fixed generative mixture parameters
   )
 
@@ -280,11 +277,11 @@ simulate_joinme_mix <- function(
     supplied_call
   )[-1L] # supplied ordinary and mixture arguments as language objects
   mixture_argument_names <- c(
-    "n_clusters",
-    "formulaCluster",
-    "cluster_type",
-    "cluster_dimensions",
-    "cluster_ordering",
+    "n_classes",
+    "formulaClass",
+    "class_type",
+    "class_dimensions",
+    "class_ordering",
     "class_parameters"
   ) # arguments consumed by the mixture layer rather than the ordinary engine
   simulation_arguments[mixture_argument_names] <- NULL
@@ -395,7 +392,7 @@ simulate_joinme_mix <- function(
 #' @param require_positive Whether every supplied value must be strictly
 #'   positive.
 #'
-#' @return An `n_clusters` by \(K\) numeric matrix.
+#' @return An `n_classes` by \(K\) numeric matrix.
 #' @keywords internal
 #' @noRd
 .sim_mixture_component_matrix <- function(
@@ -405,7 +402,7 @@ simulate_joinme_mix <- function(
   argument_name,
   require_positive = FALSE
 ) {
-  n_clusters <- nrow(default) # number of component rows
+  n_classes <- nrow(default) # number of component rows
   total_dimension <- ncol(default) # packed selected-coordinate count
   output <- default # complete matrix, overwritten only where requested
 
@@ -445,19 +442,19 @@ simulate_joinme_mix <- function(
   if (is.list(supplied) && !is.matrix(supplied)) {
     if (is.null(names(supplied)) || any(!nzchar(names(supplied)))) {
       cli::cli_abort(
-        "{.arg {argument_name}} must use clustering-level names when supplied as a list."
+        "{.arg {argument_name}} must use class-type names when supplied as a list."
       )
     }
-    canonical_names <- .canonical_cluster_types(names(supplied))
+    canonical_names <- .canonical_class_types(names(supplied))
     if (anyDuplicated(canonical_names)) {
       cli::cli_abort(
-        "{.arg {argument_name}} supplies the same clustering type more than once."
+        "{.arg {argument_name}} supplies the same class type more than once."
       )
     }
     names(supplied) <- canonical_names
     unknown_levels <- setdiff(
       canonical_names,
-      layout$mixture$cluster_type
+      layout$mixture$class_type
     )
     if (length(unknown_levels) > 0L) {
       cli::cli_abort(
@@ -470,7 +467,7 @@ simulate_joinme_mix <- function(
       block_columns <- seq.int(block_start, length.out = block_dimension)
       output[, block_columns] <- normalise_block(
         supplied[[level]],
-        rows = n_clusters,
+        rows = n_classes,
         columns = block_dimension,
         label = level
       )
@@ -478,7 +475,7 @@ simulate_joinme_mix <- function(
   } else {
     output <- normalise_block(
       supplied,
-      rows = n_clusters,
+      rows = n_classes,
       columns = total_dimension,
       label = "the packed mixture"
     )
@@ -525,24 +522,24 @@ simulate_joinme_mix <- function(
     return(NULL)
   }
 
-  # Step 1: validate the public class count and selected clustering types
+  # Step 1: validate the public class count and selected class types
   # through the same helpers used by the fitting entry point.
-  n_clusters <- specification$n_clusters # requested component count
+  n_classes <- specification$n_classes # requested component count
   if (
-    !is.numeric(n_clusters) ||
-      length(n_clusters) != 1L ||
-      !is.finite(n_clusters) ||
-      n_clusters < 2 ||
-      n_clusters != floor(n_clusters)
+    !is.numeric(n_classes) ||
+      length(n_classes) != 1L ||
+      !is.finite(n_classes) ||
+      n_classes < 2 ||
+      n_classes != floor(n_classes)
   ) {
-    cli::cli_abort("{.arg n_clusters} must be a single integer of at least two.")
+    cli::cli_abort("{.arg n_classes} must be a single integer of at least two.")
   }
-  n_clusters <- as.integer(n_clusters) # checked component count
-  selected_types <- .canonical_cluster_types(
-    specification$cluster_type
+  n_classes <- as.integer(n_classes) # checked component count
+  selected_types <- .canonical_class_types(
+    specification$class_type
   ) # canonical selected random-effect blocks
   if (length(selected_types) == 0L) {
-    cli::cli_abort("{.arg cluster_type} must select at least one clustering type.")
+    cli::cli_abort("{.arg class_type} must select at least one class type.")
   }
 
   # Step 2: construct class-regression matrices in the exact unit order used
@@ -578,16 +575,16 @@ simulate_joinme_mix <- function(
     }
   }
   class_design <- .mixture_class_design(
-    formula_class = specification$formulaCluster,
+    formula_class = specification$formulaClass,
     selected_types = selected_types,
     data_long = class_long_data,
     data_event = data_event,
     id_variable = id_variable,
     marker_variable = marker_variable,
-    n_clusters = n_clusters
+    n_classes = n_classes
   ) # subject- and marker-domain class design records
-  ordering <- .resolve_cluster_ordering(
-    cluster_ordering = specification$cluster_ordering,
+  ordering <- .resolve_class_ordering(
+    class_ordering = specification$class_ordering,
     class_specific_formulae = isTRUE(class_design$class_specific)
   ) # contextual or explicit label-identification convention
 
@@ -607,13 +604,13 @@ simulate_joinme_mix <- function(
       zidm_cols = labels$covariance
     ),
     mixture = list(
-      n_clusters = n_clusters,
-      cluster_type = selected_types,
-      cluster_dimensions = specification$cluster_dimensions,
+      n_classes = n_classes,
+      class_type = selected_types,
+      class_dimensions = specification$class_dimensions,
       class_probability_concentration = 1,
       class_regression_scale = 1,
       class_design = class_design,
-      cluster_ordering = ordering,
+      class_ordering = ordering,
       include_survival = TRUE
     )
   ) # fit-identical coordinate layout and active-domain metadata
@@ -675,15 +672,15 @@ simulate_joinme_mix <- function(
   probability <- as.numeric(
     class_parameters$probability %||%
       class_parameters$probabilities %||%
-      if (identical(ordering, "probability")) seq_len(n_clusters) else rep(1, n_clusters)
+      if (identical(ordering, "probability")) seq_len(n_classes) else rep(1, n_classes)
   ) # unnormalised zero-covariate component probabilities
   if (
-    length(probability) != n_clusters ||
+    length(probability) != n_classes ||
       any(!is.finite(probability)) ||
       any(probability <= 0)
   ) {
     cli::cli_abort(
-      "{.arg class_parameters$probability} must contain {n_clusters} positive finite values."
+      "{.arg class_parameters$probability} must contain {n_classes} positive finite values."
     )
   }
   probability <- probability / sum(probability) # probability simplex used for sampling
@@ -694,7 +691,7 @@ simulate_joinme_mix <- function(
       "The internally generated probabilities must be strictly increasing."
     }
     cli::cli_abort(c(
-      x = "{.arg cluster_ordering = \"probability\"} requires strictly increasing baseline probabilities.",
+      x = "{.arg class_ordering = \"probability\"} requires strictly increasing baseline probabilities.",
       i = detail
     ))
   }
@@ -765,10 +762,10 @@ simulate_joinme_mix <- function(
     matrix(
       probability_array[1L, , ],
       nrow = nrow(class_design[[domain]]$matrix),
-      ncol = n_clusters,
+      ncol = n_classes,
       dimnames = list(
         class_design[[domain]]$units,
-        paste0("class_", seq_len(n_clusters))
+        paste0("class_", seq_len(n_classes))
       )
     )
   })
@@ -783,7 +780,7 @@ simulate_joinme_mix <- function(
       stats::setNames(
         vapply(seq_len(nrow(probability_by_domain$subject)), function(unit) {
           sample.int(
-            n_clusters,
+            n_classes,
             size = 1L,
             prob = probability_by_domain$subject[unit, ]
           )
@@ -797,7 +794,7 @@ simulate_joinme_mix <- function(
       stats::setNames(
         vapply(seq_len(nrow(probability_by_domain$marker)), function(unit) {
           sample.int(
-            n_clusters,
+            n_classes,
             size = 1L,
             prob = probability_by_domain$marker[unit, ]
           )
@@ -813,10 +810,10 @@ simulate_joinme_mix <- function(
   # intentionally separated enough for simulation examples while remaining
   # moderate on the standardised random-effect scale.
   total_dimension <- fit_layout$K_mix # packed selected-coordinate count
-  default_centre <- seq(-1.25, 1.25, length.out = n_clusters)
+  default_centre <- seq(-1.25, 1.25, length.out = n_classes)
   default_location <- matrix(
     rep(default_centre, total_dimension),
-    nrow = n_clusters,
+    nrow = n_classes,
     ncol = total_dimension
   ) # default ordered component centres on every selected coordinate
   location <- .sim_mixture_component_matrix(
@@ -827,7 +824,7 @@ simulate_joinme_mix <- function(
   ) # complete component-location matrix
   scale <- .sim_mixture_component_matrix(
     class_parameters$scale %||% class_parameters$scales,
-    default = matrix(0.65, nrow = n_clusters, ncol = total_dimension),
+    default = matrix(0.65, nrow = n_classes, ncol = total_dimension),
     layout = fit_layout,
     argument_name = "class_parameters$scale",
     require_positive = TRUE
@@ -845,8 +842,8 @@ simulate_joinme_mix <- function(
   }
 
   list(
-    n_clusters = n_clusters,
-    cluster_type = fit_layout$mixture$cluster_type,
+    n_classes = n_classes,
+    class_type = fit_layout$mixture$class_type,
     dimensions = fit_layout$mixture$dimensions,
     starts = fit_layout$mixture$starts,
     total_dimension = total_dimension,
@@ -855,7 +852,7 @@ simulate_joinme_mix <- function(
     distribution = fit_layout$mixture$distribution,
     probability = stats::setNames(
       probability,
-      paste0("class_", seq_len(n_clusters))
+      paste0("class_", seq_len(n_classes))
     ),
     coefficient = coefficient_by_domain,
     probability_by_unit = probability_by_domain,
@@ -863,7 +860,40 @@ simulate_joinme_mix <- function(
     location = location,
     scale = scale,
     class_design = class_design,
-    allocation_domains = allocation_domains
+    allocation_domains = allocation_domains,
+    stan_data_contract = list(
+      use_mixture = fit_layout$use_mixture,
+      n_classes = fit_layout$n_classes,
+      K_mix = fit_layout$K_mix,
+      mix_subject = fit_layout$mix_subject,
+      mix_marker = fit_layout$mix_marker,
+      mix_covariance = fit_layout$mix_covariance,
+      mix_dim_subject = fit_layout$mix_dim_subject,
+      mix_idx_subject = fit_layout$mix_idx_subject,
+      mix_start_subject = fit_layout$mix_start_subject,
+      mix_dim_marker = fit_layout$mix_dim_marker,
+      mix_idx_marker = fit_layout$mix_idx_marker,
+      mix_start_marker = fit_layout$mix_start_marker,
+      mix_dim_covariance = fit_layout$mix_dim_covariance,
+      mix_idx_covariance = fit_layout$mix_idx_covariance,
+      mix_start_covariance = fit_layout$mix_start_covariance,
+      mix_ordering = fit_layout$mix_ordering,
+      mix_ordered_location_coordinate =
+        fit_layout$mix_ordered_location_coordinate,
+      P_class_subject = fit_layout$P_class_subject,
+      X_class_subject = fit_layout$X_class_subject,
+      class_term_start_subject =
+        fit_layout$class_term_start_subject,
+      class_term_count_subject =
+        fit_layout$class_term_count_subject,
+      P_class_marker = fit_layout$P_class_marker,
+      X_class_marker = fit_layout$X_class_marker,
+      class_term_start_marker =
+        fit_layout$class_term_start_marker,
+      class_term_count_marker =
+        fit_layout$class_term_count_marker,
+      shrinkage = as.integer(shrinkage)
+    ) # structural Stan fields which a fit to the simulated data must reproduce exactly
   )
 }
 
@@ -871,7 +901,7 @@ simulate_joinme_mix <- function(
 #'
 #' @param latent_matrix Allocation-unit by coordinate matrix initially drawn
 #'   from the ordinary standardised distribution.
-#' @param level Canonical clustered block name.
+#' @param level Canonical class-specific block name.
 #' @param allocation Integer class label per row.
 #' @param mixture Prepared generative mixture, or `NULL`.
 #' @param shrinkage Integer component-family code.
@@ -887,7 +917,7 @@ simulate_joinme_mix <- function(
   mixture,
   shrinkage
 ) {
-  if (is.null(mixture) || !(level %in% mixture$cluster_type)) {
+  if (is.null(mixture) || !(level %in% mixture$class_type)) {
     return(latent_matrix)
   }
   selected_coordinates <- mixture$dimensions[[level]] # source coordinates to replace

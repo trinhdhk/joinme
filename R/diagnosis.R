@@ -97,7 +97,10 @@ diagnosis <- function(object, ...) {
 .diagnosis_parameter_table_from_tables <- function(tables) {
 	metric_cols <- c(
 		"Estimate",
+		"Mean",
+		"Median",
 		"Est.Error",
+		"SD",
 		"Q2.5",
 		"Q97.5",
 		"Rhat",
@@ -188,8 +191,10 @@ diagnosis.JoiNMeFit <- function(
 ) {
 	
 	cache_key <- paste0(
-		"diagnosis_",
+		"diagnosis_schema=2_",
 		draws %||% "default",
+		"_seed=",
+		seed,
 		"_",
 		digits,
 		"_",
@@ -220,6 +225,427 @@ diagnosis.JoiNMeFit <- function(
 		),
 		class = "JoiNMe_diagnosis"
 	)
+	object$cache_set(cache_key, result)
+	result
+}
+
+#' Build posterior features used to interpret Hamiltonian energy movement
+#'
+#' @description
+#' Reduces large random-effect and scale blocks to one value per iteration and
+#' chain.  Correlation with energy is an exploratory diagnostic: it identifies
+#' posterior directions along which energy changes, but it does not establish
+#' that any one parameter caused a low E-BFMI value.
+#'
+#' @param object A fitted latent-progress mixture.
+#'
+#' @return A named list of iteration-by-chain matrices.
+#' @keywords internal
+#' @noRd
+.mixture_energy_features <- function(object) {
+	all_variables <- tryCatch(
+		posterior::variables(.get_draws_obj(object$fit)),
+		error = function(error) character(0)
+	) # complete fitted parameter names used to locate each interpretable block
+	if (length(all_variables) == 0L) {
+		return(list())
+	}
+
+	feature_from_pattern <- function(pattern, summary_function) {
+		selected_variables <- grep(
+			pattern,
+			all_variables,
+			value = TRUE
+		) # fitted variables belonging to one scale or latent-effect block
+		if (length(selected_variables) == 0L) {
+			return(NULL)
+		}
+		draw_array <- as.array(.get_draws_array(
+			object$fit,
+			variables = selected_variables
+		)) # iteration-by-chain draws for the selected posterior block
+		summary_function(draw_array)
+	}
+
+	rms_summary <- function(draw_array) {
+		sqrt(apply(draw_array^2, c(1L, 2L), mean, na.rm = TRUE))
+	}
+	minimum_summary <- function(draw_array) {
+		apply(draw_array, c(1L, 2L), min, na.rm = TRUE)
+	}
+	geometric_mean_summary <- function(draw_array) {
+		exp(apply(
+			log(pmax(abs(draw_array), sqrt(.Machine$double.eps))),
+			c(1L, 2L),
+			mean,
+			na.rm = TRUE
+		))
+	}
+
+	features <- list(
+		"within-class scale RMS" = feature_from_pattern(
+			"^mix_scale\\[",
+			rms_summary
+		),
+		"smallest within-class scale" = feature_from_pattern(
+			"^mix_scale\\[",
+			minimum_summary
+		),
+		"class-location RMS" = feature_from_pattern(
+			"^mix_location\\[",
+			rms_summary
+		),
+		"subject scale geometric mean" = feature_from_pattern(
+			"^tau_u\\[",
+			geometric_mean_summary
+		),
+		"marker scale geometric mean" = feature_from_pattern(
+			"^tau_v\\[",
+			geometric_mean_summary
+		),
+		"covariance loading geometric mean" = feature_from_pattern(
+			"^lambda_L\\[",
+			geometric_mean_summary
+		),
+		"subject standardised-effect RMS" = feature_from_pattern(
+			"^z_u\\[",
+			rms_summary
+		),
+		"marker standardised-effect RMS" = feature_from_pattern(
+			"^z_v\\[",
+			rms_summary
+		),
+		"covariance standardised-effect RMS" = feature_from_pattern(
+			"^z_L\\[",
+			rms_summary
+		),
+		"class-regression coefficient RMS" = feature_from_pattern(
+			"^mix_class_coefficient_",
+			rms_summary
+		)
+	) # scientifically named low-dimensional summaries of the main mixture geometry
+	Filter(Negate(is.null), features)
+}
+
+#' Relate posterior block summaries to Hamiltonian energy
+#'
+#' @param object A fitted latent-progress mixture.
+#'
+#' @return A long data frame with one feature-by-chain correlation per row.
+#' @keywords internal
+#' @noRd
+.mixture_energy_association <- function(object) {
+	sampler_draws <- .sampler_diagnostic_draws(
+		object$fit
+	) # sampler states in the same iteration and chain order as posterior draws
+	if (is.null(sampler_draws)) {
+		return(data.frame())
+	}
+	sampler_array <- as.array(
+		sampler_draws
+	) # numeric sampler-state array used to retrieve chain-wise energy
+	if (!"energy__" %in% (dimnames(sampler_array)[[3L]] %||% character(0))) {
+		return(data.frame())
+	}
+	features <- .mixture_energy_features(
+		object
+	) # posterior block summaries to compare with the sampled energy sequence
+	if (length(features) == 0L) {
+		return(data.frame())
+	}
+
+	rows <- list() # feature-by-chain diagnostic rows accumulated below
+	row_position <- 1L # next free position in the diagnostic row list
+	for (feature_name in names(features)) {
+		feature_values <- features[[feature_name]] # iteration-by-chain feature matrix
+		number_chains <- min(
+			ncol(feature_values),
+			dim(sampler_array)[2L]
+		) # chains jointly available in model and sampler-state draws
+		for (chain_index in seq_len(number_chains)) {
+			number_iterations <- min(
+				nrow(feature_values),
+				dim(sampler_array)[1L]
+			) # aligned retained iterations for this feature and energy
+			feature_chain <- as.numeric(
+				feature_values[seq_len(number_iterations), chain_index]
+			) # posterior feature sequence for one chain
+			energy_chain <- as.numeric(
+				sampler_array[
+					seq_len(number_iterations),
+					chain_index,
+					"energy__"
+				]
+			) # Hamiltonian energy sequence for the same chain and iterations
+			finite_values <- is.finite(feature_chain) &
+				is.finite(energy_chain) # paired iterations eligible for correlation
+			correlation <- if (
+				sum(finite_values) > 2L &&
+					stats::sd(feature_chain[finite_values]) > 0 &&
+					stats::sd(energy_chain[finite_values]) > 0
+			) {
+				stats::cor(
+					feature_chain[finite_values],
+					energy_chain[finite_values]
+				)
+			} else {
+				NA_real_
+			} # within-chain linear association, used only as an exploratory clue
+			rows[[row_position]] <- data.frame(
+				feature = feature_name,
+				chain = chain_index,
+				correlation_with_energy = correlation,
+				absolute_correlation = abs(correlation),
+				stringsAsFactors = FALSE
+			) # one interpretable energy association for this feature and chain
+			row_position <- row_position + 1L
+		}
+	}
+	output <- do.call(
+		rbind,
+		rows
+	) # complete long-form energy association table
+	output[order(-output$absolute_correlation), , drop = FALSE]
+}
+
+#' Diagnose the likelihood scale trade-off in a mixture block
+#'
+#' @description
+#' The selected standardised component scale is subsequently multiplied by an
+#' ordinary random-effect scale.  This helper reports the within-chain
+#' correlation between their logarithmic geometric means.  A strong negative
+#' value is direct posterior evidence of the scale ridge discussed in the Stan
+#' parameter declaration; it is not evidence of a coordinate-indexing error.
+#'
+#' @param object A fitted latent-progress mixture.
+#'
+#' @return A data frame with one row per active class type and chain.
+#' @keywords internal
+#' @noRd
+.mixture_scale_tradeoff <- function(object) {
+	stan_data <- object$stan_data # exact selected coordinates supplied to Stan
+	number_classes <- as.integer(
+		stan_data$n_classes %||% 0L
+	) # shared number of mixture components
+	if (number_classes < 2L) {
+		return(data.frame())
+	}
+
+	block_specifications <- list(
+		subject = list(
+			dimension = as.integer(stan_data$mix_dim_subject %||% 0L),
+			start = as.integer(stan_data$mix_start_subject %||% 0L),
+			indices = as.integer(stan_data$mix_idx_subject %||% integer(0)),
+			ordinary_prefix = "tau_u",
+			likelihood_combination = "subject Cholesky scale x class coordinate"
+		),
+		marker = list(
+			dimension = as.integer(stan_data$mix_dim_marker %||% 0L),
+			start = as.integer(stan_data$mix_start_marker %||% 0L),
+			indices = as.integer(stan_data$mix_idx_marker %||% integer(0)),
+			ordinary_prefix = "tau_v",
+			likelihood_combination = "marker Cholesky scale x class coordinate"
+		),
+		covariance = list(
+			dimension = as.integer(stan_data$mix_dim_covariance %||% 0L),
+			start = as.integer(stan_data$mix_start_covariance %||% 0L),
+			indices = as.integer(stan_data$mix_idx_covariance %||% integer(0)),
+			ordinary_prefix = "lambda_L",
+			likelihood_combination = "covariance loading x class coordinate"
+		)
+	) # mapping from each active class block to its ordinary posterior scale
+
+	rows <- list() # block-by-chain scale correlations accumulated below
+	row_position <- 1L # next free position in the result list
+	for (block_name in names(block_specifications)) {
+		block <- block_specifications[[block_name]] # selected coordinate contract for one block
+		if (
+			block$dimension < 1L ||
+				block$start < 1L ||
+				length(block$indices) != block$dimension
+		) {
+			next
+		}
+		ordinary_variables <- paste0(
+			block$ordinary_prefix,
+			"[",
+			block$indices,
+			"]"
+		) # ordinary scale variables paired with the selected latent coordinates
+		packed_coordinates <- block$start +
+			seq_len(block$dimension) - 1L # packed mixture columns belonging to this block
+		component_variables <- as.vector(outer(
+			seq_len(number_classes),
+			packed_coordinates,
+			function(class_index, coordinate_index) {
+				paste0(
+					"mix_scale[",
+					class_index,
+					",",
+					coordinate_index,
+					"]"
+				)
+			}
+		)) # within-class scale variables for all classes in the current block
+		ordinary_draws <- tryCatch(
+			as.array(.get_draws_array(
+				object$fit,
+				variables = ordinary_variables
+			)),
+			error = function(error) NULL
+		) # posterior draws of the ordinary scale factor
+		component_draws <- tryCatch(
+			as.array(.get_draws_array(
+				object$fit,
+				variables = component_variables
+			)),
+			error = function(error) NULL
+		) # posterior draws of the class-conditional standardised scales
+		if (is.null(ordinary_draws) || is.null(component_draws)) {
+			next
+		}
+		log_ordinary_scale <- apply(
+			log(pmax(ordinary_draws, sqrt(.Machine$double.eps))),
+			c(1L, 2L),
+			mean
+		) # logarithmic geometric mean of ordinary scales per draw and chain
+		log_component_scale <- apply(
+			log(pmax(component_draws, sqrt(.Machine$double.eps))),
+			c(1L, 2L),
+			mean
+		) # logarithmic geometric mean of component scales per draw and chain
+		number_chains <- min(
+			ncol(log_ordinary_scale),
+			ncol(log_component_scale)
+		) # jointly represented Markov chains
+		for (chain_index in seq_len(number_chains)) {
+			correlation <- stats::cor(
+				log_ordinary_scale[, chain_index],
+				log_component_scale[, chain_index],
+				use = "complete.obs"
+			) # posterior correlation revealing compensation between scale factors
+			rows[[row_position]] <- data.frame(
+				class_type = if (identical(block_name, "covariance")) {
+					.mixture_covariance_class_type(
+						object$mixture %||% object$config$mixture
+					) %||% "covariance"
+				} else {
+					block_name
+				},
+				chain = chain_index,
+				ordinary_scale = block$ordinary_prefix,
+				likelihood_combination = block$likelihood_combination,
+				correlation = correlation,
+				absolute_correlation = abs(correlation),
+				interpretation = if (
+					is.finite(correlation) && correlation <= -0.3
+				) {
+					"material compensating scale movement"
+				} else {
+					"no strong negative linear trade-off detected"
+				},
+				stringsAsFactors = FALSE
+			) # transparent class-block scale assessment for one chain
+			row_position <- row_position + 1L
+		}
+	}
+	if (length(rows) == 0L) {
+		return(data.frame())
+	}
+	do.call(rbind, rows)
+}
+
+#' Diagnostic summary for a latent-progress mixture
+#'
+#' @description
+#' Extends the inherited diagnostics with chain-specific Hamiltonian energy
+#' behaviour, exploratory associations between energy and model blocks, and a
+#' direct assessment of the ordinary-scale/component-scale trade-off.
+#'
+#' @inheritParams diagnosis.JoiNMeFit
+#'
+#' @return A `JoiNMeMix_diagnosis` object inheriting from
+#'   `JoiNMe_diagnosis`.
+#' @export
+diagnosis.JoiNMeMixFit <- function(
+	object,
+	draws = NULL,
+	seed = 1,
+	digits = 3,
+	include_corr = TRUE,
+	...
+) {
+	cache_key <- paste0(
+		"mixture_diagnosis_schema=3_",
+		draws %||% "default",
+		"_seed=",
+		seed,
+		"_digits=",
+		digits,
+		"_corr=",
+		as.integer(include_corr)
+	) # cache identity for the expanded mixture diagnostic report
+	cached <- object$cache_get(
+		cache_key
+	) # previously computed report for the same posterior subset and presentation
+	if (!is.null(cached)) {
+		return(cached)
+	}
+
+	result <- diagnosis.JoiNMeFit(
+		object,
+		draws = draws,
+		seed = seed,
+		digits = digits,
+		include_corr = include_corr,
+		...
+	) # inherited sampler and parameter-level diagnostics
+	backend_diagnostics <- result$sampler %||%
+		list() # backend-wide values already collected by the inherited summary
+	if (
+		!is.data.frame(backend_diagnostics$energy_by_chain) ||
+			nrow(backend_diagnostics$energy_by_chain) == 0L
+	) {
+		backend_diagnostics <- .joinme_sampler_diagnostics(
+			object$fit
+		) # fresh sampler states for an object whose earlier cache predates this schema
+	}
+	backend_table <- .diagnostics_table_from_sampler(
+		backend_diagnostics
+	) # common metric-value layout used by every JoiNMe summary
+	if (is.data.frame(result$summary) && nrow(result$summary) > 0L) {
+		for (metric_name in intersect(
+			result$summary$metric,
+			backend_table$metric
+		)) {
+			backend_value <- backend_table$value[
+				match(metric_name, backend_table$metric)
+			] # current backend-wide value for this established metric
+			if (is.finite(backend_value)) {
+				result$summary$value[
+					match(metric_name, result$summary$metric)
+				] <- backend_value
+			}
+		}
+	}
+	result$sampler <- backend_diagnostics
+	result$energy_by_chain <- backend_diagnostics$energy_by_chain %||%
+		data.frame()
+	result$energy_association <- .mixture_energy_association(
+		object
+	) # ranked exploratory clues about which posterior blocks move with energy
+	result$scale_tradeoff <- .mixture_scale_tradeoff(
+		object
+	) # direct posterior evidence for or against compensating scale movement
+	result$metadata$mixture_geometry <- paste(
+		"Class scales act before the ordinary random-effect transformation;",
+		"the likelihood can therefore identify their combination more readily",
+		"than its separate factors."
+	) # concise interpretation retained with the diagnostic object
+	class(result) <- c(
+		"JoiNMeMix_diagnosis",
+		"JoiNMe_diagnosis"
+	) # specialised class which retains all inherited diagnosis behaviour
 	object$cache_set(cache_key, result)
 	result
 }
@@ -257,6 +683,49 @@ print.JoiNMe_diagnosis <- function(x, max_rows = 20, ...) {
 				sep = ""
 			)
 		}
+	}
+	if (
+		is.data.frame(x$energy_by_chain) &&
+			nrow(x$energy_by_chain) > 0L
+	) {
+		.cli_print_table_section(
+			"Hamiltonian energy by chain",
+			x$energy_by_chain,
+			level = 2L
+		)
+		if (any(x$energy_by_chain$E_BFMI < 0.3, na.rm = TRUE)) {
+			.cli_print_bullets(c(
+				"E-BFMI below 0.3 indicates that at least one chain did not move efficiently through the posterior energy distribution.",
+				"High energy persistence, long trajectories or a small step size support a posterior-geometry explanation; they do not by themselves identify a coding error."
+			))
+		}
+	}
+	if (
+		is.data.frame(x$scale_tradeoff) &&
+			nrow(x$scale_tradeoff) > 0L
+	) {
+		.cli_print_table_section(
+			"Ordinary-scale and within-class-scale trade-off",
+			x$scale_tradeoff,
+			level = 2L
+		)
+	}
+	if (
+		is.data.frame(x$energy_association) &&
+			nrow(x$energy_association) > 0L
+	) {
+		energy_table <- utils::head(
+			x$energy_association,
+			max_rows
+		) # strongest absolute within-chain energy associations for concise printing
+		.cli_print_bullets(
+			"These correlations are exploratory indicators of posterior geometry, not causal tests or model-selection statistics."
+		)
+		.cli_print_table_section(
+			"Posterior features associated with energy",
+			energy_table,
+			level = 2L
+		)
 	}
 	invisible(x)
 }
@@ -962,6 +1431,10 @@ concordance.JoiNMeFit <- function(
 	type_weights = "none",
 	...
 ) {
+	.require_fitted_survival_process(
+		object,
+		"Concordance assessment"
+	)
   
   .warn_experimental("concordance")
 
@@ -2059,6 +2532,10 @@ tvROC.JoiNMeFit <- function(
 	type_weights = c("model-based", "IPCW"),
 	...
 ) {
+	.require_fitted_survival_process(
+		object,
+		"Time-dependent ROC assessment"
+	)
 	.warn_experimental("tvROC")
 	if (
 		!is.numeric(cause) ||

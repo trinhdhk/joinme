@@ -31,7 +31,7 @@ library(survival)
 # Purpose
 
 This guide is a practical companion to the statistical theory vignette. It
-shows how to choose a clustering type, how combined types share classes, how
+shows how to choose a class type, how combined types share classes, how
 to fit longitudinal-only and joint models, and how to use the inherited
 summary, prediction and diagnostic methods.
 
@@ -58,8 +58,8 @@ fit_subject <- joinme_mix(
   dataLong = data_long,
   formulaEvent = event_formula,
   dataEvent = data_event,
-  n_clusters = 2,
-  cluster_type = "subject",
+  n_classes = 2,
+  class_type = "subject",
   assoc = c("cv_mean", "cv_total"),
   seed = 2718
 )
@@ -71,7 +71,7 @@ intercept and time slope, the progress plane has the familiar interpretation
 of class-specific level and rate of change. Confirm the actual coordinate
 labels in `summary(fit_subject)`.
 
-# Choosing a clustering type
+# Choosing a class type
 
 ## Subject
 
@@ -84,8 +84,8 @@ fit_subject <- joinme_mix(
   data_long,
   event_formula,
   data_event,
-  n_clusters = 3,
-  cluster_type = "subject",
+  n_classes = 3,
+  class_type = "subject",
   assoc = "cv_mean"
 )
 ```
@@ -94,7 +94,7 @@ The posterior contains one class-probability vector per subject.
 
 ## Marker
 
-Use `"marker"` when markers themselves may form clusters with different common
+Use `"marker"` when markers themselves may form classes with different common
 longitudinal deviations:
 
 ```{r}
@@ -103,8 +103,8 @@ fit_marker <- joinme_mix(
   data_long,
   event_formula,
   data_event,
-  n_clusters = 2,
-  cluster_type = "marker",
+  n_classes = 2,
+  class_type = "marker",
   assoc = "cv_total"
 )
 ```
@@ -126,8 +126,8 @@ fit_covariance <- joinme_mix(
   event_formula,
   data_event,
   formulaVCov = ~ treatment + age,
-  n_clusters = 3,
-  cluster_type = "vcov",
+  n_classes = 3,
+  class_type = "vcov",
   assoc = "vcov"
 )
 ```
@@ -136,10 +136,19 @@ The nested marker term must contain an inner subject random-effect term.
 The selected coordinates refer to the covariance-regression latent vector
 `z_L`, not to `w_idm` innovations.
 
+Each covariance coordinate \(m\) has one fitted non-negative scalar loading
+`lambda_L[m]`. All loadings together form a vector of length
+\(M_{\mathrm{cov}}\), not a dense matrix. `lambda_L[m]` multiplies only
+`z_L[i,m]` and measures residual subject heterogeneity on that covariance
+predictor before applying the diagonal link or off-diagonal `tanh`
+transformation. In class \(g\), the corresponding shift and scale are
+`lambda_L[m] * mix_location[g,m]` and
+`lambda_L[m] * mix_scale[g,m]`, respectively.
+
 ## Estimated marker weights
 
 Marker weights retain their ordinary JoiNMe meaning and may still be shared or
-association-specific. They are not a latent-progress clustering type.
+association-specific. They are not a latent-progress class type.
 
 # Combining types without Cartesian expansion
 
@@ -152,8 +161,8 @@ fit_subject_process <- joinme_mix(
   event_formula,
   data_event,
   formulaVCov = ~ treatment,
-  n_clusters = 3,
-  cluster_type = c("subject", "vcov"),
+  n_classes = 3,
+  class_type = c("subject", "vcov"),
   assoc = c("cv_mean", "vcov")
 )
 ```
@@ -162,7 +171,7 @@ For subject \(i\), the subject effects and covariance-regression effects
 are evaluated under the same class \(g\) inside one `log_sum_exp`. There are
 three joint classes, not nine.
 
-Marker effects may be combined with either subject or covariance clustering:
+Marker effects may be combined with either subject or covariance classes:
 
 ```{r}
 fit_marker_process <- joinme_mix(
@@ -170,8 +179,8 @@ fit_marker_process <- joinme_mix(
   data_long,
   event_formula,
   data_event,
-  n_clusters = 3,
-  cluster_type = c("subject", "marker"),
+  n_classes = 3,
+  class_type = c("subject", "marker"),
   assoc = c("cv_total", "cs_total"),
   fixed_marker_weights = FALSE
 )
@@ -185,8 +194,8 @@ fit_both_domains <- joinme_mix(
   data_long,
   event_formula,
   data_event,
-  n_clusters = 2,
-  cluster_type = c("subject", "marker")
+  n_classes = 2,
+  class_type = c("subject", "marker")
 )
 ```
 
@@ -205,9 +214,9 @@ fit_selected <- joinme_mix(
   data_long,
   event_formula,
   data_event,
-  n_clusters = 3,
-  cluster_type = c("subject", "vcov"),
-  cluster_dimensions = list(
+  n_classes = 3,
+  class_type = c("subject", "vcov"),
+  class_dimensions = list(
     subject = c(1, 2),
     vcov = c(1, 3)
   )
@@ -222,14 +231,14 @@ fit_selected_marker <- joinme_mix(
   data_long,
   event_formula,
   data_event,
-  n_clusters = 2,
-  cluster_type = "marker",
-  cluster_dimensions = c(1, 2)
+  n_classes = 2,
+  class_type = "marker",
+  class_dimensions = c(1, 2)
 )
 ```
 
 Marker weights are the exception to the two-coordinate default. Every active
-weight set is included unless `cluster_dimensions` explicitly selects a
+weight set is included unless `class_dimensions` explicitly selects a
 subset. This protects the meaning of unshared association weights.
 
 # Longitudinal-only latent progress
@@ -240,8 +249,8 @@ Omit both event arguments:
 fit_longitudinal <- joinme_mix(
   formulaLong = longitudinal_formula,
   dataLong = data_long,
-  n_clusters = 3,
-  cluster_type = c("subject", "vcov"),
+  n_classes = 3,
+  class_type = c("subject", "vcov"),
   formulaVCov = ~ treatment
 )
 ```
@@ -273,9 +282,9 @@ fit_regularised <- joinme_mix(
   data_long,
   event_formula,
   data_event,
-  n_clusters = 3,
-  cluster_type = "subject",
-  formulaCluster = ~ treatment + age_at_entry,
+  n_classes = 3,
+  class_type = "subject",
+  formulaClass = ~ treatment + age_at_entry,
   priors = jm_prior(
     class_probability = c(2, 2, 2),
     class_regression = 1
@@ -287,15 +296,15 @@ fit_regularised <- joinme_mix(
 - `class_probability` is the Dirichlet concentration for zero-covariate class
   probabilities.
 - `class_regression` is the Normal prior scale for coefficients introduced by
-  `formulaCluster`.
-- `cluster_ordering = "intercept"` orders only the selected random-intercept
+  `formulaClass`.
+- `class_ordering = "intercept"` orders only the selected random-intercept
   location; slope locations remain unrestricted.
-- `cluster_ordering = "probability"` orders baseline class probabilities,
+- `class_ordering = "probability"` orders baseline class probabilities,
   whilst `"none"` imposes no ordering.
 - `shrinkage` selects Student-\(t_6\), Laplace, or Normal components.
 
 Ordering identifies the labels; it does not guarantee that the data support
-well-separated scientific clusters. Fit sensitivity models and compare posterior
+well-separated scientific classes. Fit sensitivity models and compare posterior
 allocations and predictive adequacy.
 
 Class-specific membership predictors are written as one formula per class:
@@ -306,9 +315,9 @@ fit_class_specific <- joinme_mix(
   data_long,
   event_formula,
   data_event,
-  n_clusters = 3,
-  cluster_type = "subject",
-  formulaCluster = list(
+  n_classes = 3,
+  class_type = "subject",
+  formulaClass = list(
     ~ treatment,
     ~ age_at_entry + biomarker_at_entry,
     ~ treatment + age_at_entry
@@ -316,8 +325,8 @@ fit_class_specific <- joinme_mix(
 )
 ```
 
-This form defaults to `cluster_ordering = "none"`. Set
-`cluster_ordering = "intercept"` or `"probability"` explicitly when the
+This form defaults to `class_ordering = "none"`. Set
+`class_ordering = "intercept"` or `"probability"` explicitly when the
 scientific interpretation supports that order.
 
 # Summaries and class membership
@@ -332,14 +341,37 @@ class_probability <- posterior_class(
   seed = 41
 )
 class_probability
+plot(class_probability, domain = "subject")
 ```
 
 The summary adds:
 
-- population class proportions;
-- component locations and scales, with original block labels;
-- subject and/or marker membership probabilities; and
+- zero-covariate class probabilities;
+- separate component-location and within-class-scale tables, with original
+  block labels;
+- class-membership regressions, with the reference class stated explicitly;
+- a compact posterior allocation-count distribution by active domain; and
 - the ordinary JoiNMe coefficient, covariance and diagnostic sections.
+
+The component locations and scales are on the standardised latent
+random-effect scale. They describe the distribution used to generate the
+selected coordinates; they are not response-scale trajectories or covariance
+curves. Each table presents `Estimate`, `Est.Error`, `Q2.5`, `Q97.5`, `Rhat`,
+`ess_bulk` and `ess_tail`. Here `Estimate` is the posterior mean and
+`Est.Error` is the posterior standard deviation. For a common
+`formulaClass`, class `n_classes` is the zero-coefficient reference and is
+therefore intentionally absent from the regression-coefficient table.
+
+The allocation-count table reports the posterior mean, posterior standard
+deviation and interval of the draw-specific soft class count, plus the number
+of units assigned by maximum posterior probability. The console summary does
+not repeat every subject-by-class or marker-by-class probability.
+`posterior_class()` returns that complete table, using the same compact
+posterior-summary columns, when individual
+allocation uncertainty is required. Its print method first shows compact
+maximum-probability allocation counts and then a bounded preview of the full
+unit-by-class table; the returned object is never truncated. `plot()` displays
+the same means and intervals.
 
 Raw probability draws are available with:
 
@@ -377,7 +409,7 @@ longitudinal_plot(
 )
 ```
 
-For a model clustered only on covariance, centre trajectories may coincide.
+For a model with classes defined only through covariance, centre trajectories may coincide.
 This is informative: the class distinction lies in dispersion or covariance
 rather than the longitudinal location.
 
@@ -420,12 +452,20 @@ same plot is available from posterior association output:
 
 ```{r}
 association_posterior <- posterior_assoc(fit_marker_process)
+association_posterior
 plot(
   association_posterior,
   estimand = "mean_per_class",
   association_term = "cv_total"
 )
 ```
+
+The first part of `association_posterior` reports the global association
+coefficient or marker-weighted effect. If the fitted class type changes the
+longitudinal or covariance feature entering that association, a second part
+reports the corresponding log-hazard contribution by class at compact
+reference points. No class rows are manufactured when the fitted class block
+is irrelevant to the association term.
 
 Or request it directly:
 
@@ -460,7 +500,7 @@ plot(dynamic_prediction)
 ```
 
 The returned object inherits from `JoiNMeDynPred` and additionally retains the
-parent mixture specification. For clustered subject-level blocks, the
+parent mixture specification. For class-specific subject-level blocks, the
 conditioning calculation also replaces the ordinary random-effect prior by the
 component probability, location and scale from the corresponding fitted-model
 draw. Thus the new subject's longitudinal history updates both their random
@@ -495,6 +535,16 @@ tv_roc <- tvROC(fit_subject_process, Tstart = 1, Dt = 2)
 tvAUC(tv_roc)
 ```
 
+For a mixture fit, `diagnosis()` adds three deliberately distinct pieces of
+evidence. `energy_by_chain` reports E-BFMI, energy persistence, tree depth,
+leapfrog effort, acceptance and step size for each chain. `scale_tradeoff`
+reports the posterior correlation between an ordinary random-effect scale and
+the within-class component scale applied before it. `energy_association`
+ranks low-dimensional posterior block summaries by their within-chain
+correlation with energy. These correlations are diagnostic clues, not causal
+tests. A strong negative scale correlation explains a compensating posterior
+ridge; it does not establish an indexing error.
+
 For mixture-specific assessment, include at least:
 
 ```{r}
@@ -520,12 +570,12 @@ A stable workflow is:
 
 # Frequent misunderstandings
 
-`n_clusters = 3` always means three component labels. Combining two levels does not
+`n_classes = 3` always means three component labels. Combining two levels does not
 mean \(3\times3\) classes.
 
 Ordering identifies labels but is not a scientifically meaningful
-minimum-distance constraint. A list of `n_clusters` class-specific formulae
-defaults to `cluster_ordering = "none"`.
+minimum-distance constraint. A list of `n_classes` class-specific formulae
+defaults to `class_ordering = "none"`.
 
 A modal allocation is not observed truth. It is a posterior summary.
 

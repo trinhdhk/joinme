@@ -681,10 +681,16 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'     on the tanh scale.
 #'   - `beta`: covariate effects from `formulaVCov` design matrix (systematic
 #'     subject-to-subject covariance shifts by observed covariates),
-#'   - `lambda`: non-negative loading on an iid standard-normal subject latent
-#'     perturbation; if a negative value is supplied, the simulator folds the
-#'     sign into the latent draw so the effective model remains unchanged but
-#'     follows the identified convention used during fitting,
+#'   - `lambda`: a scalar or length-\(M\) numeric vector of loadings. A scalar
+#'     is repeated over all \(M\) covariance coordinates; a vector supplies one
+#'     loading \(\lambda_m\) for each packed lower-triangular coordinate.
+#'     Each loading multiplies only its matching iid standard-normal subject
+#'     perturbation, so the collective operation is
+#'     `diag(lambda) %*% z_i`, not a full loading matrix. During fitting every
+#'     \(\lambda_m\) is constrained to be non-negative. If a negative value is
+#'     supplied for simulation, its sign is folded into the corresponding
+#'     latent draw, leaving the generated model unchanged whilst following the
+#'     identified fitting convention,
 #'   - `diag_link`: link for the subject-specific standard deviations (`"softplus"`
 #'     or `"exp"`).
 #'
@@ -697,6 +703,16 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   reconstructed as `L_i = SD_i * K_i`. Marker-by-id latent seeds are sampled as
 #'   iid standard normal values and the final marker-by-id effects are obtained as
 #'   `b_id = L_i z_id`.
+#'
+#'   Therefore, in the ordinary non-mixture model, \(\lambda_m\) is the
+#'   conditional standard deviation of the unexplained subject heterogeneity
+#'   on covariance-predictor coordinate \(m\), before applying `diag_link` or
+#'   `tanh`. It is not itself an entry of `L_i`, a covariance, or a correlation.
+#'   With `class_type = "corr"` or `"vcov"`, the selected `z_{im}` has a
+#'   class-specific location and scale. Conditional on class \(g\), its
+#'   contribution to `eta_{im}` consequently has location
+#'   `lambda_m * mix_location[g, m]` and distributional scale
+#'   `lambda_m * mix_scale[g, m]`.
 #'
 #'   Dimension rules for `id_marker_cov` entries follow marker-by-id random-effect
 #'   dimension `Q_idm`:
@@ -2263,7 +2279,7 @@ simulate_joinme <- function(
   # ---- Step 3a: prepare the optional latent-progress distribution
   # The mixture builder is invoked only after the random-effect formulae have
   # determined every available dimension. This is the earliest point at which
-  # `cluster_dimensions` can be checked faithfully. The builder itself reuses
+  # `class_dimensions` can be checked faithfully. The builder itself reuses
   # the fitting coordinate-layout machinery, so simulation and estimation
   # cannot silently disagree about which standardised coordinate an index
   # denotes.
@@ -2525,6 +2541,12 @@ simulate_joinme <- function(
     numeric(0)
   }
   alpha_cov <- .sim_align_len(re_cov_cfg$alpha, M_cov, default = default_alpha_cov, arg_name = "re_params$id_marker_cov$alpha")
+  if (!is.null(re_cov_cfg$lambda) && !is.null(dim(re_cov_cfg$lambda))) {
+    cli::cli_abort(c(
+      x = "{.arg re_params$id_marker_cov$lambda} must be a scalar or numeric vector.",
+      i = "A matrix would imply cross-coordinate loadings, which this element-wise covariance regression does not use."
+    ))
+  }
   lambda_cov <- .sim_align_len(re_cov_cfg$lambda, M_cov, default = default_lambda_cov, arg_name = "re_params$id_marker_cov$lambda")
   if (any(!is.finite(alpha_cov))) {
     cli::cli_abort(c(
@@ -2567,16 +2589,16 @@ simulate_joinme <- function(
 
     # The covariance-regression mixture acts on Stan's canonical `z_L`
     # coordinates, after any sign absorbed from a legacy negative loading.
-    # Individual and covariance-regression clustering share the same subject
+    # Individual and covariance-regression classes share the same subject
     # allocation held in `mixture_configuration$allocation$subject`.
-    covariance_cluster_type <- intersect(
+    covariance_class_type <- intersect(
       c("corr", "vcov"),
-      mixture_configuration$cluster_type %||% character(0)
+      mixture_configuration$class_type %||% character(0)
     ) # public covariance representation selected for the shared latent block
     z_cov <- .sim_apply_mixture_to_latent(
       latent_matrix = z_cov,
-      level = if (length(covariance_cluster_type) == 1L) {
-        covariance_cluster_type[[1L]]
+      level = if (length(covariance_class_type) == 1L) {
+        covariance_class_type[[1L]]
       } else {
         ""
       },
@@ -3605,21 +3627,21 @@ simulate_joinme <- function(
   # Assemble a simulation-truth record in both the public statistical language
   # and the fitted Stan parameter language. The standardised draws are retained
   # because class recovery should be assessed at the level on which the mixture
-  # is defined, not by clustering covariance-scaled effects after generation.
+  # is defined, not by classifying covariance-scaled effects after generation.
   mixture_truth <- mixture_configuration
   if (!is.null(mixture_truth)) {
-    mixture_truth$formulaCluster <-
-      .mixture_specification$formulaCluster # original membership formula request
+    mixture_truth$formulaClass <-
+      .mixture_specification$formulaClass # original membership formula request
     mixture_truth$standardised_draws <- list(
       subject = z_id,
       marker = z_marker
     ) # latent values to which component locations and scales may have been applied
-    covariance_cluster_type <- intersect(
+    covariance_class_type <- intersect(
       c("corr", "vcov"),
-      mixture_truth$cluster_type
+      mixture_truth$class_type
     ) # selected public name for the covariance-regression latent matrix
-    if (length(covariance_cluster_type) == 1L) {
-      mixture_truth$standardised_draws[[covariance_cluster_type]] <-
+    if (length(covariance_class_type) == 1L) {
+      mixture_truth$standardised_draws[[covariance_class_type]] <-
         z_cov[, seq_len(M_cov), drop = FALSE]
     }
     stan_fit_truth$mix_probability <-

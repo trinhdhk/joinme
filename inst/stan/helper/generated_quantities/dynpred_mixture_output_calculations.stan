@@ -10,9 +10,9 @@
 for (fitted_draw in 1 : n_draws) {
   posterior_class_probability_new_marker[fitted_draw] =
     rep_matrix(
-      1.0 / dynamic_n_clusters,
+      1.0 / dynamic_n_classes,
       n_marker_types,
-      dynamic_n_clusters
+      dynamic_n_classes
     );
 }
 
@@ -21,7 +21,7 @@ if (
   (dynamic_mix_subject == 1 || dynamic_mix_covariance == 1)
 ) {
   for (fitted_draw in 1 : n_draws) {
-    vector[dynamic_n_clusters] component_log_density =
+    vector[dynamic_n_classes] component_log_density =
       log(to_vector(
         dynamic_mix_probability_subject[fitted_draw, ]
       ));
@@ -32,7 +32,7 @@ if (
         selected_subject_effect[coordinate] =
           z_u[fitted_draw][dynamic_mix_idx_subject[coordinate]];
       }
-      for (group in 1 : dynamic_n_clusters) {
+      for (group in 1 : dynamic_n_classes) {
         component_log_density[group] +=
           latent_progress_component_lpdf(
             selected_subject_effect |
@@ -50,7 +50,7 @@ if (
         selected_covariance_effect[coordinate] =
           z_L[fitted_draw][dynamic_mix_idx_covariance[coordinate]];
       }
-      for (group in 1 : dynamic_n_clusters) {
+      for (group in 1 : dynamic_n_classes) {
         component_log_density[group] +=
           latent_progress_component_lpdf(
             selected_covariance_effect |
@@ -73,7 +73,7 @@ if (
 ) {
   for (fitted_draw in 1 : n_draws) {
     for (marker_index in 1 : n_marker_types) {
-      vector[dynamic_n_clusters] component_log_density =
+      vector[dynamic_n_classes] component_log_density =
         log(to_vector(
           dynamic_mix_probability_marker[fitted_draw][marker_index, ]
         ));
@@ -85,7 +85,7 @@ if (
             dynamic_mix_idx_marker[coordinate]
           ];
       }
-      for (group in 1 : dynamic_n_clusters) {
+      for (group in 1 : dynamic_n_classes) {
         component_log_density[group] +=
           latent_progress_component_lpdf(
             selected_marker_effect |

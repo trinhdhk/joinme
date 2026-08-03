@@ -7,15 +7,15 @@
  * probability ordering is requested, ordered negative log-odds followed by a
  * zero reference log-odds give strictly increasing baseline probabilities.
  */
-simplex[n_clusters] mix_probability; // baseline class probabilities in reporting layout
-matrix[n_clusters, K_mix] mix_location; // class locations in reporting layout
+simplex[n_classes] mix_probability; // baseline class probabilities in reporting layout
+matrix[n_classes, K_mix] mix_location; // ordered and unrestricted class locations in reporting layout
 if (mix_ordering == 2) {
-  vector[n_clusters] baseline_logit; // ordered additive-log-ratio coordinates plus reference
-  for (group in 1 : (n_clusters - 1)) {
+  vector[n_classes] baseline_logit; // ordered additive-log-ratio coordinates plus reference
+  for (group in 1 : (n_classes - 1)) {
     baseline_logit[group] =
-      -mix_probability_ordered_gap[1][n_clusters - group];
+      -mix_probability_ordered_gap[1][n_classes - group];
   }
-  baseline_logit[n_clusters] = 0;
+  baseline_logit[n_classes] = 0;
   mix_probability = softmax(baseline_logit);
 } else {
   mix_probability = mix_probability_unordered[1];

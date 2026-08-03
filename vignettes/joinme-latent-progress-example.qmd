@@ -115,10 +115,10 @@ subject_fit <- joinme_mix(
   formulaEvent = event_formula,
   dataEvent = data_event,
   formulaVCov = covariance_formula,
-  n_clusters = 3,
-  cluster_type = "subject",
-  cluster_dimensions = c(1, 2),
-  formulaCluster = ~ x1 + x2,
+  n_classes = 3,
+  class_type = "subject",
+  class_dimensions = c(1, 2),
+  formulaClass = ~ x1 + x2,
   priors = jm_prior(
     class_probability = rep(2, 3),
     class_regression = 1
@@ -191,9 +191,9 @@ subject_process_fit <- joinme_mix(
   formulaEvent = event_formula,
   dataEvent = data_event,
   formulaVCov = covariance_formula,
-  n_clusters = 3,
-  cluster_type = c("subject", "vcov"),
-  cluster_dimensions = list(
+  n_classes = 3,
+  class_type = c("subject", "vcov"),
+  class_dimensions = list(
     subject = c(1, 2),
     vcov = c(1, 2)
   ),
@@ -263,8 +263,8 @@ marker_process_fit <- joinme_mix(
   formulaEvent = event_formula,
   dataEvent = data_event,
   formulaVCov = covariance_formula,
-  n_clusters = 2,
-  cluster_type = "marker",
+  n_classes = 2,
+  class_type = "marker",
   assoc = c("cv_total", "cs_marker"),
   marker_weights = base_weights,
   fixed_marker_weights = FALSE,
@@ -314,8 +314,8 @@ longitudinal_only_fit <- joinme_mix(
   formulaLong = longitudinal_formula,
   dataLong = data_long,
   formulaVCov = covariance_formula,
-  n_clusters = 3,
-  cluster_type = c("subject", "vcov"),
+  n_classes = 3,
+  class_type = c("subject", "vcov"),
   priors = jm_prior(class_probability = rep(2, 3)),
   shrinkage = 0,
   control = list(
@@ -377,18 +377,18 @@ covariance model.
 Fit neighbouring values with the same data, priors and sampling effort:
 
 ```{r}
-fits_by_cluster_count <- lapply(2:4, function(n_clusters) {
+fits_by_class_count <- lapply(2:4, function(n_classes) {
   joinme_mix(
     formulaLong = longitudinal_formula,
     dataLong = data_long,
     formulaEvent = event_formula,
     dataEvent = data_event,
     formulaVCov = covariance_formula,
-    n_clusters = n_clusters,
-    cluster_type = "subject",
-    priors = jm_prior(class_probability = rep(2, n_clusters)),
+    n_classes = n_classes,
+    class_type = "subject",
+    priors = jm_prior(class_probability = rep(2, n_classes)),
     assoc = c("cv_mean", "cv_total"),
-    seed = 3100 + n_clusters
+    seed = 3100 + n_classes
   )
 })
 ```

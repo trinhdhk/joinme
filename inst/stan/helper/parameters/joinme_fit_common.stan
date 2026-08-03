@@ -20,7 +20,7 @@
   /* id-specific covariance regression for L_i */
   vector[M_cov] alpha_L;                 // intercepts for each L_i element
   array[M_cov] vector[K_cov] beta_L;     // covariate slopes for each element
-  vector<lower=0>[M_cov] lambda_L;       // nonnegative loadings for component-specific latent z_L (sign is absorbed into z_L)
+  vector<lower=0>[M_cov] lambda_L;       // one nonnegative scalar loading per packed covariance coordinate; collectively a diagonal, not full, loading matrix
   array[n_id] vector[M_cov] z_L;         // latent standard normals for covariance regression, one per subject and L_i element
 
   /* baseline hazard (cause-specific) */

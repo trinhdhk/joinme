@@ -41,8 +41,9 @@ The implementation has six defining properties.
 4. Combining levels retains \(G\) classes. Compatible blocks share one
    allocation rather than producing a Cartesian product.
 5. Discrete allocations are marginalised exactly in Stan.
-6. A longitudinal-only form removes the survival likelihood exactly whilst
-   retaining the common model-building infrastructure.
+6. A longitudinal-only form, available from both `joinme()` and
+   `joinme_mix()`, removes the survival likelihood exactly whilst retaining
+   the common model-building infrastructure.
 
 The same model now has a direct generative implementation through
 `simulate_joinme_mix()`. This simulator samples the otherwise marginalised
@@ -63,11 +64,11 @@ elliptical random-effect distribution can express. Two subjects may have
 similar observed values at baseline but differ systematically in their
 long-term direction. Conversely, two subjects may have similar mean
 trajectories but markedly different covariance or volatility patterns.
-Markers can also form clusters according to their population deviations or
+Markers can also form classes according to their population deviations or
 their importance in a survival association.
 
 A finite latent-progress distribution offers a probabilistic description of
-such heterogeneity. It is preferable to clustering estimated random effects
+such heterogeneity. It is preferable to classifying estimated random effects
 after model fitting for three reasons.
 
 - Longitudinal measurement error and shrinkage are propagated into class
@@ -130,8 +131,8 @@ ordinary random-effect scales change.
 
 ## Generative parameters
 
-The fitting syntax is retained through `n_clusters`, `formulaCluster`,
-`cluster`, `cluster_dimensions`, and `cluster_ordering`.
+The fitting syntax is retained through `n_classes`, `formulaClass`,
+`class_type`, `class_dimensions`, and `class_ordering`.
 `class_parameters` supplies values that must be fixed in a data-generating
 mechanism:
 
@@ -282,11 +283,11 @@ s_{gk}\sim\operatorname{Exponential}(1).
 
 By default, Stan orders only the first selected random-intercept location
 across classes. Slope and other location coordinates remain unrestricted.
-`cluster_ordering = "probability"` instead orders the baseline class
+`class_ordering = "probability"` instead orders the baseline class
 probabilities, and `"none"` imposes no order. There are no anchor values or
 public anchor-scale controls.
 
-`formulaCluster` optionally regresses membership on allocation-unit covariates.
+`formulaClass` optionally regresses membership on allocation-unit covariates.
 The simplex supplies the intercept. One formula uses class \(G\) as the
 reference category; a list of \(G\) formulae supplies separate, compact
 class-specific predictors and defaults to no ordering.
@@ -303,33 +304,33 @@ For an available block dimension \(q\), the default selected coordinates are
 \]
 
 The one-dimensional special case is legitimate and is reported as such.
-`cluster_dimensions` permits an explicit alternative.
+`class_dimensions` permits an explicit alternative.
 
-# Four clustering types
+# Four class types
 
 ## Subject effects
 
-`cluster_type = "subject"` replaces the distribution of selected
+`class_type = "subject"` replaces the distribution of selected
 \(\boldsymbol z_{u,i}\) coordinates. This is the most direct latent progression
 model when the first two coordinates are a subject intercept and slope.
 
 ## Marker effects
 
-`cluster_type = "marker"` replaces the distribution of selected
+`class_type = "marker"` replaces the distribution of selected
 \(\boldsymbol z_{v,d}\) coordinates. The allocation unit is a marker. Survival
 associations are not reparameterised; the class-specific marker trajectory can
 nevertheless enter a current-value or current-slope association.
 
 ## Correlation effects
 
-`cluster_type = "corr"` replaces selected off-diagonal correlation coordinates
+`class_type = "corr"` replaces selected off-diagonal correlation coordinates
 of \(\boldsymbol z_{L,i}\). The coordinate indices refer to correlations only;
 Stan maps them to their positions in the packed lower triangle.
 
 ## Variance--covariance effects
 
-`cluster_type = "vcov"` replaces selected lower-triangular coordinates of
-\(\boldsymbol z_{L,i}\), including scale coordinates. It clusters subject
+`class_type = "vcov"` replaces selected lower-triangular coordinates of
+\(\boldsymbol z_{L,i}\), including scale coordinates. It classes subject
 covariance profiles and does not assign a component distribution to every
 \(\boldsymbol z_{w,id}\) innovation. `corr` and `vcov` cannot be selected
 together because they describe the same latent block.
@@ -402,7 +403,7 @@ existing shrinkage family. This is an exact prior replacement.
 If formula-scoped random-effect weights are present, the relevant log-density
 terms are weighted consistently in the numerator and denominator.
 
-# Survival associations under clustering
+# Survival associations under latent classes
 
 The base association decomposition is unchanged.
 
@@ -423,7 +424,7 @@ f_a\{r_{aid}(t)\}.
 \]
 
 Transformation occurs before marker averaging. If marker weights are
-clustered, the class component location supplies the weight perturbation for a
+class-specific, the class component location supplies the weight perturbation for a
 class-specific association curve.
 
 The association coefficient remains common unless the underlying ordinary
@@ -454,10 +455,22 @@ These estimands are not interchangeable under a non-linear inverse link.
 
 ## Covariance class
 
-If covariance regression is clustered, the dedicated display reconstructs the
+If covariance regression receives a latent-class distribution, the dedicated display reconstructs the
 covariance matrix for every class and posterior draw over the covariance
 covariate grid. Every \(G\) curve appears in the same component panel, with a
 separate returned plot for each marker.
+
+The covariance-regression loading is coordinate-specific. If \(m\) indexes one
+packed lower-triangular coordinate, \(\lambda_m\) is a non-negative scalar and
+the full collection \(\boldsymbol\lambda\) is a vector of length
+\(M_{\mathrm{cov}}\). In vector notation its action is
+\(\operatorname{diag}(\boldsymbol\lambda)\boldsymbol z_{L,i}\), rather than a
+dense loading matrix. In the ordinary model, \(\lambda_m\) is the residual
+standard deviation of the untransformed covariance predictor. Under class
+\(g\), the latent contribution has location
+\(\lambda_m\mu_{gm}\) and distributional scale \(\lambda_ms_{gm}\); the
+positive diagonal link or off-diagonal partial-correlation mapping is applied
+afterwards.
 
 # Longitudinal-only likelihood
 
@@ -470,7 +483,7 @@ and zero integration limits to Stan. The event contribution is exactly
 \]
 
 No survival information enters inference. Association terms and marker-weight
-clustering are disallowed. Event prediction and discrimination methods explain
+classes are disallowed. Event prediction and discrimination methods explain
 that no event process was fitted, while longitudinal prediction and diagnostics
 remain inherited.
 
@@ -500,13 +513,46 @@ The following established methods remain available:
 Mixture-specific additions are:
 
 - `posterior_class()` for fitted units and dynamically predicted subjects;
+- direct plotting of a `posterior_class()` result using posterior mean
+  probabilities and central intervals;
 - `type = "class_membership"`;
 - `estimand = "mean_per_class"`;
 - `estimand = "marginal_per_class"`;
 - `type = "covariance_class"`;
 - class-specific association trajectories.
 
+`posterior_assoc()` distinguishes a coefficient from its realised class
+contribution. The coefficient and marker weights remain common unless the
+model explicitly states otherwise. When a selected class block changes the
+longitudinal or covariance feature entering an association, the method appends
+a compact class-by-reference-value table using `Estimate`, `Est.Error`,
+`Q2.5`, `Q97.5`, `Rhat`, `ess_bulk` and `ess_tail`. Irrelevant class blocks do
+not cause duplicated class rows.
+
+The mixture summary distinguishes five inferential objects. Baseline class
+probabilities are evaluated at zero-valued centred class covariates. Component
+locations and within-class scales describe the selected standardised latent
+random-effect coordinates and are reported in separate tables. The
+class-membership regression reports estimated multinomial-logit contrasts;
+for a shared class formula, the final class is the zero-coefficient reference.
+The allocation table then reports the posterior distribution of the
+draw-specific expected class count and the maximum-probability hard count,
+without reproducing every unit-by-class row, which remains available through
+`posterior_class()`. Posterior means, medians, standard deviations and central
+interval endpoints are stored in distinct numeric columns because component
+scales and probabilities need not have symmetric posterior distributions.
+
 # Recommended analysis protocol
+
+For mixture fits, the sampler audit includes a chain-level energy table and a
+model-specific geometry audit. The latter reports posterior compensation
+between the within-class component scale and the ordinary random-effect scale
+through which that component is subsequently transformed. Strong negative
+correlation indicates that the likelihood identifies their combination more
+readily than the separate factors. The ranked correlation of posterior block
+summaries with Hamiltonian energy is descriptive evidence about the difficult
+direction, not a causal test of a parameter or a substitute for R-hat,
+effective sample size, divergences and posterior predictive assessment.
 
 ## Model preparation
 
@@ -558,7 +604,7 @@ resolved by a modal label alone.
 ## Methods
 
 Report the nested longitudinal formula, marker families, event model,
-association channels, covariance regression, clustered levels, selected
+association channels, covariance regression, class-specific levels, selected
 coordinate labels, \(G\), component family and priors. State whether survival
 was included and whether marker weights were shared.
 
@@ -588,7 +634,7 @@ estimated correlation matrix.
 
 Intercept or baseline-probability ordering removes the corresponding label
 permutation but does not guarantee scientifically meaningful separation. With
-`cluster_ordering = "none"`, permutation-invariant summaries and careful
+`class_ordering = "none"`, permutation-invariant summaries and careful
 posterior inspection are particularly important.
 
 Class-specific marginal longitudinal curves integrate the selected component

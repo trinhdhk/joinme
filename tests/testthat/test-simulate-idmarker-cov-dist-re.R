@@ -50,8 +50,16 @@ test_that("simulate_joinme covariance regression uses component-specific subject
 
   Li <- sim$truth$L_i
   lp11 <- log(expm1(Li[, 1, 1]))
-  lp21 <- Li[, 2, 1]
-  lp22 <- log(expm1(Li[, 2, 2]))
+  sd2 <- sqrt(
+    Li[, 2, 1]^2 + Li[, 2, 2]^2
+  ) # reconstructed second-row standard deviation before the Cholesky-correlation factor
+  partial_correlation21 <-
+    Li[, 2, 1] / sd2 # row-two partial correlation implied by the Cholesky entries
+  lp21 <- atanh(pmax(
+    -1 + 1e-12,
+    pmin(1 - 1e-12, partial_correlation21)
+  ))
+  lp22 <- log(expm1(sd2))
   corr_vals <- stats::cor(cbind(lp11, lp21, lp22))
 
   expect_lt(max(abs(corr_vals[upper.tri(corr_vals)])), 0.8)
@@ -83,10 +91,24 @@ test_that("simulate_joinme canonicalizes covariance-regression loadings to lambd
   lp11 <- eff$alpha[1] + eff$lambda[1] * eff$z[, 1]
   lp21 <- eff$alpha[2] + eff$lambda[2] * eff$z[, 2]
   lp22 <- eff$alpha[3] + eff$lambda[3] * eff$z[, 3]
+  sd2 <- log1p(
+    exp(lp22)
+  ) # second-coordinate standard deviation after the configured softplus link
+  partial_correlation21 <- tanh(
+    lp21
+  ) # bounded row-two partial correlation after the off-diagonal tanh link
 
   expect_equal(sim$truth$L_i[, 1, 1], log1p(exp(lp11)), tolerance = 1e-10)
-  expect_equal(sim$truth$L_i[, 2, 1], lp21, tolerance = 1e-10)
-  expect_equal(sim$truth$L_i[, 2, 2], log1p(exp(lp22)), tolerance = 1e-10)
+  expect_equal(
+    sim$truth$L_i[, 2, 1],
+    sd2 * partial_correlation21,
+    tolerance = 1e-10
+  )
+  expect_equal(
+    sim$truth$L_i[, 2, 2],
+    sd2 * sqrt(1 - partial_correlation21^2),
+    tolerance = 1e-10
+  )
 })
 
 test_that("simulate_joinme default covariance regression uses component-specific loadings", {
@@ -106,6 +128,29 @@ test_that("simulate_joinme default covariance regression uses component-specific
   expect_length(eff$lambda, 3)
   expect_false(length(unique(round(eff$alpha, 8))) == 1L)
   expect_false(length(unique(round(eff$lambda, 8))) == 1L)
+})
+
+test_that("covariance-regression lambda is scalar or coordinate vector, not a matrix", {
+  expect_error(
+    simulate_joinme(
+      formulaLong = y ~ 1 + time +
+        (1 + time | id) +
+        (0 + (1 + time | id) | marker),
+      formulaEvent = survival::Surv(time, event) ~ 1,
+      n_id = 4,
+      families = c("gaussian", "gaussian"),
+      times_obs = c(0, 0.2),
+      time_cens = 0.3,
+      re_params = list(
+        id_marker_cov = list(
+          lambda = matrix(c(0.5, 0, 0, 0.5), nrow = 2)
+        )
+      ),
+      use_mirai = FALSE,
+      seed = 4411
+    ),
+    "scalar or numeric vector"
+  )
 })
 
 test_that("simulate_joinme default covariance regression initialises without length recycling", {

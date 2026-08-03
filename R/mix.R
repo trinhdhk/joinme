@@ -21,42 +21,42 @@
 #' z_{id}(t)^\top w_{id}.
 #' }
 #'
-#' Clustering changes the distribution of selected *standardised* random
+#' Latent-class modelling changes the distribution of selected *standardised* random
 #' effects, not the structural decomposition above.  For a selected vector
-#' \(a_j\), the ordinary density \(D(a_j;0,1)\) is replaced by
+#' \eqn{a_j}, the ordinary density \eqn{D(a_j;0,1)} is replaced by
 #'
 #' \deqn{
 #' p(a_j)=\sum_{g=1}^{G}\pi_g
 #' D\{a_j;\mu_g,\operatorname{diag}(s_g)\}.
 #' }
 #'
-#' `shrinkage = 0`, `1`, and `2` select Student-\(t_6\), Laplace, and Normal
+#' `shrinkage = 0`, `1`, and `2` select Student-\eqn{t_6}, Laplace, and Normal
 #' component densities, respectively.  The component locations and scales are
 #' estimated. By default, Stan orders only the first selected random-intercept
 #' location. Selected slopes and other coordinates remain unrestricted.
 #' Alternatively, baseline class probabilities may be ordered, or ordering may
-#' be disabled with `cluster_ordering`.
+#' be disabled with `class_ordering`.
 #'
-#' The supported clustering types are:
+#' The supported class types are:
 #'
-#' - `"subject"`: the standardised subject effects underlying \(u_i\);
-#' - `"marker"`: the standardised marker effects underlying \(v_d\);
+#' - `"subject"`: the standardised subject effects underlying \eqn{u_i};
+#' - `"marker"`: the standardised marker effects underlying \eqn{v_d};
 #' - `"corr"`: the off-diagonal correlation coordinates in the
 #'   marker-by-subject covariance regression;
 #' - `"vcov"`: the lower-triangular variance--covariance coordinates in the
 #'   marker-by-subject covariance regression.
 #'
 #' Compatible types share a single class allocation. In particular,
-#' `c("subject", "vcov")` gives one \(G\)-class probability vector per subject.
-#' The construction therefore has \(G\)
+#' `c("subject", "vcov")` gives one \eqn{G}-class probability vector per subject.
+#' The construction therefore has \eqn{G}
 #' classes, rather than the Cartesian product of separate level-specific
 #' classes. If both subject-indexed and marker-indexed types are selected,
-#' they use the same \(G\) component labels and mixing proportions but retain
+#' they use the same \eqn{G} component labels and mixing proportions but retain
 #' the natural allocation unit of their block.
 #'
 #' By default the first two coordinates of each random-effect block define the
 #' two-dimensional progress plane.  A one-dimensional block is retained as a
-#' well-defined special case.  `cluster_dimensions` can select other
+#' well-defined special case.  `class_dimensions` can select other
 #' coordinates. `corr` and `vcov` are alternatives because both act on the
 #' same covariance-regression block.
 #'
@@ -72,23 +72,23 @@
 #' @param formulaEvent Optional survival formula.  Supply this together with
 #'   `dataEvent`, or leave both `NULL` for a longitudinal-only mixture.
 #' @param dataEvent Optional event-process data.
-#' @param n_clusters Number of latent classes \(G\); must be at least two.
-#' @param cluster_type Character vector naming the random-effect clustering
+#' @param n_classes Number of latent classes \eqn{G}; must be at least two.
+#' @param class_type Character vector naming the random-effect class
 #'   types. The only accepted values are `"subject"`, `"marker"`, `"corr"`,
 #'   and `"vcov"`.
-#' @param cluster_dimensions Optional named list of integer coordinate indices,
-#'   one entry per selected clustering type. For a single type, an integer vector is
+#' @param class_dimensions Optional named list of integer coordinate indices,
+#'   one entry per selected class type. For a single type, an integer vector is
 #'   also accepted directly.
-#' @param formulaCluster A one-sided formula for class-membership covariates, or a
+#' @param formulaClass A one-sided formula for class-membership covariates, or a
 #'   named list with `subject` and `marker` formulae. A list containing
-#'   exactly `n_clusters` formulae gives a separate predictor for every class.
+#'   exactly `n_classes` formulae gives a separate predictor for every class.
 #'   Covariates must be constant within the corresponding allocation unit. The
 #'   intercept is represented by the baseline class probabilities.
-#' @param cluster_ordering Identification rule for the common class labels.
+#' @param class_ordering Identification rule for the common class labels.
 #'   `"intercept"` orders only the first selected random-intercept location;
 #'   `"probability"` orders the baseline class probabilities; `"none"` imposes
 #'   no order. The default is `"intercept"` for a shared class formula and
-#'   `"none"` for a list of `n_clusters` class-specific formulae.
+#'   `"none"` for a list of `n_classes` class-specific formulae.
 #' @param ... Additional arguments passed to [joinme_standata()], including
 #'   `assoc`, `marker_weights`, `id_var`, `marker_var`, `time_var`, and
 #'   `shrinkage`.
@@ -104,9 +104,9 @@
 #'   dataLong,
 #'   survival::Surv(time, event) ~ treatment,
 #'   dataEvent,
-#'   n_clusters = 3,
-#'   cluster_type = c("subject", "vcov"),
-#'   formulaCluster = ~ treatment + age,
+#'   n_classes = 3,
+#'   class_type = c("subject", "vcov"),
+#'   formulaClass = ~ treatment + age,
 #'   priors = jm_prior(class_probability = rep(2, 3)),
 #'   assoc = c("cv_total")
 #' )
@@ -115,8 +115,8 @@
 #'   y ~ time + (1 + time | id) +
 #'     (1 + time + (1 + time | id) | marker),
 #'   dataLong,
-#'   n_clusters = 2,
-#'   cluster_type = "subject"
+#'   n_classes = 2,
+#'   class_type = "subject"
 #' )
 #' }
 #' @export
@@ -135,11 +135,11 @@ joinme_mix <- function(
   fixed_marker_weights = FALSE,
   shared_marker_weights = TRUE,
   basehaz = joinme_basehaz(),
-  n_clusters = 2L,
-  formulaCluster = ~1,
-  cluster_type = "subject",
-  cluster_dimensions = NULL,
-  cluster_ordering = NULL,
+  n_classes = 2L,
+  formulaClass = ~1,
+  class_type = "subject",
+  class_dimensions = NULL,
+  class_ordering = NULL,
   fit = TRUE,
   seed = NULL,
   ...
@@ -160,12 +160,6 @@ joinme_mix <- function(
   }
 
   dot_arguments <- list(...)
-  if ("cluster" %in% names(dot_arguments)) {
-    cli::cli_abort(c(
-      x = "{.arg cluster} is no longer an argument to {.fn joinme_mix}.",
-      i = "Use {.arg cluster_type} with subject, marker, corr, or vcov."
-    ))
-  }
   association_terms <- dot_arguments$assoc
   if (is.null(association_terms)) {
     association_terms <- if (has_survival_process) "cv_mean" else character(0)
@@ -183,14 +177,14 @@ joinme_mix <- function(
         i = "Remove {.arg assoc}, or supply both {.arg formulaEvent} and {.arg dataEvent}."
       ))
     }
-    event_scaffold <- .mixture_event_scaffold(
+    event_scaffold <- .longitudinal_only_event_scaffold(
       data_long = dataLong,
       id_variable = dot_arguments$id_var %||% "id",
       time_variable = dot_arguments$time_var %||% "time"
     )
     formulaEvent <- survival::Surv(
-      .joinme_mix_follow_up,
-      .joinme_mix_event
+      .joinme_follow_up,
+      .joinme_event
     ) ~ 1
     dataEvent <- event_scaffold
   }
@@ -200,41 +194,41 @@ joinme_mix <- function(
   # the four random-effect blocks, so final validation occurs in
   # `.build_mixture_standata()`.
   if (
-    !is.numeric(n_clusters) ||
-      length(n_clusters) != 1L ||
-      !is.finite(n_clusters) ||
-      n_clusters < 2 ||
-      n_clusters != floor(n_clusters)
+    !is.numeric(n_classes) ||
+      length(n_classes) != 1L ||
+      !is.finite(n_classes) ||
+      n_classes < 2 ||
+      n_classes != floor(n_classes)
   ) {
-    cli::cli_abort("{.arg n_clusters} must be a single integer of at least two.")
+    cli::cli_abort("{.arg n_classes} must be a single integer of at least two.")
   }
-  n_clusters <- as.integer(n_clusters) # validated number of latent classes
-  selected_types <- .canonical_cluster_types(
-    cluster_type
-  ) # canonical random-effect blocks requested for clustering
+  n_classes <- as.integer(n_classes) # validated number of latent classes
+  selected_types <- .canonical_class_types(
+    class_type
+  ) # canonical random-effect blocks requested for latent-class modelling
   class_design <- .mixture_class_design(
-    formula_class = formulaCluster,
+    formula_class = formulaClass,
     selected_types = selected_types,
     data_long = dataLong,
     data_event = dataEvent,
     id_variable = dot_arguments$id_var %||% "id",
     marker_variable = dot_arguments$marker_var %||% "marker",
-    n_clusters = n_clusters
+    n_classes = n_classes
   ) # allocation-unit design matrices for class-probability regression
-  resolved_cluster_ordering <- .resolve_cluster_ordering(
-    cluster_ordering = cluster_ordering,
+  resolved_class_ordering <- .resolve_class_ordering(
+    class_ordering = class_ordering,
     class_specific_formulae = isTRUE(class_design$class_specific)
   ) # explicit or context-sensitive class-label identification rule
 
   mixture_specification <- list(
-    n_clusters = n_clusters,
-    cluster_type = selected_types,
-    cluster_dimensions = cluster_dimensions,
+    n_classes = n_classes,
+    class_type = selected_types,
+    class_dimensions = class_dimensions,
     class_probability_concentration =
       prior_specification$class_probability,
     class_regression_scale = prior_specification$class_regression,
     class_design = class_design,
-    cluster_ordering = resolved_cluster_ordering,
+    class_ordering = resolved_class_ordering,
     include_survival = has_survival_process
   )
 
@@ -267,13 +261,13 @@ joinme_mix <- function(
   )
 
   prepared_model <- do.call(joinme, joinme_arguments)
-  # prepared_model$result_class <- "mixture"
   result_metadata <- prepared_model$stan_data$mixture
   prepared_model$parent_call <- match.call()
   prepared_model <- JoiNMeMixStanData$new(
     prepared_model,
     more_recipe = list(mixture = result_metadata)
   )
+  prepared_model$result_class <- "mixture" # explicit fitted-result contract stored on the final mixture preparation holder
 
   if (!isTRUE(fit)) {
     return(prepared_model)
@@ -283,26 +277,26 @@ joinme_mix <- function(
 
 #' Resolve latent-class label ordering
 #'
-#' @param cluster_ordering User-supplied ordering rule, or `NULL`.
+#' @param class_ordering User-supplied ordering rule, or `NULL`.
 #' @param class_specific_formulae Whether every class has its own formula.
 #'
 #' @return One of `"intercept"`, `"probability"`, or `"none"`.
 #' @keywords internal
 #' @noRd
-.resolve_cluster_ordering <- function(
-  cluster_ordering,
+.resolve_class_ordering <- function(
+  class_ordering,
   class_specific_formulae
 ) {
-  if (is.null(cluster_ordering)) {
+  if (is.null(class_ordering)) {
     return(if (isTRUE(class_specific_formulae)) "none" else "intercept")
   }
-  if (!is.character(cluster_ordering) || length(cluster_ordering) != 1L) {
+  if (!is.character(class_ordering) || length(class_ordering) != 1L) {
     cli::cli_abort(
-      "{.arg cluster_ordering} must be intercept, probability, or none."
+      "{.arg class_ordering} must be intercept, probability, or none."
     )
   }
   match.arg(
-    tolower(cluster_ordering),
+    tolower(class_ordering),
     c("intercept", "probability", "none")
   )
 }
@@ -310,10 +304,10 @@ joinme_mix <- function(
 #' Construct allocation-unit class-regression designs
 #'
 #' @param formula_class One formula shared by active domains, or a named list of
-#'   domain-specific formulae. A list of `n_clusters` formulae gives one formula
+#'   domain-specific formulae. A list of `n_classes` formulae gives one formula
 #'   per class.
-#' @param n_clusters Number of latent classes.
-#' @param selected_types Canonical clustered random-effect levels.
+#' @param n_classes Number of latent classes.
+#' @param selected_types Canonical random-effect levels assigned latent classes.
 #' @param data_long Longitudinal data supplied to `joinme_mix()`.
 #' @param data_event Event data, including the longitudinal-only scaffold.
 #' @param id_variable Subject identifier column.
@@ -329,24 +323,24 @@ joinme_mix <- function(
   data_event,
   id_variable,
   marker_variable,
-  n_clusters = 2L
+  n_classes = 2L
 ) {
   active_domains <- c(
     subject = any(selected_types %in% c("subject", "corr", "vcov")),
     marker = "marker" %in% selected_types
   ) # whether each natural allocation domain contributes to the mixture
 
-  n_clusters <- as.integer(n_clusters) # number of class-specific formula positions
+  n_classes <- as.integer(n_classes) # number of class-specific formula positions
   is_group_formula_list <- function(value) {
     is.list(value) &&
-      length(value) == n_clusters &&
+      length(value) == n_classes &&
       all(vapply(value, inherits, logical(1), what = "formula"))
   }
   normalise_formula_specification <- function(value, domain) {
     if (inherits(value, "formula")) {
       return(list(
         formulae = c(
-          rep(list(value), max(0L, n_clusters - 1L)),
+          rep(list(value), max(0L, n_classes - 1L)),
           list(~1)
         ),
         class_specific = FALSE
@@ -359,8 +353,8 @@ joinme_mix <- function(
       ))
     }
     cli::cli_abort(c(
-      x = "Invalid {.arg formulaCluster} for the {domain} domain.",
-      i = "Use one formula, or a list containing exactly {n_clusters} one-sided formulae."
+      x = "Invalid {.arg formulaClass} for the {domain} domain.",
+      i = "Use one formula, or a list containing exactly {n_classes} one-sided formulae."
     ))
   }
 
@@ -386,7 +380,7 @@ joinme_mix <- function(
     ) # formula-list entries which do not identify an allocation domain
     if (length(unknown_domains) > 0L) {
       cli::cli_abort(
-        "Unknown {.arg formulaCluster} domain(s): {paste(unknown_domains, collapse = ', ')}."
+        "Unknown {.arg formulaClass} domain(s): {paste(unknown_domains, collapse = ', ')}."
       )
     }
     formulae <- list(
@@ -401,7 +395,7 @@ joinme_mix <- function(
     ) # omitted domains retain constant baseline probabilities
   } else {
     cli::cli_abort(
-      "{.arg formulaCluster} must be a formula, a list of {n_clusters} formulae, or a named domain list."
+      "{.arg formulaClass} must be a formula, a list of {n_classes} formulae, or a named domain list."
     )
   }
 
@@ -421,7 +415,7 @@ joinme_mix <- function(
     ) # whether every class has a one-sided formula
     if (!all(valid_formulae)) {
       cli::cli_abort(
-        "Every {.arg formulaCluster} entry for the {domain} domain must be one-sided."
+        "Every {.arg formulaClass} entry for the {domain} domain must be one-sided."
       )
     }
     variables <- unique(unlist(
@@ -476,7 +470,7 @@ joinme_mix <- function(
       }
     }
 
-    formula_records <- lapply(seq_len(n_clusters), function(group) {
+    formula_records <- lapply(seq_len(n_classes), function(group) {
       formula <- class_formulae[[group]]
       model_frame <- stats::model.frame(
         formula,
@@ -534,7 +528,7 @@ joinme_mix <- function(
       max(1L, ncol(concatenated_design))
     ) # valid inert start positions for classes without coefficients
     coefficient_class <- rep(
-      seq_len(n_clusters),
+      seq_len(n_classes),
       times = class_term_count
     ) # class receiving each concatenated coefficient
     coefficient_covariate <- unlist(
@@ -580,15 +574,15 @@ joinme_mix <- function(
       )
     } else {
       list(
-        formulae = rep(list(~1), n_clusters),
-        formula_records = vector("list", n_clusters),
+        formulae = rep(list(~1), n_classes),
+        formula_records = vector("list", n_classes),
         class_specific = FALSE,
         matrix = matrix(0, length(subject_levels), 0L),
         columns = character(0),
         coefficient_class = integer(0),
         coefficient_covariate = character(0),
-        class_term_start = rep.int(1L, n_clusters),
-        class_term_count = integer(n_clusters),
+        class_term_start = rep.int(1L, n_classes),
+        class_term_count = integer(n_classes),
         units = as.character(subject_levels)
       )
     },
@@ -603,15 +597,15 @@ joinme_mix <- function(
       )
     } else {
       list(
-        formulae = rep(list(~1), n_clusters),
-        formula_records = vector("list", n_clusters),
+        formulae = rep(list(~1), n_classes),
+        formula_records = vector("list", n_classes),
         class_specific = FALSE,
         matrix = matrix(0, length(marker_levels), 0L),
         columns = character(0),
         coefficient_class = integer(0),
         coefficient_covariate = character(0),
-        class_term_start = rep.int(1L, n_clusters),
-        class_term_count = integer(n_clusters),
+        class_term_start = rep.int(1L, n_classes),
+        class_term_count = integer(n_classes),
         units = as.character(marker_levels)
       )
     },
@@ -744,7 +738,7 @@ joinme_mix <- function(
   number_draws <- nrow(
     baseline_probability
   ) # retained posterior draws evaluated by dynamic prediction
-  n_clusters <- ncol(
+  n_classes <- ncol(
     baseline_probability
   ) # common number of latent progress classes
   number_units <- nrow(
@@ -752,7 +746,7 @@ joinme_mix <- function(
   ) # allocation units whose probabilities are required
   probability <- array(
     0,
-    dim = c(number_draws, number_units, n_clusters)
+    dim = c(number_draws, number_units, n_classes)
   ) # class probabilities to be filled draw by draw and unit by unit
 
   for (draw in seq_len(number_draws)) {
@@ -761,7 +755,7 @@ joinme_mix <- function(
     ) # numerically safe fitted baseline logits for this posterior draw
     for (unit in seq_len(number_units)) {
       class_logit <- baseline_log_probability # logits before covariate adjustment
-      for (group in seq_len(n_clusters)) {
+      for (group in seq_len(n_classes)) {
         term_count <- class_term_count[[group]]
         if (term_count > 0L) {
           term_positions <- seq.int(
@@ -788,64 +782,16 @@ joinme_mix <- function(
   probability
 }
 
-#' Construct a likelihood-neutral event scaffold
-#'
-#' @param data_long Long-format longitudinal data.
-#' @param id_variable Name of the subject identifier.
-#' @param time_variable Name of the longitudinal time variable.
-#'
-#' @return One data-frame row per subject, with positive administrative
-#'   follow-up and a zero event indicator.
-#' @keywords internal
-#' @noRd
-.mixture_event_scaffold <- function(data_long, id_variable, time_variable) {
-  if (!is.data.frame(data_long)) {
-    cli::cli_abort("{.arg dataLong} must be a data frame.")
-  }
-  missing_variables <- setdiff(c(id_variable, time_variable), names(data_long))
-  if (length(missing_variables) > 0L) {
-    cli::cli_abort(
-      "Longitudinal-only clustering requires columns: {paste(missing_variables, collapse = ', ')}."
-    )
-  }
-
-  valid_rows <- !is.na(data_long[[id_variable]]) &
-    is.finite(as.numeric(data_long[[time_variable]]))
-  observed_data <- data_long[valid_rows, , drop = FALSE]
-  if (nrow(observed_data) == 0L) {
-    cli::cli_abort("No finite longitudinal observation time is available.")
-  }
-
-  ordered_rows <- order(
-    as.character(observed_data[[id_variable]]),
-    as.numeric(observed_data[[time_variable]])
-  )
-  observed_data <- observed_data[ordered_rows, , drop = FALSE]
-  scaffold <- observed_data[
-    !duplicated(as.character(observed_data[[id_variable]]), fromLast = TRUE),
-    ,
-    drop = FALSE
-  ]
-  overall_follow_up <- max(as.numeric(observed_data[[time_variable]]), na.rm = TRUE)
-  if (!is.finite(overall_follow_up) || overall_follow_up <= 0) {
-    overall_follow_up <- 1
-  }
-  scaffold$.joinme_mix_follow_up <- overall_follow_up
-  scaffold$.joinme_mix_event <- 0L
-  rownames(scaffold) <- NULL
-  scaffold
-}
-
 #' Canonicalise latent-progress level names
 #'
-#' @param cluster_type User-supplied clustering types.
+#' @param class_type User-supplied class types.
 #'
 #' @return Unique validated names in their original order.
 #' @keywords internal
 #' @noRd
-.canonical_cluster_types <- function(cluster_type) {
+.canonical_class_types <- function(class_type) {
   supplied_types <- tolower(trimws(
-    as.character(cluster_type %||% character(0))
+    as.character(class_type %||% character(0))
   )) # normalised public values before checking the deliberately small vocabulary
   accepted_types <- c(
     "subject",
@@ -856,14 +802,14 @@ joinme_mix <- function(
   unknown_types <- setdiff(supplied_types, accepted_types)
   if (length(unknown_types) > 0L) {
     cli::cli_abort(c(
-      x = "Unknown {.arg cluster_type} value{?s}: {paste(unknown_types, collapse = ', ')}.",
+      x = "Unknown {.arg class_type} value{?s}: {paste(unknown_types, collapse = ', ')}.",
       i = "Use only subject, marker, corr, or vcov."
     ))
   }
   validated_types <- unique(supplied_types)
   if (all(c("corr", "vcov") %in% validated_types)) {
     cli::cli_abort(c(
-      x = "{.arg cluster_type} cannot contain both corr and vcov.",
+      x = "{.arg class_type} cannot contain both corr and vcov.",
       i = "They are alternative representations of the same marker-by-subject covariance block."
     ))
   }
@@ -896,7 +842,7 @@ joinme_mix <- function(
   correlation_positions
 }
 
-#' Resolve selected coordinates for one clustered block
+#' Resolve selected coordinates for one class-specific block
 #'
 #' @param requested User-supplied coordinate indices, or `NULL`.
 #' @param available_dimension Dimension of the fitted random-effect block.
@@ -929,7 +875,7 @@ joinme_mix <- function(
       any(requested != floor(requested))
   ) {
     cli::cli_abort(c(
-      x = "Invalid {.arg cluster_dimensions} for level {.val {level}}.",
+      x = "Invalid {.arg class_dimensions} for level {.val {level}}.",
       i = "Choose distinct integer indices between 1 and {available_dimension}."
     ))
   }
@@ -942,7 +888,7 @@ joinme_mix <- function(
       anyDuplicated(selected)
   ) {
     cli::cli_abort(c(
-      x = "Invalid {.arg cluster_dimensions} for level {.val {level}}.",
+      x = "Invalid {.arg class_dimensions} for level {.val {level}}.",
       i = "Choose distinct integer indices between 1 and {available_dimension}."
     ))
   }
@@ -1043,7 +989,7 @@ joinme_mix <- function(
   if (inactive) {
     return(list(
       use_mixture = 0L,
-      n_clusters = 1L,
+      n_classes = 1L,
       K_mix = 0L,
       mix_subject = 0L,
       mix_marker = 0L,
@@ -1073,22 +1019,22 @@ joinme_mix <- function(
     ))
   }
 
-  n_clusters_requested <- mixture$n_clusters
+  n_classes_requested <- mixture$n_classes
   if (
-    !is.numeric(n_clusters_requested) ||
-      length(n_clusters_requested) != 1L ||
-      is.na(n_clusters_requested) ||
-      !is.finite(n_clusters_requested) ||
-      n_clusters_requested < 2 ||
-      n_clusters_requested != floor(n_clusters_requested)
+    !is.numeric(n_classes_requested) ||
+      length(n_classes_requested) != 1L ||
+      is.na(n_classes_requested) ||
+      !is.finite(n_classes_requested) ||
+      n_classes_requested < 2 ||
+      n_classes_requested != floor(n_classes_requested)
   ) {
-    cli::cli_abort("{.arg n_clusters} must be a single integer of at least two.")
+    cli::cli_abort("{.arg n_classes} must be a single integer of at least two.")
   }
-  n_clusters <- as.integer(n_clusters_requested)
+  n_classes <- as.integer(n_classes_requested)
 
-  selected_types <- .canonical_cluster_types(mixture$cluster_type)
+  selected_types <- .canonical_class_types(mixture$class_type)
   if (length(selected_types) == 0L) {
-    cli::cli_abort("{.arg cluster_type} must select at least one clustering type.")
+    cli::cli_abort("{.arg class_type} must select at least one class type.")
   }
 
   # The covariance-regression block follows the same lower-triangular indexing
@@ -1118,9 +1064,9 @@ joinme_mix <- function(
   )
   unavailable <- selected_types[available_dimensions[selected_types] < 1L]
   if (length(unavailable) > 0L) {
-    reasons <- vapply(unavailable, function(cluster_type) {
+    reasons <- vapply(unavailable, function(class_type) {
       switch(
-        cluster_type,
+        class_type,
         marker = "the longitudinal formula has no marker random-effect coefficients",
         corr = "the formula has no off-diagonal marker-by-subject correlation regression",
         vcov = "the formula has no marker-by-subject covariance regression",
@@ -1128,16 +1074,16 @@ joinme_mix <- function(
       )
     }, character(1))
     cli::cli_abort(c(
-      x = "The requested clustering type{?s} {?is/are} unavailable: {paste(unavailable, collapse = ', ')}.",
+      x = "The requested class type{?s} {?is/are} unavailable: {paste(unavailable, collapse = ', ')}.",
       i = paste(reasons, collapse = "; ")
     ))
   }
 
-  requested_dimensions <- mixture$cluster_dimensions
+  requested_dimensions <- mixture$class_dimensions
   if (!is.null(requested_dimensions) && !is.list(requested_dimensions)) {
     if (length(selected_types) != 1L) {
       cli::cli_abort(
-        "{.arg cluster_dimensions} must be a named list when more than one type is clustered."
+        "{.arg class_dimensions} must be a named list when more than one class type is selected."
       )
     }
     requested_dimensions <- stats::setNames(
@@ -1147,29 +1093,29 @@ joinme_mix <- function(
   }
   if (is.list(requested_dimensions) && length(requested_dimensions) > 0L) {
     if (is.null(names(requested_dimensions)) || any(!nzchar(names(requested_dimensions)))) {
-      cli::cli_abort("{.arg cluster_dimensions} must be a named list.")
+      cli::cli_abort("{.arg class_dimensions} must be a named list.")
     }
-    canonical_dimension_names <- .canonical_cluster_types(names(requested_dimensions))
+    canonical_dimension_names <- .canonical_class_types(names(requested_dimensions))
     if (anyDuplicated(canonical_dimension_names)) {
-      cli::cli_abort("{.arg cluster_dimensions} supplies the same type more than once.")
+      cli::cli_abort("{.arg class_dimensions} supplies the same type more than once.")
     }
     names(requested_dimensions) <- canonical_dimension_names
     extra_dimensions <- setdiff(names(requested_dimensions), selected_types)
     if (length(extra_dimensions) > 0L) {
       cli::cli_abort(
-        "{.arg cluster_dimensions} includes unselected type{?s}: {paste(extra_dimensions, collapse = ', ')}."
+        "{.arg class_dimensions} includes unselected type{?s}: {paste(extra_dimensions, collapse = ', ')}."
       )
     }
   }
 
   coordinate_indices <- stats::setNames(
-    lapply(selected_types, function(cluster_type) {
+    lapply(selected_types, function(class_type) {
       selected_logical_indices <- .mixture_coordinate_indices(
-        requested = requested_dimensions[[cluster_type]] %||% NULL,
-        available_dimension = available_dimensions[[cluster_type]],
-        level = cluster_type
+        requested = requested_dimensions[[class_type]] %||% NULL,
+        available_dimension = available_dimensions[[class_type]],
+        level = class_type
       )
-      if (identical(cluster_type, "corr")) {
+      if (identical(class_type, "corr")) {
         correlation_source_indices[selected_logical_indices]
       } else {
         selected_logical_indices
@@ -1195,8 +1141,8 @@ joinme_mix <- function(
     }
   }
   total_dimension <- next_start - 1L
-  ordering_name <- .resolve_cluster_ordering(
-    cluster_ordering = mixture$cluster_ordering,
+  ordering_name <- .resolve_class_ordering(
+    class_ordering = mixture$class_ordering,
     class_specific_formulae = isTRUE(mixture$class_design$class_specific)
   ) # validated class-label identification rule
   ordering_code <- match(
@@ -1217,15 +1163,15 @@ joinme_mix <- function(
     mixture$class_probability_concentration %||% 1
   ) # Dirichlet concentration supplied through jm_prior()
   if (length(probability_prior) == 1L) {
-    probability_prior <- rep(probability_prior, n_clusters)
+    probability_prior <- rep(probability_prior, n_classes)
   }
   if (
-    length(probability_prior) != n_clusters ||
+    length(probability_prior) != n_classes ||
       any(!is.finite(probability_prior)) ||
       any(probability_prior <= 0)
   ) {
     cli::cli_abort(
-      "{.arg priors$class_probability} must be positive and have length one or {.arg n_clusters}."
+      "{.arg priors$class_probability} must be positive and have length one or {.arg n_classes}."
     )
   }
   class_regression_scale <- as.numeric(
@@ -1250,8 +1196,8 @@ joinme_mix <- function(
       columns = character(0),
       coefficient_class = integer(0),
       coefficient_covariate = character(0),
-      class_term_start = rep.int(1L, n_clusters),
-      class_term_count = integer(n_clusters),
+      class_term_start = rep.int(1L, n_classes),
+      class_term_count = integer(n_classes),
       units = as.character(seq_len(number_subjects))
     ),
     marker = list(
@@ -1263,8 +1209,8 @@ joinme_mix <- function(
       columns = character(0),
       coefficient_class = integer(0),
       coefficient_covariate = character(0),
-      class_term_start = rep.int(1L, n_clusters),
-      class_term_count = integer(n_clusters),
+      class_term_start = rep.int(1L, n_classes),
+      class_term_count = integer(n_classes),
       units = as.character(seq_len(number_markers))
     )
   ) # checked allocation-unit designs, with an intercept-only compatibility default
@@ -1285,7 +1231,7 @@ joinme_mix <- function(
 
   list(
     use_mixture = 1L,
-    n_clusters = n_clusters,
+    n_classes = n_classes,
     K_mix = as.integer(total_dimension),
     mix_subject = as.integer("subject" %in% selected_types),
     mix_marker = as.integer("marker" %in% selected_types),
@@ -1324,8 +1270,8 @@ joinme_mix <- function(
       as.integer(class_design$marker$class_term_count),
     class_regression_scale = class_regression_scale,
     mixture = list(
-      n_clusters = n_clusters,
-      cluster_type = selected_types,
+      n_classes = n_classes,
+      class_type = selected_types,
       dimensions = coordinate_indices,
       starts = starts,
       total_dimension = total_dimension,

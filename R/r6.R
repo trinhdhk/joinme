@@ -83,7 +83,14 @@ JoiNMeFit <- R6::R6Class(
       invisible(self)
     },
     print = function(...) {
-      .cli_summary_heading("Joint mixed effects model summary", level = 1L)
+      .cli_summary_heading(
+        if (isTRUE(self$config$include_survival %||% TRUE)) {
+          "Joint mixed effects model summary"
+        } else {
+          "Nested longitudinal mixed effects model summary"
+        },
+        level = 1L
+      )
       if (!is.null(self$call)) {
         cat("Call:\n")
         print(self$call)
@@ -101,6 +108,16 @@ JoiNMeFit <- R6::R6Class(
           }
         cat("Family: ", fml, "\n", sep = "")
       }
+      cat(
+        "Event process: ",
+        if (isTRUE(self$config$include_survival %||% TRUE)) {
+          "joint longitudinal-survival"
+        } else {
+          "longitudinal only"
+        },
+        "\n",
+        sep = ""
+      )
       cli::cli_bullets("Use {.code summary()} for parameter summaries.\n")
       invisible(self)
     }
@@ -167,10 +184,10 @@ JoiNMeMixFit <- R6::R6Class(
         print(self$call)
       }
       mixture <- self$mixture %||% list()
-      cat("Classes: ", mixture$n_clusters %||% NA_integer_, "\n", sep = "")
+      cat("Classes: ", mixture$n_classes %||% NA_integer_, "\n", sep = "")
       cat(
-        "Clustering types: ",
-        paste(mixture$cluster_type %||% character(0), collapse = ", "),
+        "Class types: ",
+        paste(mixture$class_type %||% character(0), collapse = ", "),
         "\n",
         sep = ""
       )
@@ -367,14 +384,14 @@ JoiNMeStanData <- R6::R6Class(
     print = function(...) {
       .cli_summary_heading("JoiNMe Stan Data", level = 1L)
       cli::cli_bullets(paste("Stan engine: ", self$stan_engine, "\n", sep = ""))
-      cli::cli_bullets("Sample args: ")
-      cli::cli_ul(
-        items = if (self$stan_engine == "cmdstanr") {
-          self$stan_args
-        } else {
-          self$stan_args[names(self$stan_args) != "object"]
-        }
-      )
+      # cli::cli_bullets("Sample args: ")
+      # cli::cli_ul(
+      #   items = if (self$stan_engine == "cmdstanr") {
+      #     self$stan_args
+      #   } else {
+      #     self$stan_args[names(self$stan_args) != "object"]
+      #   }
+      # )
       invisible(self)
     },
     make_cfg = function() {
@@ -435,6 +452,9 @@ JoiNMeStanData <- R6::R6Class(
         ),
         draws_default = self$draws,
         threads_per_chain = self$threads_per_chain,
+        include_survival = isTRUE(
+          as.integer(sd$include_survival %||% 1L) == 1L
+        ), # whether survival observations contributed to the fitted likelihood
         # tmax_internal = sd$tmax,
         time_indices = list(
           idx_time_beta = sd$idx_time_beta,
@@ -532,25 +552,25 @@ JoiNMeMixStanData <- R6::R6Class(
       self$mixture <- more_recipe$mixture
     },
     print = function() {
-      .cli_summary_heading("Latent-progress mixture Stan Data", level = 1L)
+      .cli_summary_heading("Latent mixture Stan Data", level = 1L)
       cli::cli_bullets(paste("Stan engine: ", self$stan_engine, "\n", sep = ""))
-      cli::cli_bullets("Sample args: ")
-      cli::cli_ul(
-        items = if (self$stan_engine == "cmdstanr") {
-          self$stan_args
-        } else {
-          self$stan_args[names(self$stan_args) != "object"]
-        }
-      )
+      # cli::cli_bullets("Sample args: ")
+      # cli::cli_ul(
+      #   items = if (self$stan_engine == "cmdstanr") {
+      #     self$stan_args
+      #   } else {
+      #     self$stan_args[names(self$stan_args) != "object"]
+      #   }
+      # )
       cli::cli_bullets(paste(
         "Classes: ",
-        self$mixture$n_clusters %||% NA_integer_,
+        self$mixture$n_classes %||% NA_integer_,
         "\n",
         sep = ""
       ))
       cli::cli_bullets(paste(
-        "Clustering types: ",
-        paste(self$mixture$cluster_type %||% character(0), collapse = ", "),
+        "Class types: ",
+        paste(self$mixture$class_type %||% character(0), collapse = ", "),
         "\n",
         sep = ""
       ))

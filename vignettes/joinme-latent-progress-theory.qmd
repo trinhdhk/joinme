@@ -35,7 +35,7 @@ effects share an subject allocation, while marker effects and estimated
 marker weights share a marker allocation. A combined request consequently
 defines \(G\), not \(G^L\), classes.
 
-This chapter states the statistical model, explains how clustering changes each
+This chapter states the statistical model, explains how latent classes change each
 association channel, distinguishes class-centre and marginal trajectories, and
 sets out the assumptions required for a defensible interpretation.
 
@@ -113,13 +113,32 @@ Write \(m=1,\ldots,M_{\mathrm{cov}}\) for the free entries required to construct
 \lambda_{L,m}z_{L,im}.
 \]
 
+For each packed lower-triangular coordinate \(m\), \(\lambda_{L,m}\) is one
+non-negative scalar loading. The collection
+\(\boldsymbol\lambda_L\in\mathbb R_+^{M_{\mathrm{cov}}}\) is stored as a
+vector; equivalently, its action is the diagonal mapping
+\(\operatorname{diag}(\boldsymbol\lambda_L)\boldsymbol z_{L,i}\), not a dense
+loading matrix. In an ordinary fit with \(z_{L,im}\sim N(0,1)\),
+\(\lambda_{L,m}\) is the residual standard deviation of \(\ell_{im}\) before
+the diagonal link or off-diagonal partial-correlation transformation.
+
 Diagonal predictors pass through `softplus` or `exp`, as selected by
 `vcov_diag_link`. Off-diagonal predictors are mapped through the fitted
-partial-correlation construction. `cluster_type = "corr"` acts only on
-off-diagonal correlation coordinates, whereas `cluster_type = "vcov"` may
-select any lower-triangular coordinate of \(\boldsymbol z_{L,i}\). Both cluster
-subject differences in covariance structure, rather than assigning a
+partial-correlation construction. `class_type = "corr"` acts only on
+off-diagonal correlation coordinates, whereas `class_type = "vcov"` may
+select any lower-triangular coordinate of \(\boldsymbol z_{L,i}\). Both describe
+latent classes of subject differences in covariance structure, rather than assigning a
 mixture directly to the innovations \(\boldsymbol z_{w,id}\).
+
+When coordinate \(m\) receives a class-specific distribution and
+\(z_{L,im}\mid C_i=g\sim D(\mu_{gm},s_{gm})\), the latent contribution becomes
+\(\lambda_{L,m}z_{L,im}\). It consequently has class-specific location
+\(\lambda_{L,m}\mu_{gm}\) and distributional scale
+\(\lambda_{L,m}s_{gm}\). Hence \(\lambda_{L,m}\) remains a common
+coordinate-specific loading, whilst \(\mu_{gm}\) and \(s_{gm}\) describe
+class differences. For Student-\(t\) or Laplace components, “scale” here is
+the distribution's scale parameter rather than necessarily its standard
+deviation.
 
 This distinction matters. A covariance class need not move the conditional
 mean trajectory, because \(\boldsymbol w_{id}\) remains centred within that
@@ -130,11 +149,11 @@ marginal response trajectory whenever the inverse link is non-linear.
 
 ## Selected coordinates
 
-For every clusterable block \(b\), let
+For every class-eligible block \(b\), let
 \(\boldsymbol a_{r,b}\) be the selected standardised coordinates for allocation
 unit \(r\). By default, JoiNMe selects coordinates 1 and 2. If only one
 coordinate exists, the one-dimensional model is retained. The choice can be
-made explicit through `cluster_dimensions`.
+made explicit through `class_dimensions`.
 
 For class \(g\), coordinate \(k\) has location \(\mu_{gk}\) and positive scale
 \(s_{gk}\). Conditional on class,
@@ -201,9 +220,9 @@ Hamiltonian Monte Carlo and also retains uncertainty when classes overlap.
 
 ## Allocation domains
 
-The public clustering types and their allocation units are:
+The public class types and their allocation units are:
 
-| clustering type | clustered latent quantity | allocation unit |
+| class type | latent quantity assigned to classes | allocation unit |
 |---|---|---|
 | `"subject"` | \(\boldsymbol z_{u,i}\) | subject \(i\) |
 | `"corr"` | off-diagonal coordinates of \(\boldsymbol z_{L,i}\) | subject \(i\) |
@@ -227,7 +246,7 @@ are reported separately because an subject is not a marker.
 
 # Prior replacement and weighted analyses
 
-The ordinary JoiNMe prior is evaluated first. For every clustered coordinate,
+The ordinary JoiNMe prior is evaluated first. For every class-specific coordinate,
 the implementation subtracts its ordinary standardised density and adds the
 finite-mixture density. This density-ratio construction changes precisely the
 selected distribution and does not place a second prior on top of the original
@@ -244,7 +263,38 @@ The component scale prior is
 s_{gk}\sim\operatorname{Exponential}(1).
 \]
 
-Under the default `cluster_ordering = "intercept"`, Stan declares only the
+## Scale decomposition and posterior geometry
+
+The component scale is defined on a standardised latent coordinate, before the
+ordinary random-effect transformation. For a covariance-regression coordinate,
+for example,
+
+\[
+z_{L,im}\mid C_i=g\sim D(\mu_{gm},s_{gm}),\qquad
+\ell_{im}=\cdots+\lambda_{L,m}z_{L,im}.
+\]
+
+The likelihood therefore encounters the class-specific distributional scale
+through the product \(\lambda_{L,m}s_{gm}\). The analogous subject and marker
+quantities pass through \(L_u\) and \(L_v\). Priors and information in other
+coordinates distinguish the factors, but data may learn the product much more
+strongly than its decomposition. Posterior compensation between a large
+ordinary scale and a small component scale, or conversely, then creates a long
+continuous ridge. Intercept ordering removes class-label permutation; it does
+not remove this scale ridge.
+
+This distinction is important for computation and interpretation. Low E-BFMI,
+persistent energy, small adapted step sizes and long Hamiltonian trajectories
+can arise even when the mixture density, threading and simulation coordinate
+map are correct. `diagnosis()` consequently reports chain-specific energy
+behaviour, the posterior correlation between ordinary and component scales,
+and exploratory correlations between energy and low-dimensional block
+summaries. These correlations describe posterior geometry rather than proving
+that one parameter caused a sampling warning. The direct
+\(\operatorname{Exponential}(1)\) prior regularises the component scale but
+does not algebraically identify the likelihood decomposition.
+
+Under the default `class_ordering = "intercept"`, Stan declares only the
 first selected random-intercept location
 \((\mu_{11},\ldots,\mu_{G1})\) as an `ordered[G]` vector. Selected slope and
 other location coordinates receive unrestricted standard Normal priors. Thus
@@ -252,10 +302,10 @@ the labels are identified by progression level without requiring progression
 rates to have the same order. If no selected coordinate is an intercept, this
 rule imposes no location order.
 
-`cluster_ordering = "probability"` instead imposes
+`class_ordering = "probability"` instead imposes
 \(\pi_1<\cdots<\pi_G\) on the baseline probabilities. Formula slopes remain
 unrestricted, so covariate-dependent probabilities may cross away from the
-zero-covariate reference point. `cluster_ordering = "none"` imposes neither
+zero-covariate reference point. `class_ordering = "none"` imposes neither
 location nor probability ordering.
 
 Class probabilities may depend on allocation-unit covariates. With class
@@ -269,13 +319,13 @@ Class probabilities may depend on allocation-unit covariates. With class
 \Pr(C_j=G\mid X_j)\propto\pi_G.
 \]
 
-`formulaCluster` constructs \(X_j\); the intercept is omitted because
+`formulaClass` constructs \(X_j\); the intercept is omitted because
 \(\boldsymbol\pi\) already supplies the baseline probabilities. A named list
 may give separate `subject` and `marker` formulae. A list of exactly \(G\)
 formulae instead gives a distinct predictor to every class, using a compact
 coefficient vector containing only the terms requested by that class. Because
 class-specific formulae need not share a natural low-to-high interpretation,
-their default `cluster_ordering` is `"none"` unless it is supplied explicitly.
+their default `class_ordering` is `"none"` unless it is supplied explicitly.
 The Dirichlet concentration and Normal coefficient scale are supplied through
 `jm_prior(class_probability = ..., class_regression = ...)`.
 
@@ -292,7 +342,7 @@ For an active weighted association term \(a\), marker \(d\) has
 If `shared_marker_weights = TRUE`, active current-value and current-slope terms
 refer to one common set. If it is `FALSE`, every active weighted term has its
 own set. These weights retain their ordinary JoiNMe prior and are not a
-latent-progress clustering type.
+latent-progress class type.
 
 # Survival submodel and association interpretation
 
@@ -358,7 +408,9 @@ For subject-indexed blocks,
 
 The same expression applies to marker-indexed blocks. Generated quantities
 save the probability vector for every posterior draw. `posterior_class()`
-reports posterior means and 95% credible intervals. The maximum-probability
+reports the posterior mean as `Estimate`, the posterior standard deviation as
+`Est.Error`, the 95% credible interval and the available chain diagnostics.
+The maximum-probability
 label is a convenient summary only. It should not replace the probability
 vector when allocations are uncertain.
 
@@ -385,8 +437,8 @@ parameter is sampled.
 # Class-specific longitudinal estimands
 
 `mean_per_class` evaluates the fixed-effects trajectory plus the centre of
-every clustered block that enters the longitudinal location. For subject
-and marker clustering this is, schematically,
+every class-specific block that enters the longitudinal location. For subject
+and marker classes this is, schematically,
 
 \[
 m_{id,g}^{\mathrm{centre}}(t)
@@ -455,7 +507,7 @@ The following checks are part of a responsible analysis.
 5. Use posterior predictive checks within markers and, where appropriate,
    within high-probability classes.
 6. Examine sensitivity to `class_probability`, `class_regression`, the chosen
-   `formulaCluster`, and `shrinkage`.
+   `formulaClass`, and `shrinkage`.
 7. Treat a very small class cautiously: it can represent a genuine subgroup,
    an outlier accommodation mechanism, or an insufficiently regularised tail.
 
@@ -478,7 +530,7 @@ random-effect blocks for R summaries and plots.
 A scientific report should state:
 
 - the fitted \(G\);
-- selected clustering types and coordinate indices;
+- selected class types and coordinate indices;
 - the component family chosen through `shrinkage`;
 - the Dirichlet, location and scale priors;
 - whether marker weights were shared;

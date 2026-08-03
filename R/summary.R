@@ -32,7 +32,7 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
   assertthat::assert_that(is.numeric(digits) && digits >= 0, msg = "digits must be non-negative.")
 
   cache_key <- paste0(
-    "summary_draws=", draws,
+    "summary_schema=2_draws=", draws,
     "_seed=", seed,
     "_digits=", digits,
     "_corr=", as.integer(include_corr)
@@ -197,9 +197,19 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
     weight_tables <- Filter(Negate(is.null), weight_tables)
     if (length(weight_tables) > 0L) {
       s_mw <- do.call(rbind, weight_tables)
+      if (!is.null(s_a) && "term" %in% names(s_a)) {
+        s_mw <- s_mw[
+          !as.character(s_mw$term) %in% as.character(s_a$term),
+          ,
+          drop = FALSE
+        ] # avoid re-appending marker weights already returned by extract(what = "assoc")
+      }
+      if (nrow(s_mw) == 0L) {
+        s_mw <- NULL
+      }
       if (is.null(s_a)) {
         s_a <- s_mw
-      } else {
+      } else if (!is.null(s_mw)) {
         all_cols <- union(names(s_a), names(s_mw))
         add_missing_cols <- function(tbl, cols) {
           miss <- setdiff(cols, names(tbl))
@@ -239,18 +249,6 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
   corr_tables <- NULL
   id_marker_cov_tables <- NULL
   if (isTRUE(include_corr)) {
-    any_re_indep <- any(as.integer(c(
-      sd$indep_id_re %||% 0L,
-      sd$indep_marker_re %||% 0L,
-      sd$indep_idmarker_cov %||% 0L
-    )) == 1L)
-    .filter_diag_rows <- function(tbl) {
-      if (is.null(tbl) || !all(c("row", "col") %in% names(tbl))) {
-        return(tbl)
-      }
-      tbl[tbl$row == tbl$col, , drop = FALSE]
-    }
-
     q_idm <- as.integer(sd$Q_idm %||% 0L)
 
     if (q_idm > 0) {
@@ -337,7 +335,7 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
       lambda_tbl <- .summarize_block_parameters(
         lambda_vars,
         block_labels = lambda_blocks,
-        term_labels = rep("lambda", m_cov),
+        term_labels = rep("latent SD (lambda)", m_cov),
         row_labels = rc_map[, 1],
         col_labels = rc_map[, 2]
       )
@@ -360,9 +358,11 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
       id = vcov(object, what = "id", draws = draws),
       marker = if (sd$R_mk > 0) vcov(object, what = "marker", draws = draws) else NULL
     )
-    if (isTRUE(any_re_indep)) {
-      corr_tables <- lapply(corr_tables, .filter_diag_rows)
-    }
+    # Retain the complete symmetric covariance summaries even when a block was
+    # fitted as independent. In that case the off-diagonal entries are exact
+    # zeros, which is meaningful model information rather than redundant
+    # output and prevents an independent block in one domain from hiding
+    # covariance entries belonging to another domain.
     corr_tables$id <- .label_covariance_summary_table(
       corr_tables$id,
       term_labels = as.character(sd$zid_cols %||% paste0("id_re_", seq_len(as.integer(sd$R_id %||% 0L))))
@@ -533,20 +533,37 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
     )
   }
 
-  term_diag <- .term_diagnostics_from_tables(list(s_beta, s_basehaz, s_surv, s_a, transform_params, s_d, s_dr, corr_tables, id_marker_cov_tables))
-  diag_table <- .build_common_diagnostics_table(
-    draws = as.numeric(diag$draws %||% NA_real_),
-    divergences = as.numeric(diag$divergences %||% NA_real_),
-    treedepth_hits = as.numeric(diag$treedepth_hits %||% NA_real_),
-    ebfmi_min = as.numeric(diag$ebfmi_min %||% NA_real_),
-    max_rhat = as.numeric(term_diag$max_rhat %||% diag$max_rhat %||% NA_real_),
-    min_ess_bulk = as.numeric(term_diag$min_ess_bulk %||% diag$min_ess_bulk %||% diag$min_ess %||% NA_real_),
-    min_ess_tail = as.numeric(term_diag$min_ess_tail %||% diag$min_ess_tail %||% diag$min_ess %||% NA_real_),
-    n_terms_total = as.numeric(term_diag$n_terms_total %||% 0),
-    n_terms_bad_rhat = as.numeric(term_diag$n_terms_bad_rhat %||% 0),
-    n_terms_low_ess_bulk = as.numeric(term_diag$n_terms_low_ess_bulk %||% 0),
-    n_terms_low_ess_tail = as.numeric(term_diag$n_terms_low_ess_tail %||% 0)
-  )
+  has_survival_process <- .fit_includes_survival(
+    object
+  ) # whether event observations contributed information to this fit
+  if (!has_survival_process) {
+    # The common Stan programme still declares event-process parameters for a
+    # longitudinal-only analysis. Their draws come solely from their priors
+    # and are computational scaffolding, not estimands supported by observed
+    # survival data. Excluding them also keeps convergence counts focused on
+    # the nested longitudinal mixed model that was actually fitted.
+    s_basehaz <- NULL
+    s_surv <- NULL
+    s_a <- NULL
+    transform_params <- NULL
+    piecewise_ordinates <- NULL
+  }
+
+  reported_tables <- list(
+    s_beta,
+    s_basehaz,
+    s_surv,
+    s_a,
+    transform_params,
+    s_d,
+    s_dr,
+    corr_tables,
+    id_marker_cov_tables
+  ) # posterior tables whose parameter-level convergence counts are reported
+  diag_table <- .summary_diagnostics_table(
+    sampler_diagnostics = diag,
+    reported_tables = reported_tables
+  ) # sampler-wide extrema combined with counts from the displayed estimands
 
   summary_obj <- SummaryJoiNMeFit$new(
     tables = list(
@@ -566,16 +583,112 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
     metadata = list(
       call = if (!is.null(object$call)) paste(deparse(object$call, width.cutoff = 500L), collapse = " ") else NULL,
       family = sd$family_names %||% .family_code_to_name(cfg$family_long),
-      basehaz = sd$basehaz %||% NULL,
+      basehaz = if (has_survival_process) {
+        sd$basehaz %||% NULL
+      } else {
+        NULL
+      },
       tmax = sd$tmax %||% 1.0,
       draws = draws,
-      transforms = cfg$transforms,
-      transform_formulas = transform_formulas
+      event_process = if (has_survival_process) {
+        "joint longitudinal-survival"
+      } else {
+        "not fitted"
+      },
+      transforms = if (has_survival_process) {
+        cfg$transforms
+      } else {
+        NULL
+      },
+      transform_formulas = if (has_survival_process) {
+        transform_formulas
+      } else {
+        NULL
+      }
     )
   )
 
   object$cache_set(cache_key, summary_obj)
   summary_obj
+}
+
+#' Build diagnostics for the parameters represented in a model summary
+#'
+#' @description
+#' The sampler knows the most extreme R-hat and effective sample size over all
+#' saved variables, whereas the summary tables identify how many displayed
+#' scientific estimands breach the reporting thresholds. Both views matter.
+#' This helper retains the sampler-wide extrema and obtains the counts from the
+#' tables that the reader can inspect. In particular, a poorly mixed latent
+#' class parameter must not disappear from the headline diagnostics merely
+#' because the ordinary joint-model summary was assembled first.
+#'
+#' @param sampler_diagnostics Named diagnostics returned by
+#'   [.joinme_sampler_diagnostics()].
+#' @param reported_tables A possibly nested list of posterior summary tables.
+#'
+#' @return A data frame in the common diagnostics schema.
+#' @keywords internal
+#' @noRd
+.summary_diagnostics_table <- function(
+  sampler_diagnostics,
+  reported_tables
+) {
+  term_diagnostics <- .term_diagnostics_from_tables(
+    reported_tables
+  ) # convergence extrema and threshold counts among displayed parameters
+  finite_maximum <- function(values) {
+    finite_values <- values[
+      is.finite(values)
+    ] # available finite diagnostics from the sampler and displayed tables
+    if (length(finite_values) == 0L) NA_real_ else max(finite_values)
+  }
+  finite_minimum <- function(values) {
+    finite_values <- values[
+      is.finite(values)
+    ] # available finite diagnostics from the sampler and displayed tables
+    if (length(finite_values) == 0L) NA_real_ else min(finite_values)
+  }
+
+  sampler_bulk_ess <- sampler_diagnostics$min_ess_bulk %||%
+    sampler_diagnostics$min_ess %||%
+    NA_real_ # smallest sampler-wide bulk ESS, with support for older fits
+  sampler_tail_ess <- sampler_diagnostics$min_ess_tail %||%
+    sampler_diagnostics$min_ess %||%
+    NA_real_ # smallest sampler-wide tail ESS, with support for older fits
+
+  .build_common_diagnostics_table(
+    draws = as.numeric(sampler_diagnostics$draws %||% NA_real_),
+    divergences = as.numeric(
+      sampler_diagnostics$divergences %||% NA_real_
+    ),
+    treedepth_hits = as.numeric(
+      sampler_diagnostics$treedepth_hits %||% NA_real_
+    ),
+    ebfmi_min = as.numeric(sampler_diagnostics$ebfmi_min %||% NA_real_),
+    max_rhat = finite_maximum(c(
+      term_diagnostics$max_rhat,
+      sampler_diagnostics$max_rhat
+    )),
+    min_ess_bulk = finite_minimum(c(
+      term_diagnostics$min_ess_bulk,
+      sampler_bulk_ess
+    )),
+    min_ess_tail = finite_minimum(c(
+      term_diagnostics$min_ess_tail,
+      sampler_tail_ess
+    )),
+    n_terms_total = as.numeric(term_diagnostics$n_terms_total %||% 0),
+    n_terms_bad_rhat = as.numeric(
+      term_diagnostics$n_terms_bad_rhat %||% 0
+    ),
+    n_terms_low_ess_bulk = as.numeric(
+      term_diagnostics$n_terms_low_ess_bulk %||% 0
+    ),
+    n_terms_low_ess_tail = as.numeric(
+      term_diagnostics$n_terms_low_ess_tail %||% 0
+    )
+  )
 }
 
 #' Summarise fitted piecewise-linear log-hazard ordinates

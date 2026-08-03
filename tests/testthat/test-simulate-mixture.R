@@ -8,11 +8,11 @@ test_that("simulate_joinme_mix mirrors the fitting mixture syntax", {
     "families",
     "fixed_marker_weights",
     "shared_marker_weights",
-    "n_clusters",
-    "formulaCluster",
-    "cluster_type",
-    "cluster_dimensions",
-    "cluster_ordering",
+    "n_classes",
+    "formulaClass",
+    "class_type",
+    "class_dimensions",
+    "class_ordering",
     "seed"
   )
 
@@ -26,10 +26,6 @@ test_that("simulate_joinme_mix mirrors the fitting mixture syntax", {
     names(formals(simulate_joinme)) %in%
       c(names(formals(simulate_joinme_mix)), ".mixture_specification")
   ))
-  expect_error(
-    simulate_joinme_mix(cluster = "subject"),
-    "no longer an argument"
-  )
 })
 
 test_that("subject mixture draws follow their recorded class parameters", {
@@ -42,10 +38,10 @@ test_that("subject mixture draws follow their recorded class parameters", {
     families = c("gaussian", "gaussian"),
     times_obs = c(0, 0.25),
     time_cens = 0.5,
-    n_clusters = 2,
-    formulaCluster = ~x1,
-    cluster_type = "subject",
-    cluster_dimensions = 1,
+    n_classes = 2,
+    formulaClass = ~x1,
+    class_type = "subject",
+    class_dimensions = 1,
     class_parameters = list(
       probability = c(0.45, 0.55),
       coefficient = list(
@@ -65,8 +61,8 @@ test_that("subject mixture draws follow their recorded class parameters", {
 
   expect_s3_class(simulation$dataLong, "data.frame")
   expect_s3_class(simulation$dataEvent, "data.frame")
-  expect_identical(mixture$n_clusters, 2L)
-  expect_identical(mixture$cluster_type, "subject")
+  expect_identical(mixture$n_classes, 2L)
+  expect_identical(mixture$class_type, "subject")
   expect_equal(realised, expected, tolerance = 0.01)
   expect_equal(
     unname(rowSums(mixture$probability_by_unit$subject)),
@@ -87,9 +83,9 @@ test_that("compatible subject blocks use one simulated allocation", {
     families = c("gaussian", "gaussian"),
     times_obs = c(0, 0.2),
     time_cens = 0.4,
-    n_clusters = 2,
-    cluster_type = c("subject", "vcov"),
-    cluster_dimensions = list(
+    n_classes = 2,
+    class_type = c("subject", "vcov"),
+    class_dimensions = list(
       subject = 1,
       vcov = 1
     ),
@@ -128,14 +124,14 @@ test_that("compatible subject blocks use one simulated allocation", {
   )
 })
 
-test_that("marker weights are not accepted as a clustering type", {
+test_that("marker weights are not accepted as a class type", {
   expect_error(
     simulate_joinme_mix(
       n_id = 4,
       families = c("gaussian", "gaussian"),
       times_obs = c(0, 0.1),
       time_cens = 0.2,
-      cluster_type = "marker_weight",
+      class_type = "marker_weight",
       seed = 8103,
       use_mirai = FALSE
     ),
@@ -150,8 +146,8 @@ test_that("mixture simulation validates ordering and context-sensitive defaults"
       families = c("gaussian", "gaussian"),
       times_obs = c(0, 0.1),
       time_cens = 0.2,
-      n_clusters = 2,
-      cluster_ordering = "probability",
+      n_classes = 2,
+      class_ordering = "probability",
       class_parameters = list(probability = c(0.7, 0.3)),
       seed = 8104,
       use_mirai = FALSE
@@ -164,8 +160,8 @@ test_that("mixture simulation validates ordering and context-sensitive defaults"
     families = c("gaussian", "gaussian"),
     times_obs = c(0, 0.1),
     time_cens = 0.2,
-    n_clusters = 2,
-    formulaCluster = list(~x1, ~1),
+    n_classes = 2,
+    formulaClass = list(~x1, ~1),
     class_parameters = list(scale = 0.5),
     seed = 8105,
     use_mirai = FALSE
@@ -177,10 +173,10 @@ test_that("mixture simulation validates ordering and context-sensitive defaults"
     families = c("gaussian", "gaussian"),
     times_obs = c(0, 0.1),
     time_cens = 0.2,
-    n_clusters = 2,
-    cluster_type = "subject",
-    cluster_dimensions = c(1, 2),
-    cluster_ordering = "intercept",
+    n_classes = 2,
+    class_type = "subject",
+    class_dimensions = c(1, 2),
+    class_ordering = "intercept",
     class_parameters = list(
       location = matrix(
         c(-1, 1, 1, -1),
@@ -208,7 +204,7 @@ test_that("mixture simulation validates ordering and context-sensitive defaults"
       times_obs = c(0, 0.1),
       time_cens = 0.2,
       fixed_marker_weights = TRUE,
-      cluster_type = "marker_weight",
+      class_type = "marker_weight",
       seed = 8110,
       use_mirai = FALSE
     ),
@@ -226,9 +222,9 @@ test_that("simulate_joinme_mix supports a longitudinal-only mixture", {
     families = c("gaussian", "gaussian"),
     times_obs = c(0, 0.2, 0.4),
     time_cens = 0.5,
-    n_clusters = 2,
-    formulaCluster = ~x1,
-    cluster_type = "subject",
+    n_classes = 2,
+    formulaClass = ~x1,
+    class_type = "subject",
     seed = 8107,
     use_mirai = FALSE
   )
@@ -265,12 +261,12 @@ test_that("simulated data enter joinme_mix through the matching syntax", {
     families = c("gaussian", "student_t"),
     times_obs = c(0, 0.2, 0.4),
     time_cens = 0.5,
-    n_clusters = 2,
-    formulaCluster = ~x1,
-    cluster_type = c("subject", "vcov"),
-    cluster_dimensions = list(
-      subject = 1,
-      vcov = 1
+    n_classes = 2,
+    formulaClass = ~x1,
+    class_type = c("subject", "vcov"),
+    class_dimensions = list(
+      subject = c(1, 2),
+      vcov = c(1, 2)
     ),
     seed = 8109,
     use_mirai = FALSE
@@ -283,11 +279,12 @@ test_that("simulated data enter joinme_mix through the matching syntax", {
     dataEvent = simulation$dataEvent,
     formulaVCov = simulation$truth$formulaVCov,
     families = simulation$marker_info$families,
-    n_clusters = simulation$truth$mixture$n_clusters,
-    formulaCluster = simulation$truth$mixture$formulaCluster,
-    cluster_type = simulation$truth$mixture$cluster_type,
-    cluster_dimensions = simulation$truth$mixture$dimensions[
-      simulation$truth$mixture$cluster_type
+    transforms = simulation$truth$transforms,
+    n_classes = simulation$truth$mixture$n_classes,
+    formulaClass = simulation$truth$mixture$formulaClass,
+    class_type = simulation$truth$mixture$class_type,
+    class_dimensions = simulation$truth$mixture$dimensions[
+      simulation$truth$mixture$class_type
     ],
     assoc = simulation$truth$assoc,
     shrinkage = simulation$truth$shrinkage,
@@ -297,15 +294,31 @@ test_that("simulated data enter joinme_mix through the matching syntax", {
 
   expect_s3_class(prepared, "JoiNMeMixStanData")
   expect_identical(
-    prepared$stan_data$mixture$n_clusters,
-    simulation$truth$mixture$n_clusters
+    prepared$stan_data$mixture$n_classes,
+    simulation$truth$mixture$n_classes
   )
   expect_identical(
-    prepared$stan_data$mixture$cluster_type,
-    simulation$truth$mixture$cluster_type
+    prepared$stan_data$mixture$class_type,
+    simulation$truth$mixture$class_type
   )
   expect_identical(
     prepared$stan_data$mixture$dimensions,
     simulation$truth$mixture$dimensions
   )
+  simulation_contract <-
+    simulation$truth$mixture$stan_data_contract
+  expect_true(is.list(simulation_contract))
+  expect_true(length(simulation_contract) > 0L)
+  for (field_name in names(simulation_contract)) {
+    expect_true(
+      field_name %in% names(prepared$stan_data),
+      info = paste("missing fitted Stan field", field_name)
+    )
+    expect_equal(
+      prepared$stan_data[[field_name]],
+      simulation_contract[[field_name]],
+      ignore_attr = TRUE,
+      info = paste("simulation/fit mismatch for", field_name)
+    )
+  }
 })

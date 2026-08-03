@@ -97,7 +97,9 @@ test_that("summary.JoiNMeFit retains covariance regression tables when top-level
 
   expect_false(is.null(s$tables$id_marker_cov$regression))
   expect_true(any(s$tables$id_marker_cov$regression$term == "(Intercept)"))
-  expect_true(any(s$tables$id_marker_cov$regression$term == "lambda"))
+  expect_true(any(
+    s$tables$id_marker_cov$regression$term == "latent SD (lambda)"
+  ))
   expect_null(s$tables$id_marker_cov$hyperparameters)
 
   id_cov <- s$tables$corr$id

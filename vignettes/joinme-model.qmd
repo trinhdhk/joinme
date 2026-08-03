@@ -135,6 +135,16 @@ perturbation $z_{im}$ and a non-negative loading $\lambda_m$, so the identified
 form is $\eta_{im} = \alpha_m + x_i^\top \beta_m + \lambda_m z_{im}$ with
 $\lambda_m \ge 0$ and $z_{im} \sim \mathcal{N}(0, 1)$.
 
+Each \(\lambda_m\) is one scalar loading for one packed lower-triangular
+coordinate. Collectively they form a length-\(M_{\mathrm{cov}}\) vector, whose
+matrix representation is diagonal:
+\(\operatorname{diag}(\boldsymbol\lambda)\boldsymbol z_i\). They are not a
+dense loading matrix and do not mix latent coordinate \(m\) into any other
+coordinate. In the ordinary model, \(\lambda_m\) is the conditional residual
+standard deviation of covariance predictor \(\eta_{im}\), before the diagonal
+link or off-diagonal `tanh` transformation. It is therefore not itself an
+entry of the final Cholesky factor, covariance matrix or correlation matrix.
+
 # Implementation
 
 The model is implemented in Stan, utilising Hamiltonian Monte Carlo (HMC) for efficient posterior sampling.

@@ -2412,9 +2412,21 @@ gk_quadrature <- function(nodes = 15L) {
 #' @keywords internal
 #' @noRd
 .summarize_draw_col <- function(x) {
+  posterior_mean <- mean(
+    x
+  ) # arithmetic posterior expectation of the reported quantity
+  posterior_median <- stats::median(
+    x
+  ) # posterior 50th percentile, reported separately from the mean
+  posterior_sd <- stats::sd(
+    x
+  ) # posterior standard deviation rather than a sampling standard error
   c(
-    Estimate = mean(x),
-    Est.Error = stats::sd(x),
+    Estimate = posterior_mean,
+    Mean = posterior_mean,
+    Median = posterior_median,
+    Est.Error = posterior_sd,
+    SD = posterior_sd,
     Q2.5 = stats::quantile(x, 0.025, names = FALSE),
     Q97.5 = stats::quantile(x, 0.975, names = FALSE)
   )

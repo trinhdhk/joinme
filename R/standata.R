@@ -39,6 +39,10 @@
 #'   (`Surv(time, status)`) or multiple time-split rows per id
 #'   (`Surv(start, stop, status)`).
 #'   Covariates referenced in `formulaEvent` may vary by interval in the split form.
+#' @param include_survival Logical indicator that the supplied event rows
+#'   represent an observed survival process. The fitting entry points set this
+#'   to `FALSE` only when they have constructed an internal likelihood-neutral
+#'   scaffold for a longitudinal-only analysis.
 #' @param formulaVCov Covariance regression formula for id-specific marker-by-id effects.
 #'   If the marker block omits the inner `( ... | id )`, then marker-by-id effects
 #'   are absent and covariance-style associations (`corr`, `vcov`) are not allowed.
@@ -173,10 +177,18 @@ joinme_standata <- function(
   quadrature_nodes = NULL,
   vcov_diag_link = c("softplus", "exp"),
   mixture = NULL,
+  include_survival = TRUE,
   seed = .Random.seed[[1]]
 ) {
   assertthat::assert_that(is.data.frame(dataLong), msg = "dataLong must be a data.frame")
   assertthat::assert_that(is.data.frame(dataEvent), msg = "dataEvent must be a data.frame")
+  if (
+    !is.logical(include_survival) ||
+      length(include_survival) != 1L ||
+      is.na(include_survival)
+  ) {
+    cli::cli_abort("{.arg include_survival} must be TRUE or FALSE.")
+  }
   assoc <- .validate_assoc_channels(assoc, context = "joinme_standata()")
   y_var <- .get_response_var(
     formulaLong = formulaLong,
@@ -915,6 +927,9 @@ joinme_standata <- function(
 
   # Return Stan data
   standata_base <- list(
+    include_survival = as.integer(
+      include_survival
+    ), # whether an observed event process contributes to the fitted likelihood
     n_id = as.integer(n_id),
     N_event = as.integer(n_event),
     N = as.integer(nrow(dl)),
@@ -1196,10 +1211,17 @@ joinme_standata <- function(
     stan_data = standata_complete,
     mixture = mixture
   )
+  effective_survival_process <- isTRUE(include_survival)
   if (
     !is.null(mixture_standata$mixture) &&
       !isTRUE(mixture_standata$mixture$include_survival)
   ) {
+    effective_survival_process <- FALSE
+  }
+  standata_complete$include_survival <- as.integer(
+    effective_survival_process
+  ) # final event-process flag after applying any latent-class specification
+  if (!effective_survival_process) {
     standata_complete$S_entry[] <- 0
     standata_complete$S_event[] <- 0
     standata_complete$d_event[] <- 0L

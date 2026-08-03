@@ -117,7 +117,7 @@ print.joinme_tf <- function(x, ...) {
 #'   class probabilities. A scalar is repeated over classes; a vector may give
 #'   one concentration per class.
 #' @param class_regression Positive Normal prior scale for coefficients from
-#'   `formulaCluster`.
+#'   `formulaClass`.
 #' @param .validate Logical; if `TRUE` (default), validate the resulting prior
 #'   declarations immediately.
 #'

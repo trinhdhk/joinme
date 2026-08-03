@@ -443,6 +443,196 @@
 }
 
 #' @keywords internal
+.sampler_diagnostic_draws <- function(fit) {
+  # Read the sampler-state variables in a common iteration-by-chain layout.
+  # These variables are deliberately kept separate from model parameters by
+  # both Stan backends, although the two backends expose them through different
+  # methods.
+  if (.is_cmdstanr_fit(fit)) {
+    sampler_draws <- tryCatch(
+      fit$sampler_diagnostics(format = "draws_array"),
+      error = function(error) NULL
+    ) # CmdStanR sampler states retained in memory by .import_cmdstanr_fit()
+    if (is.null(sampler_draws)) {
+      return(NULL)
+    }
+    return(posterior::as_draws_array(sampler_draws))
+  }
+
+  if (.is_rstan_fit(fit)) {
+    sampler_parameters <- tryCatch(
+      rstan::get_sampler_params(fit, inc_warmup = FALSE),
+      error = function(error) NULL
+    ) # one sampler-state matrix for each rstan chain
+    if (is.null(sampler_parameters) || length(sampler_parameters) == 0L) {
+      return(NULL)
+    }
+    common_variables <- Reduce(
+      intersect,
+      lapply(sampler_parameters, colnames)
+    ) # sampler variables available in every chain
+    if (length(common_variables) == 0L) {
+      return(NULL)
+    }
+    number_iterations <- min(vapply(
+      sampler_parameters,
+      nrow,
+      integer(1)
+    )) # common post-warm-up iteration count across chains
+    sampler_array <- array(
+      NA_real_,
+      dim = c(
+        number_iterations,
+        length(sampler_parameters),
+        length(common_variables)
+      ),
+      dimnames = list(
+        iteration = as.character(seq_len(number_iterations)),
+        chain = as.character(seq_along(sampler_parameters)),
+        variable = common_variables
+      )
+    ) # common sampler-state array matching posterior::draws_array conventions
+    for (chain_index in seq_along(sampler_parameters)) {
+      sampler_array[, chain_index, ] <- sampler_parameters[[chain_index]][
+        seq_len(number_iterations),
+        common_variables,
+        drop = FALSE
+      ]
+    }
+    return(posterior::as_draws_array(sampler_array))
+  }
+
+  NULL
+}
+
+#' Summarise Hamiltonian energy exploration by chain
+#'
+#' @description
+#' Computes E-BFMI directly from the retained energy sequence and reports the
+#' path quantities that help distinguish an isolated warning from persistent
+#' slow movement through the posterior energy distribution.  The backend's
+#' own E-BFMI is substituted later when it is available, so displayed values
+#' agree with CmdStanR or rstan exactly.
+#'
+#' @param fit A CmdStanR or rstan fit object.
+#'
+#' @return A data frame with one row per chain, or an empty data frame when the
+#'   sampler states are unavailable.
+#' @keywords internal
+#' @noRd
+.sampler_energy_by_chain <- function(fit) {
+  sampler_draws <- .sampler_diagnostic_draws(
+    fit
+  ) # iteration-by-chain sampler states supplied by either supported backend
+  if (is.null(sampler_draws)) {
+    return(data.frame())
+  }
+  sampler_array <- as.array(
+    sampler_draws
+  ) # numeric array used for direct sequential energy calculations
+  sampler_variables <- dimnames(sampler_array)[[3L]] %||%
+    character(0) # names of the retained sampler-state variables
+  if (!"energy__" %in% sampler_variables) {
+    return(data.frame())
+  }
+
+  value_or_missing <- function(chain_index, variable_name) {
+    if (!variable_name %in% sampler_variables) {
+      return(rep(NA_real_, dim(sampler_array)[1L]))
+    }
+    as.numeric(sampler_array[, chain_index, variable_name])
+  }
+
+  chain_rows <- vector(
+    "list",
+    dim(sampler_array)[2L]
+  ) # one transparent energy/path summary for each Markov chain
+  for (chain_index in seq_len(dim(sampler_array)[2L])) {
+    energy <- value_or_missing(
+      chain_index,
+      "energy__"
+    ) # Hamiltonian energy in retained sampling order
+    finite_energy <- is.finite(
+      energy
+    ) # iterations that can contribute to sequential energy diagnostics
+    energy <- energy[finite_energy]
+    energy_variance <- stats::var(
+      energy
+    ) # marginal energy variance in this chain
+    energy_change <- diff(
+      energy
+    ) # successive energy movement used in the E-BFMI numerator
+    ebfmi <- if (
+      length(energy_change) > 0L &&
+        is.finite(energy_variance) &&
+        energy_variance > 0
+    ) {
+      mean(energy_change^2) / energy_variance
+    } else {
+      NA_real_
+    } # direct E-BFMI calculation following the Stan diagnostic definition
+    energy_lag_one <- if (
+      length(energy) > 2L && stats::sd(energy) > 0
+    ) {
+      stats::cor(energy[-length(energy)], energy[-1L])
+    } else {
+      NA_real_
+    } # persistence of energy from one retained transition to the next
+    treedepth <- value_or_missing(
+      chain_index,
+      "treedepth__"
+    ) # binary-tree depth used by the No-U-Turn sampler at each transition
+    leapfrog <- value_or_missing(
+      chain_index,
+      "n_leapfrog__"
+    ) # number of numerical integration steps at each transition
+    acceptance <- value_or_missing(
+      chain_index,
+      "accept_stat__"
+    ) # realised Metropolis acceptance statistic at each transition
+    step_size <- value_or_missing(
+      chain_index,
+      "stepsize__"
+    ) # adapted numerical integration step size recorded per transition
+    divergences <- value_or_missing(
+      chain_index,
+      "divergent__"
+    ) # indicator that the numerical Hamiltonian path diverged
+
+    chain_rows[[chain_index]] <- data.frame(
+      chain = as.integer(chain_index),
+      draws = length(energy),
+      E_BFMI = ebfmi,
+      energy_SD = stats::sd(energy),
+      energy_lag_one = energy_lag_one,
+      divergences = if (all(is.na(divergences))) {
+        NA_integer_
+      } else {
+        sum(divergences, na.rm = TRUE)
+      },
+      median_treedepth = stats::median(treedepth, na.rm = TRUE),
+      maximum_treedepth = suppressWarnings(max(treedepth, na.rm = TRUE)),
+      median_leapfrog = stats::median(leapfrog, na.rm = TRUE),
+      mean_acceptance = mean(acceptance, na.rm = TRUE),
+      step_size = stats::median(step_size, na.rm = TRUE),
+      stringsAsFactors = FALSE
+    ) # chain-specific evidence about energy movement and integration effort
+  }
+  output <- do.call(
+    rbind,
+    chain_rows
+  ) # combined chain-level diagnostic table
+  numeric_columns <- setdiff(
+    names(output),
+    c("chain", "draws", "divergences")
+  ) # continuous path summaries which may be entirely unavailable
+  for (column_name in numeric_columns) {
+    output[[column_name]][!is.finite(output[[column_name]])] <- NA_real_
+  }
+  output
+}
+
+#' @keywords internal
 .joinme_sampler_diagnostics <- function(fit) {
   # Collect sampler diagnostics across cmdstanr or rstan backends
   out <- list(
@@ -453,8 +643,13 @@
     max_rhat = NA_real_,
     min_ess_bulk = NA_real_,
     min_ess_tail = NA_real_,
-    min_ess = NA_real_
+    min_ess = NA_real_,
+    energy_by_chain = data.frame()
   )
+
+  out$energy_by_chain <- .sampler_energy_by_chain(
+    fit
+  ) # detailed energy and numerical-path assessment retained for diagnosis()
 
   out$draws <- tryCatch(posterior::ndraws(.get_draws_obj(fit)), error = function(e) NA_integer_)
 
@@ -470,6 +665,21 @@
       if ("ebfmi" %in% names(diag)) {
         out$ebfmi_min <- suppressWarnings(min(diag$ebfmi, na.rm = TRUE))
         if (!is.finite(out$ebfmi_min)) out$ebfmi_min <- NA_real_
+        if (
+          nrow(out$energy_by_chain) == length(diag$ebfmi)
+        ) {
+          out$energy_by_chain$E_BFMI <- as.numeric(
+            diag$ebfmi
+          ) # use the backend value verbatim when CmdStanR supplies it
+        }
+      }
+      if (
+        "num_max_treedepth" %in% names(diag) &&
+          nrow(out$energy_by_chain) == length(diag$num_max_treedepth)
+      ) {
+        out$energy_by_chain$treedepth_hits <- as.integer(
+          diag$num_max_treedepth
+        ) # transitions which reached the configured rather than observed limit
       }
     }
 
@@ -490,6 +700,12 @@
       out$divergences <- sum(vapply(params, function(x) sum(x[, "divergent__"], na.rm = TRUE), numeric(1)))
       out$treedepth_hits <- rstan::get_num_max_treedepth(fit)
       out$ebfmi_min <- min(rstan::get_bfmi(fit))
+      backend_ebfmi <- as.numeric(
+        rstan::get_bfmi(fit)
+      ) # rstan's own chain-specific E-BFMI calculation
+      if (nrow(out$energy_by_chain) == length(backend_ebfmi)) {
+        out$energy_by_chain$E_BFMI <- backend_ebfmi
+      }
     }
     sumdf <- tryCatch(rstan::summary(fit)$summary, error = function(e) NULL)
     if (!is.null(sumdf)) {
@@ -780,7 +996,18 @@ print.JoiNMeFit <- function(x, ...) {
 #' @return Invisibly returns the summary object.
 #' @export
 print.summary_JoiNMeFit <- function(x, ...) {
-  .cli_summary_heading("Joint mixed effects model summary", level = 1L)
+  longitudinal_only_fit <- identical(
+    x$metadata$event_process,
+    "not fitted"
+  ) # whether the summary contains only the nested longitudinal process
+  .cli_summary_heading(
+    if (longitudinal_only_fit) {
+      "Nested longitudinal mixed effects model summary"
+    } else {
+      "Joint mixed effects model summary"
+    },
+    level = 1L
+  )
   meta_lines <- character(0)
   if (!is.null(x$metadata$call) && nzchar(x$metadata$call)) {
     meta_lines <- c(meta_lines, paste0("Call: ", x$metadata$call))
@@ -798,6 +1025,12 @@ print.summary_JoiNMeFit <- function(x, ...) {
     }
 
     meta_lines <- c(meta_lines, paste0("Family: ", family))
+  }
+  if (!is.null(x$metadata$event_process)) {
+    meta_lines <- c(
+      meta_lines,
+      paste0("Event process: ", x$metadata$event_process)
+    )
   }
   if (!is.null(x$metadata$basehaz)) {
     meta_lines <- c(meta_lines, paste0("Baseline hazard type: ", x$metadata$basehaz))
@@ -922,7 +1155,18 @@ print.JoiNMeDynPred <- function(x, ...) {
   }
 
   rounded <- tbl
-  for (col_name in intersect(c("Estimate", "Est.Error", "Q2.5", "Q97.5"), names(rounded))) {
+  for (col_name in intersect(
+    c(
+      "Estimate",
+      "Mean",
+      "Median",
+      "Est.Error",
+      "SD",
+      "Q2.5",
+      "Q97.5"
+    ),
+    names(rounded)
+  )) {
     rounded[[col_name]] <- round(rounded[[col_name]], digits)
   }
   if ("Rhat" %in% names(rounded)) {

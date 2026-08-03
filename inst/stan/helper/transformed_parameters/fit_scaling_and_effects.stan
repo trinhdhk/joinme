@@ -89,6 +89,13 @@
     int m_pos = 1; // Role: m pos.
 
     // Step 1: reconstruct the subject-specific SD regression on the diagonal.
+    //
+    // lambda_L[m] is a scalar residual-heterogeneity loading for exactly one
+    // packed covariance coordinate m. Since z_L[i][m] has unit scale in the
+    // ordinary model, lambda_L[m]^2 is the conditional variance contributed
+    // to this linear predictor before applying exp or softplus. There are no
+    // cross-coordinate loadings: in vector notation this term is
+    // diag_matrix(lambda_L) * z_L[i], not a dense matrix times z_L[i].
     for (m in 1 : M_cov) {
       int r = r_idx[m]; // Role: row position.
       int c = c_idx[m]; // Role: column position.
@@ -101,6 +108,8 @@
 
     // Step 2: rebuild the Cholesky-correlation rows from tanh-linked
     // row-specific partial correlations. This keeps K_i valid for every subject.
+    // For an off-diagonal coordinate, lambda_L[m] is the residual scale before
+    // tanh; it is therefore not itself a correlation standard deviation.
     for (r in 1 : Q_idm) {
       if (r == 1) {
         Li[1, 1] = sd_i[1];

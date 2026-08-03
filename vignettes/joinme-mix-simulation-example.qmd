@@ -1,5 +1,5 @@
 ---
-title: "Worked latent-progress simulation and recovery example"
+title: "A simple Normal-mixture simulation and recovery example"
 format:
   html:
     toc: true
@@ -12,18 +12,32 @@ execute:
   eval: false
   warning: false
   message: false
+  engine: knitr
 ---
 
-# Scientific question
 
-Suppose three unobserved progress patterns differ in subject intercept and
-slope and in the subject-specific marker covariance process. Baseline
-treatment influences class membership, and the event hazard depends on the
-current total longitudinal value. We wish to determine whether
-`joinme_mix()` recovers the component structure without being given the true
-labels.
+# Purpose
 
-# Generative specification
+This example is deliberately small and conservative. It checks whether
+`simulate_joinme_mix()` and `joinme_mix()` agree for a two-class mixture of
+Normal subject-intercept effects. It is intended for implementation debugging,
+not as a stress test of heavy-tailed mixtures, covariance classes or elaborate
+class-membership regressions.
+
+The example therefore uses:
+
+- two latent classes;
+- one clustered subject-intercept coordinate;
+- an intercept-only class-membership model;
+- Normal mixture innovations (`shrinkage = 2L`);
+- Gaussian longitudinal markers; and
+- no survival process.
+
+Student-\(t_6\), Laplace, multivariate class blocks and covariate-dependent class
+membership are documented in the latent-progress guide. They should be added
+only after this elementary correspondence check succeeds.
+
+# Model specification
 
 ```{r}
 library(joinme)
@@ -31,240 +45,228 @@ library(joinme)
 set.seed(5201)
 
 longitudinal_formula <-
-  y ~ 1 + time + treatment + age_c +
+  y ~ 1 + time + treatment +
   (1 + time | id) +
   (0 + treatment + (1 + time | id) | marker)
 
-event_formula <-
-  survival::Surv(time, event) ~ treatment + age_c
-
-covariance_formula <- ~ treatment + age_c
-
-class_formula <- ~ treatment + age_c
+class_formula <- ~ 1
 ```
 
-The subject and covariance-regression blocks contribute two selected
-coordinates each. Their common packed component locations are:
+Only the first standardised subject random-effect coordinate is assigned a
+latent class. The ordered class locations are well separated, while both
+classes have the same generating within-class scale:
 
 ```{r}
-subject_location <- rbind(
-  stable  = c(-1.50, -0.70),
-  central = c( 0.00,  0.10),
-  rapid   = c( 1.60,  0.90)
+subject_location <- matrix(
+  c(-1.40, 1.40),
+  nrow = 2,
+  ncol = 1,
+  dimnames = list(c("slower", "faster"), "subject_intercept")
 )
 
-covariance_location <- rbind(
-  stable  = c(-0.70, -0.25),
-  central = c( 0.00,  0.00),
-  rapid   = c( 0.85,  0.30)
-)
-
-component_scale <- list(
-  subject = rbind(
-    c(0.45, 0.50),
-    c(0.65, 0.60),
-    c(0.50, 0.55)
-  ),
-  vcov = rbind(
-    c(0.55, 0.60),
-    c(0.70, 0.70),
-    c(0.55, 0.60)
-  )
+subject_scale <- matrix(
+  c(0.60, 0.60),
+  nrow = 2,
+  ncol = 1,
+  dimnames = dimnames(subject_location)
 )
 ```
 
-The baseline probabilities are 0.25, 0.45 and 0.30. Treatment lowers the
-first-class logit and raises the second-class logit relative to their baseline
-probabilities.
+These locations and scales apply to the standardised latent coordinate before
+the ordinary subject random-effect Cholesky factor is applied. They are not
+response-scale longitudinal intercepts.
 
-# Simulation
+# Simulate from the Normal mixture
 
 ```{r}
 simulation <- simulate_joinme_mix(
   formulaLong = longitudinal_formula,
-  formulaEvent = event_formula,
-  formulaVCov = covariance_formula,
-  n_id = 100,
-  families = list(
-    jm_family("gaussian"),
-    jm_family("student_t"),
-    jm_family("gaussian")
-  ),
+  formulaEvent = NULL,
+  formulaVCov = ~ 1,
+  n_id = 60,
+  families = rep("gaussian", 3),
   marker_levels = c("inflammation", "renal", "functional"),
-  times_obs = seq(0, 6, length.out = 10),
-  obs_time_noise_sd = 0.08,
+  times_obs = seq(0, 6, length.out = 8),
   covariate_formulas = list(
-    treatment ~ rbinom(n_id, 1, 0.5),
-    age_c ~ rnorm(n_id, 0, 1),
-    x1 ~ rnorm(n_id),
-    x2 ~ rnorm(n_id)
+    treatment ~ rbinom(n_id, 1, 0.5)
   ),
-  assoc = "cv_total",
-  assoc_coefs = c(cv_total = 0.45),
+  assoc = character(0),
+  shrinkage = 2L,
   beta_long = c(
     "(Intercept)" = 1.0,
-    "time" = 0.25,
-    "treatment" = -0.15,
-    "age_c" = 0.10
+    "time" = 0.20,
+    "treatment" = -0.15
   ),
-  beta_event = c(
-    treatment = -0.20,
-    age_c = 0.15
-  ),
-  n_clusters = 3,
-  formulaCluster = class_formula,
-  cluster_type = c("subject", "vcov"),
-  cluster_dimensions = list(
-    subject = c(1, 2),
-    vcov = c(1, 2)
-  ),
-  cluster_ordering = "intercept",
+  n_classes = 2L,
+  formulaClass = class_formula,
+  class_type = "subject",
+  class_dimensions = list(subject = 1L),
+  class_ordering = "intercept",
   class_parameters = list(
-    probability = c(0.25, 0.45, 0.30),
-    coefficient = list(
-      subject = c(
-        "class_1:treatment" = -0.65,
-        "class_1:age_c" = -0.20,
-        "class_2:treatment" = 0.45,
-        "class_2:age_c" = 0.15
-      )
-    ),
-    location = list(
-      subject = subject_location,
-      vcov = covariance_location
-    ),
-    scale = component_scale
+    probability = c(0.50, 0.50),
+    location = list(subject = subject_location),
+    scale = list(subject = subject_scale)
   ),
-  baseline_hazard = list(
-    type = "weibull",
-    shape = 1.25,
-    scale = 7
-  ),
-  time_cens = 7,
   seed = 5201
 )
 ```
 
-# Inspecting simulated truth
+Here `shrinkage = 2L` is the important Normal-mixture choice. The three
+Gaussian `families` separately specify the observation distributions of the
+longitudinal markers. Because no event formula is supplied, both simulation
+and fitting use the longitudinal-only likelihood.
+
+# Inspect the generating truth
 
 ```{r}
 mixture_truth <- simulation$truth$mixture
 
+mixture_truth$distribution
 mixture_truth$probability
 mixture_truth$dimensions
-mixture_truth$starts
 mixture_truth$location
 mixture_truth$scale
 table(mixture_truth$allocation$subject)
 ```
 
-The probability regression implies person-specific allocation probabilities:
+The realised class labels are retained only under `truth$mixture`; they are not
+added to the fitting data.
+
+# Verify simulation-to-fit correspondence
+
+Before sampling, prepare the fitting data and compare the exact mixture fields
+recorded by the simulator:
 
 ```{r}
-head(mixture_truth$probability_by_unit$subject)
-summary(
-  apply(
-    mixture_truth$probability_by_unit$subject,
-    1,
-    max
-  )
+prepared_fit <- joinme_mix(
+  formulaLong = longitudinal_formula,
+  dataLong = simulation$dataLong,
+  formulaEvent = NULL,
+  formulaVCov = ~ 1,
+  families = simulation$marker_info$families,
+  transforms = simulation$truth$transforms,
+  n_classes = 2L,
+  formulaClass = class_formula,
+  class_type = "subject",
+  class_dimensions = list(subject = 1L),
+  class_ordering = "intercept",
+  priors = jm_prior(class_probability = c(2, 2)),
+  shrinkage = 2L,
+  fit = FALSE,
+  seed = 5201
 )
+
+simulation_contract <- mixture_truth$stan_data_contract
+contract_agreement <- vapply(
+  names(simulation_contract),
+  function(field_name) {
+    isTRUE(all.equal(
+      prepared_fit$stan_data[[field_name]],
+      simulation_contract[[field_name]],
+      check.attributes = FALSE
+    ))
+  },
+  logical(1)
+)
+
+data.frame(
+  Stan_field = names(contract_agreement),
+  agrees = unname(contract_agreement)
+)
+stopifnot(all(contract_agreement))
 ```
 
-The recorded standardised draws can be compared with their component centres:
+This audit checks the class count, selected coordinate, packed component
+position, ordering rule, class-design segment and Normal family code. It does
+not compare inferential priors with fixed simulation parameters.
 
-```{r}
-allocation <- unname(mixture_truth$allocation$subject)
-
-standardised_truth <- data.frame(
-  id = names(mixture_truth$allocation$subject),
-  class = factor(allocation),
-  subject_intercept =
-    mixture_truth$standardised_draws$subject[, 1],
-  subject_slope =
-    mixture_truth$standardised_draws$subject[, 2],
-  covariance_coordinate =
-    mixture_truth$standardised_draws$vcov[, 1]
-)
-```
-
-# Fit without true labels
+# Fit without using the true classes
 
 ```{r}
 fit <- joinme_mix(
   formulaLong = longitudinal_formula,
   dataLong = simulation$dataLong,
-  formulaEvent = event_formula,
-  dataEvent = simulation$dataEvent,
-  formulaVCov = covariance_formula,
+  formulaEvent = NULL,
+  formulaVCov = ~ 1,
   families = simulation$marker_info$families,
   transforms = simulation$truth$transforms,
-  n_clusters = 3,
-  formulaCluster = class_formula,
-  cluster_type = c("subject", "vcov"),
-  cluster_dimensions = list(
-    subject = c(1, 2),
-    vcov = c(1, 2)
-  ),
-  cluster_ordering = "intercept",
-  priors = jm_prior(
-    class_probability = c(2, 2, 2),
-    class_regression = 1
-  ),
-  assoc = "cv_total",
-  shrinkage = simulation$truth$shrinkage,
+  n_classes = 2L,
+  formulaClass = class_formula,
+  class_type = "subject",
+  class_dimensions = list(subject = 1L),
+  class_ordering = "intercept",
+  priors = jm_prior(class_probability = c(2, 2)),
+  shrinkage = 2L,
   seed = 5201,
   control = list(
-    chains = 2,
-    parallel_chains = 2,
-    iter_warmup = 2000,
-    iter_sampling = 1000,
-    adapt_delta = 0.7
+    chains = 4,
+    parallel_chains = 4,
+    threads_per_chain = 1,
+    iter_warmup = 1000,
+    iter_sampling = 500,
+    max_treedepth = 12,
+    adapt_delta = 0.95,
+    init = 0.5
   )
 )
 ```
 
-# Computational assessment
+Ordering the first class location identifies the labels. It does not fix or
+anchor either scale parameter; `mix_scale` retains its
+
+\[
+  \operatorname{Exponential}(1)
+\]
+
+prior.
+
+# Summaries and computational checks
 
 ```{r}
-summary(fit)
-diagnosis(fit)
+fit_summary <- summary(fit)
+fit_summary
+
+fit_diagnosis <- diagnosis(fit)
+fit_diagnosis
+fit_diagnosis$energy_by_chain
+fit_diagnosis$scale_tradeoff
+head(fit_diagnosis$energy_association)
+
 mcmc_plot(fit, variable = "mix_probability", type = "trace")
 mcmc_plot(fit, variable = "mix_location", type = "trace")
 mcmc_plot(fit, variable = "mix_scale", type = "trace")
 ```
 
-Assess effective sample sizes and convergence for the ordinary covariance and
-association parameters as well as the mixture parameters. A mixture trace can
-appear stable even when the underlying covariance regression is weakly
-identified.
+Posterior tables use one common numerical schema:
 
-# Component parameter recovery
+`Estimate`, `Est.Error`, `Q2.5`, `Q97.5`, `Rhat`, `ess_bulk`, and `ess_tail`.
 
-```{r}
-posterior_summary(
-  fit,
-  variables = c(
-    "mix_probability",
-    "mix_location",
-    "mix_scale",
-    "mix_class_coefficient_subject"
-  )
-)
-```
+`Estimate` is the posterior mean and `Est.Error` is the posterior standard
+deviation. Median and duplicate `Mean` or `SD` aliases are intentionally not
+printed.
 
-Under intercept ordering, posterior rows can be compared directly with the
-ordered truth. Under no ordering, first align posterior draws or summaries by
-permutation.
+Even this simple example contains two scale layers: the ordinary subject
+random-effect scale and the within-class `mix_scale`. The likelihood can learn
+their product more readily than either factor. E-BFMI below 0.3, persistently
+high R-hat, very small step sizes or trajectories reaching the maximum tree
+depth should therefore be treated as evidence that the fitted posterior is not
+yet reliable. Longer sampling must not be used to conceal a persistent scale
+ridge.
 
-# Allocation recovery
+# Class membership
 
 ```{r}
 posterior_membership <- posterior_class(fit)
 head(posterior_membership$subject)
+plot(posterior_membership, domain = "subject")
 ```
 
-Join posterior summaries to the truth only for evaluation:
+The returned table reports the posterior mean class probability as `Estimate`,
+its posterior standard deviation as `Est.Error`, its central interval and its
+chain diagnostics. `assigned_class` is the class with the greatest posterior
+mean probability for that subject.
+
+The simulated labels may be joined only for recovery assessment:
 
 ```{r}
 allocation_assessment <- transform(
@@ -273,21 +275,17 @@ allocation_assessment <- transform(
     match(unit, names(mixture_truth$allocation$subject))
   ]
 )
-```
 
-Useful summaries include:
-
-```{r}
 mean(
   allocation_assessment$class ==
     paste0("class_", allocation_assessment$true_class)
 )
 ```
 
-Hard accuracy should be accompanied by the posterior probability assigned to
-the true class and a multiclass logarithmic or Brier score.
+Hard allocation accuracy should be accompanied by posterior probability or a
+proper multiclass score.
 
-# Longitudinal class trajectories
+# Class-specific trajectories
 
 ```{r}
 longitudinal_plot(
@@ -301,103 +299,16 @@ longitudinal_plot(
 )
 ```
 
-`mean_per_class` uses fixed effects plus the clustered block's component
-centre. `marginal_per_class` integrates the inverse-link response trajectory
-over the remaining random-effect distribution. They answer different
-questions and need not coincide under nonlinear links.
-
-# Association trajectories
-
-```{r}
-posterior_assoc(
-  fit,
-  times = seq(0, 6, length.out = 80),
-  by_class = TRUE
-)
-
-plot(
-  posterior_assoc(
-    fit,
-    times = seq(0, 6, length.out = 80),
-    by_class = TRUE
-  )
-)
-```
-
-Although the hazard has no explicit class coefficient, class-specific
-longitudinal trajectories induce class-specific association trajectories.
+`mean_per_class` inserts the ordered class centre into the selected subject
+intercept coordinate. `marginal_per_class` integrates the inverse-link
+trajectory over the within-class distribution and remaining random effects.
 
 # Posterior predictive assessment
 
 ```{r}
 pp_check(fit)
-concordance(fit)
-tvAUC(fit, Tstart = 3, Dt = 2)
-tvROC(fit, Tstart = 3, Dt = 2)
 ```
 
-Good allocation recovery does not guarantee good outcome calibration.
-Conversely, predictive performance can be adequate when subject class
-labels remain uncertain.
-
-# Sensitivity to the fitted class count
-
-```{r}
-fits <- lapply(2:4, function(n_clusters) {
-  joinme_mix(
-    formulaLong = longitudinal_formula,
-    dataLong = simulation$dataLong,
-    formulaEvent = event_formula,
-    dataEvent = simulation$dataEvent,
-    formulaVCov = covariance_formula,
-    families = simulation$marker_info$families,
-    n_clusters = n_clusters,
-    formulaCluster = class_formula,
-    cluster_type = c("subject", "vcov"),
-    cluster_dimensions = list(
-      subject = c(1, 2),
-      vcov = c(1, 2)
-    ),
-    cluster_ordering = "intercept",
-    assoc = "cv_total",
-    seed = 5300 + n_clusters
-  )
-})
-```
-
-Compare out-of-sample predictive measures, posterior predictive checks,
-effective class sizes, entropy, component separation and computation. The
-known generating count is useful for validation, but applied analyses do not
-have this privilege.
-
-# Repeated-replicate study
-
-```{r}
-run_replicate <- function(replicate_id) {
-  simulated <- simulate_joinme_mix(
-    n_id = 240,
-    families = rep("gaussian", 3),
-    n_clusters = 3,
-    cluster_type = c("subject", "vcov"),
-    cluster_dimensions = list(
-      subject = c(1, 2),
-      vcov = c(1, 2)
-    ),
-    class_parameters = list(
-      probability = c(0.25, 0.45, 0.30),
-      location = list(
-        subject = subject_location,
-        vcov = covariance_location
-      ),
-      scale = component_scale
-    ),
-    seed = 6000 + replicate_id
-  )
-
-  # Fit, diagnose and return compact recovery summaries here.
-}
-```
-
-Simulation conclusions require repeated datasets. A single recovered example
-is a software demonstration, not evidence about repeated-sampling
-performance.
+This single simulation is a software correspondence example. Claims about
+class recovery or predictive performance require repeated independently
+simulated datasets.

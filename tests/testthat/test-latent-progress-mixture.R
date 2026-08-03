@@ -5,7 +5,7 @@ test_that("ordinary models receive a parameter-free mixture representation", {
   )
 
   expect_identical(mixture_data$use_mixture, 0L)
-  expect_identical(mixture_data$n_clusters, 1L)
+  expect_identical(mixture_data$n_classes, 1L)
   expect_identical(mixture_data$K_mix, 0L)
   expect_length(mixture_data$mix_idx_subject, 0L)
   expect_identical(mixture_data$P_class_subject, 0L)
@@ -28,16 +28,16 @@ test_that("compatible random-effect levels share G rather than forming a product
   mixture_data <- .build_mixture_standata(
     stan_data,
     mixture = list(
-      n_clusters = 3L,
-      cluster_type = c("subject", "vcov"),
-      cluster_dimensions = NULL,
+      n_classes = 3L,
+      class_type = c("subject", "vcov"),
+      class_dimensions = NULL,
       class_probability_concentration = 1,
       class_regression_scale = 1,
       include_survival = TRUE
     )
   )
 
-  expect_identical(mixture_data$n_clusters, 3L)
+  expect_identical(mixture_data$n_classes, 3L)
   expect_identical(mixture_data$K_mix, 4L)
   expect_identical(mixture_data$mix_idx_subject, 1:2)
   expect_identical(mixture_data$mix_idx_covariance, 1:2)
@@ -60,9 +60,9 @@ test_that("corr selects only off-diagonal covariance-regression coordinates", {
       shrinkage = 2L
     ),
     mixture = list(
-      n_clusters = 2L,
-      cluster_type = "corr",
-      cluster_dimensions = c(1L, 2L),
+      n_classes = 2L,
+      class_type = "corr",
+      class_dimensions = c(1L, 2L),
       class_probability_concentration = 1,
       class_regression_scale = 1,
       include_survival = TRUE
@@ -70,7 +70,7 @@ test_that("corr selects only off-diagonal covariance-regression coordinates", {
   )
 
   expect_identical(mixture_data$mix_idx_covariance, c(2L, 4L))
-  expect_identical(mixture_data$mixture$cluster_type, "corr")
+  expect_identical(mixture_data$mixture$class_type, "corr")
   expect_identical(mixture_data$mixture$dimensions$corr, c(2L, 4L))
   expect_false("mix_marker_weight" %in% names(mixture_data))
 })
@@ -90,16 +90,16 @@ test_that("subject and marker domains retain common labels and separate units", 
   mixture_data <- .build_mixture_standata(
     stan_data,
     mixture = list(
-      n_clusters = 2L,
-      cluster_type = c("subject", "marker"),
-      cluster_dimensions = NULL,
+      n_classes = 2L,
+      class_type = c("subject", "marker"),
+      class_dimensions = NULL,
       class_probability_concentration = c(2, 3),
       class_regression_scale = 1,
       include_survival = TRUE
     )
   )
 
-  expect_identical(mixture_data$n_clusters, 2L)
+  expect_identical(mixture_data$n_classes, 2L)
   expect_identical(mixture_data$K_mix, 4L)
   expect_equal(mixture_data$mix_probability_prior, c(2, 3))
   expect_identical(
@@ -108,26 +108,17 @@ test_that("subject and marker domains retain common labels and separate units", 
   )
 })
 
-test_that("cluster_type accepts only the four public types", {
+test_that("class_type accepts only the four public types", {
   expect_identical(
-    .canonical_cluster_types(c("subject", "marker", "corr")),
+    .canonical_class_types(c("subject", "marker", "corr")),
     c("subject", "marker", "corr")
   )
-  expect_error(.canonical_cluster_types("individual"), "subject")
-  expect_error(.canonical_cluster_types("id_marker"), "subject")
-  expect_error(.canonical_cluster_types("marker_weight"), "subject")
+  expect_error(.canonical_class_types("individual"), "subject")
+  expect_error(.canonical_class_types("id_marker"), "subject")
+  expect_error(.canonical_class_types("marker_weight"), "subject")
   expect_error(
-    .canonical_cluster_types(c("corr", "vcov")),
+    .canonical_class_types(c("corr", "vcov")),
     "cannot contain both"
-  )
-  expect_error(
-    joinme_mix(
-      y ~ time,
-      data.frame(id = 1L, marker = "m", time = 0, y = 0),
-      cluster = "subject",
-      fit = FALSE
-    ),
-    "matches multiple formal arguments"
   )
 })
 
@@ -143,9 +134,9 @@ test_that("mixture dimensions and unavailable levels are explained", {
     shrinkage = 0L
   )
   specification <- list(
-    n_clusters = 2L,
-    cluster_type = "subject",
-    cluster_dimensions = 2L,
+    n_classes = 2L,
+    class_type = "subject",
+    class_dimensions = 2L,
     class_probability_concentration = 1,
     class_regression_scale = 1,
     include_survival = FALSE
@@ -155,14 +146,14 @@ test_that("mixture dimensions and unavailable levels are explained", {
     .build_mixture_standata(stan_data, specification),
     "Choose distinct integer indices between 1 and 1"
   )
-  specification$cluster_type <- "marker"
-  specification$cluster_dimensions <- NULL
+  specification$class_type <- "marker"
+  specification$class_dimensions <- NULL
   expect_error(
     .build_mixture_standata(stan_data, specification),
     "unavailable"
   )
-  specification$cluster_type <- "subject"
-  specification$n_clusters <- 2.5
+  specification$class_type <- "subject"
+  specification$n_classes <- 2.5
   expect_error(
     .build_mixture_standata(stan_data, specification),
     "single integer"
@@ -176,18 +167,18 @@ test_that("longitudinal-only scaffolds preserve identifiers and follow-up", {
     marker = c("m1", "m1", "m1", "m1"),
     y = 1:4
   )
-  scaffold <- .mixture_event_scaffold(
+  scaffold <- .longitudinal_only_event_scaffold(
     longitudinal_data,
     id_variable = "id",
     time_variable = "time"
   )
 
   expect_equal(scaffold$id, c("a", "b"))
-  expect_equal(scaffold$.joinme_mix_follow_up, c(2, 2))
-  expect_true(all(scaffold$.joinme_mix_event == 0L))
+  expect_equal(scaffold$.joinme_follow_up, c(2, 2))
+  expect_true(all(scaffold$.joinme_event == 0L))
 })
 
-test_that("formulaCluster creates unit-level designs and stable probabilities", {
+test_that("formulaClass creates unit-level designs and stable probabilities", {
   longitudinal_data <- data.frame(
     id = rep(1:3, each = 2L),
     marker = rep(c("m1", "m2"), times = 3L),
@@ -251,7 +242,7 @@ test_that("class-specific formulae use compact coefficients and no default order
     data_event = event_data,
     id_variable = "id",
     marker_variable = "marker",
-    n_clusters = 3L
+    n_classes = 3L
   )
 
   expect_true(design$class_specific)
@@ -268,16 +259,16 @@ test_that("class-specific formulae use compact coefficients and no default order
     c(1L, 2L, 3L, 3L)
   )
   expect_identical(
-    .resolve_cluster_ordering(NULL, design$class_specific),
+    .resolve_class_ordering(NULL, design$class_specific),
     "none"
   )
   expect_identical(
-    .resolve_cluster_ordering("probability", design$class_specific),
+    .resolve_class_ordering("probability", design$class_specific),
     "probability"
   )
 })
 
-test_that("cluster_ordering targets only an intercept, baseline probabilities, or neither", {
+test_that("class_ordering targets only an intercept, baseline probabilities, or neither", {
   stan_data <- list(
     n_id = 3L,
     D = 1L,
@@ -294,12 +285,12 @@ test_that("cluster_ordering targets only an intercept, baseline probabilities, o
     shrinkage = 0L
   )
   specification <- list(
-    n_clusters = 3L,
-    cluster_type = "subject",
-    cluster_dimensions = c(1L, 2L),
+    n_classes = 3L,
+    class_type = "subject",
+    class_dimensions = c(1L, 2L),
     class_probability_concentration = 1,
     class_regression_scale = 1,
-    cluster_ordering = "intercept",
+    class_ordering = "intercept",
     include_survival = FALSE
   )
 
@@ -310,7 +301,7 @@ test_that("cluster_ordering targets only an intercept, baseline probabilities, o
     1L
   )
 
-  specification$cluster_ordering <- "probability"
+  specification$class_ordering <- "probability"
   probability_ordered <- .build_mixture_standata(stan_data, specification)
   expect_identical(probability_ordered$mix_ordering, 2L)
   expect_identical(
@@ -318,7 +309,7 @@ test_that("cluster_ordering targets only an intercept, baseline probabilities, o
     0L
   )
 
-  specification$cluster_ordering <- "none"
+  specification$class_ordering <- "none"
   unordered <- .build_mixture_standata(stan_data, specification)
   expect_identical(unordered$mix_ordering, 0L)
   expect_identical(unordered$mix_ordered_location_coordinate, 0L)
@@ -342,8 +333,8 @@ test_that("joinme_mix prepares the inherited holder through the common entry pat
   captured_arguments <- NULL
   fake_holder <- new.env(parent = emptyenv())
   fake_holder$stan_data <- list(mixture = list(
-    n_clusters = 2L,
-    cluster_type = "subject",
+    n_classes = 2L,
+    class_type = "subject",
     include_survival = TRUE
   ))
   fake_holder$sample <- function() "sampled mixture"
@@ -361,24 +352,24 @@ test_that("joinme_mix prepares the inherited holder through the common entry pat
     data.frame(id = 1L, time = 0, marker = "m", y = 1),
     survival::Surv(time, event) ~ 1,
     data.frame(id = 1L, time = 1, event = 0L),
-    n_clusters = 2,
-    cluster_type = "subject",
+    n_classes = 2,
+    class_type = "subject",
     fit = FALSE
   )
 
   expect_s3_class(prepared, "JoiNMeMixStanData")
   expect_identical(prepared$result_class, "mixture")
   expect_identical(captured_arguments$fit, FALSE)
-  expect_identical(captured_arguments$mixture$n_clusters, 2L)
-  expect_identical(captured_arguments$mixture$cluster_type, "subject")
-  expect_identical(captured_arguments$mixture$cluster_ordering, "intercept")
+  expect_identical(captured_arguments$mixture$n_classes, 2L)
+  expect_identical(captured_arguments$mixture$class_type, "subject")
+  expect_identical(captured_arguments$mixture$class_ordering, "intercept")
 })
 
 test_that("joinme_mix defaults class-specific formulae to no ordering", {
   captured_arguments <- NULL
   fake_holder <- new.env(parent = emptyenv())
   fake_holder$stan_data <- list(mixture = list(
-    n_clusters = 2L,
+    n_classes = 2L,
     levels = "subject",
     include_survival = TRUE
   ))
@@ -407,14 +398,14 @@ test_that("joinme_mix defaults class-specific formulae to no ordering", {
       event = 0L,
       x = c(0, 1)
     ),
-    n_clusters = 2,
-    cluster_type = "subject",
-    formulaCluster = list(~x, ~x),
+    n_classes = 2,
+    class_type = "subject",
+    formulaClass = list(~x, ~x),
     fit = FALSE
   )
 
   expect_s3_class(prepared, "JoiNMeMixStanData")
-  expect_identical(captured_arguments$mixture$cluster_ordering, "none")
+  expect_identical(captured_arguments$mixture$class_ordering, "none")
   expect_identical(
     captured_arguments$mixture$class_design$subject$class_term_count,
     c(1L, 1L)
@@ -439,7 +430,7 @@ test_that("Stan fit data and source include every mixture field", {
   required_data <- .stan_data_names(stan_file)
   expect_true(all(c(
     "use_mixture",
-    "n_clusters",
+    "n_classes",
     "K_mix",
     "mix_idx_subject",
     "mix_idx_marker",
@@ -460,9 +451,14 @@ test_that("Stan fit data and source include every mixture field", {
 
   source <- paste(.read_stan_with_includes(stan_file), collapse = "\n")
   expect_match(source, "fit_mixture_priors", fixed = TRUE)
-  expect_match(source, "ordered[n_clusters] mix_location_ordered", fixed = TRUE)
+  expect_match(source, "ordered[n_classes] mix_location_ordered", fixed = TRUE)
   expect_match(source, "mix_location_unordered", fixed = TRUE)
-  expect_match(source, "positive_ordered[n_clusters - 1]", fixed = TRUE)
+  expect_match(
+    source,
+    "to_vector(mix_scale) ~ exponential(1)",
+    fixed = TRUE
+  )
+  expect_match(source, "positive_ordered[n_classes - 1]", fixed = TRUE)
   expect_match(source, "posterior_class_probability_subject", fixed = TRUE)
   expect_match(source, "posterior_class_probability_marker", fixed = TRUE)
 })
@@ -478,9 +474,60 @@ test_that("ordinary Stan fitting has no latent-class contract", {
   required_data <- .stan_data_names(stan_file)
   source <- paste(.read_stan_with_includes(stan_file), collapse = "\n")
 
-  expect_false(any(grepl("^mix_|^n_clusters$|^K_mix$|^use_mixture$", required_data)))
+  expect_false(any(grepl("^mix_|^n_classes$|^K_mix$|^use_mixture$", required_data)))
   expect_false(grepl("latent_progress_component_lpdf", source, fixed = TRUE))
   expect_false(grepl("posterior_class_probability_", source, fixed = TRUE))
+})
+
+test_that("the mixture prior is evaluated once outside the threaded likelihood", {
+  stan_file <- testthat::test_path(
+    "..",
+    "..",
+    "inst",
+    "stan",
+    "joinme_mix_fit_threading.stan"
+  )
+  main_source <- paste(readLines(stan_file, warn = FALSE), collapse = "\n")
+  mixture_prior_position <- regexpr(
+    "#include helper/model/fit_mixture_priors.stan",
+    main_source,
+    fixed = TRUE
+  )[[1L]]
+  likelihood_position <- regexpr(
+    "#include helper/model/fit_threaded_likelihood.stan",
+    main_source,
+    fixed = TRUE
+  )[[1L]]
+
+  expect_gt(mixture_prior_position, 0L)
+  expect_gt(likelihood_position, mixture_prior_position)
+  expect_equal(
+    lengths(gregexpr(
+      "#include helper/model/fit_mixture_priors.stan",
+      main_source,
+      fixed = TRUE
+    )),
+    1L
+  )
+
+  partial_source <- paste(readLines(
+    testthat::test_path(
+      "..",
+      "..",
+      "inst",
+      "stan",
+      "helper",
+      "functions",
+      "joinme_fit_partial.stanfunctions"
+    ),
+    warn = FALSE
+  ), collapse = "\n")
+  expect_false(grepl(
+    "latent_progress_component_lpdf",
+    partial_source,
+    fixed = TRUE
+  ))
+  expect_false(grepl("mix_scale", partial_source, fixed = TRUE))
 })
 
 test_that("dynamic prediction restores the fitted mixture distribution", {
@@ -561,14 +608,14 @@ test_that("prediction draw subsetting preserves mixture coordinate layouts", {
     dynamic_mix_probability = matrix(c(0.4, 0.6, 0.7, 0.3), nrow = 2L),
     dynamic_mix_idx_subject = c(2L, 4L),
     dynamic_mix_idx_covariance = c(1L, 3L),
-    dynamic_n_clusters = 2L
+    dynamic_n_classes = 2L
   )
 
   subset <- .subset_draws_for_prediction(draw_list, 1L)
 
   expect_identical(subset$dynamic_mix_idx_subject, c(2L, 4L))
   expect_identical(subset$dynamic_mix_idx_covariance, c(1L, 3L))
-  expect_identical(subset$dynamic_n_clusters, 2L)
+  expect_identical(subset$dynamic_n_classes, 2L)
   expect_identical(nrow(subset$dynamic_mix_probability), 1L)
 })
 
@@ -635,7 +682,7 @@ test_that("dynamic prediction exposes conditional class probabilities", {
           )
         )
       ),
-      mixture = list(n_clusters = 2L),
+      mixture = list(n_classes = 2L),
       metadata = list(marker_levels = c("marker_a", "marker_b"))
     ),
     class = c("JoiNMeMixDynPred", "JoiNMeDynPred")
@@ -652,9 +699,108 @@ test_that("dynamic prediction exposes conditional class probabilities", {
     unique(membership$marker$unit),
     c("marker_a", "marker_b")
   )
+  expect_named(
+    membership$subject,
+    c(
+      "unit",
+      "class",
+      "Estimate",
+      "Est.Error",
+      "Q2.5",
+      "Q97.5",
+      "Rhat",
+      "ess_bulk",
+      "ess_tail",
+      "assigned_class"
+    )
+  )
+  expect_s3_class(
+    plot(membership, domain = "subject"),
+    "ggplot"
+  )
+  printed_membership <- paste(
+    capture.output(print(membership, max_rows = 2L)),
+    collapse = "\n"
+  )
+  expect_match(
+    printed_membership,
+    "Maximum-probability allocation counts",
+    fixed = TRUE
+  )
+  expect_match(
+    printed_membership,
+    "Estimate",
+    fixed = TRUE
+  )
   expect_s3_class(
     plot.JoiNMeMixDynPred(prediction, type = "class_membership"),
     "ggplot"
+  )
+})
+
+test_that("class association relevance follows the fitted random-effect block", {
+  subject_fit <- structure(
+    list(
+      mixture = list(class_type = "subject"),
+      config = list()
+    ),
+    class = c("JoiNMeMixFit", "JoiNMeFit")
+  )
+  covariance_fit <- structure(
+    list(
+      mixture = list(class_type = "vcov"),
+      config = list()
+    ),
+    class = c("JoiNMeMixFit", "JoiNMeFit")
+  )
+
+  expect_true(.mixture_class_changes_association(
+    subject_fit,
+    "cv_mean",
+    "mean_per_class"
+  ))
+  expect_true(.mixture_class_changes_association(
+    subject_fit,
+    "cs_total",
+    "mean_per_class"
+  ))
+  expect_false(.mixture_class_changes_association(
+    subject_fit,
+    "cv_marker",
+    "mean_per_class"
+  ))
+  expect_true(.mixture_class_changes_association(
+    covariance_fit,
+    "vcov[1]",
+    "mean_per_class"
+  ))
+  expect_false(.mixture_class_changes_association(
+    covariance_fit,
+    "cv_mean",
+    "mean_per_class"
+  ))
+})
+
+test_that("posterior marker weights retain draw-wise trajectory pairing", {
+  trajectory <- matrix(
+    c(1, 2, 3, 4, 5, 6),
+    nrow = 3L,
+    byrow = TRUE
+  )
+  weight <- posterior::as_draws_matrix(matrix(
+    c(2, 3, 4),
+    ncol = 1L,
+    dimnames = list(NULL, "weight")
+  ))
+
+  weighted <- .mixture_weight_draw_trajectory(
+    trajectory,
+    weight[, 1L]
+  )
+
+  expect_equal(
+    weighted,
+    trajectory * c(2, 3, 4)
   )
 })
 
@@ -730,6 +876,145 @@ test_that("Cholesky reconstruction matches the covariance helper", {
   )
 })
 
+test_that("mixture summaries reduce membership to active class totals", {
+  subject_membership <- data.frame(
+    unit = rep(c("subject_a", "subject_b"), each = 3L),
+    class = rep(paste0("class_", 1:3), times = 2L),
+    probability = c(0.8, 0.1, 0.1, 0.2, 0.7, 0.1),
+    lower = 0,
+    upper = 1,
+    assigned_class = rep(c("class_1", "class_2"), each = 3L),
+    stringsAsFactors = FALSE
+  )
+  subject_draws <- matrix(
+    c(
+      0.8, 0.2, 0.1, 0.7, 0.1, 0.1,
+      0.6, 0.4, 0.2, 0.5, 0.2, 0.1
+    ),
+    nrow = 2L,
+    byrow = TRUE,
+    dimnames = list(
+      draw = 1:2,
+      variable = c(
+        "probability[1,1]",
+        "probability[2,1]",
+        "probability[1,2]",
+        "probability[2,2]",
+        "probability[1,3]",
+        "probability[2,3]"
+      )
+    )
+  ) # two posterior draws ordered by class and then allocation unit
+
+  overview <- .mixture_membership_overview(
+    class_membership = list(subject = subject_membership),
+    class_membership_draws = list(subject = subject_draws)
+  )
+
+  expect_named(overview, "subject")
+  expect_equal(nrow(overview$subject), 3L)
+  expect_named(
+    overview$subject,
+    c(
+      "class",
+      "Estimate",
+      "Est.Error",
+      "Q2.5",
+      "Q97.5",
+      "Rhat",
+      "ess_bulk",
+      "ess_tail",
+      "assigned_units"
+    )
+  )
+  expect_equal(
+    overview$subject$Estimate,
+    c(1, 0.75, 0.25)
+  )
+  expect_equal(
+    overview$subject$assigned_units,
+    c(1L, 1L, 0L)
+  )
+  expect_false("marker" %in% names(overview))
+})
+
+test_that("repeated scientific labels retain one distinct posterior row per variable", {
+  draw_array <- array(
+    NA_real_,
+    dim = c(20L, 2L, 4L),
+    dimnames = list(
+      iteration = seq_len(20L),
+      chain = seq_len(2L),
+      variable = paste0("coefficient[", seq_len(4L), "]")
+    )
+  ) # four distinct source variables whose display labels repeat by class
+  for (variable_index in seq_len(4L)) {
+    draw_array[, , variable_index] <- variable_index +
+      matrix(seq_len(40L) / 1000, nrow = 20L, ncol = 2L)
+  }
+
+  summary_table <- .assoc_summary_from_draw_array(
+    draw_array,
+    term_labels = rep(c("treatment", "age"), times = 2L)
+  )
+  mixture_table <- .mixture_summary_columns(
+    summary_table,
+    identifier_columns = "term"
+  )
+
+  expect_equal(nrow(mixture_table), 4L)
+  expect_equal(mixture_table$term, c("treatment", "age", "treatment", "age"))
+  expect_equal(length(unique(mixture_table$Estimate)), 4L)
+  expect_named(
+    mixture_table,
+    c(
+      "term",
+      "Estimate",
+      "Est.Error",
+      "Q2.5",
+      "Q97.5",
+      "Rhat",
+      "ess_bulk",
+      "ess_tail"
+    )
+  )
+})
+
+test_that("mixture headline diagnostics retain sampler-wide extremes", {
+  displayed_parameters <- data.frame(
+    term = c("class_1", "class_2"),
+    Rhat = c(1.02, 1.08),
+    ess_bulk = c(80, 140),
+    ess_tail = c(120, 70)
+  ) # two displayed class parameters used for threshold counts
+  sampler_diagnostics <- list(
+    draws = 1000,
+    divergences = 2,
+    treedepth_hits = 3,
+    ebfmi_min = 0.12,
+    max_rhat = 1.15,
+    min_ess_bulk = 40,
+    min_ess_tail = 35
+  ) # sampler-wide diagnostics, including variables absent from the table
+
+  diagnostic_table <- .summary_diagnostics_table(
+    sampler_diagnostics = sampler_diagnostics,
+    reported_tables = list(class_location = displayed_parameters)
+  )
+  diagnostic_value <- stats::setNames(
+    diagnostic_table$value,
+    diagnostic_table$metric
+  ) # named vector for direct assertions on the common diagnostic schema
+
+  expect_equal(diagnostic_value[["max_rhat"]], 1.15)
+  expect_equal(diagnostic_value[["min_ess_bulk"]], 40)
+  expect_equal(diagnostic_value[["min_ess_tail"]], 35)
+  expect_equal(diagnostic_value[["n_terms_total"]], 2)
+  expect_equal(diagnostic_value[["n_terms_bad_rhat"]], 2)
+  expect_equal(diagnostic_value[["n_terms_low_ess_bulk"]], 1)
+  expect_equal(diagnostic_value[["n_terms_low_ess_tail"]], 1)
+})
+
 test_that("class trajectories distinguish centres and response-scale margins", {
   fitted_model <- structure(
     list(
@@ -757,8 +1042,8 @@ test_that("class trajectories distinguish centres and response-scale margins", {
         Xcov = matrix(numeric(0), 1L, 0L)
       ),
       mixture = list(
-        n_clusters = 2L,
-        cluster_type = "subject",
+        n_classes = 2L,
+        class_type = "subject",
         dimensions = list(
           subject = 1L,
           marker = integer(0),
@@ -881,7 +1166,7 @@ test_that("covariance association plots use the hazard contribution scale", {
   object <- structure(
     list(
       fit = structure(list(), class = "mock_fit"),
-      mixture = list(n_clusters = 2L, cluster_type = "vcov"),
+      mixture = list(n_classes = 2L, class_type = "vcov"),
       config = list(),
       stan_data = list(
         Q_idm = 1L,
@@ -975,14 +1260,14 @@ test_that("update preserves the mixture entry point and longitudinal-only mode",
       call = quote(joinme_mix(
         formulaLong = y ~ time,
         dataLong = data_for_update,
-        n_clusters = 2,
-        cluster_type = "subject",
+        n_classes = 2,
+        class_type = "subject",
         fit = FALSE
       )),
       formulaLong = y ~ time,
       formulaEvent = survival::Surv(
-        .joinme_mix_follow_up,
-        .joinme_mix_event
+        .joinme_follow_up,
+        .joinme_event
       ) ~ 1,
       formulaVCov = ~1,
       mixture = list(include_survival = FALSE),
@@ -1007,8 +1292,8 @@ test_that("update preserves the mixture entry point and longitudinal-only mode",
   )
 
   expect_identical(result, "updated mixture")
-  expect_identical(captured$n_clusters, 2)
-  expect_identical(captured$cluster_type, "subject")
+  expect_identical(captured$n_classes, 2)
+  expect_identical(captured$class_type, "subject")
   expect_identical(captured$draws, 25L)
   expect_null(captured$formulaEvent)
   expect_null(captured$dataEvent)

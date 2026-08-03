@@ -143,7 +143,9 @@
  * @param B_cross Array of cross-correlation matrices between levels (per draw).
  * @param alpha_vcov_reg Array of intercept vectors for covariance regression (per draw).
  * @param beta_vcov_reg_flat Array of flattened coefficient vectors for covariance regression (per draw).
- * @param lambda_vcov_reg Array of effective loading vectors for latent covariance effects (per draw).
+ * @param lambda_vcov_reg One vector per retained draw containing a
+ * coordinate-specific nonnegative scalar loading. Multiplication by z_L is
+ * element-wise; these vectors do not represent dense loading matrices.
  * @param K_event Number of competing risks.
  * @param bs_gamma_c Array of baseline hazard spline coefficients (per draw).
  * @param gamma_hazard Array of hazard covariate coefficients (per draw).
