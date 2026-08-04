@@ -30,6 +30,7 @@ articles:
   - joinme-workflow
   - joinme-discrimination
   - joinme-associations
+  - joinme-covariance-regression
   - joinme-model
   - joinme-theory
 - title: Latent progress

@@ -74,22 +74,21 @@ class_ordering
 seed
 ```
 
-The simulation produces `dataLong` and `dataEvent`; the fitting function
-consumes them:
+The simulation records a fitting argument list after the generated data have
+reached their final layout. It includes the covariance formula, priors,
+transforms, marker-weight convention, association request, and class syntax.
+Consequently a recovery fit does not require a second hand-written
+specification:
 
 ```{r}
-fit <- joinme_mix(
-  formulaLong = simulation$truth$formulaLong,
-  dataLong = simulation$dataLong,
-  formulaEvent = simulation$truth$formulaEvent,
-  dataEvent = simulation$dataEvent,
-  formulaVCov = simulation$truth$formulaVCov,
-  families = simulation$marker_info$families,
-  n_classes = 2,
-  class_type = "subject",
-  seed = 4101
+fit <- do.call(
+  joinme_mix,
+  c(simulation$truth$recovery$arguments, list(seed = 4101))
 )
 ```
+
+The generating coefficients remain separate estimands in `truth`; they are
+not inserted into the fitted call as though they were known.
 
 # Selecting progress coordinates
 
@@ -260,7 +259,10 @@ problem. Recovery studies should vary both quantities.
 
 ```{r}
 simulation <- simulate_joinme_mix(
-  formulaVCov = ~ treatment + age,
+  formulaVCov = list(
+    sd = ~ treatment + age,
+    corr = ~ baseline_score
+  ),
   n_id = 180,
   families = rep("gaussian", 4),
   n_classes = 3,
@@ -287,6 +289,7 @@ simulation <- simulate_joinme_mix(
   covariate_formulas = list(
     treatment ~ rbinom(n_id, 1, 0.5),
     age ~ rnorm(n_id, 65, 8),
+    baseline_score ~ rnorm(n_id),
     x1 ~ rnorm(n_id),
     x2 ~ rnorm(n_id)
   ),

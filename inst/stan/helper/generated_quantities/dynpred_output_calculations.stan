@@ -57,14 +57,16 @@ for (k in 1 : n_draws) {
     int r_ = idx_row_cov[m]; // Role: r.
     int c_ = idx_col_cov[m]; // Role: c.
     real beta_contrib = 0.0; // Role: coefficient contrib.
-    if (n_cov_vcov > 0) {
-      vector[n_cov_vcov] bL_m = beta_vcov_reg_flat[k][((m - 1) * n_cov_vcov
-                               + 1) : (m * n_cov_vcov)];
-      beta_contrib = dot_product(bL_m, vec_cov_vcov);
-    }
-    real lp = alpha_vcov_reg[k][m] + beta_contrib + lambda_vcov_reg[k][m] * z_L[k][m]; // Role: linear predictor.
-    if (r_ == c_)
+    if (r_ == c_) {
+      if (n_cov_vcov_sd > 0) {
+        int first_slope = (r_ - 1) * n_cov_vcov_sd + 1; // first SD slope for diagonal coordinate r_
+        int final_slope = r_ * n_cov_vcov_sd; // final SD slope for diagonal coordinate r_
+        vector[n_cov_vcov_sd] bL_m = beta_vcov_sd_flat[k][first_slope : final_slope]; // draw-specific SD coefficients
+        beta_contrib = dot_product(bL_m, vec_cov_vcov_sd);
+      }
+      real lp = alpha_vcov_reg[k][m] + beta_contrib + lambda_vcov_reg[k][m] * z_L[k][m]; // standard-deviation linear predictor
       sd_i[r_] = (vcov_diag_link == 1) ? exp(lp) : log1p_exp(lp);
+    }
   }
 
   for (r in 1 : n_random_marker_id) {
@@ -80,9 +82,12 @@ for (k in 1 : n_draws) {
       for (c in 1 : r) {
         if (c < r) {
             real beta_contrib = 0.0; // Role: coefficient contrib.
-            if (n_cov_vcov > 0) {
-              vector[n_cov_vcov] bL_m = beta_vcov_reg_flat[k][((m_pos - 1) * n_cov_vcov + 1) : (m_pos * n_cov_vcov)]; // Role: bL m.
-              beta_contrib = dot_product(bL_m, vec_cov_vcov);
+            if (n_cov_vcov_corr > 0) {
+              int correlation_coordinate = ((r - 1) * (r - 2)) %/% 2 + c; // row-major off-diagonal coordinate
+              int first_slope = (correlation_coordinate - 1) * n_cov_vcov_corr + 1; // first correlation slope
+              int final_slope = correlation_coordinate * n_cov_vcov_corr; // final correlation slope
+              vector[n_cov_vcov_corr] bL_m = beta_vcov_corr_flat[k][first_slope : final_slope]; // draw-specific correlation coefficients
+              beta_contrib = dot_product(bL_m, vec_cov_vcov_corr);
             }
             {
               real lp = alpha_vcov_reg[k][m_pos] + beta_contrib + lambda_vcov_reg[k][m_pos] * z_L[k][m_pos]; // Role: linear predictor.

@@ -28,11 +28,11 @@
  *
  * STEP 3: Build subject-specific Cholesky factor L_i via covariance regression
  *   - For each unique lower-triangular entry (r,c), compute:
- *       lp_i = alpha_vcov_reg + beta_vcov_reg' * vec_cov_vcov + lambda * z_Lk
+ *       lp_i = alpha_vcov_reg + beta_component' * x_component + lambda * z_Lk
  *     If r == c (diagonal), apply softplus or exp to ensure positivity.
  *     Otherwise, use lp_i directly for off-diagonal entries.
- *     When `formulaVCov = ~ 1`, `vec_cov_vcov` has length 0 and the slope term
- *     drops out, leaving an intercept-only covariance regression.
+ *     SD and correlation entries use independent formulae and designs. An
+ *     intercept-only component has a zero-length design and no slope term.
  *
  * STEP 4: Evaluate longitudinal likelihood given random effects
  *   - For each observed longitudinal row n:
@@ -85,8 +85,10 @@
  * @param X_kappa_obs Design matrix for kappa regression.
  * @param P_tau Number of coefficients for tau regression.
  * @param X_tau_obs Design matrix for tau regression.
- * @param n_cov_vcov Number of covariates for variance-covariance regression.
- * @param vec_cov_vcov Vector of covariates for variance-covariance regression.
+ * @param n_cov_vcov_sd Number of standard-deviation regression covariates.
+ * @param vec_cov_vcov_sd Subject covariates for the SD regression.
+ * @param n_cov_vcov_corr Number of off-diagonal correlation covariates.
+ * @param vec_cov_vcov_corr Subject covariates for the correlation regression.
  * @param n_cov_hazard Number of covariates for hazard baseline.
  * @param vec_cov_hazard Vector of covariates for hazard baseline.
  * @param n_basehaz_basis Number of basis functions for baseline hazard.
@@ -142,7 +144,8 @@
  * @param Lcorr_marker Array of marker random effect Cholesky correlations (per draw).
  * @param B_cross Array of cross-correlation matrices between levels (per draw).
  * @param alpha_vcov_reg Array of intercept vectors for covariance regression (per draw).
- * @param beta_vcov_reg_flat Array of flattened coefficient vectors for covariance regression (per draw).
+ * @param beta_vcov_sd_flat Flattened SD-regression slopes per draw.
+ * @param beta_vcov_corr_flat Flattened off-diagonal correlation slopes per draw.
  * @param lambda_vcov_reg One vector per retained draw containing a
  * coordinate-specific nonnegative scalar loading. Multiplication by z_L is
  * element-wise; these vectors do not represent dense loading matrices.
@@ -266,8 +269,10 @@ real partial_draw(
     matrix X_kappa_obs,
     int P_tau,
     matrix X_tau_obs,
-    int n_cov_vcov,
-    vector vec_cov_vcov,
+    int n_cov_vcov_sd,
+    vector vec_cov_vcov_sd,
+    int n_cov_vcov_corr,
+    vector vec_cov_vcov_corr,
     int n_cov_hazard,
     vector vec_cov_hazard,
     int n_basehaz_basis,
@@ -323,7 +328,8 @@ real partial_draw(
     array[] matrix Lcorr_marker,
     array[] matrix B_cross,
     array[] vector alpha_vcov_reg,
-    array[] vector beta_vcov_reg_flat,
+    array[] vector beta_vcov_sd_flat,
+    array[] vector beta_vcov_corr_flat,
     array[] vector lambda_vcov_reg,
     int K_event,
     array[,] vector bs_gamma_c,
@@ -522,11 +528,13 @@ real partial_draw(
       int r_ = idx_row_cov[m]; // Role: r.
       int c_ = idx_col_cov[m]; // Role: c.
       real beta_contrib = 0.0; // Role: coefficient contrib.
-      if (n_cov_vcov > 0) {
-        vector[n_cov_vcov] bL_m = beta_vcov_reg_flat[k][((m - 1) * n_cov_vcov + 1) : (m * n_cov_vcov)]; // Role: bL m.
-        beta_contrib = dot_product(bL_m, vec_cov_vcov);
-      }
       if (r_ == c_) {
+        if (n_cov_vcov_sd > 0) {
+          int first_slope = (r_ - 1) * n_cov_vcov_sd + 1; // first SD slope for this diagonal coordinate
+          int final_slope = r_ * n_cov_vcov_sd; // final SD slope for this diagonal coordinate
+          vector[n_cov_vcov_sd] bL_m = beta_vcov_sd_flat[k][first_slope : final_slope]; // matching draw-specific SD slopes
+          beta_contrib = dot_product(bL_m, vec_cov_vcov_sd);
+        }
         real lp_i = alpha_vcov_reg[k][m] + beta_contrib + lambda_vcov_reg[k][m] * z_L[k][m]; // Role: lp i.
         sd_i[r_] = (vcov_diag_link == 1) ? exp(lp_i) : log1p_exp(lp_i);
       }
@@ -545,9 +553,12 @@ real partial_draw(
         for (c in 1 : r) {
           if (c < r) {
             real beta_contrib = 0.0; // Role: coefficient contrib.
-            if (n_cov_vcov > 0) {
-              vector[n_cov_vcov] bL_m = beta_vcov_reg_flat[k][((m_pos - 1) * n_cov_vcov + 1) : (m_pos * n_cov_vcov)]; // Role: bL m.
-              beta_contrib = dot_product(bL_m, vec_cov_vcov);
+            if (n_cov_vcov_corr > 0) {
+              int correlation_coordinate = ((r - 1) * (r - 2)) %/% 2 + c; // row-major off-diagonal coordinate
+              int first_slope = (correlation_coordinate - 1) * n_cov_vcov_corr + 1; // first slope for this correlation coordinate
+              int final_slope = correlation_coordinate * n_cov_vcov_corr; // final slope for this correlation coordinate
+              vector[n_cov_vcov_corr] bL_m = beta_vcov_corr_flat[k][first_slope : final_slope]; // matching draw-specific correlation slopes
+              beta_contrib = dot_product(bL_m, vec_cov_vcov_corr);
             }
             {
               real lp_i = alpha_vcov_reg[k][m_pos] + beta_contrib + lambda_vcov_reg[k][m_pos] * z_L[k][m_pos]; // Role: lp i.

@@ -63,6 +63,45 @@ Those fields remain useful R-side metadata, but the ordinary Stan programme
 does not declare or receive them. The final data filter is derived from the
 selected programme, so mixture arrays are absent from ordinary Stan input.
 
+## Covariance-regression contract
+
+```mermaid
+flowchart LR
+  A[formulaVCov] --> B[canonical sd and corr formulae]
+  B --> C[independent subject model matrices]
+  C --> D[SD and correlation coefficient packs]
+  D --> E[independent prior materialisation]
+  E --> F[Stan partial-correlation reconstruction]
+  C --> G[ordinary simulator]
+  G --> H[truth recovery arguments]
+  H --> A
+```
+
+`.get_vcov_formula()` is the sole syntax parser. A formula becomes
+`list(sd = formula, corr = formula)`; an explicit list must contain both
+components and no additional names. `.build_vcov_design()` then removes each
+formula intercept and creates `Xcov_sd`/`K_cov_sd` and
+`Xcov_corr`/`K_cov_corr` independently.
+
+Stan packs `vcov_sd` as all SD intercepts followed by row-major SD slopes. It
+packs `vcov_corr` as all row-major off-diagonal intercepts followed by their
+row-major slopes. The longstanding packed lower-triangle order of `z_L` and
+`lambda_L` is unchanged, preserving covariance associations and latent-class
+coordinate selection. `simulate_joinme()` uses these same matrices and packs;
+its `truth$recovery` record contains a directly reusable `joinme()` or
+`joinme_mix()` argument list.
+
+Objects fitted before this split remain readable. `.stored_vcov_design()`
+presents their `K_cov`/`Xcov` as a shared SD/correlation design, and reporting,
+class plots and prediction draw extraction unpack the former `beta_L` rows
+into the new component view. This is a read-only bridge: every newly prepared
+fit uses only the split fields and split Stan parameters.
+
+Simulation truth exposes the scientific nested records and fitted-name aliases
+(`alpha_L`, `beta_L_sd`, `beta_L_corr`, `lambda_L`, and `z_L`). The former are
+suited to interpretation; the latter permit exact posterior-recovery joins
+without duplicating the packer in an analysis script.
+
 ## R source responsibilities
 
 ### `R/fit.R`
@@ -89,6 +128,12 @@ while ordinary fitting discards those fields before sampling.
 - records `include_survival` and zeros event integration limits, indicators,
   and censoring codes for longitudinal-only fits;
 - appends `.build_mixture_standata()` output.
+
+Prior declarations are materialised only after every formula parser has
+established the fitted dimensions. `.build_priors()` encodes the selected
+families; `.materialise_joinme_prior_data()` then accepts either one location
+and scale or exactly one value per coefficient. This prevents partial R
+recycling from shifting a prior onto the wrong design column.
 
 For a longitudinal-only mixture, the outer builder sets event indicators and
 integration times to zero after all common designs have been created.
@@ -237,6 +282,47 @@ flowchart TD
 The mixture does not modify observation rows or the longitudinal linear
 predictor. It modifies only the prior distribution of selected standardised
 random-effect coordinates.
+
+## Block-specific prior flow
+
+```mermaid
+flowchart LR
+  A[jm_prior declarations] --> B[R validation]
+  B --> C[formula dimensions and coefficient order]
+  C --> D[scalar or exact-vector materialisation]
+  D --> E[fit_data.stan]
+  E --> F[prior_families.stanfunctions]
+  F --> G[ordinary fit priors]
+  G --> H{selected mixture coordinate?}
+  H -->|no| I[retain ordinary density]
+  H -->|yes| J[subtract ordinary density and add mixture]
+```
+
+The fit programme carries independent family codes and hyperparameters for
+`beta`, `alpha`, `iota`, standardised marker effects, and marker-weight
+perturbations. Codes 1--4 denote fixed-degrees-of-freedom Student-t, Normal,
+Laplace, and regularised horseshoe. `prior_lkj()` supplies the separate LKJ
+concentration for correlation factors.
+
+The mixture-only data module adds the same family contract for
+`class_regression`. Its packed prior order is every subject-domain design
+column followed by every marker-domain design column. The transformed-
+parameter module restores the longstanding domain-specific coefficient names
+before the multinomial-logit probability function is evaluated.
+
+`helper/functions/prior_families.stanfunctions` is the sole implementation of
+ordinary non-centred transformations, raw standard densities and the finite-
+slab horseshoe scale. `joinme_fit_threading.stan` and
+`joinme_mix_fit_threading.stan` both include it. The association transformation
+maps the declared `alpha` prior directly to the coefficient entering the
+hazard; no secondary association-scale parameter changes its declared scale.
+
+Marker effects and marker-weight perturbations are standardised blocks. Their
+location and ordinary scale are fixed to zero and one in R, although their
+family and Student-t degrees of freedom may differ. This leaves marker
+covariance factors and supplied base weights as the unique scale-bearing
+quantities. Horseshoe local and global scales are conditionally present only
+for a block whose family code is four, avoiding unused posterior parameters.
 
 ## Mixture simulation data flow
 
@@ -396,7 +482,8 @@ flowchart TD
 - one flag, dimension, index array and start per class-eligible block;
 - `mix_probability_prior`;
 - subject and marker `formulaClass` design matrices; and
-- the class-regression prior scale.
+- the class-regression family, coefficient-specific locations and scales, and
+  any fixed horseshoe hyperparameters.
 
 ### Mixture parameters
 
@@ -409,9 +496,14 @@ array[mix_ordered_location_coordinate > 0 ? 1 : 0]
 matrix[n_classes, K_mix - (mix_ordered_location_coordinate > 0 ? 1 : 0)]
   mix_location_unordered;
 matrix<lower=1e-8>[n_classes, K_mix] mix_scale;
-vector[P_class_subject] mix_class_coefficient_subject;
-vector[P_class_marker] mix_class_coefficient_marker;
+vector[P_class_subject + P_class_marker] mix_class_coefficient_raw;
 ```
+
+The transformed-parameter module applies the selected class-regression prior
+and restores `mix_class_coefficient_subject` and
+`mix_class_coefficient_marker`, preserving the established reporting and
+prediction names. Regularised-horseshoe auxiliaries are declared only when
+that family is selected.
 
 This parameter module is never included by the ordinary fitting programme.
 
@@ -440,6 +532,14 @@ The same component evaluator is used in the model and generated quantities.
 
 Formula-scoped random-effect weights multiply both the removed and replacement
 density for the relevant subject or marker.
+
+For a selected marker block, the removed density is the raw density declared by
+`priors$marker`. Normal, Student-t and Laplace therefore subtract their own
+standard density; a horseshoe subtracts its standard-Normal raw coefficient
+density whilst retaining the explicitly sampled local/global transformation.
+Subject and covariance-regression raw coordinates retain standard-Normal
+ordinary denominators. This density match is necessary for an exact
+replacement rather than an unintended product of priors.
 
 ### Generated quantities
 

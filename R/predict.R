@@ -621,7 +621,8 @@ predict.JoiNMeFit <- function(object,
             sd_pred <- .coerce_rstan_time_indices(sd_pred)
             sd_pred <- .coerce_rstan_dist_arrays(sd_pred)
             sd_pred <- .coerce_rstan_vectors(sd_pred, c(
-                "vec_cov_vcov",
+                "vec_cov_vcov_sd",
+                "vec_cov_vcov_corr",
                 "const_data_cv",
                 "const_data_cs",
                 "const_data_corr",
@@ -1086,10 +1087,9 @@ predict.JoiNMeFit <- function(object,
 }
 
 # Resolve prediction draw count independent of posterior extraction count.
-.get_n_pred_draws <- function(n_pred_draws, n_available, iter_sampling) {
+.get_n_pred_draws <- function(n_pred_draws, n_available, iter_sampling = n_available) {
 
     if (is.null(n_pred_draws)) {
-        n_available <- if (n_available <= 50) 20 * n_available else n_available
         cli::cli_alert_info(c(i = "Setting {.arg n_pred_draws} to {n_available}."))
         return(as.integer(n_available))
     }
@@ -1323,19 +1323,20 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
     n_post_rows <- nrow(draws_mat)
     row_idx <- ((seq_len(N_rows) - 1L) %% max(1L, n_post_rows)) + 1L
     
-    for (n in 1:N_cols) {
+    for (n in seq_len(N_cols)) {
         # nms <- paste0(var_name, "[", 1:N_rows, ",", n, "]")
         # alt_nms <- paste0(var_name, "[", n, ",", 1:N_rows, "]")
         
         mat_vars <- grepv(paste0(var_name, '\\[.*,',n, ']'), colnames(draws_mat), fixed = FALSE)
-        N_samples <- length(mat_vars) 
+        N_samples <- length(mat_vars)
+        if (N_samples == 0L) next
         # decide how many times a variable is extracted
         n_post_sampling <- ceiling(N_rows/N_samples)
         nms <- paste0(var_name, "[", 1:N_samples, ",", n, "]")
         
         # Sampling n time the draws to fill the matrix
         cur <- c()
-        for (i in 1:n_post_sampling) {
+        for (i in seq_len(n_post_sampling)) {
             cur <- c(cur, draws_mat[i, nms])
         }
         mat[, n] <- cur[1:N_rows]
@@ -1818,13 +1819,52 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
     M_cov <- if (sd$Q_idm > 0) sd$Q_idm * (sd$Q_idm + 1) / 2 else 0
     if (sd$indep_idmarker_cov == 1) M_cov <- if (sd$Q_idm > 0) sd$Q_idm else 0
 
-    beta_vcov_reg_flat <- array(0, dim = c(n, M_cov * sd$K_cov))
-    if (M_cov > 0) {
-        for (m in 1:M_cov) {
-            for (k in 1:sd$K_cov) {
-                nm <- paste0("beta_L[", m, ",", k, "]")
-                idx <- (m - 1) * sd$K_cov + k
-                if (nm %in% colnames(dmat)) beta_vcov_reg_flat[, idx] <- dmat[, nm]
+    M_corr <- if (sd$Q_idm > 1L && sd$indep_idmarker_cov == 0L) {
+        as.integer(sd$Q_idm * (sd$Q_idm - 1L) / 2L)
+    } else 0L
+    covariance_design <- .stored_vcov_design(sd) # current split or earlier shared fitted design
+    k_cov_sd <- covariance_design$k_sd
+    k_cov_corr <- covariance_design$k_corr
+    beta_vcov_sd_flat <- array(0, dim = c(n, sd$Q_idm * k_cov_sd))
+    if (!isTRUE(covariance_design$legacy) && sd$Q_idm > 0L && k_cov_sd > 0L) {
+        for (r in seq_len(sd$Q_idm)) {
+            for (k in seq_len(k_cov_sd)) {
+                nm <- paste0("beta_L_sd[", r, ",", k, "]")
+                idx <- (r - 1L) * k_cov_sd + k
+                if (nm %in% colnames(dmat)) beta_vcov_sd_flat[, idx] <- dmat[, nm]
+            }
+        }
+    }
+    beta_vcov_corr_flat <- array(0, dim = c(n, M_corr * k_cov_corr))
+    if (!isTRUE(covariance_design$legacy) && M_corr > 0L && k_cov_corr > 0L) {
+        for (m in seq_len(M_corr)) {
+            for (k in seq_len(k_cov_corr)) {
+                nm <- paste0("beta_L_corr[", m, ",", k, "]")
+                idx <- (m - 1L) * k_cov_corr + k
+                if (nm %in% colnames(dmat)) beta_vcov_corr_flat[, idx] <- dmat[, nm]
+            }
+        }
+    }
+    if (isTRUE(covariance_design$legacy) && sd$Q_idm > 0L && k_cov_sd > 0L) {
+        packed_coordinate <- 1L
+        correlation_coordinate <- 1L
+        for (row in seq_len(sd$Q_idm)) {
+            columns <- if (sd$indep_idmarker_cov == 1L) row else seq_len(row)
+            for (column in columns) {
+                for (k in seq_len(k_cov_sd)) {
+                    legacy_name <- paste0("beta_L[", packed_coordinate, ",", k, "]")
+                    if (legacy_name %in% colnames(dmat)) {
+                        if (row == column) {
+                            sd_index <- (row - 1L) * k_cov_sd + k
+                            beta_vcov_sd_flat[, sd_index] <- dmat[, legacy_name]
+                        } else {
+                            corr_index <- (correlation_coordinate - 1L) * k_cov_corr + k
+                            beta_vcov_corr_flat[, corr_index] <- dmat[, legacy_name]
+                        }
+                    }
+                }
+                if (row != column) correlation_coordinate <- correlation_coordinate + 1L
+                packed_coordinate <- packed_coordinate + 1L
             }
         }
     }
@@ -2090,7 +2130,8 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
             matrix(0, n, 0)
         },
         alpha_vcov_reg = if (M_cov > 0) get_mat(paste0("alpha_L[", 1:M_cov, "]")) else matrix(0, n, 0),
-        beta_vcov_reg_flat = beta_vcov_reg_flat,
+        beta_vcov_sd_flat = beta_vcov_sd_flat,
+        beta_vcov_corr_flat = beta_vcov_corr_flat,
         lambda_vcov_reg = if (M_cov > 0) get_mat(paste0("lambda_L[", 1:M_cov, "]")) else matrix(0, n, 0),
         bs_gamma_c = bs_gamma_c,
         gamma_hazard = gamma_hazard,
@@ -2346,7 +2387,8 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         time_var = eval(object$call$time_var) %||% "time",
         context = "predict.JoiNMeFit()"
     )
-    vec_cov_vcov <- vcov_design$Xcov
+    vec_cov_vcov_sd <- vcov_design$Xcov_sd
+    vec_cov_vcov_corr <- vcov_design$Xcov_corr
 
     quadrature_nodes <- control$quadrature_nodes %||% sd$quadrature_nodes %||% sd$n_gk %||% NULL
     quadrature_nodes_input <- quadrature_nodes %||% 15L
@@ -2661,7 +2703,8 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         n_fixed_effects = sd$P, n_random_id = sd$R_id, n_random_marker = sd$R_mk, n_random_marker_id = sd$Q_idm,
         mat_fixed_obs = mat_fixed_obs, mat_id_obs = mat_id_obs, mat_marker_obs = mat_marker_obs, mat_marker_id_obs = mat_marker_id_obs,
         marker_id_row_scale = as.numeric(marker_id_row_scale),
-        n_cov_vcov = as.integer(ncol(vec_cov_vcov)), vec_cov_vcov = array(as.numeric(vec_cov_vcov), dim = as.integer(ncol(vec_cov_vcov))),
+        n_cov_vcov_sd = as.integer(ncol(vec_cov_vcov_sd)), vec_cov_vcov_sd = array(as.numeric(vec_cov_vcov_sd), dim = as.integer(ncol(vec_cov_vcov_sd))),
+        n_cov_vcov_corr = as.integer(ncol(vec_cov_vcov_corr)), vec_cov_vcov_corr = array(as.numeric(vec_cov_vcov_corr), dim = as.integer(ncol(vec_cov_vcov_corr))),
         n_cov_hazard = as.integer(ncol(vec_cov_hazard)), vec_cov_hazard = array(as.numeric(vec_cov_hazard), dim = as.integer(ncol(vec_cov_hazard))),
         n_basehaz_basis = sd$Kbs, time_condition = T_cond_scaled,
         n_gk = as.integer(n_gk),
@@ -2698,7 +2741,9 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
         tau_id = draws_list$tau_id, Lcorr_id = draws_list$Lcorr_id,
         tau_marker = draws_list$tau_marker, Lcorr_marker = draws_list$Lcorr_marker, B_cross = draws_list$B_cross,
         num_unique_cov_entries = M_cov_val,
-        alpha_vcov_reg = draws_list$alpha_vcov_reg, beta_vcov_reg_flat = draws_list$beta_vcov_reg_flat,
+        alpha_vcov_reg = draws_list$alpha_vcov_reg,
+        beta_vcov_sd_flat = draws_list$beta_vcov_sd_flat,
+        beta_vcov_corr_flat = draws_list$beta_vcov_corr_flat,
         lambda_vcov_reg = draws_list$lambda_vcov_reg,
         K_event = sd$K_event %||% 1L,
         bs_gamma_c = draws_list$bs_gamma_c, gamma_hazard = draws_list$gamma_hazard,
@@ -3035,19 +3080,22 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
     idx_sample <- rep(seq_len(n_sample), ceiling(n_draws_target / n_sample))[seq_len(n_draws_target)]
 
     alpha_vcov_reg <- standata_subject$alpha_vcov_reg
-    beta_vcov_reg_flat <- standata_subject$beta_vcov_reg_flat
+    beta_vcov_sd_flat <- standata_subject$beta_vcov_sd_flat
+    beta_vcov_corr_flat <- standata_subject$beta_vcov_corr_flat
     lambda_vcov_reg <- standata_subject$lambda_vcov_reg
-    vec_cov_vcov <- as.numeric(standata_subject$vec_cov_vcov %||% numeric(0))
+    vec_cov_vcov_sd <- as.numeric(standata_subject$vec_cov_vcov_sd %||% numeric(0))
+    vec_cov_vcov_corr <- as.numeric(standata_subject$vec_cov_vcov_corr %||% numeric(0))
     idx_row_cov <- as.integer(standata_subject$idx_row_cov %||% integer(0))
     idx_col_cov <- as.integer(standata_subject$idx_col_cov %||% integer(0))
 
-    if (is.null(alpha_vcov_reg) || is.null(beta_vcov_reg_flat) || is.null(lambda_vcov_reg) ||
+    if (is.null(alpha_vcov_reg) || is.null(beta_vcov_sd_flat) || is.null(beta_vcov_corr_flat) || is.null(lambda_vcov_reg) ||
         length(idx_row_cov) == 0 || length(idx_col_cov) == 0) {
         return(NULL)
     } else {
-      alpha_vcov_reg <- alpha_vcov_reg[idx_sample, ]
-      beta_vcov_reg_flat <- beta_vcov_reg_flat[idx_sample, ]
-      lambda_vcov_reg <- lambda_vcov_reg[idx_sample, ]
+      alpha_vcov_reg <- alpha_vcov_reg[idx_sample, , drop = FALSE]
+      beta_vcov_sd_flat <- beta_vcov_sd_flat[idx_sample, , drop = FALSE]
+      beta_vcov_corr_flat <- beta_vcov_corr_flat[idx_sample, , drop = FALSE]
+      lambda_vcov_reg <- lambda_vcov_reg[idx_sample, , drop = FALSE]
     }
 
     n_random_marker <- as.integer(standata_subject$n_random_marker %||% 0L)
@@ -3101,16 +3149,28 @@ posterior_predict.JoiNMeFit <- function(object, ...) {
             }
         }
 
+        correlation_coordinate <- 0L
         lp_vec <- vapply(seq_len(m_cov), function(m) {
-            b_slice_start <- (m - 1L) * length(vec_cov_vcov) + 1L
-            b_slice_end <- m * length(vec_cov_vcov)
-            b_vec <- if (length(vec_cov_vcov) > 0) {
-                as.numeric(beta_vcov_reg_flat[draw_index, b_slice_start:b_slice_end])
+            row_coordinate <- idx_row_cov[m]
+            column_coordinate <- idx_col_cov[m]
+            if (row_coordinate == column_coordinate) {
+                b_slice_start <- (row_coordinate - 1L) * length(vec_cov_vcov_sd) + 1L
+                b_slice_end <- row_coordinate * length(vec_cov_vcov_sd)
+                observed_contribution <- if (length(vec_cov_vcov_sd) > 0L) {
+                    b_vec <- as.numeric(beta_vcov_sd_flat[draw_index, b_slice_start:b_slice_end])
+                    sum(b_vec * vec_cov_vcov_sd)
+                } else 0
             } else {
-                numeric(0)
+                correlation_coordinate <<- correlation_coordinate + 1L
+                b_slice_start <- (correlation_coordinate - 1L) * length(vec_cov_vcov_corr) + 1L
+                b_slice_end <- correlation_coordinate * length(vec_cov_vcov_corr)
+                observed_contribution <- if (length(vec_cov_vcov_corr) > 0L) {
+                    b_vec <- as.numeric(beta_vcov_corr_flat[draw_index, b_slice_start:b_slice_end])
+                    sum(b_vec * vec_cov_vcov_corr)
+                } else 0
             }
             as.numeric(alpha_vcov_reg[draw_index, m]) +
-                if (length(vec_cov_vcov) > 0) sum(b_vec * vec_cov_vcov) else 0 +
+                observed_contribution +
                 as.numeric(lambda_vcov_reg[draw_index, m]) * as.numeric(z_l_draws[draw_index, m])
         }, numeric(1))
 

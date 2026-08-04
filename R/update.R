@@ -10,7 +10,11 @@
 #' @param dataLong Optional updated longitudinal dataset.
 #' @param formulaEvent Optional updated survival formula (full or update form).
 #' @param dataEvent Optional updated event dataset.
-#' @param formulaVCov Optional updated covariance formula (full or update form).
+#' @param formulaVCov Optional updated covariance regression. Supply one formula
+#'   to update both components, or `list(sd = ~ ..., corr = ~ ...)` to update
+#'   the standard-deviation and off-diagonal correlation regressions
+#'   independently. Update formulae containing `.` are supported within each
+#'   component.
 #' @param formulaDist Optional distributional regression formulas with parameter
 #'   names on the LHS (e.g., `sigma ~ 1 + time`).
 #' @param control Optional updated control list.
@@ -117,7 +121,30 @@ update.JoiNMeFit <- function(
       "formulaEvent"
     )
   }
-  call_obj$formulaVCov <- update_formula(object$formulaVCov, formulaVCov, "formulaVCov")
+  update_vcov_formula <- function(current, updated) {
+    current_components <- .get_vcov_formula(
+      current,
+      default = ~ 1,
+      context = "update.JoiNMeFit()"
+    ) # canonical SD/correlation formula pair stored by all current fit objects
+    if (is.null(updated)) return(current_components)
+    if (inherits(updated, "formula")) {
+      return(list(
+        sd = update_formula(current_components$sd, updated, "formulaVCov$sd"),
+        corr = update_formula(current_components$corr, updated, "formulaVCov$corr")
+      ))
+    }
+    updated_components <- .get_vcov_formula(
+      updated,
+      default = ~ 1,
+      context = "update.JoiNMeFit()"
+    )
+    list(
+      sd = update_formula(current_components$sd, updated_components$sd, "formulaVCov$sd"),
+      corr = update_formula(current_components$corr, updated_components$corr, "formulaVCov$corr")
+    )
+  }
+  call_obj$formulaVCov <- update_vcov_formula(object$formulaVCov, formulaVCov)
   if (!is.null(formulaDist)) call_obj$formulaDist <- formulaDist
 
   if (!is.null(call_obj$formulaLong) && inherits(call_obj$formulaLong, "formula")) {

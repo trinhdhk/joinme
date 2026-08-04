@@ -121,7 +121,7 @@ subject_fit <- joinme_mix(
   formulaClass = ~ x1 + x2,
   priors = jm_prior(
     class_probability = rep(2, 3),
-    class_regression = 1
+    class_regression = prior_normal(scale = 1)
   ),
   assoc = c("cv_mean", "cv_total", "vcov"),
   shrinkage = 0,

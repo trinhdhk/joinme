@@ -234,6 +234,14 @@ test_that("simulate_joinme_mix supports a longitudinal-only mixture", {
   expect_equal(nrow(simulation$dataLong), 8L * 2L * 3L)
   expect_length(simulation$truth$mixture$allocation$subject, 8L)
   expect_true(all(is.finite(simulation$dataLong$y)))
+  expect_length(simulation$truth$assoc, 0L)
+  expect_length(simulation$truth$recovery$arguments$assoc, 0L)
+  recovered_specification <- do.call(
+    joinme_mix,
+    c(simulation$truth$recovery$arguments, list(fit = FALSE))
+  )
+  expect_s3_class(recovered_specification, "JoiNMeMixStanData")
+  expect_identical(recovered_specification$stan_data$include_survival, 0L)
 
   expect_error(
     simulate_joinme_mix(
@@ -256,7 +264,7 @@ test_that("simulated data enter joinme_mix through the matching syntax", {
       (1 + time | id) +
       (0 + x1 + (1 + time | id) | marker),
     formulaEvent = survival::Surv(time, event) ~ x1 + x2,
-    formulaVCov = ~x1,
+    formulaVCov = list(sd = ~ x1, corr = ~ x2),
     n_id = 8,
     families = c("gaussian", "student_t"),
     times_obs = c(0, 0.2, 0.4),
@@ -272,27 +280,30 @@ test_that("simulated data enter joinme_mix through the matching syntax", {
     use_mirai = FALSE
   )
 
-  prepared <- joinme_mix(
-    formulaLong = simulation$truth$formulaLong,
-    dataLong = simulation$dataLong,
-    formulaEvent = simulation$truth$formulaEvent,
-    dataEvent = simulation$dataEvent,
-    formulaVCov = simulation$truth$formulaVCov,
-    families = simulation$marker_info$families,
-    transforms = simulation$truth$transforms,
-    n_classes = simulation$truth$mixture$n_classes,
-    formulaClass = simulation$truth$mixture$formulaClass,
-    class_type = simulation$truth$mixture$class_type,
-    class_dimensions = simulation$truth$mixture$dimensions[
-      simulation$truth$mixture$class_type
-    ],
-    assoc = simulation$truth$assoc,
-    shrinkage = simulation$truth$shrinkage,
-    fit = FALSE,
-    seed = 8109
+  prepared <- do.call(
+    joinme_mix,
+    c(
+      simulation$truth$recovery$arguments,
+      list(fit = FALSE, seed = 8109)
+    )
   )
 
   expect_s3_class(prepared, "JoiNMeMixStanData")
+  expect_identical(prepared$stan_data$K_cov_sd, 1L)
+  expect_identical(prepared$stan_data$K_cov_corr, 1L)
+  expect_identical(simulation$truth$recovery$entry_point, "joinme_mix")
+  expect_equal(
+    simulation$truth$recovery$arguments$formulaVCov,
+    simulation$truth$formulaVCov
+  )
+  expect_equal(
+    simulation$truth$recovery$arguments$formulaClass,
+    simulation$truth$mixture$formulaClass
+  )
+  expect_identical(
+    simulation$truth$recovery$arguments$class_type,
+    simulation$truth$mixture$class_type
+  )
   expect_identical(
     prepared$stan_data$mixture$n_classes,
     simulation$truth$mixture$n_classes

@@ -275,69 +275,151 @@ suppressPackageStartupMessages({
 #' @param default Default formula when the input is not supplied.
 #' @param context Character label for error messages.
 #'
-#' @return A formula for the subject-level covariance regression.
+#' @return A named list containing the canonical `sd` and `corr` formulae.
 #' @keywords internal
 #' @noRd
 .get_vcov_formula <- function(formulaVCov = NULL,
                                   default = ~ 1,
                                   context = "JoiNMe") {
   chosen <- formulaVCov %||% default
-  if (!inherits(chosen, "formula")) {
+  if (inherits(chosen, "formula")) {
+    return(list(sd = chosen, corr = chosen))
+  }
+  if (!is.list(chosen) || is.null(names(chosen))) {
     cli::cli_abort(c(
-      x = "{context}: {.arg formulaVCov} must be a formula.",
-      i = "Example: {.code ~ x1 + x2}."
+      x = "{context}: {.arg formulaVCov} must be a formula or a named list containing {.arg sd} and {.arg corr} formulae.",
+      i = "Use {.code ~ x1 + x2} for one shared regression, or {.code list(sd = ~ x1, corr = ~ x2)} for independent regressions."
     ))
   }
-  chosen
+  unknown_names <- setdiff(names(chosen), c("sd", "corr"))
+  if (length(unknown_names) > 0L) {
+    cli::cli_abort(c(
+      x = "{context}: unknown {.arg formulaVCov} component{?s}: {paste(unknown_names, collapse = ', ')}.",
+      i = "The only components are {.arg sd} and {.arg corr}."
+    ))
+  }
+  missing_names <- setdiff(c("sd", "corr"), names(chosen))
+  if (length(missing_names) > 0L) {
+    cli::cli_abort(c(
+      x = "{context}: {.arg formulaVCov} is missing {paste(missing_names, collapse = ' and ')}.",
+      i = "Supply both regressions explicitly, for example {.code list(sd = ~ x1, corr = ~ x2)}."
+    ))
+  }
+  if (anyDuplicated(names(chosen))) {
+    cli::cli_abort("{context}: each {.arg formulaVCov} component must be supplied once.")
+  }
+  for (component in c("sd", "corr")) {
+    if (!inherits(chosen[[component]], "formula")) {
+      cli::cli_abort(
+        "{context}: {.arg formulaVCov}${component} must be a formula."
+      )
+    }
+  }
+  chosen[c("sd", "corr")]
 }
 
 #' Build the subject-level covariance-regression design matrix
 #'
-#' @param formulaVCov Covariance-regression formula.
+#' @param formulaVCov Canonical covariance-regression formula list returned by
+#'   [.get_vcov_formula()].
 #' @param dataEvent Event-level data with one row per subject.
 #' @param time_var Longitudinal time variable name, forbidden in `formulaVCov`.
 #' @param context Character label for error messages.
 #'
-#' @return Named list with `formulaVCov`, `K_cov`, and `Xcov`.
+#' @return Named list with the canonical formulae and independent `sd` and
+#'   `corr` design records. Convenience fields `K_cov_sd`, `Xcov_sd`,
+#'   `K_cov_corr`, and `Xcov_corr` are also supplied for Stan assembly.
 #' @keywords internal
 #' @noRd
 .build_vcov_design <- function(formulaVCov,
                                dataEvent,
                                time_var,
                                context = "JoiNMe") {
-  if (length(reformulas::findbars(formulaVCov)) > 0) {
-    cli::cli_abort(c(
-      x = "{context}: {.arg formulaVCov} does not support random-effects terms.",
-      i = "Remove all ( ... | ... ) terms from {.arg formulaVCov}."
-    ))
-  }
-
-  fv_rhs <- stats::update(formulaVCov, . ~ .)
-  fv_rhs[[2]] <- NULL
-  if (length(fv_rhs) >= 3 && .expr_has_time(fv_rhs[[3]], time_var)) {
-    cli::cli_abort(c(
-      x = "{context}: {.arg formulaVCov} cannot include the time variable {.arg {time_var}}.",
-      i = "Remove time from {.arg formulaVCov} or move it to longitudinal formulas."
-    ))
-  }
-
-  Xtmp <- .mm(fv_rhs, dataEvent)
-  if ("(Intercept)" %in% colnames(Xtmp)) {
-    Xtmp <- Xtmp[, colnames(Xtmp) != "(Intercept)", drop = FALSE]
-  }
-
-  if (ncol(Xtmp) < 1L) {
-    return(list(
-      formulaVCov = formulaVCov,
-      K_cov = 0L,
-      Xcov = matrix(0.0, nrow(dataEvent), 0)
-    ))
-  }
-
-  list(
+  canonical_formulae <- .get_vcov_formula(
     formulaVCov = formulaVCov,
-    K_cov = as.integer(ncol(Xtmp)),
-    Xcov = Xtmp
+    default = ~ 1,
+    context = context
+  ) # one checked representation shared by fitting, prediction and simulation
+
+  build_component <- function(component) {
+    component_formula <- canonical_formulae[[component]] # scientific regression assigned to this covariance component
+    if (length(reformulas::findbars(component_formula)) > 0) {
+      cli::cli_abort(c(
+        x = "{context}: {.arg formulaVCov}${component} does not support random-effects terms.",
+        i = "Remove all ( ... | ... ) terms from this covariance regression."
+      ))
+    }
+
+    component_rhs <- stats::update(component_formula, . ~ .) # copy retaining formula environment and contrasts
+    component_rhs[[2]] <- NULL # remove any accidental response so only the right-hand side defines the design
+    if (length(component_rhs) >= 3 && .expr_has_time(component_rhs[[3]], time_var)) {
+      cli::cli_abort(c(
+        x = "{context}: {.arg formulaVCov}${component} cannot include the time variable {.arg {time_var}}.",
+        i = "Covariance regressions are subject-level; remove time or move it to the longitudinal model."
+      ))
+    }
+
+    design <- .mm(component_rhs, dataEvent) # model matrix evaluated in the same subject order used by Stan
+    if ("(Intercept)" %in% colnames(design)) {
+      design <- design[, colnames(design) != "(Intercept)", drop = FALSE]
+    } # component-specific intercepts are represented explicitly by alpha_L
+    if (ncol(design) < 1L) {
+      design <- matrix(0.0, nrow(dataEvent), 0L)
+    }
+    list(
+      formula = component_formula,
+      K = as.integer(ncol(design)),
+      X = design
+    ) # self-contained component record used unchanged by simulate and fit
+  }
+
+  sd_design <- build_component("sd") # regression for log/softplus standard deviations
+  corr_design <- build_component("corr") # regression for off-diagonal partial correlations
+  list(
+    formulaVCov = canonical_formulae,
+    sd = sd_design,
+    corr = corr_design,
+    K_cov_sd = sd_design$K,
+    Xcov_sd = sd_design$X,
+    K_cov_corr = corr_design$K,
+    Xcov_corr = corr_design$X
+  )
+}
+
+#' Resolve covariance-design fields stored by current and earlier fit objects
+#'
+#' @param stan_data Fitted Stan-data metadata.
+#'
+#' @return A list containing independent SD/correlation dimensions and design
+#'   matrices, plus `legacy = TRUE` when both components came from the former
+#'   shared `K_cov`/`Xcov` representation.
+#' @keywords internal
+#' @noRd
+.stored_vcov_design <- function(stan_data) {
+  legacy_design <- is.null(stan_data$K_cov_sd) && !is.null(stan_data$K_cov)
+  if (legacy_design) {
+    shared_dimension <- as.integer(stan_data$K_cov %||% 0L) # former common covariance-regression slope count
+    shared_matrix <- as.matrix(
+      stan_data$Xcov %||% matrix(0, nrow = stan_data$n_id %||% 0L, ncol = shared_dimension)
+    ) # former common subject-level covariance design
+    return(list(
+      k_sd = shared_dimension,
+      k_corr = shared_dimension,
+      x_sd = shared_matrix,
+      x_corr = shared_matrix,
+      legacy = TRUE
+    ))
+  }
+
+  sd_dimension <- as.integer(stan_data$K_cov_sd %||% 0L) # current standard-deviation slope count
+  corr_dimension <- as.integer(stan_data$K_cov_corr %||% 0L) # current off-diagonal correlation slope count
+  number_subjects <- as.integer(stan_data$n_id %||% nrow(stan_data$Xcov_sd) %||% nrow(stan_data$Xcov_corr) %||% 0L) # fitted subject count used for empty matrices
+  list(
+    k_sd = sd_dimension,
+    k_corr = corr_dimension,
+    x_sd = as.matrix(stan_data$Xcov_sd %||% matrix(0, nrow = number_subjects, ncol = sd_dimension)),
+    x_corr = as.matrix(stan_data$Xcov_corr %||% matrix(0, nrow = number_subjects, ncol = corr_dimension)),
+    legacy = FALSE
   )
 }
 

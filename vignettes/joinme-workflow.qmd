@@ -190,16 +190,29 @@ formulaLong_marker_only <- y ~ time + x1 +
   (0 + x1 || marker)
 ```
 
-Scales of the parameters can be set via `joinme_priors()`, which allows explicit control over the prior distributions for fixed effects, association coefficients, and correlation matrices. Stricter shrinkage can be set via `shrinkage` params.
+Prior families are declared by model block through `jm_prior()`. Thus changing
+the prior for an association coefficient does not silently change the fixed
+effects, affine transformation shifts, marker effects, or marker weights.
 ```{r priors}
-# Define explicit priors for transparency (optional but recommended)
-# Note: JoiNMe exposes beta (fixed effects), alpha (associations), and lkj
-priors <- joinme_priors(
-  beta = list(scale = 2.5),       # Fixed effects (Student-t, df = 6)
-  alpha = list(scale = 1.0),      # Association coefficients
-  lkj = 2.0                       # Correlation matrices (regularizing)
+# Define explicit, block-specific priors for transparency.
+priors <- jm_prior(
+  beta = prior_normal(
+    mu = list(0, 0, 0, 0),
+    scale = list(2, 1, 1, 0.5)
+  ),
+  alpha = prior_student_t(df = 4, mu = 0, scale = 1),
+  iota = prior_laplace(mu = 0, scale = 0.75),
+  marker = prior_normal(),        # necessarily location 0 and scale 1
+  marker_weight = prior_student_t(df = 6), # necessarily 0 and 1
+  lkj = prior_lkj(2)
 )
 ```
+
+For `beta`, `alpha`, and `iota`, `mu` and `scale` may be one value or one value
+per coefficient. Numeric vectors and lists of scalar numbers are equivalent.
+Partial recycling is refused: a non-scalar declaration must have exactly the
+dimension determined from the fitted formula. See
+`vignette("joinme-priors")` for the coefficient order and horseshoe hierarchy.
 
 # Model Fitting
 

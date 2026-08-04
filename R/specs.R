@@ -90,6 +90,184 @@ print.joinme_tf <- function(x, ...) {
   invisible(x)
 }
 
+#' Declare a Normal coefficient prior
+#'
+#' @description
+#' Creates a JoiNMe prior declaration without evaluating a density in R. The
+#' location and scale may be scalars or vectors; scalar values are recycled to
+#' the number of coefficients in the selected model block.
+#'
+#' The `prior_` prefix is intentional. It avoids masking the short constructor
+#' names exported by other Bayesian modelling packages.
+#'
+#' @param mu Prior location or vector of coefficient-specific locations.
+#' @param scale Positive prior scale or vector of coefficient-specific scales.
+#'   Numeric lists, such as `list(1, 1, 2)`, are accepted and flattened in
+#'   their supplied order. The same convention applies to `mu`.
+#'
+#' @return A `joinme_prior_spec` object for use inside [jm_prior()].
+#' @export
+prior_normal <- function(mu = 0, scale = 1) {
+  make_prior_dist("normal", mu = mu, scale = scale)
+}
+
+#' Declare a Student-t coefficient prior
+#'
+#' @inheritParams prior_normal
+#' @param df Positive fixed degrees of freedom. A single value is shared by the
+#'   complete parameter block.
+#'
+#' @return A `joinme_prior_spec` object for use inside [jm_prior()].
+#' @export
+prior_student_t <- function(df = 6, mu = 0, scale = 1) {
+  make_prior_dist(
+    "student_t",
+    mu = mu,
+    scale = scale,
+    df = df
+  )
+}
+
+#' Declare a Laplace coefficient prior
+#'
+#' @description
+#' The Laplace distribution is Stan's double-exponential distribution. Its
+#' `scale` is the exponential-decay scale, not its standard deviation; the
+#' standard deviation is `sqrt(2) * scale`.
+#'
+#' @inheritParams prior_normal
+#'
+#' @return A `joinme_prior_spec` object for use inside [jm_prior()].
+#' @export
+prior_laplace <- function(mu = 0, scale = 1) {
+  make_prior_dist("laplace", mu = mu, scale = scale)
+}
+
+#' Declare a regularised horseshoe prior
+#'
+#' @description
+#' Declares the regularised horseshoe hierarchy used by brms and rstanarm. The
+#' coefficient is conditionally Normal with local and global half-Student-t
+#' scales and a finite Student-t slab. The slab regularises very large signals,
+#' whilst the local scales permit coefficient-specific escape from shrinkage.
+#'
+#' @param df Positive fixed degrees of freedom for local shrinkage scales.
+#' @param global_df Positive fixed degrees of freedom for the global scale.
+#' @param global_scale Positive global scale. Smaller values express stronger
+#'   prior sparsity.
+#' @param slab_df Positive fixed degrees of freedom for the regularising slab.
+#' @param slab_scale Positive scale of the regularising slab.
+#'
+#' @return A `joinme_prior_spec` object for use inside [jm_prior()].
+#' @export
+prior_horseshoe <- function(
+  df = 1,
+  global_df = 1,
+  global_scale = 1,
+  slab_df = 4,
+  slab_scale = 2
+) {
+  make_prior_dist(
+    "horseshoe",
+    mu = 0,
+    scale = 1,
+    df = df,
+    global_df = global_df,
+    global_scale = global_scale,
+    slab_df = slab_df,
+    slab_scale = slab_scale
+  )
+}
+
+#' Declare an LKJ correlation prior
+#'
+#' @param eta Positive LKJ concentration. `eta = 1` is uniform over correlation
+#'   matrices; values above one favour correlations nearer zero.
+#'
+#' @return A `joinme_lkj_prior` object for use inside [jm_prior()].
+#' @export
+prior_lkj <- function(eta = 1) {
+  if (!is.numeric(eta) || length(eta) != 1L || !is.finite(eta) || eta <= 0) {
+    cli::cli_abort("{.arg eta} must be one positive finite number.")
+  }
+  structure(
+    list(family = "lkj", eta = as.numeric(eta)),
+    class = c("joinme_lkj_prior", "list")
+  )
+}
+
+#' Build one validated JoiNMe coefficient-prior declaration
+#'
+#' @keywords internal
+#' @noRd
+make_prior_dist <- function(
+  family,
+  mu,
+  scale,
+  df = NA_real_,
+  global_df = NA_real_,
+  global_scale = NA_real_,
+  slab_df = NA_real_,
+  slab_scale = NA_real_
+) {
+  normalise_numeric_values <- function(value, argument, positive = FALSE) {
+    # Lists make long coefficient-wise declarations easier to read. Requiring
+    # one numeric value per element preserves an unambiguous parameter order.
+    if (is.list(value)) {
+      valid_elements <- vapply(
+        value,
+        function(element) is.numeric(element) && length(element) == 1L,
+        logical(1)
+      )
+      if (!all(valid_elements)) {
+        cli::cli_abort("{.arg {argument}} must be a numeric vector or a list of single numeric values.")
+      }
+      value <- unlist(value, recursive = FALSE, use.names = TRUE)
+    }
+    if (!is.numeric(value) || length(value) < 1L || any(!is.finite(value))) {
+      cli::cli_abort("{.arg {argument}} must contain finite numeric values.")
+    }
+    if (isTRUE(positive) && any(value <= 0)) {
+      cli::cli_abort("{.arg {argument}} must contain positive finite values.")
+    }
+    as.numeric(value)
+  }
+  mu <- normalise_numeric_values(mu, "mu") # coefficient locations in declared order
+  scale <- normalise_numeric_values(scale, "scale", positive = TRUE) # positive coefficient scales in declared order
+  scalar_hyperparameters <- list(
+    df = df,
+    global_df = global_df,
+    global_scale = global_scale,
+    slab_df = slab_df,
+    slab_scale = slab_scale
+  ) # fixed scalar degrees of freedom and horseshoe hyper-scales
+  for (hyperparameter_name in names(scalar_hyperparameters)) {
+    hyperparameter_value <- scalar_hyperparameters[[hyperparameter_name]] # one fixed hyperparameter supplied to Stan data
+    if (
+      !is.numeric(hyperparameter_value) || length(hyperparameter_value) != 1L ||
+        (!is.na(hyperparameter_value) &&
+          (!is.finite(hyperparameter_value) || hyperparameter_value <= 0))
+    ) {
+      cli::cli_abort(
+        "Prior hyperparameter {.arg {hyperparameter_name}} must be one positive finite number."
+      )
+    }
+  }
+  structure(
+    list(
+      family = family,
+      mu = mu,
+      scale = scale,
+      df = as.numeric(df),
+      global_df = as.numeric(global_df),
+      global_scale = as.numeric(global_scale),
+      slab_df = as.numeric(slab_df),
+      slab_scale = as.numeric(slab_scale)
+    ),
+    class = c("joinme_prior_spec", "list")
+  )
+}
+
 #' Declare priors with validation
 #'
 #' @description
@@ -98,50 +276,70 @@ print.joinme_tf <- function(x, ...) {
 #' structured object that can be supplied directly as the `priors` argument.
 #'
 #' Exposed components are:
-#' - `beta`: longitudinal/survival regression prior scale(s)
-#' - `alpha`: association prior scale
-#' - `iota`: fit-only affine-shift prior scale for functional association transforms
-#' - `lkj`: LKJ concentration parameter
+#' - `beta`: longitudinal fixed-effect coefficients;
+#' - `alpha`: coefficients multiplying transformed association summaries;
+#' - `iota`: fitted affine shifts for functional association transforms;
+#' - `marker`: standardised marker-level random effects;
+#' - `marker_weight`: estimated marker-weight perturbations;
+#' - `vcov_sd`: intercepts and slopes of the standard-deviation regression;
+#' - `vcov_corr`: intercepts and slopes of the off-diagonal correlation regression;
+#' - `lkj`: random-effect correlation matrices;
 #' - `class_probability`: Dirichlet concentration for baseline class probabilities
-#' - `class_regression`: Normal prior scale for class-membership regression
+#' - `class_regression`: class-membership regression coefficients.
 #'
-#' @param beta Beta prior specification. Use either a numeric scale (or vector of
-#'   scales) or a list with `scale`/`sd`.
-#' @param alpha Alpha prior specification. Use either a numeric scale or a list
-#'   with `scale`/`sd`.
-#' @param iota Iota prior specification for fit-only affine-shift intercept and
-#'   slope parameters in functional association transforms. Use either a numeric
-#'   scale or a list with `scale`/`sd`.
-#' @param lkj LKJ concentration parameter.
+#' @param beta,alpha,iota,vcov_sd,vcov_corr Prior declarations made with [prior_normal()],
+#'   [prior_student_t()], [prior_laplace()] or [prior_horseshoe()]. Numeric
+#'   values remain supported as deprecated shorthand for Student-t(6) scales.
+#'   `vcov_sd` is packed as all standard-deviation intercepts followed by their
+#'   row-major slope matrix. `vcov_corr` uses the same order for off-diagonal
+#'   partial-correlation coordinates `(2,1), (3,1), (3,2), ...`.
+#' @param marker Prior family for standardised marker-level random effects.
+#'   Its location and scale are fixed at zero and one. Consequently a supplied
+#'   Normal, Student-t or Laplace declaration must retain `mu = 0` and
+#'   `scale = 1`; horseshoe hyper-scales must retain their unit defaults.
+#' @param marker_weight Prior family for estimated marker-weight perturbations.
+#'   The location and scale are likewise fixed at zero and one.
+#' @param lkj An object from [prior_lkj()] or a positive numeric concentration
+#'   retained for compatibility.
 #' @param class_probability Positive Dirichlet concentration for the baseline
 #'   class probabilities. A scalar is repeated over classes; a vector may give
 #'   one concentration per class.
-#' @param class_regression Positive Normal prior scale for coefficients from
-#'   `formulaClass`.
+#' @param class_regression Prior declaration for coefficients from
+#'   `formulaClass`, made with the same constructors accepted by `beta`,
+#'   `alpha`, and `iota`. A positive numeric value remains accepted as shorthand
+#'   for `prior_normal(scale = value)`.
 #' @param .validate Logical; if `TRUE` (default), validate the resulting prior
 #'   declarations immediately.
 #'
 #' @return An object of class `joinme_priors`.
-#' @aliases jm_priors jm_prior
+#' @aliases joinme_prior jm_priors jm_prior
 #' @export
 #'
 #' @examples
-#' pri <- joinme_priors(
-#'   beta = list(scale = 2.5),
-#'   alpha = list(scale = 1.0),
-#'   iota = list(scale = 1.0),
-#'   lkj = 2,
+#' pri <- jm_prior(
+#'   beta = prior_normal(mu = c(0, 1), scale = c(1, 0.5)),
+#'   alpha = prior_student_t(df = 4, scale = 1),
+#'   iota = prior_laplace(scale = 0.75),
+#'   marker = prior_normal(),
+#'   marker_weight = prior_student_t(df = 6),
+#'   vcov_sd = prior_normal(scale = 1),
+#'   vcov_corr = prior_student_t(df = 4, scale = 0.75),
+#'   lkj = prior_lkj(2),
 #'   class_probability = c(2, 2, 2),
-#'   class_regression = 1
+#'   class_regression = prior_normal(scale = 1)
 #' )
 #' print(pri)
 joinme_priors <- function(
   beta = NULL, # prior scale for fixed-effect coefficients
   alpha = NULL, # prior scale for association coefficients
   iota = NULL, # prior scale for fitted transformation shifts
+  marker = NULL, # unit-scale family for standardised marker random effects
+  marker_weight = NULL, # unit-scale family for marker-weight perturbations
+  vcov_sd = NULL, # prior for standard-deviation covariance-regression coefficients
+  vcov_corr = NULL, # prior for off-diagonal correlation-regression coefficients
   lkj = NULL, # LKJ concentration for correlation matrices
   class_probability = 1, # Dirichlet concentration for baseline class weights
-  class_regression = 1, # Normal prior scale for class-regression coefficients
+  class_regression = NULL, # family and hyperparameters for class-regression coefficients
   .validate = TRUE # whether to validate the assembled prior specification
 ) {
   .joinme_priors_(
@@ -149,6 +347,10 @@ joinme_priors <- function(
       beta = beta,
       alpha = alpha,
       iota = iota,
+      marker = marker,
+      marker_weight = marker_weight,
+      vcov_sd = vcov_sd,
+      vcov_corr = vcov_corr,
       lkj = lkj,
       class_probability = class_probability,
       class_regression = class_regression
@@ -165,41 +367,63 @@ jm_priors <- joinme_priors
 #' @export
 jm_prior <- joinme_priors
 
+#' @rdname joinme_priors
+#' @export
+joinme_prior <- joinme_priors
+
 #' @export
 print.joinme_priors <- function(x, ...) {
   priors <- unclass(x)
-  beta_txt <- if (is.null(priors$beta)) "default" else {
-    beta_scale <- if (is.list(priors$beta)) priors$beta$scale %||% priors$beta$sd else priors$beta
-    paste(beta_scale, collapse = ", ")
+  describe_prior <- function(prior) {
+    if (is.null(prior)) return("default")
+    if (inherits(prior, "joinme_lkj_prior")) {
+      return(paste0("lkj(eta = ", prior$eta, ")"))
+    }
+    if (inherits(prior, "joinme_prior_spec")) {
+      if (identical(prior$family, "horseshoe")) {
+        return(paste0(
+          "regularised horseshoe(global_scale = ", prior$global_scale,
+          ", slab_scale = ", prior$slab_scale, ")"
+        ))
+      }
+      return(paste0(
+        prior$family,
+        "(mu = ", paste(prior$mu, collapse = ", "),
+        "; scale = ", paste(prior$scale, collapse = ", "),
+        if (identical(prior$family, "student_t")) {
+          paste0("; df = ", prior$df)
+        } else "",
+        ")"
+      ))
+    }
+    paste(prior, collapse = ", ")
   }
-  alpha_txt <- if (is.null(priors$alpha)) "default" else {
-    alpha_scale <- if (is.list(priors$alpha)) priors$alpha$scale %||% priors$alpha$sd else priors$alpha
-    paste(alpha_scale, collapse = ", ")
-  }
-  iota_txt <- if (is.null(priors$iota)) "default" else {
-    iota_scale <- if (is.list(priors$iota)) priors$iota$scale %||% priors$iota$sd else priors$iota
-    paste(iota_scale, collapse = ", ")
-  }
-  lkj_txt <- if (is.null(priors$lkj)) "default" else paste(priors$lkj, collapse = ", ")
   class_probability_txt <- paste(priors$class_probability, collapse = ", ")
-  class_regression_txt <- paste(priors$class_regression, collapse = ", ")
 
   tbl <- data.frame(
     component = c(
       "beta",
       "alpha",
       "iota",
+      "marker",
+      "marker_weight",
+      "vcov_sd",
+      "vcov_corr",
       "lkj",
       "class_probability",
       "class_regression"
     ),
     value = c(
-      beta_txt,
-      alpha_txt,
-      iota_txt,
-      lkj_txt,
+      describe_prior(priors$beta),
+      describe_prior(priors$alpha),
+      describe_prior(priors$iota),
+      describe_prior(priors$marker),
+      describe_prior(priors$marker_weight),
+      describe_prior(priors$vcov_sd),
+      describe_prior(priors$vcov_corr),
+      describe_prior(priors$lkj),
       class_probability_txt,
-      class_regression_txt
+      describe_prior(priors$class_regression)
     ),
     stringsAsFactors = FALSE
   )
@@ -624,9 +848,13 @@ make_conditions <- function(x, ...) {
       beta = NULL,
       alpha = NULL,
       iota = NULL,
+      marker = NULL,
+      marker_weight = NULL,
+      vcov_sd = NULL,
+      vcov_corr = NULL,
       lkj = NULL,
       class_probability = 1,
-      class_regression = 1
+      class_regression = NULL
     )
   }
   priors <- if (inherits(priors, "joinme_priors")) unclass(priors) else priors
@@ -634,13 +862,13 @@ make_conditions <- function(x, ...) {
   if (!is.list(priors)) {
     cli::cli_abort(c(
       x = "{.arg priors} must be a named list or a {.fn joinme_priors} object.",
-      i = "Example: joinme_priors(beta = list(scale = 2.5), alpha = list(scale = 1), lkj = 2)."
+      i = "Example: jm_prior(beta = prior_normal(scale = 2.5), alpha = prior_student_t(df = 6), lkj = prior_lkj(2))."
     ))
   }
   if (length(priors) > 0 && (is.null(names(priors)) || any(names(priors) %in% c("", NA_character_)))) {
     cli::cli_abort(c(
       x = "{.arg priors} must be a named list.",
-      i = "Allowed components are beta, alpha, iota, lkj, class_probability, and class_regression."
+      i = "Allowed components are beta, alpha, iota, marker, marker_weight, vcov_sd, vcov_corr, lkj, class_probability, and class_regression."
     ))
   }
 
@@ -648,6 +876,10 @@ make_conditions <- function(x, ...) {
     "beta",
     "alpha",
     "iota",
+    "marker",
+    "marker_weight",
+    "vcov_sd",
+    "vcov_corr",
     "lkj",
     "class_probability",
     "class_regression"
@@ -656,22 +888,61 @@ make_conditions <- function(x, ...) {
   if (length(bad) > 0) {
     cli::cli_abort(c(
       x = "Unknown prior component(s): {paste(bad, collapse = ', ')}.",
-      i = "Allowed components: beta, alpha, iota, lkj, class_probability, class_regression."
+      i = "Allowed components: beta, alpha, iota, marker, marker_weight, vcov_sd, vcov_corr, lkj, class_probability, class_regression."
     ))
   }
 
   out <- list(
-    beta = priors$beta %||% NULL,
-    alpha = priors$alpha %||% NULL,
-    iota = priors$iota %||% NULL,
-    lkj = priors$lkj %||% NULL,
+    beta = .normalise_joinme_prior_component(
+      priors$beta,
+      name = "beta",
+      default = prior_student_t(df = 6, scale = 2)
+    ),
+    alpha = .normalise_joinme_prior_component(
+      priors$alpha,
+      name = "alpha",
+      default = prior_student_t(df = 6, scale = 1)
+    ),
+    iota = .normalise_joinme_prior_component(
+      priors$iota,
+      name = "iota",
+      default = prior_student_t(df = 6, scale = 1)
+    ),
+    marker = .normalise_joinme_prior_component(
+      priors$marker,
+      name = "marker",
+      default = prior_normal(),
+      fixed_unit_scale = TRUE
+    ),
+    marker_weight = .normalise_joinme_prior_component(
+      priors$marker_weight,
+      name = "marker_weight",
+      default = prior_student_t(df = 6),
+      fixed_unit_scale = TRUE
+    ),
+    vcov_sd = .normalise_joinme_prior_component(
+      priors$vcov_sd,
+      name = "vcov_sd",
+      default = prior_student_t(df = 6, scale = 1)
+    ),
+    vcov_corr = .normalise_joinme_prior_component(
+      priors$vcov_corr,
+      name = "vcov_corr",
+      default = prior_student_t(df = 6, scale = 1)
+    ),
+    lkj = .normalise_joinme_lkj_prior(priors$lkj),
     class_probability = priors$class_probability %||% 1,
-    class_regression = priors$class_regression %||% 1
+    class_regression = if (is.numeric(priors$class_regression)) {
+      prior_normal(scale = priors$class_regression)
+    } else {
+      .normalise_joinme_prior_component(
+        priors$class_regression,
+        name = "class_regression",
+        default = prior_normal()
+      )
+    }
   )
 
-  .validate_joinme_prior_component(out$beta, "beta")
-  .validate_joinme_prior_component(out$alpha, "alpha")
-  .validate_joinme_prior_component(out$iota, "iota")
   if (
     !is.numeric(out$class_probability) ||
       length(out$class_probability) < 1L ||
@@ -682,64 +953,84 @@ make_conditions <- function(x, ...) {
       "{.arg class_probability} must contain positive finite Dirichlet concentrations."
     )
   }
-  if (
-    !is.numeric(out$class_regression) ||
-      length(out$class_regression) != 1L ||
-      !is.finite(out$class_regression) ||
-      out$class_regression <= 0
-  ) {
-    cli::cli_abort("{.arg class_regression} must be a positive numeric scalar.")
-  }
   out$class_probability <- as.numeric(out$class_probability)
-  out$class_regression <- as.numeric(out$class_regression)
-  if (!is.null(out$lkj)) {
-    if (!is.numeric(out$lkj) || length(out$lkj) != 1L || !is.finite(out$lkj) || out$lkj <= 0) {
-      cli::cli_abort(c(
-        x = "{.arg lkj} must be a positive numeric scalar.",
-        i = "Example: joinme_priors(lkj = 2)."
-      ))
-    }
-    out$lkj <- as.numeric(out$lkj)
-  }
-
   if (isTRUE(validate)) {
-    .build_priors(beta_prior = out$beta, alpha_prior = out$alpha, iota_prior = out$iota, lkj_prior = out$lkj)
+    .build_priors(
+      beta_prior = out$beta,
+      alpha_prior = out$alpha,
+      iota_prior = out$iota,
+      marker_prior = out$marker,
+      marker_weight_prior = out$marker_weight,
+      vcov_sd_prior = out$vcov_sd,
+      vcov_corr_prior = out$vcov_corr,
+      lkj_prior = out$lkj
+    )
   }
 
   structure(out, class = c("joinme_priors", "list"))
 }
 
 #' @keywords internal
-.validate_joinme_prior_component <- function(x, name) {
-  if (is.null(x)) return(invisible(NULL))
-  if (is.numeric(x)) {
+.normalise_joinme_prior_component <- function(
+  x,
+  name,
+  default,
+  fixed_unit_scale = FALSE
+) {
+  if (is.null(x)) return(default)
+  if (inherits(x, "joinme_prior_spec")) {
+    output <- x
+  } else if (is.numeric(x)) {
     if (length(x) < 1L || any(!is.finite(x)) || any(x <= 0)) {
       cli::cli_abort(c(
         x = "{.arg {name}} must contain positive finite scale values.",
-        i = "Example: joinme_priors({name} = list(scale = 2.5))."
+        i = "Prefer {.code {name} = prior_student_t(df = 6, scale = 1)}."
       ))
     }
-    return(invisible(NULL))
-  }
-  if (is.list(x)) {
+    output <- prior_student_t(df = 6, scale = x)
+  } else if (is.list(x) && !is.null(x$scale %||% x$sd)) {
     scale <- x$scale %||% x$sd
-    if (is.null(scale)) {
-      cli::cli_abort(c(
-        x = "Prior component {.arg {name}} must provide {.arg scale} or {.arg sd} when declared as a list.",
-        i = "Example: joinme_priors({name} = list(scale = 1.5))."
-      ))
-    }
-    if (!is.numeric(scale) || length(scale) < 1L || any(!is.finite(scale)) || any(scale <= 0)) {
-      cli::cli_abort(c(
-        x = "Prior component {.arg {name}} must use positive finite scale values.",
-        i = "Example: joinme_priors({name} = list(scale = 1.5))."
-      ))
-    }
-    return(invisible(NULL))
+    mu <- x$mu %||% x$location %||% 0
+    output <- prior_student_t(df = x$df %||% 6, mu = mu, scale = scale)
+  } else {
+    cli::cli_abort(c(
+      x = "Prior component {.arg {name}} is not a recognised JoiNMe prior declaration.",
+      i = "Use {.fn prior_normal}, {.fn prior_student_t}, {.fn prior_laplace}, or {.fn prior_horseshoe}."
+    ))
   }
 
+  if (
+    isTRUE(fixed_unit_scale) &&
+      (
+        !identical(as.numeric(output$mu), 0) ||
+          !identical(as.numeric(output$scale), 1) ||
+          (
+            identical(output$family, "horseshoe") &&
+              (!identical(output$global_scale, 1) || !identical(output$slab_scale, 2))
+          )
+      )
+  ) {
+    cli::cli_abort(c(
+      x = "{.arg {name}} is a standardised latent block and cannot accept a location or scale.",
+      i = "Choose only its family, for example {.code {name} = prior_laplace()} or {.code {name} = prior_horseshoe()}.",
+      i = "Its location is fixed at zero and its ordinary scale is fixed at one."
+    ))
+  }
+  output
+}
+
+#' @keywords internal
+#' @noRd
+.normalise_joinme_lkj_prior <- function(x) {
+  if (is.null(x)) return(prior_lkj(1))
+  if (is.numeric(x)) {
+    return(prior_lkj(x))
+  }
+  if (inherits(x, "joinme_lkj_prior")) {
+    return(x)
+  }
   cli::cli_abort(c(
-    x = "Prior component {.arg {name}} must be numeric or a list with {.arg scale}/{.arg sd}.",
-    i = "Example: joinme_priors({name} = list(scale = 1.5))."
+    x = "{.arg lkj} must be created with {.fn prior_lkj}.",
+    i = "A positive numeric concentration remains accepted for compatibility."
   ))
 }

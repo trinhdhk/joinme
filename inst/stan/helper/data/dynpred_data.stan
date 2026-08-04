@@ -53,9 +53,11 @@
   matrix[n_obs_long, P_tau] X_tau_obs;   // tau design observed
   matrix[n_obs_pred, P_tau] X_tau_pred;  // tau design pred
 
-  /* Covariance regression covariates */
-  int<lower=0> n_cov_vcov;                        // covariate count for covariance regression
-  vector[n_cov_vcov] vec_cov_vcov;                // covariate vector (subject-level)
+  /* Independent covariance regression covariates */
+  int<lower=0> n_cov_vcov_sd; // covariate count for the standard-deviation regression
+  vector[n_cov_vcov_sd] vec_cov_vcov_sd; // subject covariates entering standard-deviation predictors
+  int<lower=0> n_cov_vcov_corr; // covariate count for the off-diagonal correlation regression
+  vector[n_cov_vcov_corr] vec_cov_vcov_corr; // subject covariates entering partial-correlation predictors
 
   /* Hazard covariates */
   int<lower=0> n_cov_hazard;                      // hazard covariate count
@@ -134,7 +136,8 @@
 
   int<lower=0> num_unique_cov_entries;         // unique elements in L_i
   array[n_draws] vector[num_unique_cov_entries] alpha_vcov_reg; // intercepts
-  array[n_draws] vector[num_unique_cov_entries * n_cov_vcov] beta_vcov_reg_flat; // flattened slopes
+  array[n_draws] vector[n_random_marker_id * n_cov_vcov_sd] beta_vcov_sd_flat; // row-major standard-deviation slopes
+  array[n_draws] vector[((n_random_marker_id * (n_random_marker_id - 1)) %/% 2) * n_cov_vcov_corr] beta_vcov_corr_flat; // row-major off-diagonal correlation slopes
   array[n_draws] vector[num_unique_cov_entries] lambda_vcov_reg; // one nonnegative scalar latent-heterogeneity loading per packed covariance coordinate and retained fit draw
 
   int<lower=1> K_event;                        // number of competing risks

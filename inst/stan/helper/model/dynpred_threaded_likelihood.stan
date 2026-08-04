@@ -49,8 +49,10 @@ target += reduce_sum(
   P_tau,
   X_tau_obs,
   /* Covariance regression inputs */
-  n_cov_vcov,
-  vec_cov_vcov,
+  n_cov_vcov_sd,
+  vec_cov_vcov_sd,
+  n_cov_vcov_corr,
+  vec_cov_vcov_corr,
   /* Hazard baseline inputs */
   n_cov_hazard,
   vec_cov_hazard,
@@ -111,7 +113,8 @@ target += reduce_sum(
   B_cross,
   /* Draw-specific covariance regression weights */
   alpha_vcov_reg,
-  beta_vcov_reg_flat,
+  beta_vcov_sd_flat,
+  beta_vcov_corr_flat,
   lambda_vcov_reg,
   /* Draw-specific survival parameters */
   K_event,

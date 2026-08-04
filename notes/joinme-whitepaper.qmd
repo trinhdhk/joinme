@@ -206,18 +206,35 @@ The nested subject-by-marker effect is
 \operatorname{diag}(\boldsymbol r_w)L_i\boldsymbol z_{w,id}.
 \]
 
-The subject covariance factor \(L_i\) is generated through lower-triangular
-regression predictors. For entry \(m\),
+The subject covariance factor is
 
 \[
-\ell_{im}
-=
-\alpha_{L,m}
-+
-\boldsymbol x_{\mathrm{cov},i}^{\top}\boldsymbol\beta_{L,m}
-+
-\lambda_{L,m}z_{L,im}.
+L_i=\operatorname{diag}(\boldsymbol\sigma_i)K_i.
 \]
+
+Its standard deviations and off-diagonal partial correlations have separate
+subject-level regressions:
+
+\[
+\eta^{sd}_{ir}
+=\alpha^{sd}_r
++\boldsymbol x_{sd,i}^{\top}\boldsymbol\beta^{sd}_r
++\lambda_{m(r)}z_{L,i,m(r)},
+\]
+
+\[
+\eta^{corr}_{ih}
+=\alpha^{corr}_h
++\boldsymbol x_{corr,i}^{\top}\boldsymbol\beta^{corr}_h
++\lambda_{m(h)}z_{L,i,m(h)}.
+\]
+
+The first predictor is mapped to a positive standard deviation by softplus or
+the exponential link. The second is mapped through `tanh` to a partial
+correlation and assembled row by row into the Cholesky correlation factor
+\(K_i\). The public declaration
+`formulaVCov = list(sd = ~ ..., corr = ~ ...)` supplies the two independent
+designs; a single formula is their shared-design shorthand.
 
 The event hazard for cause \(k\) is
 
@@ -233,6 +250,52 @@ A_i(t)
 \]
 
 where \(A_i(t)\) is a sum of active transformed association channels.
+
+## Block-specific regularisation
+
+Let \(\theta_j\) denote a coefficient in one of the fixed-effect (`beta`),
+association (`alpha`), or functional affine-shift (`iota`) blocks. The analyst
+may independently declare
+
+\[
+N(\mu_j,s_j^2),\qquad t_\nu(\mu_j,s_j),\qquad
+\operatorname{Laplace}(\mu_j,s_j),
+\]
+
+or a regularised horseshoe. The Student-\(t\) degrees of freedom are fixed. A
+scalar location or scale is repeated over the block; a non-scalar declaration
+must have exactly the fitted dimension. This strict rule is important because
+the model matrices are constructed dynamically and ordinary partial recycling
+could silently assign a prior to the wrong scientific coefficient.
+
+For the regularised horseshoe, \(z_j\sim N(0,1)\), the local and global scales
+have positive Student-\(t\) laws, and
+
+\[
+\theta_j=\mu_j+s_j\tau\widetilde\lambda_jz_j,
+\qquad
+\widetilde\lambda_j^2=
+\frac{c^2\lambda_j^2}{c^2+\tau^2\lambda_j^2}.
+\]
+
+The finite slab \(c\) regularises exceptionally large signals. This is the
+regularised form used in brms and rstanarm rather than an unbounded classical
+horseshoe.
+
+Standardised marker effects and marker-weight perturbations may select any of
+these four families, but their location and ordinary scale are fixed at zero
+and one. The marker covariance factor carries the former block's scale, whilst
+the supplied base marker weights define the latter block's unit. Correlation
+matrices have a separate LKJ prior with concentration `eta`; they are not
+forced into a scalar shrinkage family.
+
+The six scalar association positions are ordered as total current value, total
+current slope, subject-mean current value, subject-mean current slope, marker
+current value and marker current slope, followed by correlation and covariance
+components. The declared `alpha` scale applies directly to the log-hazard
+coefficient. There is no additional random association scale. This direct
+meaning is especially important when eliciting priors through plausible hazard
+ratios.
 
 # Latent-progress model
 
@@ -292,8 +355,10 @@ The simplex supplies the intercept. One formula uses class \(G\) as the
 reference category; a list of \(G\) formulae supplies separate, compact
 class-specific predictors and defaults to no ordering.
 `jm_prior(class_probability = ...)` supplies
-\(\boldsymbol\alpha_\pi\), whilst `class_regression` supplies the Normal prior
-scale for the regression coefficients.
+\(\boldsymbol\alpha_\pi\), whilst `class_regression` supplies an independent
+Normal, fixed-degrees-of-freedom Student-t, Laplace, or regularised horseshoe
+prior for the regression coefficients. Coefficient-specific locations and
+scales follow subject-domain then marker-domain design order.
 
 ## Two-dimensional default
 
@@ -396,9 +461,12 @@ then adds
 \log p_{\mathrm{ordinary}}(\boldsymbol a_r).
 \]
 
-For subject, marker and covariance-regression standardised effects, the
-ordinary denominator is Normal. For marker-weight perturbations it follows the
-existing shrinkage family. This is an exact prior replacement.
+For subject and covariance-regression standardised effects, the ordinary
+denominator is Normal. For marker effects, the denominator is the raw density
+declared in `jm_prior(marker = ...)`: Student-t, Normal or Laplace as selected,
+and standard Normal for a regularised-horseshoe raw coefficient. The latter
+retains its local/global scale transformation downstream. This matching
+subtraction makes the construction an exact prior replacement.
 
 If formula-scoped random-effect weights are present, the relevant log-density
 terms are weighted consistently in the numerator and denominator.
@@ -471,6 +539,14 @@ standard deviation of the untransformed covariance predictor. Under class
 \(\lambda_m\mu_{gm}\) and distributional scale \(\lambda_ms_{gm}\); the
 positive diagonal link or off-diagonal partial-correlation mapping is applied
 afterwards.
+
+Observed-covariate effects are deliberately separate from this latent
+loading. `formulaVCov$sd` creates one design for the standard-deviation
+predictors and `formulaVCov$corr` creates another for off-diagonal partial
+correlations. Their coefficient blocks receive independent `vcov_sd` and
+`vcov_corr` prior declarations. A single formula is canonicalised to two
+identical formulae, so the ordinary, mixture, simulation and prediction paths
+still have one interface contract.
 
 # Longitudinal-only likelihood
 

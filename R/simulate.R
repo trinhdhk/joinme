@@ -486,16 +486,19 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   keeps marker-only and marker-by-id blocks independent, while inner
 #'   `( ... || id )` makes the marker-by-id covariance diagonal.
 #' @param formulaEvent Event/survival formula (same role as in `joinme()`).
-#' @param formulaVCov Optional covariance-regression formula for the id-specific
-#'   marker-by-id covariance factor (same role as in `joinme_standata()`).
-#'   This formula is evaluated on event-level covariates (one row per subject),
+#' @param formulaVCov Optional covariance-regression specification for the
+#'   id-specific marker-by-id covariance factor. A formula is shared by both
+#'   covariance components; `list(sd = ~ ..., corr = ~ ...)` supplies
+#'   independent observed-covariate regressions with exactly the same syntax as
+#'   [joinme()] and [joinme_mix()]. Each formula is evaluated on event-level covariates (one row per subject),
 #'   must not include random-effect bars `( ... | ... )`, and must not include
 #'   the longitudinal time variable.
 #'
-#'   Internally, this formula drives subject-specific standard deviations and
-#'   Cholesky-correlation-factor rows used to build `L_i = SD_i * K_i`; see
+#'   The `sd` formula drives subject-specific standard deviations and the
+#'   `corr` formula drives Cholesky-correlation-factor rows used to build
+#'   `L_i = SD_i * K_i`; see
 #'   `re_params$id_marker_cov`.
-#'   The default `~ 1` is supported and gives an intercept-only covariance regression.
+#'   The default `~ 1` gives intercept-only regressions for both components.
 #' @param formulaDist Optional distributional regression formulas (same role as in `joinme()`).
 #'   Supported LHS parameters are `sigma`, `nu`, `phi`, `alpha` (aliases:
 #'   `alpha_skew`, `skew`), `kappa`, and `tau`.
@@ -533,7 +536,7 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'     monotone I-spline evaluated on `plogis(x)`; explicit knots are supplied
 #'     on the expit scale.
 #'   - `list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), y = seq(0.02, 0.98, length.out = 50)^0.8, n_knots = 6, degree = 3, lambda = 1)`:
-#'     penalised monotone I-spline on `plogis(x)` in legacy plug-in mode.
+#'     penalised monotone I-spline on `plogis(x)` in plug-in mode.
 #'   - `list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))`:
 #'     piecewise-linear transform; `x` and `y` are required.
 #'     Simulation deliberately treats these as fixed interpolation pairs. This
@@ -557,9 +560,11 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'     and explicit `knots` for these transform types are specified on that
 #'     bounded expit scale. This is useful
 #'     when the raw association feature has long tails or steep nonlinear effects.
-#'
-#'   In other words, simulation currently uses the legacy plug-in spline mode;
-#'   it does not estimate spline coefficients jointly inside Stan.
+
+#' @param priors A [jm_prior()] declaration retained in `truth$priors` for the
+#'   corresponding recovery fit. Priors do not alter generated observations;
+#'   carrying the checked object prevents simulation and fitting scripts from
+#'   silently using different covariance-regression prior families.
 #' @param marker_weights Optional base marker weights used for association
 #'   aggregation. If `shared_marker_weights = TRUE`, supply one numeric vector to
 #'   be shared across all active weighted marker-based association terms. If
@@ -674,16 +679,17 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   - `latent`: deprecated compatibility input. If supplied, its implied
 #'     lower-triangular factor is folded into the baseline `alpha` intercepts
 #'     before simulation. Marker-by-id latent seeds are still drawn as iid
-#'     standard normal values. Prefer setting `alpha` directly in new code.
-#'   - `alpha`: baseline linear predictors for the subject-specific covariance
-#'     regression entries. Diagonal positions control standard deviations;
-#'     off-diagonal positions control the row-wise correlation-factor regression,
-#'     on the tanh scale.
-#'   - `beta`: covariate effects from `formulaVCov` design matrix (systematic
-#'     subject-to-subject covariance shifts by observed covariates),
-#'   - `lambda`: a scalar or length-\(M\) numeric vector of loadings. A scalar
-#'     is repeated over all \(M\) covariance coordinates; a vector supplies one
-#'     loading \(\lambda_m\) for each packed lower-triangular coordinate.
+#'     standard normal values. Prefer setting `sd$alpha` and `corr$alpha`
+#'     directly in new code.
+#'   - `sd`: a named list with `alpha`, `beta`, and `lambda` for the standard-
+#'     deviation regression. It contains `Q_idm` intercepts, a
+#'     `Q_idm` by `K_cov_sd` slope matrix, and `Q_idm` residual loadings.
+#'   - `corr`: the corresponding list for the `Q_idm(Q_idm-1)/2`
+#'     row-major off-diagonal partial correlations. Its slope matrix uses the
+#'     independent `formulaVCov$corr` design.
+#'   - `lambda` within either component may be scalar or component-length. A scalar
+#'     is repeated over that component; a vector supplies one
+#'     loading \(\lambda_m\) for each coordinate in that component.
 #'     Each loading multiplies only its matching iid standard-normal subject
 #'     perturbation, so the collective operation is
 #'     `diag(lambda) %*% z_i`, not a full loading matrix. During fitting every
@@ -777,6 +783,11 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   Hazard-scale association coefficients are stored as `alpha_cv_total`,
 #'   `alpha_cs_total`, `alpha_cv_mean`, `alpha_cs_mean`, `alpha_corr`, and
 #'   `alpha_vcov`, matching the fitted posterior output names.
+#'   `truth$recovery` contains the paired fitting entry-point name and a
+#'   directly reusable argument list. Thus
+#'   `do.call(joinme, c(sim$truth$recovery$arguments, list(seed = 1)))`
+#'   recreates the full fitted specification without retyping formulae, priors,
+#'   association controls, or covariance settings.
 #'
 #' @examples
 #' \dontrun{
@@ -823,6 +834,7 @@ simulate_joinme <- function(
   formulaDist = NULL,
   formulaAssoc = NULL,
   transforms = NULL,
+  priors = joinme_priors(),
   n_id = 50,
   families = c("gaussian", "student_t", "binomial"),
   marker_levels = NULL,
@@ -851,9 +863,8 @@ simulate_joinme <- function(
     marker = list(sd = NULL, corr = NULL),
     id_marker_cov = list(
       latent = list(sd = NULL, corr = NULL),
-      alpha = NULL,
-      beta = NULL,
-      lambda = NULL,
+      sd = list(alpha = NULL, beta = NULL, lambda = NULL),
+      corr = list(alpha = NULL, beta = NULL, lambda = NULL),
       diag_link = "softplus"
     ),
     dist = list()
@@ -905,6 +916,10 @@ simulate_joinme <- function(
   # Step 6. Draw marker responses from family-specific observation models,
   #         collect truth objects, and return simulation outputs.
   set.seed(seed)
+  prior_specification <- .joinme_priors_(
+    priors,
+    validate = TRUE
+  ) # fitting priors retained verbatim in truth so the recovery fit can reuse the same declaration
   assoc_coefs_missing <- missing(assoc_coefs)
   if (!is.logical(fixed_marker_weights) || length(fixed_marker_weights) != 1L || is.na(fixed_marker_weights)) {
     cli::cli_abort(c(
@@ -2088,8 +2103,10 @@ simulate_joinme <- function(
     time_var = time_var,
     context = "simulate_joinme()"
   )
-  K_cov <- vcov_design$K_cov
-  Xcov <- vcov_design$Xcov
+  K_cov_sd <- vcov_design$K_cov_sd # standard-deviation predictor count shared with fitting
+  Xcov_sd <- vcov_design$Xcov_sd # standard-deviation design in fitted subject order
+  K_cov_corr <- vcov_design$K_cov_corr # off-diagonal correlation predictor count shared with fitting
+  Xcov_corr <- vcov_design$Xcov_corr # correlation design in fitted subject order
 
   # ---- Step 2a: Build prototype matrices for deterministic coefficient alignment
   # Time-dependent model matrices are defined on the scaled [0, 1] domain so
@@ -2464,7 +2481,7 @@ simulate_joinme <- function(
     list(lambda = lambda_out, z = z_out, sign = sign_vec)
   }
 
-  .sim_align_cov_beta <- function(beta_cfg, m_cov, k_cov) {
+  .sim_align_cov_beta <- function(beta_cfg, m_cov, k_cov, arg_name) {
     if (m_cov <= 0) return(matrix(0.0, 0, k_cov))
     if (k_cov <= 0) return(matrix(0.0, m_cov, 0))
     if (is.null(beta_cfg)) {
@@ -2473,14 +2490,14 @@ simulate_joinme <- function(
     if (is.matrix(beta_cfg)) {
       if (!all(dim(beta_cfg) == c(m_cov, k_cov))) {
         cli::cli_abort(c(
-          x = "{.arg re_params$id_marker_cov$beta} matrix has incompatible dimensions.",
+          x = "{.arg {arg_name}} matrix has incompatible dimensions.",
           i = "Expected {m_cov}x{k_cov}, got {nrow(beta_cfg)}x{ncol(beta_cfg)}."
         ))
       }
       beta_mat <- matrix(as.numeric(beta_cfg), nrow = m_cov, ncol = k_cov)
       if (any(!is.finite(beta_mat))) {
         cli::cli_abort(c(
-          x = "{.arg re_params$id_marker_cov$beta} must contain only finite values.",
+          x = "{.arg {arg_name}} must contain only finite values.",
           i = "Check the supplied covariance-regression coefficient matrix."
         ))
       }
@@ -2491,7 +2508,7 @@ simulate_joinme <- function(
       beta_mat <- matrix(rep(beta_vec, each = m_cov), nrow = m_cov, ncol = k_cov, byrow = FALSE)
       if (any(!is.finite(beta_mat))) {
         cli::cli_abort(c(
-          x = "{.arg re_params$id_marker_cov$beta} must contain only finite values.",
+          x = "{.arg {arg_name}} must contain only finite values.",
           i = "Check the supplied covariance-regression coefficients."
         ))
       }
@@ -2501,14 +2518,14 @@ simulate_joinme <- function(
       beta_mat <- matrix(beta_vec, nrow = m_cov, ncol = k_cov, byrow = TRUE)
       if (any(!is.finite(beta_mat))) {
         cli::cli_abort(c(
-          x = "{.arg re_params$id_marker_cov$beta} must contain only finite values.",
+          x = "{.arg {arg_name}} must contain only finite values.",
           i = "Check the supplied covariance-regression coefficients."
         ))
       }
       return(beta_mat)
     }
     cli::cli_abort(c(
-      x = "{.arg re_params$id_marker_cov$beta} has incompatible length.",
+      x = "{.arg {arg_name}} has incompatible length.",
       i = "Provide length {k_cov}, or {m_cov * k_cov}, or an explicit {m_cov}x{k_cov} matrix."
     ))
   }
@@ -2521,45 +2538,117 @@ simulate_joinme <- function(
     ))
   }
 
-  default_alpha_cov <- if (M_cov > 0L) {
-    vapply(seq_len(M_cov), function(m) {
-      r_ <- idx_row_cov[m]
-      c_ <- idx_col_cov[m]
-      if (r_ == c_) {
-        diag_target <- stats::runif(1, min = 0.45, max = 1.15)
-        if (diag_link_cov == "exp") log(diag_target) else log(expm1(diag_target))
-      } else {
-        stats::rnorm(1, mean = 0, sd = 0.2)
-      }
+  # STEP 3b-i: separate the scientific SD and correlation parameter blocks.
+  #
+  # A full lower triangle is still retained internally because class selection
+  # and association code use that stable coordinate order. The public
+  # generative syntax, however, mirrors formulaVCov directly: `sd` has Q rows
+  # and `corr` has Q(Q-1)/2 rows. Legacy packed values are unpacked silently so
+  # existing reproducibility scripts retain their numerical behaviour.
+  M_corr_cov <- if (K_idm >= 2L && as.integer(indep_flags$indep_idmarker_cov %||% 0L) == 0L) {
+    as.integer(K_idm * (K_idm - 1L) / 2L)
+  } else {
+    0L
+  } # number of off-diagonal partial-correlation coordinates actually fitted
+  diagonal_positions <- which(idx_row_cov == idx_col_cov) # packed locations governed by formulaVCov$sd
+  correlation_positions <- which(idx_row_cov != idx_col_cov) # packed locations governed by formulaVCov$corr
+  re_cov_sd_cfg <- re_cov_cfg$sd %||% list() # user-supplied SD intercepts, slopes and latent loadings
+  re_cov_corr_cfg <- re_cov_cfg$corr %||% list() # user-supplied off-diagonal correlation parameters
+
+  if (!is.list(re_cov_sd_cfg) || !is.list(re_cov_corr_cfg)) {
+    cli::cli_abort(
+      "{.arg re_params$id_marker_cov$sd} and {.arg re_params$id_marker_cov$corr} must be named lists."
+    )
+  }
+
+  legacy_alpha <- re_cov_cfg$alpha # former packed lower-triangular intercept vector, retained as an exact compatibility input
+  legacy_lambda <- re_cov_cfg$lambda # former packed lower-triangular loading vector, retained as an exact compatibility input
+  legacy_beta <- re_cov_cfg$beta # former common-design slope matrix, usable only when the two designs coincide
+  if (!is.null(legacy_alpha)) {
+    legacy_alpha <- .sim_align_len(
+      legacy_alpha, M_cov, default = 0,
+      arg_name = "re_params$id_marker_cov$alpha"
+    )
+    re_cov_sd_cfg$alpha <- re_cov_sd_cfg$alpha %||% legacy_alpha[diagonal_positions]
+    re_cov_corr_cfg$alpha <- re_cov_corr_cfg$alpha %||% legacy_alpha[correlation_positions]
+  }
+  if (!is.null(legacy_lambda)) {
+    legacy_lambda <- .sim_align_len(
+      legacy_lambda, M_cov, default = 0,
+      arg_name = "re_params$id_marker_cov$lambda"
+    )
+    re_cov_sd_cfg$lambda <- re_cov_sd_cfg$lambda %||% legacy_lambda[diagonal_positions]
+    re_cov_corr_cfg$lambda <- re_cov_corr_cfg$lambda %||% legacy_lambda[correlation_positions]
+  }
+  if (!is.null(legacy_beta)) {
+    shared_design <- identical(colnames(Xcov_sd), colnames(Xcov_corr)) && K_cov_sd == K_cov_corr
+    if (!shared_design) {
+      cli::cli_abort(c(
+        x = "Packed {.arg re_params$id_marker_cov$beta} cannot represent different SD and correlation formulae.",
+        i = "Supply {.arg re_params$id_marker_cov$sd$beta} and {.arg re_params$id_marker_cov$corr$beta} separately."
+      ))
+    }
+    legacy_beta <- .sim_align_cov_beta(
+      legacy_beta, M_cov, K_cov_sd,
+      "re_params$id_marker_cov$beta"
+    )
+    re_cov_sd_cfg$beta <- re_cov_sd_cfg$beta %||% legacy_beta[diagonal_positions, , drop = FALSE]
+    re_cov_corr_cfg$beta <- re_cov_corr_cfg$beta %||% legacy_beta[correlation_positions, , drop = FALSE]
+  }
+
+  default_alpha_sd <- if (K_idm > 0L) {
+    vapply(seq_len(K_idm), function(coordinate) {
+      target_sd <- stats::runif(1, min = 0.45, max = 1.15) # plausible marginal SD before any subject covariate shift
+      if (diag_link_cov == "exp") log(target_sd) else log(expm1(target_sd))
     }, numeric(1))
-  } else {
-    numeric(0)
+  } else numeric(0)
+  default_alpha_corr <- if (M_corr_cov > 0L) {
+    stats::rnorm(M_corr_cov, mean = 0, sd = 0.2)
+  } else numeric(0)
+  default_lambda_sd <- if (K_idm > 0L) {
+    .sim_random_signed(K_idm, min_abs = 0.15, max_abs = 0.75)
+  } else numeric(0)
+  default_lambda_corr <- if (M_corr_cov > 0L) {
+    .sim_random_signed(M_corr_cov, min_abs = 0.15, max_abs = 0.75)
+  } else numeric(0)
+
+  alpha_cov_sd <- .sim_align_len(
+    re_cov_sd_cfg$alpha, K_idm, default_alpha_sd,
+    "re_params$id_marker_cov$sd$alpha"
+  ) # SD-regression intercept for every marker-by-subject basis coordinate
+  alpha_cov_corr <- .sim_align_len(
+    re_cov_corr_cfg$alpha, M_corr_cov, default_alpha_corr,
+    "re_params$id_marker_cov$corr$alpha"
+  ) # correlation-regression intercept for every row-major off-diagonal coordinate
+  lambda_cov_sd <- .sim_align_len(
+    re_cov_sd_cfg$lambda, K_idm, default_lambda_sd,
+    "re_params$id_marker_cov$sd$lambda"
+  ) # unexplained subject heterogeneity on each unlinked SD predictor
+  lambda_cov_corr <- .sim_align_len(
+    re_cov_corr_cfg$lambda, M_corr_cov, default_lambda_corr,
+    "re_params$id_marker_cov$corr$lambda"
+  ) # unexplained subject heterogeneity on each Fisher-like tanh predictor
+
+  for (value_name in c("alpha_cov_sd", "alpha_cov_corr", "lambda_cov_sd", "lambda_cov_corr")) {
+    if (any(!is.finite(get(value_name)))) {
+      cli::cli_abort("Every covariance-regression intercept and loading must be finite.")
+    }
   }
-  default_lambda_cov <- if (M_cov > 0L) {
-    .sim_random_signed(M_cov, min_abs = 0.15, max_abs = 0.75)
-  } else {
-    numeric(0)
-  }
-  alpha_cov <- .sim_align_len(re_cov_cfg$alpha, M_cov, default = default_alpha_cov, arg_name = "re_params$id_marker_cov$alpha")
-  if (!is.null(re_cov_cfg$lambda) && !is.null(dim(re_cov_cfg$lambda))) {
-    cli::cli_abort(c(
-      x = "{.arg re_params$id_marker_cov$lambda} must be a scalar or numeric vector.",
-      i = "A matrix would imply cross-coordinate loadings, which this element-wise covariance regression does not use."
-    ))
-  }
-  lambda_cov <- .sim_align_len(re_cov_cfg$lambda, M_cov, default = default_lambda_cov, arg_name = "re_params$id_marker_cov$lambda")
-  if (any(!is.finite(alpha_cov))) {
-    cli::cli_abort(c(
-      x = "{.arg re_params$id_marker_cov$alpha} must contain only finite values.",
-      i = "Check the supplied covariance-regression intercepts."
-    ))
-  }
-  if (any(!is.finite(lambda_cov))) {
-    cli::cli_abort(c(
-      x = "{.arg re_params$id_marker_cov$lambda} must contain only finite values.",
-      i = "Check the supplied covariance-regression loadings."
-    ))
-  }
+  beta_cov_sd <- .sim_align_cov_beta(
+    re_cov_sd_cfg$beta, K_idm, K_cov_sd,
+    "re_params$id_marker_cov$sd$beta"
+  ) # Q by K_cov_sd systematic SD effects
+  beta_cov_corr <- .sim_align_cov_beta(
+    re_cov_corr_cfg$beta, M_corr_cov, K_cov_corr,
+    "re_params$id_marker_cov$corr$beta"
+  ) # M_corr by K_cov_corr systematic correlation effects
+
+  alpha_cov <- numeric(M_cov) # compatibility/reporting vector in packed lower-triangular order
+  lambda_cov <- numeric(M_cov) # compatibility/reporting loading vector in the same packed order
+  alpha_cov[diagonal_positions] <- alpha_cov_sd
+  alpha_cov[correlation_positions] <- alpha_cov_corr
+  lambda_cov[diagonal_positions] <- lambda_cov_sd
+  lambda_cov[correlation_positions] <- lambda_cov_corr
   if (!is.null(re_cov_cfg$sd_u) || !is.null(re_cov_cfg$tau_u)) {
     cli::cli_abort(c(
       x = "{.arg re_params$id_marker_cov$sd_u} is no longer supported.",
@@ -2570,9 +2659,9 @@ simulate_joinme <- function(
   if (!is.null(re_idm_legacy) && M_cov > 0 && K_idm > 0) {
     base_li <- .sim_cov_lp_to_matrix(alpha_cov, K_idm, idx_row_cov, idx_col_cov, diag_link_cov)
     alpha_cov <- .sim_cov_matrix_to_alpha(base_li %*% latent_compat_factor, idx_row_cov, idx_col_cov, diag_link_cov)
+    alpha_cov_sd <- alpha_cov[diagonal_positions]
+    alpha_cov_corr <- alpha_cov[correlation_positions]
   }
-  beta_cov <- .sim_align_cov_beta(re_cov_cfg$beta, M_cov, K_cov)
-
   L_i <- array(0.0, dim = c(n_id, K_idm, K_idm))
   marker_id_row_scale_internal <- rep(1.0, K_idm)
   if (length(idx_time_idm) > 0L) {
@@ -2586,6 +2675,8 @@ simulate_joinme <- function(
     lambda_cov <- cov_latent$lambda
     z_cov <- cov_latent$z
     lambda_cov_sign <- cov_latent$sign
+    lambda_cov_sd <- lambda_cov[diagonal_positions]
+    lambda_cov_corr <- lambda_cov[correlation_positions]
 
     # The covariance-regression mixture acts on Stan's canonical `z_L`
     # coordinates, after any sign absorbed from a legacy negative loading.
@@ -2608,9 +2699,16 @@ simulate_joinme <- function(
       shrinkage = shrinkage
     ) # selected component-conditional covariance-regression latents
 
+    # STEP 3b-ii: evaluate the two independent observed-covariate regressions
+    # and place their predictors into the unchanged packed latent order.
     lp_cov <- matrix(alpha_cov, nrow = n_id, ncol = M_cov, byrow = TRUE)
-    if (K_cov > 0) {
-      lp_cov <- lp_cov + Xcov %*% t(beta_cov)
+    if (K_cov_sd > 0L) {
+      lp_cov[, diagonal_positions] <- lp_cov[, diagonal_positions, drop = FALSE] +
+        Xcov_sd %*% t(beta_cov_sd)
+    }
+    if (K_cov_corr > 0L && M_corr_cov > 0L) {
+      lp_cov[, correlation_positions] <- lp_cov[, correlation_positions, drop = FALSE] +
+        Xcov_corr %*% t(beta_cov_corr)
     }
     lp_cov <- lp_cov + sweep(z_cov, 2L, lambda_cov, `*`)
 
@@ -3598,6 +3696,11 @@ simulate_joinme <- function(
     Corr_v = re_marker_effective$corr,
     Sigma_v = re_marker_effective$cov,
     marker_id_row_scale_eff = marker_id_row_scale_eff,
+    alpha_L = alpha_cov, # fitted packed covariance-regression intercepts
+    beta_L_sd = beta_cov_sd, # fitted Q_idm by K_cov_sd standard-deviation slopes
+    beta_L_corr = beta_cov_corr, # fitted M_corr by K_cov_corr partial-correlation slopes
+    lambda_L = lambda_cov, # fitted non-negative residual loading for each packed latent coordinate
+    z_L = z_cov[, seq_len(M_cov), drop = FALSE], # subject-by-coordinate standardised covariance latents
     alpha_cv_total = unname(assoc_coef_scalar[["cv_total"]] %||% NA_real_),
     alpha_cs_total = unname(assoc_coef_scalar[["cs_total"]] %||% NA_real_),
     alpha_cv_mean = unname(assoc_coef_scalar[["cv_mean"]] %||% NA_real_),
@@ -3724,6 +3827,7 @@ simulate_joinme <- function(
     gk_weights = gk_spec$weights,
     gk_rule = gk_spec$rule,
     transforms = transforms,
+    priors = prior_specification,
     basehaz = h0_fn,
     baseline_hazard = baseline_hazard_truth,
     formulaVCov = formulaVCov,
@@ -3741,8 +3845,22 @@ simulate_joinme <- function(
       marker = re_marker_effective,
       id_marker_cov = list(
         latent = re_idm_effective,
+        sd = list(
+          alpha = alpha_cov_sd,
+          beta = beta_cov_sd,
+          lambda = lambda_cov_sd,
+          z = z_cov[, diagonal_positions, drop = FALSE],
+          formula = formulaVCov$sd
+        ),
+        corr = list(
+          alpha = alpha_cov_corr,
+          beta = beta_cov_corr,
+          lambda = lambda_cov_corr,
+          z = z_cov[, correlation_positions, drop = FALSE],
+          formula = formulaVCov$corr
+        ),
         alpha = alpha_cov,
-        beta = beta_cov,
+        beta = list(sd = beta_cov_sd, corr = beta_cov_corr),
         lambda = lambda_cov,
         z = z_cov[, seq_len(M_cov), drop = FALSE],
         lambda_sign = lambda_cov_sign,
@@ -3769,8 +3887,22 @@ simulate_joinme <- function(
         factor = latent_compat_factor,
         applied_to = if (!is.null(re_idm_legacy)) "alpha" else NULL
       ),
+      sd = list(
+        alpha = alpha_cov_sd,
+        beta = beta_cov_sd,
+        lambda = lambda_cov_sd,
+        z = z_cov[, diagonal_positions, drop = FALSE],
+        formula = formulaVCov$sd
+      ),
+      corr = list(
+        alpha = alpha_cov_corr,
+        beta = beta_cov_corr,
+        lambda = lambda_cov_corr,
+        z = z_cov[, correlation_positions, drop = FALSE],
+        formula = formulaVCov$corr
+      ),
       alpha = alpha_cov,
-      beta = beta_cov,
+      beta = list(sd = beta_cov_sd, corr = beta_cov_corr),
       lambda = lambda_cov,
       z = z_cov[, seq_len(M_cov), drop = FALSE],
       lambda_sign = lambda_cov_sign,
@@ -3869,6 +4001,56 @@ simulate_joinme <- function(
         as.numeric(dataEvent_public[[event_time_var]]), 
         dataEvent_public$time_start + 1e-9)
   }
+
+  # ---- Step 6a: retain a directly reusable fitting specification.
+  #
+  # This record is assembled only after the public event data have reached
+  # their final subject-level or counting-process layout. Every name below is
+  # therefore an argument understood by the corresponding fitting entry
+  # point. Generating quantities such as beta_long and the covariance
+  # coefficients remain in `truth`; they are estimands, not fitting inputs.
+  recovery_marker_weights <- if (isTRUE(shared_marker_weights)) {
+    as.numeric(marker_weights_base)
+  } else {
+    marker_weights_base_by_term
+  } # base marker weights use precisely the fitting interface's shared/list convention
+  recovery_arguments <- list(
+    formulaLong = formulaLong,
+    dataLong = dataLong,
+    formulaEvent = formulaEvent,
+    dataEvent = dataEvent_public,
+    formulaVCov = formulaVCov,
+    formulaDist = dist_formulas,
+    families = families,
+    transforms = transforms,
+    priors = prior_specification,
+    fixed_marker_weights = isTRUE(fixed_marker_weights),
+    shared_marker_weights = isTRUE(shared_marker_weights),
+    control = list(
+      quadrature_nodes = as.integer(gk_spec$n_gk),
+      vcov_diag_link = diag_link_cov
+    ),
+    assoc = assoc,
+    marker_weights = recovery_marker_weights,
+    shrinkage = shrinkage,
+    eps_fd = eps_cs,
+    id_var = id_var,
+    marker_var = marker_var,
+    time_var = time_var
+  ) # complete common fitting syntax for a simulation-recovery analysis
+  recovery_entry_point <- "joinme" # ordinary fitting function paired with simulate_joinme()
+  if (!is.null(.mixture_specification)) {
+    recovery_entry_point <- "joinme_mix"
+    recovery_arguments$n_classes <- .mixture_specification$n_classes
+    recovery_arguments$formulaClass <- .mixture_specification$formulaClass
+    recovery_arguments$class_type <- .mixture_specification$class_type
+    recovery_arguments$class_dimensions <- .mixture_specification$class_dimensions
+    recovery_arguments$class_ordering <- .mixture_specification$class_ordering
+  }
+  true_params$recovery <- list(
+    entry_point = recovery_entry_point,
+    arguments = recovery_arguments
+  ) # call with do.call(get(entry_point), arguments) to rebuild the fitted specification exactly
 
   list(
     dataLong = dataLong,

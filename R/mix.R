@@ -31,7 +31,9 @@
 #' }
 #'
 #' `shrinkage = 0`, `1`, and `2` select Student-\eqn{t_6}, Laplace, and Normal
-#' component densities, respectively.  The component locations and scales are
+#' latent-class component densities, respectively. These choices do not set
+#' the ordinary priors for `beta`, `alpha`, `iota`, marker effects or marker
+#' weights; declare those independently with [jm_prior()]. The component locations and scales are
 #' estimated. By default, Stan orders only the first selected random-intercept
 #' location. Selected slopes and other coordinates remain unrestricted.
 #' Alternatively, baseline class probabilities may be ordered, or ordering may
@@ -226,7 +228,7 @@ joinme_mix <- function(
     class_dimensions = class_dimensions,
     class_probability_concentration =
       prior_specification$class_probability,
-    class_regression_scale = prior_specification$class_regression,
+    class_regression_prior = prior_specification$class_regression,
     class_design = class_design,
     class_ordering = resolved_class_ordering,
     include_survival = has_survival_process
@@ -1014,7 +1016,14 @@ joinme_mix <- function(
       X_class_marker = matrix(0, nrow = number_markers, ncol = 0L),
       class_term_start_marker = 1L,
       class_term_count_marker = 0L,
-      class_regression_scale = 1,
+      prior_class_regression_family = 2L,
+      prior_class_regression_mu = numeric(0),
+      prior_class_regression_scale = numeric(0),
+      prior_class_regression_df = 1,
+      prior_class_regression_global_df = 1,
+      prior_class_regression_global_scale = 1,
+      prior_class_regression_slab_df = 4,
+      prior_class_regression_slab_scale = 2,
       mixture = NULL
     ))
   }
@@ -1174,18 +1183,6 @@ joinme_mix <- function(
       "{.arg priors$class_probability} must be positive and have length one or {.arg n_classes}."
     )
   }
-  class_regression_scale <- as.numeric(
-    mixture$class_regression_scale %||% 1
-  ) # prior standard deviation for multinomial-logit coefficients
-  if (
-    length(class_regression_scale) != 1L ||
-      !is.finite(class_regression_scale) ||
-      class_regression_scale <= 0
-  ) {
-    cli::cli_abort(
-      "{.arg priors$class_regression} must be a positive finite number."
-    )
-  }
   class_design <- mixture$class_design %||% list(
     subject = list(
       formula = ~1,
@@ -1226,6 +1223,25 @@ joinme_mix <- function(
       "Marker class design does not align with the fitted marker order."
     )
   }
+
+  # Materialise the class-regression prior only after both allocation-domain
+  # designs have established the exact concatenated coefficient dimension.
+  # This delayed expansion permits a concise scalar prior whilst making a
+  # coefficient-specific vector unambiguous and safe to validate.
+  class_regression_declaration <- mixture$class_regression_prior
+  class_regression_declaration <- .normalise_joinme_prior_component(
+    class_regression_declaration,
+    name = "class_regression",
+    default = prior_normal()
+  ) # validated family declaration shared by subject and marker class regressions
+  class_regression_prior_data <- .materialise_joinme_prior_data(
+    priors = list(
+      class_regression = .encode_joinme_prior(class_regression_declaration)
+    ),
+    dimensions = c(
+      class_regression = ncol(X_class_subject) + ncol(X_class_marker)
+    )
+  ) # Stan fields ordered as all subject-domain then all marker-domain coefficients
 
   include_survival <- isTRUE(mixture$include_survival)
 
@@ -1268,7 +1284,14 @@ joinme_mix <- function(
       as.integer(class_design$marker$class_term_start),
     class_term_count_marker =
       as.integer(class_design$marker$class_term_count),
-    class_regression_scale = class_regression_scale,
+    prior_class_regression_family = class_regression_prior_data$prior_class_regression_family,
+    prior_class_regression_mu = class_regression_prior_data$prior_class_regression_mu,
+    prior_class_regression_scale = class_regression_prior_data$prior_class_regression_scale,
+    prior_class_regression_df = class_regression_prior_data$prior_class_regression_df,
+    prior_class_regression_global_df = class_regression_prior_data$prior_class_regression_global_df,
+    prior_class_regression_global_scale = class_regression_prior_data$prior_class_regression_global_scale,
+    prior_class_regression_slab_df = class_regression_prior_data$prior_class_regression_slab_df,
+    prior_class_regression_slab_scale = class_regression_prior_data$prior_class_regression_slab_scale,
     mixture = list(
       n_classes = n_classes,
       class_type = selected_types,
@@ -1278,7 +1301,7 @@ joinme_mix <- function(
       ordering = ordering_name,
       ordered_location_coordinate = ordered_location_coordinate,
       class_probability = probability_prior,
-      class_regression_scale = class_regression_scale,
+      class_regression_prior = class_regression_declaration,
       class_design = class_design,
       distribution = c(
         "student_t_6",

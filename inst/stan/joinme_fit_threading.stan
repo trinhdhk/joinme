@@ -22,6 +22,7 @@ functions {
   #include helper/functions/link_functions.stanfunctions 
   #include helper/functions/basis_functions.stanfunctions
   #include helper/functions/composite_transform.stanfunctions
+  #include helper/functions/prior_families.stanfunctions
   #include helper/functions/joinme_fit_partial.stanfunctions
 }
 

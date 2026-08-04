@@ -98,20 +98,30 @@ adjustments.
 
 # Covariance regression as a random-effect block
 
-Write \(m=1,\ldots,M_{\mathrm{cov}}\) for the free entries required to construct
-\(L_i\). For the full lower-triangular model,
+Write \(m=1,\ldots,M_{\mathrm{cov}}\) for the packed latent coordinates used
+to construct \(L_i\). For the full model,
 \(M_{\mathrm{cov}}=Q(Q+1)/2\); for an independent covariance model,
-\(M_{\mathrm{cov}}=Q\). The linear predictor for entry \(m\) is
+\(M_{\mathrm{cov}}=Q\). Standard deviations and off-diagonal partial
+correlations have independent observed-covariate regressions:
 
 \[
-\ell_{im}
-=
-\alpha_{L,m}
-+
-\boldsymbol x_{\mathrm{cov},i}^{\top}\boldsymbol\beta_{L,m}
-+
-\lambda_{L,m}z_{L,im}.
+\eta^{sd}_{ir}
+=\alpha^{sd}_r
++\boldsymbol x_{sd,i}^{\top}\boldsymbol\beta^{sd}_r
++\lambda_{m(r)}z_{L,i,m(r)},
 \]
+
+\[
+\eta^{corr}_{ih}
+=\alpha^{corr}_h
++\boldsymbol x_{corr,i}^{\top}\boldsymbol\beta^{corr}_h
++\lambda_{m(h)}z_{L,i,m(h)}.
+\]
+
+They are declared by
+`formulaVCov = list(sd = ~ ..., corr = ~ ...)`. A single formula applies one
+shared design to both parts. The latent coordinates, and hence the mixture
+coordinate selection, retain the established packed lower-triangle order.
 
 For each packed lower-triangular coordinate \(m\), \(\lambda_{L,m}\) is one
 non-negative scalar loading. The collection
@@ -119,7 +129,7 @@ non-negative scalar loading. The collection
 vector; equivalently, its action is the diagonal mapping
 \(\operatorname{diag}(\boldsymbol\lambda_L)\boldsymbol z_{L,i}\), not a dense
 loading matrix. In an ordinary fit with \(z_{L,im}\sim N(0,1)\),
-\(\lambda_{L,m}\) is the residual standard deviation of \(\ell_{im}\) before
+\(\lambda_{L,m}\) is the residual standard deviation of its matched predictor before
 the diagonal link or off-diagonal partial-correlation transformation.
 
 Diagonal predictors pass through `softplus` or `exp`, as selected by
@@ -326,8 +336,11 @@ formulae instead gives a distinct predictor to every class, using a compact
 coefficient vector containing only the terms requested by that class. Because
 class-specific formulae need not share a natural low-to-high interpretation,
 their default `class_ordering` is `"none"` unless it is supplied explicitly.
-The Dirichlet concentration and Normal coefficient scale are supplied through
-`jm_prior(class_probability = ..., class_regression = ...)`.
+The Dirichlet concentration and the independently selected class-regression
+prior are supplied through
+`jm_prior(class_probability = ..., class_regression = ...)`. Class-regression
+coefficients may use Normal, fixed-degrees-of-freedom Student-t, Laplace, or
+regularised horseshoe priors.
 
 # Marker weights
 

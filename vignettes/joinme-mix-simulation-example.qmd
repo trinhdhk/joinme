@@ -27,7 +27,7 @@ class-membership regressions.
 The example therefore uses:
 
 - two latent classes;
-- one clustered subject-intercept coordinate;
+- one class-specific subject-intercept coordinate;
 - an intercept-only class-membership model;
 - Normal mixture innovations (`shrinkage = 2L`);
 - Gaussian longitudinal markers; and

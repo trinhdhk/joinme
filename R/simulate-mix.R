@@ -88,6 +88,9 @@
 #' @return A list with the same top-level components as [simulate_joinme()].
 #'   The `truth` and `true_params` entries additionally contain a `mixture`
 #'   record suitable for recovery studies and class-allocation assessment.
+#'   `truth$recovery$entry_point` is `"joinme_mix"`, and its `arguments`
+#'   preserve the formula-class, class-type, coordinate and ordering syntax
+#'   alongside every ordinary fitting argument.
 #'
 #' @examples
 #' \dontrun{
@@ -139,6 +142,7 @@ simulate_joinme_mix <- function(
   formulaDist = NULL,
   formulaAssoc = NULL,
   transforms = NULL,
+  priors = joinme_priors(),
   n_id = 50,
   families = c("gaussian", "student_t", "binomial"),
   marker_levels = NULL,
@@ -167,9 +171,8 @@ simulate_joinme_mix <- function(
     marker = list(sd = NULL, corr = NULL),
     id_marker_cov = list(
       latent = list(sd = NULL, corr = NULL),
-      alpha = NULL,
-      beta = NULL,
-      lambda = NULL,
+      sd = list(alpha = NULL, beta = NULL, lambda = NULL),
+      corr = list(alpha = NULL, beta = NULL, lambda = NULL),
       diag_link = "softplus"
     ),
     dist = list()
@@ -327,6 +330,14 @@ simulate_joinme_mix <- function(
     simulation$dataEvent <- NULL
     simulation$truth$formulaEvent <- NULL
     simulation$true_params$formulaEvent <- NULL
+    simulation$truth$assoc <- character(0)
+    simulation$true_params$assoc <- character(0)
+    simulation$truth$recovery$arguments$formulaEvent <- NULL
+    simulation$truth$recovery$arguments$dataEvent <- NULL
+    simulation$truth$recovery$arguments$assoc <- character(0)
+    simulation$true_params$recovery$arguments$formulaEvent <- NULL
+    simulation$true_params$recovery$arguments$dataEvent <- NULL
+    simulation$true_params$recovery$arguments$assoc <- character(0)
   }
   simulation
 }
@@ -608,7 +619,7 @@ simulate_joinme_mix <- function(
       class_type = selected_types,
       class_dimensions = specification$class_dimensions,
       class_probability_concentration = 1,
-      class_regression_scale = 1,
+      class_regression_prior = prior_normal(),
       class_design = class_design,
       class_ordering = ordering,
       include_survival = TRUE

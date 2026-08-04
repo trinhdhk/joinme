@@ -173,7 +173,11 @@
 #'   (`Surv(start, stop, status)`). Covariates in `formulaEvent` may vary by
 #'   interval. Leave this and `formulaEvent` as `NULL` for longitudinal-only
 #'   fitting.
-#' @param formulaVCov Covariance regression formula for id-specific marker-by-id effects.
+#' @param formulaVCov Covariance regression specification for id-specific
+#'   marker-by-id effects. Supply one formula to share its observed covariates,
+#'   or `list(sd = ~ ..., corr = ~ ...)` to model standard deviations and
+#'   off-diagonal partial correlations independently. Intercepts are always
+#'   component-specific parameters and are not duplicated in either design.
 #'   If the marker block omits the inner `( ... | id )`, marker-by-id effects are
 #'   absent and covariance-style associations (`corr`, `vcov`) are not allowed.
 #'   When present, `corr` associations use the off-diagonal entries of the
@@ -246,12 +250,15 @@
 #'   `joinme_tf(cv_total = ~ expit(x, intercept = TRUE, slope = TRUE))`, which
 #'   is fitted as `expit(iota_1 + iota_2 * x)`. See details.
 #'
-#' @param priors Prior declaration. Prefer `joinme_priors(...)`; raw named lists
-#'   with components `beta`, `alpha`, `iota`, and `lkj` remain supported.
+#' @param priors Prior declaration from [jm_prior()]. Separate coefficient
+#'   families may be supplied for `beta`, `alpha`, `iota`, `marker`,
+#'   `marker_weight`, `vcov_sd`, `vcov_corr`, and `class_regression`, together with an LKJ declaration
+#'   for correlations. `class_regression` applies to coefficients introduced
+#'   by `formulaClass` in [joinme_mix()].
 #' @param fixed_marker_weights Logical; if TRUE, marker weights are fixed at the
 #'   supplied base values. If FALSE, marker-weight perturbations are estimated
-#'   using the family selected by `shrinkage` (0 = Student-t(6), 1 = Laplace,
-#'   2 = Normal).
+#'   using `priors$marker_weight`. Their location and ordinary scale remain
+#'   fixed at zero and one so the supplied base weights retain their meaning.
 #' @param shared_marker_weights Logical; if TRUE, all weighted marker-based
 #'   association terms share one marker-weight structure. If FALSE, each active
 #'   weighted marker-based association term gets its own marker-weight structure.
@@ -407,6 +414,10 @@ joinme <- function(
       beta_prior = priors$beta,
       alpha_prior = priors$alpha,
       iota_prior = priors$iota,
+      marker_prior = priors$marker,
+      marker_weight_prior = priors$marker_weight,
+      vcov_sd_prior = priors$vcov_sd,
+      vcov_corr_prior = priors$vcov_corr,
       lkj_prior = priors$lkj,
       fixed_marker_weights = fixed_marker_weights,
       shared_marker_weights = shared_marker_weights,
@@ -564,7 +575,22 @@ joinme <- function(
   sd_stan <- .coerce_rstan_vectors(
     sd_stan,
     c(
-      "beta_scale",
+      "prior_beta_mu",
+      "prior_beta_scale",
+      "prior_alpha_mu",
+      "prior_alpha_scale",
+      "prior_iota_mu",
+      "prior_iota_scale",
+      "prior_marker_mu",
+      "prior_marker_scale",
+      "prior_marker_weight_mu",
+      "prior_marker_weight_scale",
+      "prior_vcov_sd_mu",
+      "prior_vcov_sd_scale",
+      "prior_vcov_corr_mu",
+      "prior_vcov_corr_scale",
+      "prior_class_regression_mu",
+      "prior_class_regression_scale",
       "const_data_cv",
       "const_data_cs",
       "const_data_corr",

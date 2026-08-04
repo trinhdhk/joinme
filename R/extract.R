@@ -500,8 +500,12 @@ extract.JoiNMeFit <- function(object,
         k_idx <- match(k_vars, dimnames(arr)[[3]])
         if (any(is.na(k_idx))) next
         for (ch in seq_len(dim(arr)[2])) {
-          coef_mat <- arr[, ch, k_idx, drop = FALSE]
-          out[, ch, col_pos:(col_pos + nrow(b_event) - 1L)] <- exp(as.matrix(coef_mat) %*% t(b_event)) / tmax
+          coef_mat <- matrix(
+            arr[, ch, k_idx, drop = FALSE],
+            nrow = dim(arr)[1],
+            ncol = length(k_idx)
+          ) # iteration-by-basis coefficient matrix after removing the singleton chain dimension
+          out[, ch, col_pos:(col_pos + nrow(b_event) - 1L)] <- exp(coef_mat %*% t(b_event)) / tmax
         }
         prefix <- if (k_event > 1L) paste0("event", k, ":") else ""
         dimnames(out)[[3]][col_pos:(col_pos + nrow(b_event) - 1L)] <- paste0(prefix, row_labels)

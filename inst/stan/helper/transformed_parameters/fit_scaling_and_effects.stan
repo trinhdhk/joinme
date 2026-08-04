@@ -5,8 +5,64 @@
    * 1. Scaled versions of fixed and random effect SDs where time transformations are applied
    * 2. Cholesky factors for random effect covariance structures
    * 3. Marker-average effects used in survival model
-   * 4. ID-specific variance structure for covariance regression
-   */
+  * 4. ID-specific variance structure for covariance regression
+  */
+
+  vector[M_cov] alpha_L = rep_vector(0, M_cov); // packed SD and correlation intercepts retained in the established lower-triangular reporting order
+  array[Q_idm] vector[K_cov_sd] beta_L_sd; // slopes unique to each standard-deviation coordinate and its formulaVCov$sd design
+  array[M_corr] vector[K_cov_corr] beta_L_corr; // slopes unique to each off-diagonal partial correlation and its formulaVCov$corr design
+
+  // STEP 1: transform the two covariance-regression coefficient blocks.
+  //
+  // Each block has its own formula, dimension and prior family. Packing all
+  // intercepts before the row-major slope matrix gives R, simulation and Stan
+  // one deterministic parameter order even when the two formulae differ.
+  {
+    vector[P_vcov_sd] vcov_sd_coefficient = joinme_prior_transform(
+      vcov_sd_coefficient_raw,
+      prior_vcov_sd_family,
+      prior_vcov_sd_mu,
+      prior_vcov_sd_scale,
+      horseshoe_local_vcov_sd,
+      horseshoe_global_vcov_sd,
+      horseshoe_slab_vcov_sd,
+      prior_vcov_sd_slab_scale
+    ); // SD intercepts and slopes after their selected prior transformation
+    vector[P_vcov_corr] vcov_corr_coefficient = joinme_prior_transform(
+      vcov_corr_coefficient_raw,
+      prior_vcov_corr_family,
+      prior_vcov_corr_mu,
+      prior_vcov_corr_scale,
+      horseshoe_local_vcov_corr,
+      horseshoe_global_vcov_corr,
+      horseshoe_slab_vcov_corr,
+      prior_vcov_corr_slab_scale
+    ); // off-diagonal correlation intercepts and slopes after their independent transformation
+    int correlation_coordinate = 1; // next row-major off-diagonal coordinate when reconstructing packed alpha_L
+
+    if (K_cov_sd > 0) {
+      for (r in 1 : Q_idm) {
+        int first_slope = Q_idm + (r - 1) * K_cov_sd + 1; // first packed SD slope for row r
+        int final_slope = Q_idm + r * K_cov_sd; // final packed SD slope for row r
+        beta_L_sd[r] = vcov_sd_coefficient[first_slope : final_slope];
+      }
+    }
+    if (K_cov_corr > 0) {
+      for (correlation in 1 : M_corr) {
+        int first_slope = M_corr + (correlation - 1) * K_cov_corr + 1; // first packed slope for this off-diagonal coordinate
+        int final_slope = M_corr + correlation * K_cov_corr; // final packed slope for this off-diagonal coordinate
+        beta_L_corr[correlation] = vcov_corr_coefficient[first_slope : final_slope];
+      }
+    }
+    for (m in 1 : M_cov) {
+      if (r_idx[m] == c_idx[m]) {
+        alpha_L[m] = vcov_sd_coefficient[r_idx[m]];
+      } else {
+        alpha_L[m] = vcov_corr_coefficient[correlation_coordinate];
+        correlation_coordinate += 1;
+      }
+    }
+  }
 
   /* -------------------- Effective (scaled-time) coefficient vectors for use with scaled design matrices */
   vector[P] beta_scaled = beta; // Role: coefficient scaled.
@@ -56,13 +112,33 @@
   matrix[R_mk, R_mk] L_v; // Cholesky factor for marker REs
   array[D] vector[R_mk] v_marker; // realized marker random effects
   if (R_mk > 0) {
-    if (indep_marker_re == 1) 
+    vector[D * R_mk] marker_raw; // packed standardised marker parameters in marker-major order
+    vector[D * R_mk] marker_prior_effect; // packed marker parameters after their selected unit-scale prior transformation
+    for (d in 1 : D) {
+      int marker_start = (d - 1) * R_mk + 1; // first packed coordinate for marker d
+      int marker_end = d * R_mk; // final packed coordinate for marker d
+      marker_raw[marker_start : marker_end] = z_v[d];
+    }
+    marker_prior_effect = joinme_prior_transform(
+      marker_raw,
+      prior_marker_family,
+      prior_marker_mu,
+      prior_marker_scale,
+      horseshoe_local_marker,
+      horseshoe_global_marker,
+      horseshoe_slab_marker,
+      prior_marker_slab_scale
+    );
+    if (indep_marker_re == 1)
       L_v = diag_matrix(tau_v_scaled);
     else 
       L_v = diag_pre_multiply(tau_v_scaled, Lcorr_v);
     
-    for (d in 1 : D) 
-      v_marker[d] = L_v * z_v[d];
+    for (d in 1 : D) {
+      int marker_start = (d - 1) * R_mk + 1; // first transformed coordinate for marker d
+      int marker_end = d * R_mk; // final transformed coordinate for marker d
+      v_marker[d] = L_v * marker_prior_effect[marker_start : marker_end];
+    }
   }
   
   /* -------------------- marker-by-id latent effects */
@@ -100,7 +176,7 @@
       int r = r_idx[m]; // Role: row position.
       int c = c_idx[m]; // Role: column position.
       if (r == c) {
-        real lp = alpha_L[m] + dot_product(beta_L[m], to_vector(Xcov[i]'))
+        real lp = alpha_L[m] + dot_product(beta_L_sd[r], to_vector(Xcov_sd[i]'))
           + lambda_L[m] * z_L[i][m];
         sd_i[r] = (vcov_diag_link == 1) ? exp(lp) : log1p_exp(lp);
       }
@@ -122,7 +198,8 @@
         real scale_prod = 1.0; // Role: scale product.
         for (c in 1 : r) {
           if (c < r) {
-            real lp = alpha_L[m_pos] + dot_product(beta_L[m_pos], to_vector(Xcov[i]'))
+            int correlation_coordinate = ((r - 1) * (r - 2)) %/% 2 + c; // row-major off-diagonal index: (2,1), (3,1), (3,2), ...
+            real lp = alpha_L[m_pos] + dot_product(beta_L_corr[correlation_coordinate], to_vector(Xcov_corr[i]'))
               + lambda_L[m_pos] * z_L[i][m_pos];
             real z_rc = tanh(lp); // Role: standardised latent value rc.
             Li[r, c] = sd_i[r] * scale_prod * z_rc;
@@ -154,6 +231,16 @@
   // - Keep perturbation model directly interpretable by adding signed latent
   //   perturbations to the supplied base weights.
   matrix[n_marker_weight_sets, D] z_marker_weight_sets = rep_matrix(0.0, n_marker_weight_sets, D); // Role: standardised latent value marker weight sets.
+  vector[D * estimate_marker_weights * use_marker_weight_assoc * n_marker_weight_sets] marker_weight_prior_effect = joinme_prior_transform(
+    z_marker_weights,
+    prior_marker_weight_family,
+    prior_marker_weight_mu,
+    prior_marker_weight_scale,
+    horseshoe_local_marker_weight,
+    horseshoe_global_marker_weight,
+    horseshoe_slab_marker_weight,
+    prior_marker_weight_slab_scale
+  ); // marker-weight perturbations after the selected fixed-unit-scale family transformation
   vector[D] marker_weights_eff_cv_total = marker_weights_cv_total; // Role: marker weights eff current value total.
   vector[D] marker_weights_eff_cs_total = marker_weights_cs_total; // Role: marker weights eff current slope total.
   vector[D] marker_weights_eff_cv_marker = marker_weights_cv_marker; // Role: marker weights eff current value marker.
@@ -163,7 +250,7 @@
       for (s in 1:n_marker_weight_sets) {
         int start_pos = (s - 1) * D + 1; // Role: starting pos.
         int end_pos = s * D; // Role: ending pos.
-        z_marker_weight_sets[s] = to_row_vector(z_marker_weights[start_pos:end_pos]);
+        z_marker_weight_sets[s] = to_row_vector(marker_weight_prior_effect[start_pos:end_pos]);
       }
     }
 
@@ -306,22 +393,57 @@
   vector[estimate_iota_intercept_cs_marker] iota_intercept_cs_marker_eff = rep_vector(0, estimate_iota_intercept_cs_marker); // Role: affine transformation intercept current slope marker eff.
   vector[estimate_iota_slope_cs_marker] iota_slope_cs_marker_eff = rep_vector(1, estimate_iota_slope_cs_marker); // Role: affine transformation slope current slope marker eff.
 
-  if (estimate_iota_intercept_cv > 0) iota_intercept_cv_eff = iota_scale * z_iota_intercept_cv;
-  if (estimate_iota_slope_cv > 0) iota_slope_cv_eff = iota_scale * z_iota_slope_cv;
-  if (estimate_iota_intercept_cs > 0) iota_intercept_cs_eff = iota_scale * z_iota_intercept_cs;
-  if (estimate_iota_slope_cs > 0) iota_slope_cs_eff = iota_scale * z_iota_slope_cs;
-  if (estimate_iota_intercept_corr > 0 && M_corr > 0) iota_intercept_corr_eff = iota_scale * z_iota_intercept_corr;
-  if (estimate_iota_slope_corr > 0 && M_corr > 0) iota_slope_corr_eff = iota_scale * z_iota_slope_corr;
-  if (estimate_iota_intercept_vcov > 0 && M_vcov > 0) iota_intercept_vcov_eff = iota_scale * z_iota_intercept_vcov;
-  if (estimate_iota_slope_vcov > 0 && M_vcov > 0) iota_slope_vcov_eff = iota_scale * z_iota_slope_vcov;
-  if (estimate_iota_intercept_cv_mean > 0) iota_intercept_cv_mean_eff = iota_scale * z_iota_intercept_cv_mean;
-  if (estimate_iota_slope_cv_mean > 0) iota_slope_cv_mean_eff = iota_scale * z_iota_slope_cv_mean;
-  if (estimate_iota_intercept_cv_marker > 0) iota_intercept_cv_marker_eff = iota_scale * z_iota_intercept_cv_marker;
-  if (estimate_iota_slope_cv_marker > 0) iota_slope_cv_marker_eff = iota_scale * z_iota_slope_cv_marker;
-  if (estimate_iota_intercept_cs_mean > 0) iota_intercept_cs_mean_eff = iota_scale * z_iota_intercept_cs_mean;
-  if (estimate_iota_slope_cs_mean > 0) iota_slope_cs_mean_eff = iota_scale * z_iota_slope_cs_mean;
-  if (estimate_iota_intercept_cs_marker > 0) iota_intercept_cs_marker_eff = iota_scale * z_iota_intercept_cs_marker;
-  if (estimate_iota_slope_cs_marker > 0) iota_slope_cs_marker_eff = iota_scale * z_iota_slope_cs_marker;
+  {
+    vector[n_iota_prior] iota_raw; // all affine-shift raw parameters in their documented block order
+    vector[n_iota_prior] iota_prior_effect; // scientific affine shifts after the selected prior transformation
+    int iota_position = 1; // next free position in the packed affine-shift vector
+
+    if (estimate_iota_intercept_cv > 0) { iota_raw[iota_position : iota_position + estimate_iota_intercept_cv - 1] = z_iota_intercept_cv; iota_position += estimate_iota_intercept_cv; }
+    if (estimate_iota_slope_cv > 0) { iota_raw[iota_position : iota_position + estimate_iota_slope_cv - 1] = z_iota_slope_cv; iota_position += estimate_iota_slope_cv; }
+    if (estimate_iota_intercept_cs > 0) { iota_raw[iota_position : iota_position + estimate_iota_intercept_cs - 1] = z_iota_intercept_cs; iota_position += estimate_iota_intercept_cs; }
+    if (estimate_iota_slope_cs > 0) { iota_raw[iota_position : iota_position + estimate_iota_slope_cs - 1] = z_iota_slope_cs; iota_position += estimate_iota_slope_cs; }
+    if (M_corr * estimate_iota_intercept_corr > 0) { iota_raw[iota_position : iota_position + M_corr * estimate_iota_intercept_corr - 1] = z_iota_intercept_corr; iota_position += M_corr * estimate_iota_intercept_corr; }
+    if (M_corr * estimate_iota_slope_corr > 0) { iota_raw[iota_position : iota_position + M_corr * estimate_iota_slope_corr - 1] = z_iota_slope_corr; iota_position += M_corr * estimate_iota_slope_corr; }
+    if (M_vcov * estimate_iota_intercept_vcov > 0) { iota_raw[iota_position : iota_position + M_vcov * estimate_iota_intercept_vcov - 1] = z_iota_intercept_vcov; iota_position += M_vcov * estimate_iota_intercept_vcov; }
+    if (M_vcov * estimate_iota_slope_vcov > 0) { iota_raw[iota_position : iota_position + M_vcov * estimate_iota_slope_vcov - 1] = z_iota_slope_vcov; iota_position += M_vcov * estimate_iota_slope_vcov; }
+    if (estimate_iota_intercept_cv_mean > 0) { iota_raw[iota_position : iota_position + estimate_iota_intercept_cv_mean - 1] = z_iota_intercept_cv_mean; iota_position += estimate_iota_intercept_cv_mean; }
+    if (estimate_iota_slope_cv_mean > 0) { iota_raw[iota_position : iota_position + estimate_iota_slope_cv_mean - 1] = z_iota_slope_cv_mean; iota_position += estimate_iota_slope_cv_mean; }
+    if (estimate_iota_intercept_cv_marker > 0) { iota_raw[iota_position : iota_position + estimate_iota_intercept_cv_marker - 1] = z_iota_intercept_cv_marker; iota_position += estimate_iota_intercept_cv_marker; }
+    if (estimate_iota_slope_cv_marker > 0) { iota_raw[iota_position : iota_position + estimate_iota_slope_cv_marker - 1] = z_iota_slope_cv_marker; iota_position += estimate_iota_slope_cv_marker; }
+    if (estimate_iota_intercept_cs_mean > 0) { iota_raw[iota_position : iota_position + estimate_iota_intercept_cs_mean - 1] = z_iota_intercept_cs_mean; iota_position += estimate_iota_intercept_cs_mean; }
+    if (estimate_iota_slope_cs_mean > 0) { iota_raw[iota_position : iota_position + estimate_iota_slope_cs_mean - 1] = z_iota_slope_cs_mean; iota_position += estimate_iota_slope_cs_mean; }
+    if (estimate_iota_intercept_cs_marker > 0) { iota_raw[iota_position : iota_position + estimate_iota_intercept_cs_marker - 1] = z_iota_intercept_cs_marker; iota_position += estimate_iota_intercept_cs_marker; }
+    if (estimate_iota_slope_cs_marker > 0) { iota_raw[iota_position : iota_position + estimate_iota_slope_cs_marker - 1] = z_iota_slope_cs_marker; }
+
+    iota_prior_effect = joinme_prior_transform(
+      iota_raw,
+      prior_iota_family,
+      prior_iota_mu,
+      prior_iota_scale,
+      horseshoe_local_iota,
+      horseshoe_global_iota,
+      horseshoe_slab_iota,
+      prior_iota_slab_scale
+    );
+
+    iota_position = 1;
+    if (estimate_iota_intercept_cv > 0) { iota_intercept_cv_eff = iota_prior_effect[iota_position : iota_position + estimate_iota_intercept_cv - 1]; iota_position += estimate_iota_intercept_cv; }
+    if (estimate_iota_slope_cv > 0) { iota_slope_cv_eff = iota_prior_effect[iota_position : iota_position + estimate_iota_slope_cv - 1]; iota_position += estimate_iota_slope_cv; }
+    if (estimate_iota_intercept_cs > 0) { iota_intercept_cs_eff = iota_prior_effect[iota_position : iota_position + estimate_iota_intercept_cs - 1]; iota_position += estimate_iota_intercept_cs; }
+    if (estimate_iota_slope_cs > 0) { iota_slope_cs_eff = iota_prior_effect[iota_position : iota_position + estimate_iota_slope_cs - 1]; iota_position += estimate_iota_slope_cs; }
+    if (M_corr * estimate_iota_intercept_corr > 0) { iota_intercept_corr_eff = iota_prior_effect[iota_position : iota_position + M_corr * estimate_iota_intercept_corr - 1]; iota_position += M_corr * estimate_iota_intercept_corr; }
+    if (M_corr * estimate_iota_slope_corr > 0) { iota_slope_corr_eff = iota_prior_effect[iota_position : iota_position + M_corr * estimate_iota_slope_corr - 1]; iota_position += M_corr * estimate_iota_slope_corr; }
+    if (M_vcov * estimate_iota_intercept_vcov > 0) { iota_intercept_vcov_eff = iota_prior_effect[iota_position : iota_position + M_vcov * estimate_iota_intercept_vcov - 1]; iota_position += M_vcov * estimate_iota_intercept_vcov; }
+    if (M_vcov * estimate_iota_slope_vcov > 0) { iota_slope_vcov_eff = iota_prior_effect[iota_position : iota_position + M_vcov * estimate_iota_slope_vcov - 1]; iota_position += M_vcov * estimate_iota_slope_vcov; }
+    if (estimate_iota_intercept_cv_mean > 0) { iota_intercept_cv_mean_eff = iota_prior_effect[iota_position : iota_position + estimate_iota_intercept_cv_mean - 1]; iota_position += estimate_iota_intercept_cv_mean; }
+    if (estimate_iota_slope_cv_mean > 0) { iota_slope_cv_mean_eff = iota_prior_effect[iota_position : iota_position + estimate_iota_slope_cv_mean - 1]; iota_position += estimate_iota_slope_cv_mean; }
+    if (estimate_iota_intercept_cv_marker > 0) { iota_intercept_cv_marker_eff = iota_prior_effect[iota_position : iota_position + estimate_iota_intercept_cv_marker - 1]; iota_position += estimate_iota_intercept_cv_marker; }
+    if (estimate_iota_slope_cv_marker > 0) { iota_slope_cv_marker_eff = iota_prior_effect[iota_position : iota_position + estimate_iota_slope_cv_marker - 1]; iota_position += estimate_iota_slope_cv_marker; }
+    if (estimate_iota_intercept_cs_mean > 0) { iota_intercept_cs_mean_eff = iota_prior_effect[iota_position : iota_position + estimate_iota_intercept_cs_mean - 1]; iota_position += estimate_iota_intercept_cs_mean; }
+    if (estimate_iota_slope_cs_mean > 0) { iota_slope_cs_mean_eff = iota_prior_effect[iota_position : iota_position + estimate_iota_slope_cs_mean - 1]; iota_position += estimate_iota_slope_cs_mean; }
+    if (estimate_iota_intercept_cs_marker > 0) { iota_intercept_cs_marker_eff = iota_prior_effect[iota_position : iota_position + estimate_iota_intercept_cs_marker - 1]; iota_position += estimate_iota_intercept_cs_marker; }
+    if (estimate_iota_slope_cs_marker > 0) { iota_slope_cs_marker_eff = iota_prior_effect[iota_position : iota_position + estimate_iota_slope_cs_marker - 1]; }
+  }
 
   /* -------------------- marker averages for survival association (unweighted mean across markers) */
   // For transformed marker-aggregated CV terms, signed marker weights are applied
@@ -352,43 +474,73 @@
     wbar_i[i] = diag_pre_multiply(row_scale_idm, L_i[i]) * zbar[i];
   
   /* -------------------- Effective association coefficients (flags applied) */
+  vector[6 + M_corr + M_vcov] alpha_prior_raw; // six scalar association latents followed by corr and vcov vectors
+  vector[6 + M_corr + M_vcov] alpha_prior_effect; // association latents after their block-specific prior transformation
+  alpha_prior_raw[1] = z_alpha_cv_total;
+  alpha_prior_raw[2] = z_alpha_cs_total;
+  alpha_prior_raw[3] = z_alpha_cv_mean;
+  alpha_prior_raw[4] = z_alpha_cs_mean;
+  alpha_prior_raw[5] = z_alpha_cv_marker;
+  alpha_prior_raw[6] = z_alpha_cs_marker;
+  if (M_corr > 0) alpha_prior_raw[7 : 6 + M_corr] = z_alpha_corr;
+  if (M_vcov > 0) alpha_prior_raw[7 + M_corr : 6 + M_corr + M_vcov] = z_alpha_vcov;
+  alpha_prior_effect = joinme_prior_transform(
+    alpha_prior_raw,
+    prior_alpha_family,
+    prior_alpha_mu,
+    prior_alpha_scale,
+    horseshoe_local_alpha,
+    horseshoe_global_alpha,
+    horseshoe_slab_alpha,
+    prior_alpha_slab_scale
+  );
+
   // Non-centred association construction with flexible sign constraints:
   // - when weighted marker-based association terms share one marker-weight
   //   structure, only the first active weighted term is constrained positive;
   // - when weighted marker-based association terms use separate weight
   //   structures, every active weighted term is constrained positive.
-  real z_alpha_cv_total_constrained = z_alpha_cv_total; // Role: standardised latent value shape current value total constrained.
-  real z_alpha_cs_total_constrained = z_alpha_cs_total; // Role: standardised latent value shape current slope total constrained.
-  real z_alpha_cv_marker_constrained = z_alpha_cv_marker; // Role: standardised latent value shape current value marker constrained.
-  real z_alpha_cs_marker_constrained = z_alpha_cs_marker; // Role: standardised latent value shape current slope marker constrained.
+  real z_alpha_cv_total_constrained = alpha_prior_effect[1]; // transformed latent for total current-value association
+  real z_alpha_cs_total_constrained = alpha_prior_effect[2]; // transformed latent for total current-slope association
+  real z_alpha_cv_marker_constrained = alpha_prior_effect[5]; // transformed latent for marker current-value association
+  real z_alpha_cs_marker_constrained = alpha_prior_effect[6]; // transformed latent for marker current-slope association
 
   if ((assoc_cv_total + assoc_cs_total + assoc_cv_marker + assoc_cs_marker) > 0) {
     if (shared_marker_weights == 1) {
       if (assoc_cv_total == 1) {
-        z_alpha_cv_total_constrained = abs(z_alpha_cv_total);
+        z_alpha_cv_total_constrained = abs(alpha_prior_effect[1]);
       } else if (assoc_cs_total == 1) {
-        z_alpha_cs_total_constrained = abs(z_alpha_cs_total);
+        z_alpha_cs_total_constrained = abs(alpha_prior_effect[2]);
       } else if (assoc_cv_marker == 1) {
-        z_alpha_cv_marker_constrained = abs(z_alpha_cv_marker);
+        z_alpha_cv_marker_constrained = abs(alpha_prior_effect[5]);
       } else if (assoc_cs_marker == 1) {
-        z_alpha_cs_marker_constrained = abs(z_alpha_cs_marker);
+        z_alpha_cs_marker_constrained = abs(alpha_prior_effect[6]);
       }
     } else {
-      if (assoc_cv_total == 1) z_alpha_cv_total_constrained = abs(z_alpha_cv_total);
-      if (assoc_cs_total == 1) z_alpha_cs_total_constrained = abs(z_alpha_cs_total);
-      if (assoc_cv_marker == 1) z_alpha_cv_marker_constrained = abs(z_alpha_cv_marker);
-      if (assoc_cs_marker == 1) z_alpha_cs_marker_constrained = abs(z_alpha_cs_marker);
+      if (assoc_cv_total == 1) z_alpha_cv_total_constrained = abs(alpha_prior_effect[1]);
+      if (assoc_cs_total == 1) z_alpha_cs_total_constrained = abs(alpha_prior_effect[2]);
+      if (assoc_cv_marker == 1) z_alpha_cv_marker_constrained = abs(alpha_prior_effect[5]);
+      if (assoc_cs_marker == 1) z_alpha_cs_marker_constrained = abs(alpha_prior_effect[6]);
     }
   }
 
-  real alpha_cv_total_scaled = z_alpha_cv_total_constrained * sd_alpha_cv_total; // Role: shape current value total scaled.
-  real alpha_cs_total_scaled = z_alpha_cs_total_constrained * sd_alpha_cs_total; // Role: shape current slope total scaled.
-  real alpha_cv_mean_scaled = z_alpha_cv_mean * sd_alpha_cv_mean; // Role: shape current value mean scaled.
-  real alpha_cs_mean_scaled = z_alpha_cs_mean * sd_alpha_cs_mean; // Role: shape current slope mean scaled.
-  real alpha_cv_marker = z_alpha_cv_marker_constrained * sd_alpha_cv_marker; // Role: shape current value marker.
-  real alpha_cs_marker = z_alpha_cs_marker_constrained * sd_alpha_cs_marker; // Role: shape current slope marker.
-  vector[M_corr] alpha_corr_scaled = s_corr * z_alpha_corr; // Role: shape correlation scaled.
-  vector[M_vcov] alpha_vcov_scaled = s_vcov * z_alpha_vcov; // Role: shape covariance scaled.
+  /*
+   * These quantities are the association coefficients used by the hazard.
+   * They are not multiplied by an additional unidentified random scale: the
+   * location and scale supplied in `jm_prior(alpha = ...)` therefore describe
+   * the coefficient itself. The suffix "scaled" is retained because the
+   * downstream likelihood has historically used these names.
+   */
+  real alpha_cv_total_scaled = z_alpha_cv_total_constrained; // Role: total current-value association coefficient on the hazard scale.
+  real alpha_cs_total_scaled = z_alpha_cs_total_constrained; // Role: total current-slope association coefficient on the hazard scale.
+  real alpha_cv_mean_scaled = alpha_prior_effect[3]; // Role: subject-mean current-value association coefficient on the hazard scale.
+  real alpha_cs_mean_scaled = alpha_prior_effect[4]; // Role: subject-mean current-slope association coefficient on the hazard scale.
+  real alpha_cv_marker = z_alpha_cv_marker_constrained; // Role: marker current-value association coefficient on the hazard scale.
+  real alpha_cs_marker = z_alpha_cs_marker_constrained; // Role: marker current-slope association coefficient on the hazard scale.
+  vector[M_corr] alpha_corr_scaled; // transformed correlation-association coefficients
+  vector[M_vcov] alpha_vcov_scaled; // transformed covariance-association coefficients
+  if (M_corr > 0) alpha_corr_scaled = alpha_prior_effect[7 : 6 + M_corr];
+  if (M_vcov > 0) alpha_vcov_scaled = alpha_prior_effect[7 + M_corr : 6 + M_corr + M_vcov];
 
   real a_cv_total = assoc_cv_total * alpha_cv_total_scaled; // total CV coefficient
   real a_cs_total = assoc_cs_total * alpha_cs_total_scaled; // total CS coefficient

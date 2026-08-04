@@ -307,27 +307,58 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
       )
       if (!is.null(alpha_tbl)) reg_rows[[length(reg_rows) + 1L]] <- alpha_tbl
 
-      k_cov <- as.integer(sd$K_cov %||% 0L)
-      if (m_cov > 0 && k_cov > 0) {
-        cov_labels <- colnames(sd$Xcov)
-        if (is.null(cov_labels) || length(cov_labels) != k_cov) {
-          cov_labels <- paste0("k", seq_len(k_cov))
-        }
-        beta_vars <- as.vector(outer(seq_len(m_cov), seq_len(k_cov), function(m, k) paste0("beta_L[", m, ",", k, "]")))
-        beta_blocks <- rep(alpha_blocks, each = k_cov)
-        beta_rows <- as.vector(outer(seq_len(m_cov), seq_len(k_cov), function(m, k) rc_map[m, 1]))
-        beta_cols <- as.vector(outer(seq_len(m_cov), seq_len(k_cov), function(m, k) rc_map[m, 2]))
-        beta_terms <- as.vector(outer(seq_len(m_cov), seq_len(k_cov), function(m, k) {
-          cov_labels[k]
-        }))
-        beta_tbl <- .summarize_block_parameters(
-          beta_vars,
-          block_labels = beta_blocks,
-          term_labels = beta_terms,
-          row_labels = beta_rows,
-          col_labels = beta_cols
+      # The two formulaVCov components may have unrelated model matrices, so
+      # their posterior slope names and scientific labels are assembled
+      # independently. Earlier fitted objects stored one shared beta_L array;
+      # that representation remains readable without changing new fits.
+      covariance_design <- .stored_vcov_design(sd) # current split design or a read-only legacy shared-design view
+      k_cov_sd <- covariance_design$k_sd
+      k_cov_corr <- covariance_design$k_corr
+      if (isTRUE(covariance_design$legacy) && m_cov > 0L && k_cov_sd > 0L) {
+        shared_labels <- colnames(covariance_design$x_sd) %||% paste0("k", seq_len(k_cov_sd))
+        beta_legacy_vars <- as.vector(outer(
+          seq_len(m_cov), seq_len(k_cov_sd),
+          function(m, k) paste0("beta_L[", m, ",", k, "]")
+        ))
+        beta_legacy_tbl <- .summarize_block_parameters(
+          beta_legacy_vars,
+          block_labels = rep(alpha_blocks, times = k_cov_sd),
+          term_labels = rep(shared_labels, each = m_cov),
+          row_labels = rep(rc_map[, 1], times = k_cov_sd),
+          col_labels = rep(rc_map[, 2], times = k_cov_sd)
         )
-        if (!is.null(beta_tbl)) reg_rows[[length(reg_rows) + 1L]] <- beta_tbl
+        if (!is.null(beta_legacy_tbl)) reg_rows[[length(reg_rows) + 1L]] <- beta_legacy_tbl
+      } else if (q_idm > 0L && k_cov_sd > 0L) {
+        sd_labels <- colnames(covariance_design$x_sd) %||% paste0("k", seq_len(k_cov_sd))
+        beta_sd_vars <- as.vector(outer(
+          seq_len(q_idm), seq_len(k_cov_sd),
+          function(r, k) paste0("beta_L_sd[", r, ",", k, "]")
+        ))
+        beta_sd_tbl <- .summarize_block_parameters(
+          beta_sd_vars,
+          block_labels = rep("SD[id:marker]", q_idm * k_cov_sd),
+          term_labels = rep(sd_labels, each = q_idm),
+          row_labels = rep(seq_len(q_idm), times = k_cov_sd),
+          col_labels = rep(seq_len(q_idm), times = k_cov_sd)
+        )
+        if (!is.null(beta_sd_tbl)) reg_rows[[length(reg_rows) + 1L]] <- beta_sd_tbl
+      }
+
+      correlation_map <- rc_map[rc_map[, 1] != rc_map[, 2], , drop = FALSE]
+      if (!isTRUE(covariance_design$legacy) && nrow(correlation_map) > 0L && k_cov_corr > 0L) {
+        corr_labels <- colnames(covariance_design$x_corr) %||% paste0("k", seq_len(k_cov_corr))
+        beta_corr_vars <- as.vector(outer(
+          seq_len(nrow(correlation_map)), seq_len(k_cov_corr),
+          function(m, k) paste0("beta_L_corr[", m, ",", k, "]")
+        ))
+        beta_corr_tbl <- .summarize_block_parameters(
+          beta_corr_vars,
+          block_labels = rep("K[id:marker]", nrow(correlation_map) * k_cov_corr),
+          term_labels = rep(corr_labels, each = nrow(correlation_map)),
+          row_labels = rep(correlation_map[, 1], times = k_cov_corr),
+          col_labels = rep(correlation_map[, 2], times = k_cov_corr)
+        )
+        if (!is.null(beta_corr_tbl)) reg_rows[[length(reg_rows) + 1L]] <- beta_corr_tbl
       }
 
       lambda_vars <- paste0("lambda_L[", seq_len(m_cov), "]")

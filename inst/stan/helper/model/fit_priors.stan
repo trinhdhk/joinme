@@ -36,7 +36,21 @@
   
   // -------------------- Priors
   /* Fixed effects + distributional regressions */
-  beta ~ student_t(6, 0, beta_scale);
+  if (prior_beta_family == 1) {
+    beta ~ student_t(prior_beta_df, prior_beta_mu, prior_beta_scale);
+  } else if (prior_beta_family == 2) {
+    beta ~ normal(prior_beta_mu, prior_beta_scale);
+  } else if (prior_beta_family == 3) {
+    beta ~ double_exponential(prior_beta_mu, prior_beta_scale);
+  } else {
+    vector[P] beta_horseshoe_scale = prior_beta_scale .* joinme_regularized_horseshoe_scale(
+      horseshoe_local_beta,
+      horseshoe_global_beta[1],
+      horseshoe_slab_beta[1],
+      prior_beta_slab_scale
+    ); // regularised coefficient-specific scale after global and local shrinkage
+    beta ~ normal(prior_beta_mu, beta_horseshoe_scale);
+  }
   beta_sigma ~ student_t(6, 0, 1);
   beta_nu ~ student_t(6, 0, 1);
   beta_phi ~ student_t(6, 0, 1);
@@ -86,7 +100,9 @@
     tau_v ~ exponential(1);
     Lcorr_v ~ lkj_corr_cholesky(lkj_eta);
     for (d in 1 : D)
-      target += re_weight_marker[d] * std_normal_lpdf(z_v[d]);
+      target += re_weight_marker[d] * joinme_standard_prior_lpdf(
+        z_v[d] | prior_marker_family, prior_marker_df
+      );
     to_vector(B_cross) ~ std_normal();
   }
   
@@ -101,16 +117,55 @@
   
   /* Covariance regression priors */
   {
-    real vcov_lp_scale = 1; // Role: covariance lp scale.
-    alpha_L ~ student_t(6, 0, vcov_lp_scale);
-    for (m in 1 : M_cov) 
-      beta_L[m] ~ student_t(6, 0, vcov_lp_scale);
+    real vcov_latent_scale = 1; // fixed half-Student-t scale for unexplained covariance-predictor heterogeneity
+
+    // STEP 1: assign the declared family independently to the packed SD and
+    // correlation coefficient blocks. Locations and scales enter through the
+    // transformed-parameter mapping, whilst this density remains standardised.
+    target += joinme_standard_prior_lpdf(
+      vcov_sd_coefficient_raw |
+      prior_vcov_sd_family,
+      prior_vcov_sd_df
+    );
+    target += joinme_standard_prior_lpdf(
+      vcov_corr_coefficient_raw |
+      prior_vcov_corr_family,
+      prior_vcov_corr_df
+    );
+
+    // STEP 2: add a regularised-horseshoe hierarchy only for a block which
+    // selected that family. Zero-length declarations ensure all other families
+    // add neither parameters nor irrelevant prior geometry.
+    if (prior_vcov_sd_family == 4) {
+      horseshoe_local_vcov_sd ~ student_t(prior_vcov_sd_df, 0, 1);
+      horseshoe_global_vcov_sd ~ student_t(
+        prior_vcov_sd_global_df, 0, prior_vcov_sd_global_scale
+      );
+      horseshoe_slab_vcov_sd ~ inv_gamma(
+        0.5 * prior_vcov_sd_slab_df,
+        0.5 * prior_vcov_sd_slab_df
+      );
+    }
+    if (prior_vcov_corr_family == 4) {
+      horseshoe_local_vcov_corr ~ student_t(prior_vcov_corr_df, 0, 1);
+      horseshoe_global_vcov_corr ~ student_t(
+        prior_vcov_corr_global_df, 0, prior_vcov_corr_global_scale
+      );
+      horseshoe_slab_vcov_corr ~ inv_gamma(
+        0.5 * prior_vcov_corr_slab_df,
+        0.5 * prior_vcov_corr_slab_df
+      );
+    }
+
+    // STEP 3: retain the identified non-negative residual loading. This is a
+    // hyperparameter, rather than an observed-covariate coefficient, so it is
+    // deliberately separate from the two formula-specific coefficient priors.
     // Each lambda_L[m] is the residual standard deviation on one untransformed
     // covariance-predictor coordinate because ordinary z_L[i][m] is standard
     // Normal. The vector acts element-wise, equivalently through a diagonal
     // loading matrix. It is constrained nonnegative because its sign can
     // always be absorbed into the symmetric latent z_L coordinate.
-    lambda_L ~ student_t(6, 0, vcov_lp_scale);
+    lambda_L ~ student_t(6, 0, vcov_latent_scale);
     for (i in 1 : n_id)
       target += re_weight_L[i] * std_normal_lpdf(z_L[i]);
   }
@@ -118,22 +173,15 @@
   /* Baseline hazard priors (per event type) */
   for (k_ev in 1 : K_event) { // event-specific baseline hazard
     // Intercept is encoded in the first basis column (constant 1s).
-    // bs_gamma_c[k_ev][1] ~ normal(-3, alpha_scale);
     bs_gamma_c[k_ev][1] ~ student_t(3, -5, 6);
     if (Kbs > 1)
-      bs_gamma_c[k_ev][2:Kbs] ~ student_t(3, 0, alpha_scale);
+      bs_gamma_c[k_ev][2:Kbs] ~ student_t(3, 0, 1);
     if (Kbs >= 4) // penalised spline second differences (exclude intercept)
       for (k in 4 : Kbs)
         target += normal_lpdf(
                               bs_gamma_c[k_ev][k] - 2 * bs_gamma_c[k_ev][k - 1]
                               + bs_gamma_c[k_ev][k - 2] | 0, tau_spline);
-    if (shrinkage == 1) {
-      gamma_w[k_ev] ~ double_exponential(0, alpha_scale);
-    } else if (shrinkage == 2) {
-      gamma_w[k_ev] ~ normal(0, alpha_scale);
-    } else {
-      gamma_w[k_ev] ~ student_t(6, 0, alpha_scale);
-    }
+    gamma_w[k_ev] ~ student_t(6, 0, 1);
   }
   
   /* Distributional parameters (marker-specific + ordinal cutpoints) */
@@ -145,29 +193,14 @@
   tau_family ~ beta(2, 2);
   cutpoints_ord ~ normal(0, 2);
   
-  /* Association priors */
- 
-  sd_alpha_cv_total ~ exponential(1);
-  sd_alpha_cs_total ~ exponential(1);
-  sd_alpha_cv_mean ~ exponential(1);
-  sd_alpha_cs_mean ~ exponential(1);
-  sd_alpha_cv_marker ~ exponential(1);
-  sd_alpha_cs_marker ~ exponential(1);
-  // s_corr / s_vcov are global half-normal scales for covariance-style
-  // association coefficients. z_alpha_corr / z_alpha_vcov are standardized
-  // coefficient latents, and the effective hazard coefficients are defined in
-  // transformed parameters as s_* times those latents.
-  s_corr ~ exponential(1);
-  s_vcov ~ exponential(1);
-
   /**
    * @brief Exchangeable Dirichlet priors for piecewise-linear increments.
    *
    * @details A vector of ones gives a uniform prior over the simplex, so no
    * interval is preferred before seeing the longitudinal and event data. The
    * optional second-difference penalty below can add smoothness without
-   * changing the ordering constraint. Existing I-splines retain their latent
-   * increment priors in the shrinkage-family branches below.
+   * changing the ordering constraint. Existing I-splines retain latent
+   * increment priors chosen by the alpha prior family below.
    */
   if ((tf_mode_cv_tot == 3 || tf_mode_cv_tot == 7) && n_free_spline_cv > 0)
     pwlin_simplex_cv ~ dirichlet(rep_vector(1, n_free_spline_cv));
@@ -188,20 +221,70 @@
   if ((tf_mode_cs_marker == 3 || tf_mode_cs_marker == 7) && n_free_spline_cs_marker > 0)
     pwlin_simplex_cs_marker ~ dirichlet(rep_vector(1, n_free_spline_cs_marker));
 
-  
-  /* Shrinkage family switch for corr weights */
-  if (shrinkage == 1) {
-    z_alpha_corr ~ double_exponential(0, 1);
-    z_alpha_vcov ~ double_exponential(0, 1);
-    z_alpha_cv_total ~ double_exponential(0, 1);
-    z_alpha_cs_total ~ double_exponential(0, 1);
-    z_alpha_cv_mean ~ double_exponential(0, 1);
-    z_alpha_cs_mean ~ double_exponential(0, 1);
-    z_alpha_cv_marker ~ double_exponential(0, 1);
-    z_alpha_cs_marker ~ double_exponential(0, 1);
-    // if (estimate_marker_weights == 1 && use_marker_weight_assoc == 1)
-    z_marker_weights ~ double_exponential(0, 1);
+  /**
+   * Independent prior families for association, iota and marker weights.
+   * Raw quantities are zero-centred and unit-scale; their scientific location,
+   * scale and optional horseshoe transformation are applied in transformed
+   * parameters. This keeps the five families independent of the class
+   * component family, which is declared only by the mixture entry point.
+   */
+  target += joinme_standard_prior_lpdf(
+    alpha_prior_raw | prior_alpha_family, prior_alpha_df
+  );
+  target += joinme_standard_prior_lpdf(
+    z_marker_weights | prior_marker_weight_family, prior_marker_weight_df
+  );
+  target += joinme_standard_prior_lpdf(z_iota_intercept_cv | prior_iota_family, prior_iota_df);
+  target += joinme_standard_prior_lpdf(z_iota_slope_cv | prior_iota_family, prior_iota_df);
+  target += joinme_standard_prior_lpdf(z_iota_intercept_cs | prior_iota_family, prior_iota_df);
+  target += joinme_standard_prior_lpdf(z_iota_slope_cs | prior_iota_family, prior_iota_df);
+  target += joinme_standard_prior_lpdf(z_iota_intercept_corr | prior_iota_family, prior_iota_df);
+  target += joinme_standard_prior_lpdf(z_iota_slope_corr | prior_iota_family, prior_iota_df);
+  target += joinme_standard_prior_lpdf(z_iota_intercept_vcov | prior_iota_family, prior_iota_df);
+  target += joinme_standard_prior_lpdf(z_iota_slope_vcov | prior_iota_family, prior_iota_df);
+  target += joinme_standard_prior_lpdf(z_iota_intercept_cv_mean | prior_iota_family, prior_iota_df);
+  target += joinme_standard_prior_lpdf(z_iota_slope_cv_mean | prior_iota_family, prior_iota_df);
+  target += joinme_standard_prior_lpdf(z_iota_intercept_cv_marker | prior_iota_family, prior_iota_df);
+  target += joinme_standard_prior_lpdf(z_iota_slope_cv_marker | prior_iota_family, prior_iota_df);
+  target += joinme_standard_prior_lpdf(z_iota_intercept_cs_mean | prior_iota_family, prior_iota_df);
+  target += joinme_standard_prior_lpdf(z_iota_slope_cs_mean | prior_iota_family, prior_iota_df);
+  target += joinme_standard_prior_lpdf(z_iota_intercept_cs_marker | prior_iota_family, prior_iota_df);
+  target += joinme_standard_prior_lpdf(z_iota_slope_cs_marker | prior_iota_family, prior_iota_df);
 
+  if (prior_beta_family == 4) {
+    horseshoe_local_beta ~ student_t(prior_beta_df, 0, 1);
+    horseshoe_global_beta ~ student_t(prior_beta_global_df, 0, prior_beta_global_scale);
+    horseshoe_slab_beta ~ inv_gamma(0.5 * prior_beta_slab_df, 0.5 * prior_beta_slab_df);
+  }
+  if (prior_alpha_family == 4) {
+    horseshoe_local_alpha ~ student_t(prior_alpha_df, 0, 1);
+    horseshoe_global_alpha ~ student_t(prior_alpha_global_df, 0, prior_alpha_global_scale);
+    horseshoe_slab_alpha ~ inv_gamma(0.5 * prior_alpha_slab_df, 0.5 * prior_alpha_slab_df);
+  }
+  if (prior_iota_family == 4) {
+    horseshoe_local_iota ~ student_t(prior_iota_df, 0, 1);
+    horseshoe_global_iota ~ student_t(prior_iota_global_df, 0, prior_iota_global_scale);
+    horseshoe_slab_iota ~ inv_gamma(0.5 * prior_iota_slab_df, 0.5 * prior_iota_slab_df);
+  }
+  if (prior_marker_family == 4) {
+    horseshoe_local_marker ~ student_t(prior_marker_df, 0, 1);
+    horseshoe_global_marker ~ student_t(prior_marker_global_df, 0, prior_marker_global_scale);
+    horseshoe_slab_marker ~ inv_gamma(0.5 * prior_marker_slab_df, 0.5 * prior_marker_slab_df);
+  }
+  if (prior_marker_weight_family == 4) {
+    horseshoe_local_marker_weight ~ student_t(prior_marker_weight_df, 0, 1);
+    horseshoe_global_marker_weight ~ student_t(prior_marker_weight_global_df, 0, prior_marker_weight_global_scale);
+    horseshoe_slab_marker_weight ~ inv_gamma(0.5 * prior_marker_weight_slab_df, 0.5 * prior_marker_weight_slab_df);
+  }
+
+
+  /*
+   * Association-shape increments use the alpha family's standard raw law.
+   * A regularised horseshoe has a standard-Normal raw law, so the simplex or
+   * softmax shape coordinates remain separate from the horseshoe coefficient
+   * scales and do not duplicate their global--local hierarchy.
+   */
+  if (prior_alpha_family == 3) {
     /* Penalised monotone I-spline shape priors. */
     if (tf_mode_cv_tot != 3 && tf_mode_cv_tot != 7 && n_free_spline_cv > 0) z_spline_cv ~ double_exponential(0, 1);
     if (tf_mode_cs_tot != 3 && tf_mode_cs_tot != 7 && n_free_spline_cs > 0) z_spline_cs ~ double_exponential(0, 1);
@@ -212,34 +295,7 @@
     if (tf_mode_cs_mean != 3 && tf_mode_cs_mean != 7 && n_free_spline_cs_mean > 0) z_spline_cs_mean ~ double_exponential(0, 1);
     if (tf_mode_cs_marker != 3 && tf_mode_cs_marker != 7 && n_free_spline_cs_marker > 0) z_spline_cs_marker ~ double_exponential(0, 1);
 
-    if (estimate_iota_intercept_cv > 0) z_iota_intercept_cv ~ std_normal();
-    if (estimate_iota_slope_cv > 0) z_iota_slope_cv ~ std_normal();
-    if (estimate_iota_intercept_cs > 0) z_iota_intercept_cs ~ std_normal();
-    if (estimate_iota_slope_cs > 0) z_iota_slope_cs ~ std_normal();
-    if (estimate_iota_intercept_corr > 0) z_iota_intercept_corr ~ std_normal();
-    if (estimate_iota_slope_corr > 0) z_iota_slope_corr ~ std_normal();
-    if (estimate_iota_intercept_vcov > 0) z_iota_intercept_vcov ~ std_normal();
-    if (estimate_iota_slope_vcov > 0) z_iota_slope_vcov ~ std_normal();
-    if (estimate_iota_intercept_cv_mean > 0) z_iota_intercept_cv_mean ~ std_normal();
-    if (estimate_iota_slope_cv_mean > 0) z_iota_slope_cv_mean ~ std_normal();
-    if (estimate_iota_intercept_cv_marker > 0) z_iota_intercept_cv_marker ~ std_normal();
-    if (estimate_iota_slope_cv_marker > 0) z_iota_slope_cv_marker ~ std_normal();
-    if (estimate_iota_intercept_cs_mean > 0) z_iota_intercept_cs_mean ~ std_normal();
-    if (estimate_iota_slope_cs_mean > 0) z_iota_slope_cs_mean ~ std_normal();
-    if (estimate_iota_intercept_cs_marker > 0) z_iota_intercept_cs_marker ~ std_normal();
-    if (estimate_iota_slope_cs_marker > 0) z_iota_slope_cs_marker ~ std_normal();
-  } else if (shrinkage == 2) {
-    z_alpha_corr ~ std_normal();
-    z_alpha_vcov ~ std_normal();
-    z_alpha_cv_total ~ std_normal();
-    z_alpha_cs_total ~ std_normal();
-    z_alpha_cv_mean ~ std_normal();
-    z_alpha_cs_mean ~ std_normal();
-    z_alpha_cv_marker ~ std_normal();
-    z_alpha_cs_marker ~ std_normal();
-    // if (estimate_marker_weights == 1 && use_marker_weight_assoc == 1)
-    z_marker_weights ~ std_normal();
-
+  } else if (prior_alpha_family == 2 || prior_alpha_family == 4) {
     /* Penalised monotone I-spline shape priors. */
     if (tf_mode_cv_tot != 3 && tf_mode_cv_tot != 7 && n_free_spline_cv > 0) z_spline_cv ~ std_normal();
     if (tf_mode_cs_tot != 3 && tf_mode_cs_tot != 7 && n_free_spline_cs > 0) z_spline_cs ~ std_normal();
@@ -250,60 +306,17 @@
     if (tf_mode_cs_mean != 3 && tf_mode_cs_mean != 7 && n_free_spline_cs_mean > 0) z_spline_cs_mean ~ std_normal();
     if (tf_mode_cs_marker != 3 && tf_mode_cs_marker != 7 && n_free_spline_cs_marker > 0) z_spline_cs_marker ~ std_normal();
 
-    if (estimate_iota_intercept_cv > 0) z_iota_intercept_cv ~ std_normal();
-    if (estimate_iota_slope_cv > 0) z_iota_slope_cv ~ std_normal();
-    if (estimate_iota_intercept_cs > 0) z_iota_intercept_cs ~ std_normal();
-    if (estimate_iota_slope_cs > 0) z_iota_slope_cs ~ std_normal();
-    if (estimate_iota_intercept_corr > 0) z_iota_intercept_corr ~ std_normal();
-    if (estimate_iota_slope_corr > 0) z_iota_slope_corr ~ std_normal();
-    if (estimate_iota_intercept_vcov > 0) z_iota_intercept_vcov ~ std_normal();
-    if (estimate_iota_slope_vcov > 0) z_iota_slope_vcov ~ std_normal();
-    if (estimate_iota_intercept_cv_mean > 0) z_iota_intercept_cv_mean ~ std_normal();
-    if (estimate_iota_slope_cv_mean > 0) z_iota_slope_cv_mean ~ std_normal();
-    if (estimate_iota_intercept_cv_marker > 0) z_iota_intercept_cv_marker ~ std_normal();
-    if (estimate_iota_slope_cv_marker > 0) z_iota_slope_cv_marker ~ std_normal();
-    if (estimate_iota_intercept_cs_mean > 0) z_iota_intercept_cs_mean ~ std_normal();
-    if (estimate_iota_slope_cs_mean > 0) z_iota_slope_cs_mean ~ std_normal();
-    if (estimate_iota_intercept_cs_marker > 0) z_iota_intercept_cs_marker ~ std_normal();
-    if (estimate_iota_slope_cs_marker > 0) z_iota_slope_cs_marker ~ std_normal();
   } else {
-    z_alpha_corr ~ student_t(6, 0, 1);
-    z_alpha_vcov ~ student_t(6, 0, 1);
-    z_alpha_cv_total ~ student_t(6, 0, 1);
-    z_alpha_cs_total ~ student_t(6, 0, 1);
-    z_alpha_cv_mean ~ student_t(6, 0, 1);
-    z_alpha_cs_mean ~ student_t(6, 0, 1);
-    z_alpha_cv_marker ~ student_t(6, 0, 1);
-    z_alpha_cs_marker ~ student_t(6, 0, 1);
-    // if (estimate_marker_weights == 1 && use_marker_weight_assoc == 1)
-    z_marker_weights ~ student_t(6, 0, 1);
-
     /* Penalised monotone I-spline shape priors. */
-    if (tf_mode_cv_tot != 3 && tf_mode_cv_tot != 7 && n_free_spline_cv > 0) z_spline_cv ~ student_t(6, 0, 1);
-    if (tf_mode_cs_tot != 3 && tf_mode_cs_tot != 7 && n_free_spline_cs > 0) z_spline_cs ~ student_t(6, 0, 1);
-    if (tf_mode_corr != 3 && tf_mode_corr != 7 && n_free_spline_corr > 0) to_vector(z_spline_corr) ~ student_t(6, 0, 1);
-    if (tf_mode_vcov != 3 && tf_mode_vcov != 7 && n_free_spline_vcov > 0) to_vector(z_spline_vcov) ~ student_t(6, 0, 1);
-    if (tf_mode_cv_mean != 3 && tf_mode_cv_mean != 7 && n_free_spline_cv_mean > 0) z_spline_cv_mean ~ student_t(6, 0, 1);
-    if (tf_mode_cv_marker != 3 && tf_mode_cv_marker != 7 && n_free_spline_cv_marker > 0) z_spline_cv_marker ~ student_t(6, 0, 1);
-    if (tf_mode_cs_mean != 3 && tf_mode_cs_mean != 7 && n_free_spline_cs_mean > 0) z_spline_cs_mean ~ student_t(6, 0, 1);
-    if (tf_mode_cs_marker != 3 && tf_mode_cs_marker != 7 && n_free_spline_cs_marker > 0) z_spline_cs_marker ~ student_t(6, 0, 1);
+    if (tf_mode_cv_tot != 3 && tf_mode_cv_tot != 7 && n_free_spline_cv > 0) z_spline_cv ~ student_t(prior_alpha_df, 0, 1);
+    if (tf_mode_cs_tot != 3 && tf_mode_cs_tot != 7 && n_free_spline_cs > 0) z_spline_cs ~ student_t(prior_alpha_df, 0, 1);
+    if (tf_mode_corr != 3 && tf_mode_corr != 7 && n_free_spline_corr > 0) to_vector(z_spline_corr) ~ student_t(prior_alpha_df, 0, 1);
+    if (tf_mode_vcov != 3 && tf_mode_vcov != 7 && n_free_spline_vcov > 0) to_vector(z_spline_vcov) ~ student_t(prior_alpha_df, 0, 1);
+    if (tf_mode_cv_mean != 3 && tf_mode_cv_mean != 7 && n_free_spline_cv_mean > 0) z_spline_cv_mean ~ student_t(prior_alpha_df, 0, 1);
+    if (tf_mode_cv_marker != 3 && tf_mode_cv_marker != 7 && n_free_spline_cv_marker > 0) z_spline_cv_marker ~ student_t(prior_alpha_df, 0, 1);
+    if (tf_mode_cs_mean != 3 && tf_mode_cs_mean != 7 && n_free_spline_cs_mean > 0) z_spline_cs_mean ~ student_t(prior_alpha_df, 0, 1);
+    if (tf_mode_cs_marker != 3 && tf_mode_cs_marker != 7 && n_free_spline_cs_marker > 0) z_spline_cs_marker ~ student_t(prior_alpha_df, 0, 1);
 
-    if (estimate_iota_intercept_cv > 0) z_iota_intercept_cv ~ student_t(6, 0, 1);
-    if (estimate_iota_slope_cv > 0) z_iota_slope_cv ~ student_t(6, 0, 1);
-    if (estimate_iota_intercept_cs > 0) z_iota_intercept_cs ~ student_t(6, 0, 1);
-    if (estimate_iota_slope_cs > 0) z_iota_slope_cs ~ student_t(6, 0, 1);
-    if (estimate_iota_intercept_corr > 0) z_iota_intercept_corr ~ student_t(6, 0, 1);
-    if (estimate_iota_slope_corr > 0) z_iota_slope_corr ~ student_t(6, 0, 1);
-    if (estimate_iota_intercept_vcov > 0) z_iota_intercept_vcov ~ student_t(6, 0, 1);
-    if (estimate_iota_slope_vcov > 0) z_iota_slope_vcov ~ student_t(6, 0, 1);
-    if (estimate_iota_intercept_cv_mean > 0) z_iota_intercept_cv_mean ~ student_t(6, 0, 1);
-    if (estimate_iota_slope_cv_mean > 0) z_iota_slope_cv_mean ~ student_t(6, 0, 1);
-    if (estimate_iota_intercept_cv_marker > 0) z_iota_intercept_cv_marker ~ student_t(6, 0, 1);
-    if (estimate_iota_slope_cv_marker > 0) z_iota_slope_cv_marker ~ student_t(6, 0, 1);
-    if (estimate_iota_intercept_cs_mean > 0) z_iota_intercept_cs_mean ~ student_t(6, 0, 1);
-    if (estimate_iota_slope_cs_mean > 0) z_iota_slope_cs_mean ~ student_t(6, 0, 1);
-    if (estimate_iota_intercept_cs_marker > 0) z_iota_intercept_cs_marker ~ student_t(6, 0, 1);
-    if (estimate_iota_slope_cs_marker > 0) z_iota_slope_cs_marker ~ student_t(6, 0, 1);
   }
 
   

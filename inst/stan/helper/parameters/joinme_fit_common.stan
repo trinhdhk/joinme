@@ -18,8 +18,14 @@
   matrix[Q_idm, R_mk] B_cross;           // cross-loadings when crosscorr enabled
 
   /* id-specific covariance regression for L_i */
-  vector[M_cov] alpha_L;                 // intercepts for each L_i element
-  array[M_cov] vector[K_cov] beta_L;     // covariate slopes for each element
+  vector[P_vcov_sd] vcov_sd_coefficient_raw; // standardised SD-regression intercepts followed by row-major slopes
+  vector[P_vcov_corr] vcov_corr_coefficient_raw; // standardised off-diagonal correlation intercepts followed by row-major slopes
+  vector<lower=0>[prior_vcov_sd_family == 4 ? P_vcov_sd : 0] horseshoe_local_vcov_sd; // local regularised-horseshoe scales for SD coefficients
+  vector<lower=0>[prior_vcov_sd_family == 4 ? 1 : 0] horseshoe_global_vcov_sd; // global regularised-horseshoe scale for SD coefficients
+  vector<lower=0>[prior_vcov_sd_family == 4 ? 1 : 0] horseshoe_slab_vcov_sd; // finite-slab multiplier for SD coefficients
+  vector<lower=0>[prior_vcov_corr_family == 4 ? P_vcov_corr : 0] horseshoe_local_vcov_corr; // local regularised-horseshoe scales for correlation coefficients
+  vector<lower=0>[prior_vcov_corr_family == 4 ? 1 : 0] horseshoe_global_vcov_corr; // global regularised-horseshoe scale for correlation coefficients
+  vector<lower=0>[prior_vcov_corr_family == 4 ? 1 : 0] horseshoe_slab_vcov_corr; // finite-slab multiplier for correlation coefficients
   vector<lower=0>[M_cov] lambda_L;       // one nonnegative scalar loading per packed covariance coordinate; collectively a diagonal, not full, loading matrix
   array[n_id] vector[M_cov] z_L;         // latent standard normals for covariance regression, one per subject and L_i element
 
@@ -123,12 +129,30 @@
   vector[estimate_iota_intercept_cs_marker] z_iota_intercept_cs_marker; // Role: standardised latent value affine transformation intercept current slope marker.
   vector[estimate_iota_slope_cs_marker] z_iota_slope_cs_marker; // Role: standardised latent value affine transformation slope current slope marker.
 
-  /* association scales */
-  real<lower=0> sd_alpha_cv_total;     // scale for total CV association
-  real<lower=0> sd_alpha_cs_total;     // scale for total CS association
-  real<lower=0> sd_alpha_cv_mean;      // scale for mean CV association
-  real<lower=0> sd_alpha_cs_mean;      // scale for mean CS association
-  real<lower=0> sd_alpha_cv_marker;    // scale for marker CV association
-  real<lower=0> sd_alpha_cs_marker;    // scale for marker CS association
-  real<lower=0> s_corr;                // scale for corr association
-  real<lower=0> s_vcov;                // scale for vcov association
+  /**
+   * Regularised-horseshoe auxiliaries.
+   *
+   * Each vector has positive length only when its block selects family code 4.
+   * Zero-length declarations keep all other prior families free of unused
+   * parameters. The slab auxiliary has an inverse-gamma prior and represents
+   * the random squared width of the finite regularising slab.
+   */
+  vector<lower=0>[prior_beta_family == 4 ? P : 0] horseshoe_local_beta; // local shrinkage scales for beta
+  vector<lower=0>[prior_beta_family == 4 ? 1 : 0] horseshoe_global_beta; // global shrinkage scale for beta
+  vector<lower=0>[prior_beta_family == 4 ? 1 : 0] horseshoe_slab_beta; // slab-variance auxiliary for beta
+
+  vector<lower=0>[prior_alpha_family == 4 ? 6 + M_corr + M_vcov : 0] horseshoe_local_alpha; // local scales for association coefficients
+  vector<lower=0>[prior_alpha_family == 4 ? 1 : 0] horseshoe_global_alpha; // global scale for association coefficients
+  vector<lower=0>[prior_alpha_family == 4 ? 1 : 0] horseshoe_slab_alpha; // slab auxiliary for association coefficients
+
+  vector<lower=0>[prior_iota_family == 4 ? n_iota_prior : 0] horseshoe_local_iota; // local scales for fitted affine shifts
+  vector<lower=0>[prior_iota_family == 4 ? 1 : 0] horseshoe_global_iota; // global scale for fitted affine shifts
+  vector<lower=0>[prior_iota_family == 4 ? 1 : 0] horseshoe_slab_iota; // slab auxiliary for fitted affine shifts
+
+  vector<lower=0>[prior_marker_family == 4 ? D * R_mk : 0] horseshoe_local_marker; // local scales for marker random effects
+  vector<lower=0>[prior_marker_family == 4 ? 1 : 0] horseshoe_global_marker; // global scale for marker random effects
+  vector<lower=0>[prior_marker_family == 4 ? 1 : 0] horseshoe_slab_marker; // slab auxiliary for marker random effects
+
+  vector<lower=0>[prior_marker_weight_family == 4 ? D * estimate_marker_weights * use_marker_weight_assoc * n_marker_weight_sets : 0] horseshoe_local_marker_weight; // local scales for marker weights
+  vector<lower=0>[prior_marker_weight_family == 4 ? 1 : 0] horseshoe_global_marker_weight; // global scale for marker weights
+  vector<lower=0>[prior_marker_weight_family == 4 ? 1 : 0] horseshoe_slab_marker_weight; // slab auxiliary for marker weights

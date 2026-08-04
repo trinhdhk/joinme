@@ -38,5 +38,7 @@ array[mix_ordering == 2 ? 0 : 1] simplex[n_classes] mix_probability_unordered; /
 array[mix_ordered_location_coordinate > 0 ? 1 : 0] ordered[n_classes] mix_location_ordered; // ordered class locations for the selected random intercept only
 matrix[n_classes, K_mix - (mix_ordered_location_coordinate > 0 ? 1 : 0)] mix_location_unordered; // unrestricted slope and other selected locations
 matrix<lower=1e-8>[n_classes, K_mix] mix_scale; // positive within-class component scales by class and packed coordinate
-vector[P_class_subject] mix_class_coefficient_subject; // concatenated subject-domain class coefficients
-vector[P_class_marker] mix_class_coefficient_marker; // concatenated marker-domain class coefficients
+vector[P_class_subject + P_class_marker] mix_class_coefficient_raw; // standardised class-regression coefficients in subject-then-marker order
+vector<lower=0>[prior_class_regression_family == 4 ? P_class_subject + P_class_marker : 0] horseshoe_local_class_regression; // local horseshoe scales for class-regression coefficients
+vector<lower=0>[prior_class_regression_family == 4 ? 1 : 0] horseshoe_global_class_regression; // global horseshoe scale for class regression
+vector<lower=0>[prior_class_regression_family == 4 ? 1 : 0] horseshoe_slab_class_regression; // inverse-gamma slab multiplier for class regression

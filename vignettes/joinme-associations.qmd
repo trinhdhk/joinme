@@ -190,8 +190,11 @@ plot(ce, ask = FALSE)
 Internally, association coefficients are denoted with the $\alpha$ prefix (e.g., `alpha_cv_total`). 
 This follows joint-model conventions and avoids confusion with the linear predictor
 $\eta$ used throughout the longitudinal and survival submodels.
-Total, mean, and marker associations use a positive non-centred parameterisation
-$\alpha = z_{\alpha} \cdot sd_{\alpha}$ for stable sampling.
+Total, mean, marker, correlation, and covariance associations use the
+block-specific prior declared by `jm_prior(alpha = ...)`. Its location and
+scale describe the effective coefficient entering the log hazard; there is no
+additional random association-scale multiplier. Marker-weight sign conventions
+are applied after this prior transformation where required for identification.
 
 When an association component is not selected in `assoc`, its coefficient is prior-only and does not enter the likelihood. Summaries only report active components to keep interpretation focused on the fitted association structure.
 

@@ -16,7 +16,8 @@
  *
  * The component density is placed on the non-centred coordinates themselves.
  * The longitudinal likelihood later sees `L_u * z_u` and `L_v * z_v`, whilst
- * covariance regression sees `alpha_L + beta_L * X + lambda_L .* z_L`.
+ * covariance regression sees independently designed SD and correlation
+ * predictors, each followed by the matching `lambda_L .* z_L` coordinate.
  * This is the same order used by the R generator. It also explains why the
  * component scales can compensate for the ordinary random-effect scales or
  * covariance loadings. The likelihood may identify their product more readily
@@ -52,8 +53,25 @@ if (use_mixture == 1) {
   // equivalent to one independent exponential density for every class and
   // packed coordinate, including the normalising constant.
   to_vector(mix_scale) ~ exponential(1);
-  mix_class_coefficient_subject ~ normal(0, class_regression_scale);
-  mix_class_coefficient_marker ~ normal(0, class_regression_scale);
+  target += joinme_standard_prior_lpdf(
+    mix_class_coefficient_raw |
+    prior_class_regression_family,
+    prior_class_regression_df
+  );
+  if (prior_class_regression_family == 4) {
+    horseshoe_local_class_regression ~ student_t(
+      prior_class_regression_df, 0, 1
+    );
+    horseshoe_global_class_regression ~ student_t(
+      prior_class_regression_global_df,
+      0,
+      prior_class_regression_global_scale
+    );
+    horseshoe_slab_class_regression ~ inv_gamma(
+      0.5 * prior_class_regression_slab_df,
+      0.5 * prior_class_regression_slab_df
+    );
+  }
 
   // STEP 2: replace the ordinary prior in the subject allocation domain.
   //
@@ -172,8 +190,16 @@ if (use_mixture == 1) {
               shrinkage
             );
       }
+      // The ordinary marker prior may now be Normal, Student-t, Laplace or a
+      // regularised horseshoe. Horseshoe raw coefficients are standard Normal;
+      // their random local/global transformation is applied downstream. Remove
+      // exactly that raw density before inserting the selected mixture density.
       target += -re_weight_marker[marker_index]
-        * std_normal_lpdf(selected_marker_effect);
+        * joinme_standard_prior_lpdf(
+            selected_marker_effect |
+            prior_marker_family,
+            prior_marker_df
+          );
 
       target += log_sum_exp(component_log_density);
     }

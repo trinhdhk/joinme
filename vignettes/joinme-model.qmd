@@ -120,20 +120,37 @@ using weights $\omega_d$ (one per marker). These weights apply to marker summari
 after transformation and before association scaling.
 When marker-weight estimation is enabled, latent perturbations are added to base
 weights and the resulting weights are used directly before aggregation.
-Marker weights and association coefficients are regularized with standard
-Student-$t_6$, Laplace, or Normal priors for `shrinkage = 0, 1, 2`, respectively,
-using a positive non-centred
-parameterisation $\alpha = z_{\alpha} \cdot sd_{\alpha}$.
+Marker weights and association coefficients have separate priors declared as
+`marker_weight` and `alpha` in `jm_prior()`. Normal, fixed-degrees-of-freedom
+Student-$t$, Laplace, and regularised horseshoe families are available. The
+declared `alpha` location and scale apply directly to the coefficient used on
+the log-hazard scale; there is no additional unidentified association-scale
+parameter. Sign constraints required by estimated marker weights are applied
+after the prior transformation. Covariance-style (`corr`, `vcov`)
+coefficients follow the same rule.
 
-For covariance-style channels (`corr`, `vcov`), the fitted association
-coefficients use the same positive-scale parameterisation: a global scale
-(`s_corr` or `s_vcov`) multiplies a latent coefficient vector, and summaries
-report the resulting effective coefficients on the hazard scale.
+The marker-weight perturbations and standardised marker random effects retain
+location zero and scale one by construction. Their family and, where relevant,
+fixed degrees of freedom may vary, but a user-supplied location or scale is
+rejected. This preserves the interpretation of the base marker weights and of
+the random-effect covariance scales.
 
-For covariance regression, each lower-triangular entry has its own latent
-perturbation $z_{im}$ and a non-negative loading $\lambda_m$, so the identified
-form is $\eta_{im} = \alpha_m + x_i^\top \beta_m + \lambda_m z_{im}$ with
-$\lambda_m \ge 0$ and $z_{im} \sim \mathcal{N}(0, 1)$.
+For covariance regression, standard deviations and off-diagonal partial
+correlations have independent observed-covariate regressions:
+
+$$
+\eta^{sd}_{ir}=\alpha^{sd}_r+x_{sd,i}^\top\beta^{sd}_r+
+\lambda_{m(r)}z_{i,m(r)},
+\qquad
+\eta^{corr}_{ih}=\alpha^{corr}_h+x_{corr,i}^\top\beta^{corr}_h+
+\lambda_{m(h)}z_{i,m(h)}.
+$$
+
+They are declared with
+`formulaVCov = list(sd = ~ ..., corr = ~ ...)`; one formula is the shared-
+design shorthand. The SD predictor passes through softplus or exp. The
+correlation predictor passes through `tanh` and a row-wise partial-correlation
+recursion, thereby preserving a valid covariance factor.
 
 Each \(\lambda_m\) is one scalar loading for one packed lower-triangular
 coordinate. Collectively they form a length-\(M_{\mathrm{cov}}\) vector, whose

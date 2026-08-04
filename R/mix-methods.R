@@ -1111,6 +1111,105 @@ summary.JoiNMeMixFit <- function(
   labels
 }
 
+#' Extract independent covariance-regression slopes for latent-class displays
+#'
+#' @param object Fitted latent-progress object.
+#' @param draws Number of posterior draws.
+#' @param seed Optional draw-selection seed.
+#'
+#' @return A list containing SD and correlation slope arrays, their reference
+#'   covariate profiles, and a function which packs observed-covariate
+#'   contributions into the established lower-triangular coordinate order.
+#' @keywords internal
+#' @noRd
+.mixture_covariance_regression_draws <- function(object, draws, seed) {
+  stan_data <- object$stan_data # fitted dimensions and the two subject-level design matrices
+  q_dimension <- as.integer(stan_data$Q_idm %||% 0L) # number of marker-by-subject basis coordinates
+  correlation_dimension <- if (
+    q_dimension > 1L &&
+      as.integer(stan_data$indep_idmarker_cov %||% 0L) == 0L
+  ) as.integer(q_dimension * (q_dimension - 1L) / 2L) else 0L
+  covariance_design <- .stored_vcov_design(stan_data) # split design or legacy common-design view
+  k_sd <- covariance_design$k_sd # formulaVCov$sd slope count
+  k_corr <- covariance_design$k_corr # formulaVCov$corr slope count
+  if (isTRUE(covariance_design$legacy) && q_dimension > 0L && k_sd > 0L) {
+    packed_dimension <- if (
+      as.integer(stan_data$indep_idmarker_cov %||% 0L) == 1L
+    ) q_dimension else as.integer(q_dimension * (q_dimension + 1L) / 2L) # former beta_L row count
+    legacy_beta <- .mixture_matrix_draws(
+      object, "beta_L", packed_dimension, k_sd, draws, seed
+    ) # posterior slopes stored by fits predating the split covariance formula
+    diagonal_positions <- integer(q_dimension) # packed beta_L rows supplying SD predictors
+    correlation_positions <- integer(correlation_dimension) # packed beta_L rows supplying partial-correlation predictors
+    packed_position <- 1L
+    correlation_position <- 1L
+    for (row in seq_len(q_dimension)) {
+      columns <- if (as.integer(stan_data$indep_idmarker_cov %||% 0L) == 1L) row else seq_len(row)
+      for (column in columns) {
+        if (row == column) {
+          diagonal_positions[row] <- packed_position
+        } else {
+          correlation_positions[correlation_position] <- packed_position
+          correlation_position <- correlation_position + 1L
+        }
+        packed_position <- packed_position + 1L
+      }
+    }
+    beta_sd <- legacy_beta[, diagonal_positions, , drop = FALSE]
+    beta_corr <- if (correlation_dimension > 0L) {
+      legacy_beta[, correlation_positions, , drop = FALSE]
+    } else array(0, dim = c(draws, 0L, k_corr))
+  } else {
+    beta_sd <- if (q_dimension > 0L && k_sd > 0L) {
+      .mixture_matrix_draws(object, "beta_L_sd", q_dimension, k_sd, draws, seed)
+    } else array(0, dim = c(draws, q_dimension, k_sd))
+    beta_corr <- if (correlation_dimension > 0L && k_corr > 0L) {
+      .mixture_matrix_draws(object, "beta_L_corr", correlation_dimension, k_corr, draws, seed)
+    } else array(0, dim = c(draws, correlation_dimension, k_corr))
+  }
+  reference_sd <- if (k_sd > 0L) {
+    colMeans(covariance_design$x_sd, na.rm = TRUE)
+  } else numeric(0)
+  reference_corr <- if (k_corr > 0L) {
+    colMeans(covariance_design$x_corr, na.rm = TRUE)
+  } else numeric(0)
+
+  pack_contribution <- function(sd_covariates = reference_sd,
+                                corr_covariates = reference_corr) {
+    number_draws <- dim(beta_sd)[1L] %||% dim(beta_corr)[1L] # common posterior draw count
+    covariance_dimension <- if (
+      as.integer(stan_data$indep_idmarker_cov %||% 0L) == 1L
+    ) q_dimension else as.integer(q_dimension * (q_dimension + 1L) / 2L)
+    contribution <- matrix(0, nrow = number_draws, ncol = covariance_dimension)
+    packed_coordinate <- 1L
+    correlation_coordinate <- 1L
+    for (row in seq_len(q_dimension)) {
+      for (column in if (as.integer(stan_data$indep_idmarker_cov %||% 0L) == 1L) row else seq_len(row)) {
+        if (row == column) {
+          if (k_sd > 0L) contribution[, packed_coordinate] <- beta_sd[, row, ] %*% sd_covariates
+        } else {
+          if (k_corr > 0L) contribution[, packed_coordinate] <- beta_corr[, correlation_coordinate, ] %*% corr_covariates
+          correlation_coordinate <- correlation_coordinate + 1L
+        }
+        packed_coordinate <- packed_coordinate + 1L
+      }
+    }
+    contribution
+  }
+
+  list(
+    beta_sd = beta_sd,
+    beta_corr = beta_corr,
+    reference_sd = reference_sd,
+    reference_corr = reference_corr,
+    x_sd = covariance_design$x_sd,
+    x_corr = covariance_design$x_corr,
+    k_sd = k_sd,
+    k_corr = k_corr,
+    pack_contribution = pack_contribution
+  )
+}
+
 #' Identify the selected covariance-regression class representation
 #'
 #' @param mixture Fitted latent-progress metadata.
@@ -1937,34 +2036,12 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
   } else {
     matrix(0, nrow = number_draws, ncol = 0L)
   }
-  covariance_covariates <- as.integer(stan_data$K_cov %||% 0L)
-  covariance_slope <- if (
-    covariance_dimension > 0L &&
-      covariance_covariates > 0L
-  ) {
-    .mixture_matrix_draws(
-      object,
-      "beta_L",
-      covariance_dimension,
-      covariance_covariates,
-      draws = number_draws,
-      seed = seed
-    )
-  } else {
-    array(
-      0,
-      dim = c(
-        number_draws,
-        covariance_dimension,
-        covariance_covariates
-      )
-    )
-  }
-  covariance_reference <- if (covariance_covariates > 0L) {
-    colMeans(as.matrix(stan_data$Xcov), na.rm = TRUE)
-  } else {
-    numeric(0)
-  }
+  covariance_regression <- .mixture_covariance_regression_draws(
+    object,
+    draws = number_draws,
+    seed = seed
+  ) # independent posterior SD/correlation slopes and their observed reference profiles
+  covariance_reference_contribution <- covariance_regression$pack_contribution()
   marker_cross_loading <- if (
     q_dimension > 0L &&
       as.integer(stan_data$R_mk) > 0L &&
@@ -2205,19 +2282,8 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
         covariance_predictor <- as.numeric(
           covariance_intercept[draw, ]
         )
-        if (covariance_covariates > 0L) {
-          covariance_predictor <- covariance_predictor +
-            matrix(
-              covariance_slope[
-                draw,
-                ,
-                ,
-                drop = FALSE
-              ],
-              nrow = covariance_dimension,
-              ncol = covariance_covariates
-            ) %*% covariance_reference
-        }
+        covariance_predictor <- covariance_predictor +
+          covariance_reference_contribution[draw, ]
         covariance_predictor <- covariance_predictor +
           as.numeric(covariance_loading[draw, ]) *
             covariance_latent[draw, group, ]
@@ -3174,21 +3240,15 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
     draws = number_draws,
     seed = seed
   )
-  k_covariates <- as.integer(stan_data$K_cov %||% 0L)
-  beta <- if (k_covariates > 0L) {
-    .mixture_matrix_draws(
-      object,
-      "beta_L",
-      covariance_dimension,
-      k_covariates,
-      draws = number_draws,
-      seed = seed
-    )
-  } else {
-    array(0, dim = c(number_draws, covariance_dimension, 0L))
-  }
+  covariance_regression <- .mixture_covariance_regression_draws(
+    object, number_draws, seed
+  ) # separate formulaVCov$sd and formulaVCov$corr posterior slopes
+  k_covariates <- max(covariance_regression$k_sd, covariance_regression$k_corr)
   x_grid <- if (k_covariates > 0L) {
-    observed <- as.numeric(stan_data$Xcov[, 1L])
+    observed <- c(
+      if (covariance_regression$k_sd > 0L) as.numeric(covariance_regression$x_sd[, 1L]) else numeric(0),
+      if (covariance_regression$k_corr > 0L) as.numeric(covariance_regression$x_corr[, 1L]) else numeric(0)
+    )
     seq(min(observed), max(observed), length.out = 60L)
   } else {
     seq(0, 1, length.out = 60L)
@@ -3239,13 +3299,15 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
         ncol = length(component_labels)
       )
       for (draw in seq_len(number_draws)) {
-        linear_predictor <- as.numeric(alpha[draw, ])
-        if (k_covariates > 0L) {
-          covariate_vector <- rep(0, k_covariates)
-          covariate_vector[1L] <- x_grid[x_position]
-          linear_predictor <- linear_predictor +
-            beta[draw, , ] %*% covariate_vector
-        }
+        sd_profile <- covariance_regression$reference_sd
+        corr_profile <- covariance_regression$reference_corr
+        if (length(sd_profile) > 0L) sd_profile[1L] <- x_grid[x_position]
+        if (length(corr_profile) > 0L) corr_profile[1L] <- x_grid[x_position]
+        observed_contribution <- covariance_regression$pack_contribution(
+          sd_covariates = sd_profile,
+          corr_covariates = corr_profile
+        )
+        linear_predictor <- as.numeric(alpha[draw, ]) + observed_contribution[draw, ]
         linear_predictor <- linear_predictor +
           as.numeric(lambda[draw, ]) *
             class_mean[draw, group, ]
@@ -3330,7 +3392,13 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
         title = paste("Marker-by-subject covariance:", marker_label),
         subtitle = "All latent classes are displayed in every component panel",
         x = if (k_covariates > 0L) {
-          colnames(stan_data$Xcov)[1L] %||% "Covariance covariate"
+          paste(
+            c(
+              if (covariance_regression$k_sd > 0L) paste0("SD: ", colnames(covariance_regression$x_sd)[1L]) else NULL,
+              if (covariance_regression$k_corr > 0L) paste0("correlation: ", colnames(covariance_regression$x_corr)[1L]) else NULL
+            ),
+            collapse = "; "
+          )
         } else {
           "Reference profile"
         },
@@ -3522,28 +3590,19 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
     draws = number_draws,
     seed = seed
   )
-  k_covariates <- as.integer(stan_data$K_cov %||% 0L)
-  beta <- if (k_covariates > 0L) {
-    .mixture_matrix_draws(
-      object,
-      "beta_L",
-      covariance_dimension,
-      k_covariates,
-      draws = number_draws,
-      seed = seed
-    )
-  } else {
-    array(
-      0,
-      dim = c(number_draws, covariance_dimension, 0L)
-    )
-  }
+  covariance_regression <- .mixture_covariance_regression_draws(
+    object, number_draws, seed
+  ) # independent SD and correlation regression slopes used for association curves
+  k_covariates <- max(covariance_regression$k_sd, covariance_regression$k_corr)
   points <- max(
     2L,
     as.integer(points)
   ) # number of covariance-covariate reference values used in this display
   x_grid <- if (k_covariates > 0L) {
-    observed <- as.numeric(stan_data$Xcov[, 1L])
+    observed <- c(
+      if (covariance_regression$k_sd > 0L) as.numeric(covariance_regression$x_sd[, 1L]) else numeric(0),
+      if (covariance_regression$k_corr > 0L) as.numeric(covariance_regression$x_corr[, 1L]) else numeric(0)
+    )
     seq(min(observed), max(observed), length.out = points)
   } else {
     seq(0, 1, length.out = points)
@@ -3586,7 +3645,6 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
   class_mean <- class_mean[seq_len(number_draws), , , drop = FALSE]
   alpha <- alpha[seq_len(number_draws), , drop = FALSE]
   lambda <- lambda[seq_len(number_draws), , drop = FALSE]
-  beta <- beta[seq_len(number_draws), , , drop = FALSE]
 
   interval <- max(ci_levels)
   result_rows <- list()
@@ -3599,17 +3657,15 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
     )
     for (x_position in seq_along(x_grid)) {
       for (draw in seq_len(number_draws)) {
-        linear_predictor <- as.numeric(alpha[draw, ])
-        if (k_covariates > 0L) {
-          covariate_vector <- rep(0, k_covariates)
-          covariate_vector[1L] <- x_grid[x_position]
-          linear_predictor <- linear_predictor +
-            matrix(
-              beta[draw, , , drop = FALSE],
-              nrow = covariance_dimension,
-              ncol = k_covariates
-            ) %*% covariate_vector
-        }
+        sd_profile <- covariance_regression$reference_sd
+        corr_profile <- covariance_regression$reference_corr
+        if (length(sd_profile) > 0L) sd_profile[1L] <- x_grid[x_position]
+        if (length(corr_profile) > 0L) corr_profile[1L] <- x_grid[x_position]
+        observed_contribution <- covariance_regression$pack_contribution(
+          sd_covariates = sd_profile,
+          corr_covariates = corr_profile
+        )
+        linear_predictor <- as.numeric(alpha[draw, ]) + observed_contribution[draw, ]
         linear_predictor <- linear_predictor +
           as.numeric(lambda[draw, ]) *
             class_mean[draw, group, ]
@@ -3712,8 +3768,13 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
         association_term
       ),
       x = if (k_covariates > 0L) {
-        colnames(stan_data$Xcov)[1L] %||%
-          "Covariance covariate"
+        paste(
+          c(
+            if (covariance_regression$k_sd > 0L) paste0("SD: ", colnames(covariance_regression$x_sd)[1L]) else NULL,
+            if (covariance_regression$k_corr > 0L) paste0("correlation: ", colnames(covariance_regression$x_corr)[1L]) else NULL
+          ),
+          collapse = "; "
+        )
       } else {
         "Reference profile"
       },

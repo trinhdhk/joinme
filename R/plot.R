@@ -4096,14 +4096,41 @@ plot.JoiNMeFit <- function(x,
         } else {
             matrix(0, nrow = n_id, ncol = 0L)
         }
-        k_cov <- as.integer(stan_data$K_cov %||% 0L)
-        beta_mean <- if (k_cov > 0L && nrow(vcov_map) > 0L) {
-            beta_flat <- mean_of_vars(as.vector(outer(seq_len(nrow(vcov_map)), seq_len(k_cov), function(m, k) paste0("beta_L[", m, ",", k, "]"))), default = 0)
-            matrix(beta_flat, nrow = nrow(vcov_map), byrow = TRUE)
-        } else {
-            matrix(0, nrow = nrow(vcov_map), ncol = 0L)
+        q_idm <- as.integer(stan_data$Q_idm)
+        n_corr <- as.integer(q_idm * (q_idm - 1L) / 2L)
+        covariance_design <- .stored_vcov_design(stan_data) # current split or earlier shared covariance design
+        k_cov_sd <- covariance_design$k_sd
+        k_cov_corr <- covariance_design$k_corr
+        beta_sd_mean <- matrix(0, nrow = q_idm, ncol = k_cov_sd)
+        if (!isTRUE(covariance_design$legacy) && q_idm > 0L && k_cov_sd > 0L) {
+            for (r in seq_len(q_idm)) for (k in seq_len(k_cov_sd)) {
+                beta_sd_mean[r, k] <- mean_of_vars(paste0("beta_L_sd[", r, ",", k, "]"), default = 0)
+            }
         }
-        xcov <- as.matrix(stan_data$Xcov %||% matrix(0, nrow = n_id, ncol = k_cov))
+        beta_corr_mean <- matrix(0, nrow = n_corr, ncol = k_cov_corr)
+        if (!isTRUE(covariance_design$legacy) && n_corr > 0L && k_cov_corr > 0L) {
+            for (m in seq_len(n_corr)) for (k in seq_len(k_cov_corr)) {
+                beta_corr_mean[m, k] <- mean_of_vars(paste0("beta_L_corr[", m, ",", k, "]"), default = 0)
+            }
+        }
+        if (isTRUE(covariance_design$legacy) && k_cov_sd > 0L) {
+            correlation_coordinate <- 1L
+            for (packed_coordinate in seq_len(nrow(vcov_map))) {
+                row_coordinate <- vcov_map[packed_coordinate, 1L]
+                column_coordinate <- vcov_map[packed_coordinate, 2L]
+                legacy_slope <- vapply(seq_len(k_cov_sd), function(k) {
+                    mean_of_vars(paste0("beta_L[", packed_coordinate, ",", k, "]"), default = 0)
+                }, numeric(1))
+                if (row_coordinate == column_coordinate) {
+                    beta_sd_mean[row_coordinate, ] <- legacy_slope
+                } else {
+                    beta_corr_mean[correlation_coordinate, ] <- legacy_slope
+                    correlation_coordinate <- correlation_coordinate + 1L
+                }
+            }
+        }
+        xcov_sd <- covariance_design$x_sd
+        xcov_corr <- covariance_design$x_corr
         marker_id_row_scale <- rep(1, as.integer(stan_data$Q_idm %||% 0L))
         idx_time_idm <- as.integer(stan_data$idx_time_idm %||% integer(0))
         idx_time_idm <- idx_time_idm[is.finite(idx_time_idm) & idx_time_idm >= 1L & idx_time_idm <= length(marker_id_row_scale)]
@@ -4114,9 +4141,17 @@ plot.JoiNMeFit <- function(x,
             if (nrow(vcov_map) == 0L) {
                 return(numeric(0))
             }
+            correlation_coordinate <- 0L
             lp_vec <- vapply(seq_len(nrow(vcov_map)), function(m) {
-                alpha_mean[m] +
-                    if (k_cov > 0L) sum(beta_mean[m, ] * xcov[i, ]) else 0 +
+                row_coordinate <- vcov_map[m, 1]
+                column_coordinate <- vcov_map[m, 2]
+                observed_contribution <- if (row_coordinate == column_coordinate) {
+                    if (k_cov_sd > 0L) sum(beta_sd_mean[row_coordinate, ] * xcov_sd[i, ]) else 0
+                } else {
+                    correlation_coordinate <<- correlation_coordinate + 1L
+                    if (k_cov_corr > 0L) sum(beta_corr_mean[correlation_coordinate, ] * xcov_corr[i, ]) else 0
+                }
+                alpha_mean[m] + observed_contribution +
                     lambda_mean[m] * z_l_mean[min(i, nrow(z_l_mean)), m]
             }, numeric(1))
             li <- .cov_lp_to_chol(

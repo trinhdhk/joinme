@@ -88,7 +88,8 @@ test_that("posterior_fixef and posterior_ranef expose posterior extraction", {
       n_re_sigma = 1L,
       K_sigma = 1L,
       G_sigma = 1L,
-      K_cov = 0L,
+      K_cov_sd = 0L,
+      K_cov_corr = 0L,
       indep_idmarker_cov = 1L
     ),
     config = list(

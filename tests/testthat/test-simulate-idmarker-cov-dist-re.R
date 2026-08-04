@@ -23,8 +23,9 @@ test_that("simulate_joinme supports id-specific id:marker covariance via formula
   raw1 <- sim$helpers$assoc_components_raw(1, 1.0)
   raw2 <- sim$helpers$assoc_components_raw(2, 1.0)
 
-  expect_true(inherits(sim$truth$formulaVCov, "formula"))
-  expect_equal(as.character(sim$truth$formulaVCov), as.character(~ x1 + x2))
+  expect_identical(names(sim$truth$formulaVCov), c("sd", "corr"))
+  expect_equal(as.character(sim$truth$formulaVCov$sd), as.character(~ x1 + x2))
+  expect_equal(as.character(sim$truth$formulaVCov$corr), as.character(~ x1 + x2))
   expect_true(length(raw1$corr_vals) > 0)
   expect_false(isTRUE(all.equal(raw1$corr_vals, raw2$corr_vals)))
 })
@@ -189,17 +190,17 @@ test_that("simulate_joinme randomises omitted coefficients reproducibly and expo
     seed = 4406
   )
 
-  eff <- sim1$truth$re_effective
+  eff <- sim1$truth$re_structure
 
   expect_equal(sim1$truth$beta_long, sim2$truth$beta_long)
   expect_equal(sim1$truth$beta_event, sim2$truth$beta_event)
   expect_equal(sim1$truth$assoc_coefs, sim2$truth$assoc_coefs)
-  expect_equal(eff$id$sd, sim2$truth$re_effective$id$sd)
-  expect_equal(eff$id$corr, sim2$truth$re_effective$id$corr)
-  expect_equal(eff$id$Lcorr, sim2$truth$re_effective$id$Lcorr)
-  expect_equal(eff$id$cov, sim2$truth$re_effective$id$cov)
-  expect_equal(eff$id_marker_cov$latent$sd, sim2$truth$re_effective$id_marker_cov$latent$sd)
-  expect_equal(eff$id_marker_cov$alpha, sim2$truth$re_effective$id_marker_cov$alpha)
+  expect_equal(eff$id$sd, sim2$truth$re_structure$id$sd)
+  expect_equal(eff$id$corr, sim2$truth$re_structure$id$corr)
+  expect_equal(eff$id$Lcorr, sim2$truth$re_structure$id$Lcorr)
+  expect_equal(eff$id$cov, sim2$truth$re_structure$id$cov)
+  expect_equal(eff$id_marker_cov$latent$sd, sim2$truth$re_structure$id_marker_cov$latent$sd)
+  expect_equal(eff$id_marker_cov$alpha, sim2$truth$re_structure$id_marker_cov$alpha)
   expect_true(all(eff$id$sd > 0))
   expect_true(all(eff$marker$sd > 0))
   expect_identical(eff$id_marker_cov$latent$mode, "iid_standard_normal")
@@ -326,15 +327,15 @@ test_that("simulate_joinme exposes fit-aligned truth for defaults and scaled par
   fam_truth <- sim$truth$family
 
   expect_true(is.list(fit_truth))
-  expect_equal(unname(fit_truth$tau_u), sim$truth$re_effective$id$sd)
-  expect_equal(unname(fit_truth$Lcorr_u), sim$truth$re_effective$id$Lcorr)
-  expect_equal(unname(fit_truth$Sigma_u), sim$truth$re_effective$id$cov)
+  expect_equal(unname(fit_truth$tau_u), sim$truth$re_structure$id$sd)
+  expect_equal(unname(fit_truth$Lcorr_u), sim$truth$re_structure$id$Lcorr)
+  expect_equal(unname(fit_truth$Sigma_u), sim$truth$re_structure$id$cov)
   expect_equal(length(fit_truth$beta_scaled), length(sim$truth$beta_long))
   expect_true(is.finite(fit_truth$time_scale_generation))
   expect_true(is.finite(fit_truth$time_scale_observed_max))
   expect_gt(fit_truth$time_scale_generation, 0)
   expect_gt(fit_truth$time_scale_observed_max, 0)
-  expect_equal(length(fit_truth$marker_id_row_scale_eff), length(sim$truth$re_effective$id_marker_cov$latent$sd))
+  expect_equal(length(fit_truth$marker_id_row_scale_eff), length(sim$truth$re_structure$id_marker_cov$latent$sd))
   expect_true("student_t" %in% names(fit_truth$sigma_family))
   expect_true("student_t" %in% names(fit_truth$nu_family))
   expect_true("beta" %in% names(fit_truth$kappa_family))
@@ -355,7 +356,7 @@ test_that("simulate_joinme exposes public random-effect draws on the original-ti
     seed = 4421
   )
 
-  scale_factor <- unname(sim$truth$stan_fit$tau_v_eff[2] / sim$truth$re_effective$marker$sd[2])
+  scale_factor <- unname(sim$truth$stan_fit$tau_v_eff[2] / sim$truth$re_structure$marker$sd[2])
   expect_true(is.finite(scale_factor))
   expect_gt(scale_factor, 0)
 

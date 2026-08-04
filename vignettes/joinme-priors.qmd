@@ -1,0 +1,259 @@
+---
+title: "Block-specific priors and shrinkage in JoiNMe"
+output-dir: ../docs/articles
+format:
+  html:
+    toc: true
+    number-sections: true
+    code-fold: true
+    embed-resources: true
+    theme: cosmo
+execute:
+  eval: false
+  echo: true
+  warning: false
+  message: false
+---
+
+# Purpose
+
+A joint multivariate model contains parameter blocks with quite different
+scientific meanings. A longitudinal fixed effect, a survival-association
+coefficient, an affine shift inside a nonlinear transformation, and a
+standardised marker effect should not acquire the same prior merely because
+they are fitted in one Stan programme. `jm_prior()` therefore declares the
+family of each block independently.
+
+The available declarations are `prior_normal()`, `prior_student_t()`,
+`prior_laplace()`, `prior_horseshoe()`, and `prior_lkj()`. The `prior_` prefix
+is deliberate: it makes code explicit and avoids collisions with constructors
+from other modelling packages.
+
+# Complete declaration
+
+```{r}
+model_priors <- jm_prior(
+  beta = prior_normal(
+    mu = list(0, 1, 2, 3),
+    scale = list(1, 1, 2, 0.5)
+  ),
+  alpha = prior_student_t(df = 4, mu = 0, scale = 1),
+  iota = prior_laplace(mu = 0, scale = 0.75),
+  marker = prior_normal(),
+  marker_weight = prior_student_t(df = 6),
+  vcov_sd = prior_normal(mu = 0, scale = 1),
+  vcov_corr = prior_student_t(df = 4, mu = 0, scale = 0.75),
+  lkj = prior_lkj(eta = 2),
+  class_probability = 1,
+  class_regression = prior_normal(mu = 0, scale = 1)
+)
+```
+
+This object can be supplied unchanged to `joinme()` or `joinme_mix()`. The
+ordinary and latent-class entry points share the prior encoder and the common
+fit-only Stan modules.
+
+# Statistical definitions
+
+For an ordinary coefficient (	heta_j), the Normal, Student-(t), and Laplace
+declarations mean, respectively,
+
+[
+	heta_j\sim N(\mu_j,s_j^2),\qquad
+	heta_j\sim t_\nu(\mu_j,s_j),\qquad
+	heta_j\sim \operatorname{Laplace}(\mu_j,s_j).
+]
+
+The Laplace scale is its exponential-decay scale, so its standard deviation is
+(sqrt{2}s_j). Student-(t) degrees of freedom are fixed for the complete
+block. They are not estimated. A scalar `mu` or `scale` is repeated over the
+block. A non-scalar vector must contain exactly one value per coefficient;
+partial recycling is rejected. Numeric vectors and lists of scalar numbers
+are equivalent and retain their supplied order.
+
+The regularised horseshoe follows the hierarchy used by brms and rstanarm. For
+raw (z_j\sim N(0,1)), positive local scale (lambda_j), positive global
+scale (	au), and finite slab variance (c^2), JoiNMe uses
+
+[
+\widetilde\lambda_j
+=
+\sqrt{\frac{c^2\lambda_j^2}
+{c^2+\tau^2\lambda_j^2}},
+\qquad
+\theta_j=\mu_j+s_j\tau\widetilde\lambda_jz_j.
+]
+
+The local and global scales have half-Student-(t) distributions. The random
+slab multiplier has the inverse-gamma representation corresponding to the
+declared `slab_df`; `slab_scale` gives the finite slab width. This hierarchy
+shrinks small coefficients strongly whilst preventing the very large tails of
+an unregularised horseshoe from dominating weakly identified joint models.
+
+# Meaning of each block
+
+| `jm_prior()` argument | Scientific quantity | Vector order |
+|---|---|---|
+| `beta` | longitudinal population fixed effects | columns of the longitudinal fixed-effect model matrix |
+| `alpha` | coefficients multiplying transformed longitudinal summaries in the log hazard | `cv_total`, `cs_total`, `cv_mean`, `cs_mean`, `cv_marker`, `cs_marker`, then packed `corr`, then packed `vcov` |
+| `iota` | fitted intercepts and slopes inside functional association transforms | channel order `cv`, `cs`, `corr`, `vcov`, `cv_mean`, `cv_marker`, `cs_mean`, `cs_marker`; intercept precedes slope within each channel |
+| `marker` | standardised marker-level random effects before the marker covariance factor | marker-major order, then random-effect coordinate |
+| `marker_weight` | signed perturbations added to supplied base marker weights | weight-set order, then marker order |
+| `vcov_sd` | intercepts and observed-covariate slopes for subject-specific standard deviations | all (Q) intercepts, then the (Q\times K_{sd}) slope matrix in row-major order |
+| `vcov_corr` | intercepts and observed-covariate slopes for off-diagonal partial correlations | all (Q(Q-1)/2) intercepts in `(2,1), (3,1), (3,2), ...` order, then the corresponding slope matrix in row-major order |
+| `class_regression` | multinomial-logit coefficients introduced by `formulaClass` | all subject-domain coefficients, then all marker-domain coefficients |
+| `lkj` | Cholesky correlation factors for subject and marker random-effect blocks | one concentration shared by the fitted correlation matrices |
+
+All six scalar `alpha` positions exist in the Stan parameter block so the
+ordering remains stable across association specifications. Inactive
+coefficients do not enter the likelihood. The `corr` and `vcov` tails have the
+dimensions established by the covariance design. Likewise, only requested
+functional intercepts and slopes contribute positions to `iota`. A practical
+workflow is to construct the data once with `fit = FALSE`, inspect the model
+matrix and transformation metadata, and then supply coefficient-wise vectors.
+
+The declared `alpha` location and scale describe the coefficient used on the
+log-hazard scale. No second random association-scale parameter is multiplied
+into it. Where estimated marker weights require a sign convention, the
+relevant coefficient is folded to the required sign after its prior
+transformation.
+
+# Covariance-regression priors
+
+`vcov_sd` and `vcov_corr` are separate because the positive marginal scale and
+the dependence structure answer different scientific questions and may have
+different design dimensions. Each accepts Normal, fixed-degrees-of-freedom
+Student-(t), Laplace, or regularised-horseshoe shrinkage:
+
+```{r}
+covariance_priors <- jm_prior(
+  vcov_sd = prior_normal(
+    mu = 0,
+    scale = c(1, 1, 0.5, 0.5)
+  ),
+  vcov_corr = prior_horseshoe(
+    global_scale = 0.25,
+    slab_df = 4,
+    slab_scale = 1
+  )
+)
+```
+
+The coefficient dimension is known only after both `formulaVCov` model
+matrices have been constructed. A scalar location or scale is repeated over
+its block. A non-scalar vector must have exactly the documented packed length;
+partial recycling is rejected. The non-negative `lambda_L` values are residual
+heterogeneity hyperparameters, not observed-covariate coefficients, and retain
+their identified half-Student-$t_6(0,1)$ prior.
+
+# Standardised marker blocks
+
+`marker` and `marker_weight` are deliberately different from `beta`, `alpha`,
+and `iota`. Their location is always zero and their ordinary scale is always
+one. For example, these are valid:
+
+```{r}
+jm_prior(
+  marker = prior_laplace(),
+  marker_weight = prior_student_t(df = 4)
+)
+```
+
+These are rejected:
+
+```{r}
+jm_prior(marker = prior_normal(scale = 2))
+jm_prior(marker_weight = prior_laplace(mu = 0.5))
+```
+
+The restriction preserves two identifications. First, the marker covariance
+factor carries the scale of realised marker random effects, so a second freely
+chosen latent scale would be redundant. Secondly, marker weights are fitted as
+unit-scale perturbations around the user-supplied base weights. The family may
+change their tail behaviour, but not the unit in which the base weights are
+defined. `marker` is the sole public name for this prior block.
+
+# Class-membership regression
+
+`class_regression` accepts the same Normal, fixed-degrees-of-freedom Student-t,
+Laplace, and regularised horseshoe declarations as `beta`, `alpha`, and `iota`.
+The prior is materialised after `formulaClass` has constructed both allocation-
+domain designs. A scalar location or scale is repeated; a vector must match the
+combined number of subject-domain and marker-domain coefficients exactly.
+
+```{r}
+jm_prior(
+  class_regression = prior_student_t(
+    df = 4,
+    mu = c(0, 0),
+    scale = c(1, 0.5)
+  )
+)
+```
+
+For compatibility, `class_regression = 1` continues to mean
+`prior_normal(mu = 0, scale = 1)`. It does not select a Student-t prior.
+
+# LKJ correlation prior
+
+`prior_lkj(eta)` is separate because an LKJ prior is a distribution on a
+correlation matrix, not a scalar shrinkage family. `eta = 1` is uniform over
+correlation matrices. Values greater than one increasingly favour correlations
+near zero. The same declared concentration is passed to each fitted Cholesky
+correlation factor.
+
+# Relationship to latent classes
+
+In `joinme_mix()`, `shrinkage` still selects the Student-(t_6), Laplace, or
+Normal *component density* for selected latent-progress coordinates. It no
+longer acts as a global prior switch. The ordinary prior for a selected marker
+coordinate is removed before the mixture density is added, so choosing
+`marker = prior_laplace()` does not accidentally retain both a Laplace prior
+and a mixture prior. Subject and covariance-regression latent coordinates have
+their established standard-Normal ordinary densities. Priors for `beta`,
+`alpha`, and `iota` remain independent of the class component family.
+
+For a regularised-horseshoe marker declaration, the latent-class mixture acts
+on the raw standardised coordinate and the local/global horseshoe scale maps
+that coordinate into the realised marker effect. This ordering matches the
+non-centred longitudinal predictor and is stated explicitly because both the
+mixture scale and the random-effect covariance scale can otherwise appear to
+describe the same variation.
+
+# Prior calibration and reporting
+
+Locations and scales should be chosen on the scale where the coefficient enters
+the model. Standardising continuous covariates makes this substantially easier.
+Association coefficients are log-hazard coefficients after transformation, so
+a prior can be calibrated by translating plausible values into hazard ratios.
+A horseshoe is most useful when a block is genuinely sparse and contains enough
+coefficients for global--local shrinkage to be identified; it is rarely helpful
+for a two-coefficient block.
+
+A defensible analysis should report the family and all fixed hyperparameters
+for every non-default block, the LKJ concentration, and a sensitivity analysis
+for scientifically influential coefficients. Prior predictive simulation
+should precede long posterior runs. In a latent-class analysis, inspect class
+separation and energy diagnostics as well as ordinary coefficient diagnostics,
+because a broad component scale and a broad random-effect scale may produce a
+weakly identified posterior ridge even when each prior is proper.
+
+# Implementation map
+
+R validates declarations in `R/specs.R`, encodes them in `R/family.R`, and
+materialises scalar or coefficient-wise values in `R/standata.R` only after all
+formula dimensions are known. Stan data declarations live in
+`helper/data/fit_data.stan`. The reusable distribution transformation and
+density functions are in `helper/functions/prior_families.stanfunctions`.
+Fit-only parameters, transformations, and densities remain split across the
+existing parameter, transformed-parameter, and model include files. Both
+ordinary and latent-class fit entry points include those same modules.
+
+# Related implementations
+
+The regularised-horseshoe parameterisation and the decision to keep correlation
+priors separate follow the public interfaces documented by
+[brms](https://paulbuerkner.com/brms/reference/horseshoe.html) and
+[rstanarm](https://mc-stan.org/rstanarm/reference/priors.html). JoiNMe retains
+its own explicit block names because its nested marker and association
+structures do not map one-to-one to the coefficient classes in either package.

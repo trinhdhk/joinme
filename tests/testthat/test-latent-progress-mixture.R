@@ -32,7 +32,7 @@ test_that("compatible random-effect levels share G rather than forming a product
       class_type = c("subject", "vcov"),
       class_dimensions = NULL,
       class_probability_concentration = 1,
-      class_regression_scale = 1,
+      class_regression_prior = prior_normal(),
       include_survival = TRUE
     )
   )
@@ -64,7 +64,7 @@ test_that("corr selects only off-diagonal covariance-regression coordinates", {
       class_type = "corr",
       class_dimensions = c(1L, 2L),
       class_probability_concentration = 1,
-      class_regression_scale = 1,
+      class_regression_prior = prior_normal(),
       include_survival = TRUE
     )
   )
@@ -94,7 +94,7 @@ test_that("subject and marker domains retain common labels and separate units", 
       class_type = c("subject", "marker"),
       class_dimensions = NULL,
       class_probability_concentration = c(2, 3),
-      class_regression_scale = 1,
+      class_regression_prior = prior_normal(),
       include_survival = TRUE
     )
   )
@@ -105,6 +105,52 @@ test_that("subject and marker domains retain common labels and separate units", 
   expect_identical(
     mixture_data$mixture$allocation_domains,
     list(subject = "subject", marker = "marker")
+  )
+})
+
+test_that("class-regression priors materialise in subject-then-marker order", {
+  stan_data <- list(
+    n_id = 3L,
+    D = 2L,
+    R_id = 2L,
+    R_mk = 2L,
+    Q_idm = 1L,
+    indep_idmarker_cov = 1L,
+    shrinkage = 2L
+  )
+  class_design <- list(
+    subject = list(
+      matrix = matrix(0, nrow = 3L, ncol = 2L),
+      class_term_start = c(1L, 2L),
+      class_term_count = c(1L, 1L)
+    ),
+    marker = list(
+      matrix = matrix(0, nrow = 2L, ncol = 1L),
+      class_term_start = c(1L, 1L),
+      class_term_count = c(1L, 0L)
+    )
+  )
+  specification <- list(
+    n_classes = 2L,
+    class_type = c("subject", "marker"),
+    class_probability_concentration = 1,
+    class_regression_prior = prior_laplace(
+      mu = c(0, 0.5, -0.5),
+      scale = c(1, 0.75, 0.5)
+    ),
+    class_design = class_design,
+    include_survival = TRUE
+  )
+
+  mixture_data <- .build_mixture_standata(stan_data, specification)
+  expect_identical(mixture_data$prior_class_regression_family, 3L)
+  expect_equal(mixture_data$prior_class_regression_mu, c(0, 0.5, -0.5))
+  expect_equal(mixture_data$prior_class_regression_scale, c(1, 0.75, 0.5))
+
+  specification$class_regression_prior <- prior_normal(scale = c(1, 2))
+  expect_error(
+    .build_mixture_standata(stan_data, specification),
+    "exactly one value per parameter"
   )
 })
 
@@ -138,7 +184,7 @@ test_that("mixture dimensions and unavailable levels are explained", {
     class_type = "subject",
     class_dimensions = 2L,
     class_probability_concentration = 1,
-    class_regression_scale = 1,
+    class_regression_prior = prior_normal(),
     include_survival = FALSE
   )
 
@@ -289,7 +335,7 @@ test_that("class_ordering targets only an intercept, baseline probabilities, or 
     class_type = "subject",
     class_dimensions = c(1L, 2L),
     class_probability_concentration = 1,
-    class_regression_scale = 1,
+    class_regression_prior = prior_normal(),
     class_ordering = "intercept",
     include_survival = FALSE
   )
@@ -318,11 +364,17 @@ test_that("class_ordering targets only an intercept, baseline probabilities, or 
 test_that("latent-class priors are declared through jm_prior", {
   priors <- jm_prior(
     class_probability = c(2, 3, 4),
-    class_regression = 1.25
+    class_regression = prior_student_t(
+      df = 4,
+      mu = c(0, 0.5),
+      scale = c(1.25, 0.75)
+    )
   )
   expect_s3_class(priors, "joinme_priors")
   expect_equal(priors$class_probability, c(2, 3, 4))
-  expect_identical(priors$class_regression, 1.25)
+  expect_identical(priors$class_regression$family, "student_t")
+  expect_equal(priors$class_regression$df, 4)
+  expect_equal(priors$class_regression$mu, c(0, 0.5))
   expect_false("class_probability_prior" %in% names(formals(joinme_mix)))
   expect_false("class_location_scale" %in% names(formals(joinme_mix)))
   expect_false("class_scale_rate" %in% names(formals(joinme_mix)))
@@ -446,7 +498,14 @@ test_that("Stan fit data and source include every mixture field", {
     "X_class_marker",
     "class_term_start_marker",
     "class_term_count_marker",
-    "class_regression_scale"
+    "prior_class_regression_family",
+    "prior_class_regression_mu",
+    "prior_class_regression_scale",
+    "prior_class_regression_df",
+    "prior_class_regression_global_df",
+    "prior_class_regression_global_scale",
+    "prior_class_regression_slab_df",
+    "prior_class_regression_slab_scale"
   ) %in% required_data))
 
   source <- paste(.read_stan_with_includes(stan_file), collapse = "\n")
@@ -1026,7 +1085,8 @@ test_that("class trajectories distinguish centres and response-scale margins", {
         Q_idm = 1L,
         D = 1L,
         M_cov = 1L,
-        K_cov = 0L,
+        K_cov_sd = 0L,
+        K_cov_corr = 0L,
         marker_levels = "marker_a",
         zidm_cols = "intercept",
         indep_idmarker_cov = 1L,
@@ -1039,7 +1099,8 @@ test_that("class trajectories distinguish centres and response-scale margins", {
         inv_link_n_const = 0L,
         inv_link_ops = matrix(integer(0), 1L, 0L),
         inv_link_const = matrix(numeric(0), 1L, 0L),
-        Xcov = matrix(numeric(0), 1L, 0L)
+        Xcov_sd = matrix(numeric(0), 1L, 0L),
+        Xcov_corr = matrix(numeric(0), 1L, 0L)
       ),
       mixture = list(
         n_classes = 2L,
@@ -1172,8 +1233,10 @@ test_that("covariance association plots use the hazard contribution scale", {
         Q_idm = 1L,
         indep_idmarker_cov = 1L,
         M_cov = 1L,
-        K_cov = 0L,
-        Xcov = matrix(numeric(0), 1L, 0L),
+        K_cov_sd = 0L,
+        K_cov_corr = 0L,
+        Xcov_sd = matrix(numeric(0), 1L, 0L),
+        Xcov_corr = matrix(numeric(0), 1L, 0L),
         assoc_vcov = 1L,
         vcov_diag_link = 1L,
         idx_time_idm = integer(0),

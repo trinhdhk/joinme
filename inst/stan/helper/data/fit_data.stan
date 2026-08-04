@@ -158,9 +158,11 @@
   int<lower=0> p_w;              // number of baseline hazard covariates
   matrix[N_event, p_w] W;        // hazard covariate design per event interval
 
-  /* Covariance regression covariates for L_i */
-  int<lower=0> K_cov;            // number of covariates in covariance regression
-  matrix[n_id, K_cov] Xcov;      // covariate matrix for covariance regression
+  /* Independent covariance regressions for the SD and correlation components of L_i */
+  int<lower=0> K_cov_sd; // number of observed predictors in the standard-deviation regression
+  matrix[n_id, K_cov_sd] Xcov_sd; // subject-aligned predictors for covariance standard deviations
+  int<lower=0> K_cov_corr; // number of observed predictors in the off-diagonal partial-correlation regression
+  matrix[n_id, K_cov_corr] Xcov_corr; // subject-aligned predictors for off-diagonal partial correlations
 
   /* Baseline hazard spline (centred basis) */
   int<lower=1> Kbs;              // number of baseline hazard basis functions
@@ -213,14 +215,82 @@
   int<lower=0, upper=1> assoc_corr;       // include corr association term
   int<lower=0, upper=1> assoc_vcov;       // include vcov association term
 
-  /* Prior scales */
-  vector[P] beta_scale;        // per-coefficient scale for fixed effects
-  real<lower=0> alpha_scale;   // scale for association + baseline hazard priors
-  real<lower=0> iota_scale;    // scale for functional transform intercept/slope priors
-  real<lower=0> lkj_eta;       // LKJ concentration for correlation priors
+  /* Correlation prior */
+  real<lower=0> lkj_eta;       // LKJ concentration shared by random-effect correlation matrices
 
-  /* Marker-side association shrinkage */
-  int<lower=0, upper=2> shrinkage; // 0 Student t // 1 Laplace, 2 Gaussian
+  /**
+   * Block-specific coefficient prior declarations.
+   * Family codes are 1 Student-t, 2 Normal, 3 Laplace and 4 regularised
+   * horseshoe. Marker and marker-weight locations/scales are supplied as
+   * explicit unit vectors for an auditable common interface, but R validation
+   * fixes them at zero and one.
+   */
+  int<lower=1, upper=4> prior_beta_family; // selected family for longitudinal fixed effects
+  vector[P] prior_beta_mu; // coefficient-specific prior locations for beta
+  vector<lower=0>[P] prior_beta_scale; // coefficient-specific prior scales for beta
+  real<lower=0> prior_beta_df; // fixed Student-t degrees of freedom for beta
+  real<lower=0> prior_beta_global_df; // horseshoe global-scale degrees of freedom for beta
+  real<lower=0> prior_beta_global_scale; // horseshoe global scale for beta
+  real<lower=0> prior_beta_slab_df; // horseshoe slab degrees of freedom for beta
+  real<lower=0> prior_beta_slab_scale; // horseshoe slab scale for beta
+
+  int<lower=1, upper=4> prior_alpha_family; // selected family for association coefficients
+  int<lower=6> n_alpha_prior; // six scalar association coefficients plus corr and vcov components
+  vector[n_alpha_prior] prior_alpha_mu; // locations for six scalar then corr and vcov association coefficients
+  vector<lower=0>[n_alpha_prior] prior_alpha_scale; // scales in the same association ordering
+  real<lower=0> prior_alpha_df; // fixed Student-t degrees of freedom for association coefficients
+  real<lower=0> prior_alpha_global_df; // horseshoe global-scale degrees of freedom for association coefficients
+  real<lower=0> prior_alpha_global_scale; // horseshoe global scale for association coefficients
+  real<lower=0> prior_alpha_slab_df; // horseshoe slab degrees of freedom for association coefficients
+  real<lower=0> prior_alpha_slab_scale; // horseshoe slab scale for association coefficients
+
+  int<lower=1, upper=4> prior_iota_family; // selected family for functional affine shifts
+  int<lower=0> n_iota_prior; // total number of fitted affine-shift coefficients
+  vector[n_iota_prior] prior_iota_mu; // locations ordered like the iota parameter declarations
+  vector<lower=0>[n_iota_prior] prior_iota_scale; // scales ordered like prior_iota_mu
+  real<lower=0> prior_iota_df; // fixed Student-t degrees of freedom for iota
+  real<lower=0> prior_iota_global_df; // horseshoe global-scale degrees of freedom for iota
+  real<lower=0> prior_iota_global_scale; // horseshoe global scale for iota
+  real<lower=0> prior_iota_slab_df; // horseshoe slab degrees of freedom for iota
+  real<lower=0> prior_iota_slab_scale; // horseshoe slab scale for iota
+
+  int<lower=1, upper=4> prior_marker_family; // family of standardised marker random effects
+  vector[D * R_mk] prior_marker_mu; // fixed zero locations for marker random effects
+  vector<lower=0>[D * R_mk] prior_marker_scale; // fixed unit scales for marker random effects
+  real<lower=0> prior_marker_df; // fixed Student-t degrees of freedom for marker effects
+  real<lower=0> prior_marker_global_df; // unit-default horseshoe global degrees of freedom for marker effects
+  real<lower=0> prior_marker_global_scale; // fixed unit horseshoe global scale for marker effects
+  real<lower=0> prior_marker_slab_df; // fixed horseshoe slab degrees of freedom for marker effects
+  real<lower=0> prior_marker_slab_scale; // fixed-default horseshoe slab scale for marker effects
+
+  int<lower=1, upper=4> prior_marker_weight_family; // family of standardised marker-weight perturbations
+  vector[D * estimate_marker_weights * use_marker_weight_assoc * n_marker_weight_sets] prior_marker_weight_mu; // fixed zero locations for marker weights
+  vector<lower=0>[D * estimate_marker_weights * use_marker_weight_assoc * n_marker_weight_sets] prior_marker_weight_scale; // fixed unit scales for marker weights
+  real<lower=0> prior_marker_weight_df; // fixed Student-t degrees of freedom for marker weights
+  real<lower=0> prior_marker_weight_global_df; // unit-default horseshoe global degrees of freedom for marker weights
+  real<lower=0> prior_marker_weight_global_scale; // fixed unit horseshoe global scale for marker weights
+  real<lower=0> prior_marker_weight_slab_df; // fixed horseshoe slab degrees of freedom for marker weights
+  real<lower=0> prior_marker_weight_slab_scale; // fixed-default horseshoe slab scale for marker weights
+
+  int<lower=0> P_vcov_sd; // packed count: Q_idm SD intercepts, then row-major SD slopes
+  int<lower=1, upper=4> prior_vcov_sd_family; // selected family for SD-regression intercepts and slopes
+  vector[P_vcov_sd] prior_vcov_sd_mu; // coefficient-specific SD-regression prior locations
+  vector<lower=0>[P_vcov_sd] prior_vcov_sd_scale; // coefficient-specific SD-regression prior scales
+  real<lower=0> prior_vcov_sd_df; // Student-t or horseshoe-local degrees of freedom for the SD regression
+  real<lower=0> prior_vcov_sd_global_df; // horseshoe global degrees of freedom for the SD regression
+  real<lower=0> prior_vcov_sd_global_scale; // horseshoe global scale for the SD regression
+  real<lower=0> prior_vcov_sd_slab_df; // horseshoe finite-slab degrees of freedom for the SD regression
+  real<lower=0> prior_vcov_sd_slab_scale; // horseshoe finite-slab scale for the SD regression
+
+  int<lower=0> P_vcov_corr; // packed count: off-diagonal intercepts, then row-major correlation slopes
+  int<lower=1, upper=4> prior_vcov_corr_family; // selected family for correlation-regression intercepts and slopes
+  vector[P_vcov_corr] prior_vcov_corr_mu; // coefficient-specific correlation-regression prior locations
+  vector<lower=0>[P_vcov_corr] prior_vcov_corr_scale; // coefficient-specific correlation-regression prior scales
+  real<lower=0> prior_vcov_corr_df; // Student-t or horseshoe-local degrees of freedom for the correlation regression
+  real<lower=0> prior_vcov_corr_global_df; // horseshoe global degrees of freedom for the correlation regression
+  real<lower=0> prior_vcov_corr_global_scale; // horseshoe global scale for the correlation regression
+  real<lower=0> prior_vcov_corr_slab_df; // horseshoe finite-slab degrees of freedom for the correlation regression
+  real<lower=0> prior_vcov_corr_slab_scale; // horseshoe finite-slab scale for the correlation regression
 
   /* Time scaling metadata */
   real<lower=0> tmax;                         // original time scale max

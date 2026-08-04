@@ -172,59 +172,71 @@ selection rule. Its row-specific generating values are retained in
 `truth$distributional$rowwise$tau`, while the fixed-value flags and constants
 are retained in `truth$stan_fit`.
 
-# Covariance Regression
+# Covariance regression
 
-A unique feature of `JoiNMe` is the ability to model the covariance structure of the marker-by-id effects $\mathbf{w}_{id}$. In standard models, $\Sigma_w$ is constant. In `joinme`, we can allow the variance to depend on subject-level covariates $\mathbf{x}_{cov, i}$:
-
-$$
-\Sigma_{w, i} = \text{diag}(\boldsymbol{\tau}_i) \, \Omega \, \text{diag}(\boldsymbol{\tau}_i)
-$$
-where $\log(\boldsymbol{\tau}_i) = \mathbf{X}_{cov, i} \boldsymbol{\beta}_{\tau}$. This allows, for example, the variability in biomarker trajectories to differ between treatment groups or with baseline age (`formulaVCov`).
-
-In the Stan implementation, the subject-specific covariance matrix is built from
-its Cholesky factor $L_i$. Each unique lower-triangular element of $L_i$ is
-modelled through a regression with a subject-level latent effect:
+JoiNMe models the marker-by-subject covariance factor as
 
 $$
-\ell_{im} = \alpha_m + \mathbf{x}_{cov,i}^\top \boldsymbol{\beta}_m + \lambda_m z_{L,im},
-\qquad z_{L,im} \sim \mathcal{N}(0, 1).
+L_i=\operatorname{diag}(\boldsymbol\sigma_i)K_i,
 $$
 
-Here $m$ indexes a single packed entry of the lower triangle. Thus
-$\lambda_m$ is a scalar for coordinate $m$, and
-$\boldsymbol\lambda_L=(\lambda_1,\ldots,\lambda_{M_{\mathrm{cov}}})^\top$
-is a vector of length $M_{\mathrm{cov}}$. It is not a dense loading matrix:
-the vector form of the latent contribution is
-$\operatorname{diag}(\boldsymbol\lambda_L)\boldsymbol z_{L,i}$, so
-$z_{L,im}$ affects only coordinate $m$. The coefficient array
-$\boldsymbol\beta_L$, by contrast, has one row per covariance coordinate and
-one column per `formulaVCov` predictor.
+where $\boldsymbol\sigma_i$ contains marginal standard deviations and $K_i$
+is a Cholesky correlation factor. The two parts may depend on different
+subject-level predictors:
 
-In the ordinary model,
-$\operatorname{Var}(\ell_{im}\mid\mathbf{x}_{cov,i})=\lambda_m^2$.
-Accordingly, $\lambda_m$ is a residual standard deviation on the
-*untransformed covariance-predictor scale*. It is not directly a standard
-deviation, covariance or correlation in $L_iL_i^\top$.
+```r
+formulaVCov = list(
+  sd = ~ treatment + age,
+  corr = ~ baseline_score
+)
+```
 
-For diagonal elements, a softplus (default) or exp transform ensures positivity:
+A single formula remains shorthand for applying the same regression to both
+parts. Component intercepts are represented explicitly, so formula intercept
+columns are removed from both model matrices.
+
+For standard-deviation coordinate $r$,
 
 $$
-L_i[r,r] = \log(1 + \exp(\ell_{im}))\;\text{or}\;\exp(\ell_{im}), \qquad L_i[r,c] = \ell_{im} \; (r > c).
+\eta^{sd}_{ir}
+=\alpha^{sd}_r
++\boldsymbol x_{sd,i}^\top\boldsymbol\beta^{sd}_r
++\lambda_{m(r)}z_{L,i,m(r)},
+\qquad
+\sigma_{ir}=g_{sd}(\eta^{sd}_{ir}),
 $$
 
-Use `control$vcov_diag_link` to select `"softplus"` (default) or `"exp"`.
+where $g_{sd}$ is softplus by default and may instead be exponential. For an
+off-diagonal coordinate $h=(r,c)$, $c<r$,
 
-For a diagonal coordinate, $\lambda_m$ describes unexplained variation
-before softplus or exponentiation. Under the exponential link, increasing
-$z_{L,im}$ by one multiplies the corresponding subject-specific standard
-deviation by $\exp(\lambda_m)$. Under softplus the effect remains monotone
-but is not a constant multiplicative change. For an off-diagonal coordinate,
-the predictor passes through `tanh` to form a row-wise partial correlation;
-$\lambda_m$ is therefore the residual scale before `tanh`, not the standard
-deviation of the final correlation.
+$$
+\eta^{corr}_{ih}
+=\alpha^{corr}_h
++\boldsymbol x_{corr,i}^\top\boldsymbol\beta^{corr}_h
++\lambda_{m(h)}z_{L,i,m(h)},
+\qquad
+a_{ih}=\tanh(\eta^{corr}_{ih}).
+$$
 
-This construction allows both covariate-driven heterogeneity and subject-level
-latent variability in the marker-by-subject covariance structure.
+The $a_{ih}$ are row-wise partial correlations. Their multiplicative
+recursion constructs $K_i$ with unit row norms and consequently a valid
+correlation matrix for every subject.
+
+The packed lower-triangle coordinate $m$ retains one non-negative scalar
+loading $\lambda_m$. Thus
+$\boldsymbol\lambda_L=(\lambda_1,\ldots,\lambda_{M_{\mathrm{cov}}})^\top$ is
+a vector and its action is
+$\operatorname{diag}(\boldsymbol\lambda_L)\boldsymbol z_{L,i}$, not a dense
+loading matrix. In the ordinary model, $\lambda_m^2$ is the conditional
+residual variance of the corresponding *untransformed* covariance predictor.
+It is not directly a standard deviation, correlation, or covariance in
+$L_iL_i^\top$.
+
+`jm_prior(vcov_sd = ..., vcov_corr = ...)` assigns independent prior families
+to the two intercept-and-slope blocks. Their formula dimensions and packed
+orders are shared by fitting, dynamic prediction, and both simulation entry
+points. The dedicated covariance-regression vignette gives the complete
+recursion and recovery-study syntax.
 
 # The Survival Submodel
 
@@ -267,11 +279,11 @@ code and used via precomputed design matrices. CS is approximated by a forward
 finite difference with step size $\varepsilon$. These summaries can be
 transformed before entering the hazard, as described below.
 
-For covariance-style channels (`corr`, `vcov`), the fitted association
-coefficients follow a scale-times-latent form. Internally, a positive global
-scale (`s_corr` or `s_vcov`) multiplies a latent coefficient vector, and the
-reported posterior summaries correspond to the effective coefficients that enter
-the hazard.
+For covariance-style channels (`corr`, `vcov`), the declared `alpha` prior
+applies directly to the effective coefficient entering the log hazard. The
+coefficient is not multiplied by a second random association scale. Normal,
+fixed-degrees-of-freedom Student-$t$, Laplace, and regularised horseshoe priors
+are selected independently through `jm_prior(alpha = ...)`.
 
 The covariance-regression layer itself uses an identified parameterisation for
 the subject-specific Cholesky factor: each lower-triangular entry has its own

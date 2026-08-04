@@ -1154,16 +1154,16 @@ jm_family <- joinme_family
 #' Build prior specification for JoiNMe model
 #'
 #' @description
-#' Create prior specifications for fixed effects (beta), baseline hazard coefficients (alpha),
-#' and correlation structure (LKJ prior).
+#' Create prior specifications for coefficient, marker-latent and correlation
+#' blocks. Distribution declarations are converted to compact integer and
+#' numeric fields consumed by the common Stan fitting programme.
 #'
-#' @param beta_prior Named list or vector. If vector: uniform scale for all beta.
-#'   If list with 'scale' or 'sd': uses normal(0, sd) for all.
-#'   Example: list(scale = 2) or list(scale = c(2, 1, 1))
-#' @param alpha_prior Scale for baseline hazard coefficients. Default: normal(0, 2)
-#' @param iota_prior Scale for fit-only affine-shift intercept and slope
-#'   parameters in functional association transforms. Default: normal(0, 1)
-#' @param lkj_prior Concentration parameter for LKJ correlation prior. Default: 1 (uniform)
+#' @param beta_prior,alpha_prior,iota_prior Coefficient prior declarations.
+#' @param marker_prior Unit-scale marker random-effect prior declaration.
+#' @param marker_weight_prior Unit-scale marker-weight prior declaration.
+#' @param vcov_sd_prior,vcov_corr_prior Prior declarations for the independent
+#'   standard-deviation and off-diagonal correlation regressions.
+#' @param lkj_prior LKJ prior declaration.
 #'
 #' @return List with prior specifications compatible with Stan
 #' @keywords internal
@@ -1172,56 +1172,152 @@ jm_family <- joinme_family
   beta_prior = NULL,
   alpha_prior = NULL,
   iota_prior = NULL,
+  marker_prior = NULL,
+  marker_weight_prior = NULL,
+  vcov_sd_prior = NULL,
+  vcov_corr_prior = NULL,
   lkj_prior = NULL
 ) {
-  # Create full prior spec list consumed by joinme_standata()
-  priors <- list()
+  beta_prior <- .normalise_joinme_prior_component(
+    beta_prior,
+    "beta",
+    prior_student_t(df = 6, scale = 2)
+  )
+  alpha_prior <- .normalise_joinme_prior_component(
+    alpha_prior,
+    "alpha",
+    prior_student_t(df = 6)
+  )
+  iota_prior <- .normalise_joinme_prior_component(
+    iota_prior,
+    "iota",
+    prior_student_t(df = 6)
+  )
+  marker_prior <- .normalise_joinme_prior_component(
+    marker_prior,
+    "marker",
+    prior_normal(),
+    fixed_unit_scale = TRUE
+  )
+  marker_weight_prior <- .normalise_joinme_prior_component(
+    marker_weight_prior,
+    "marker_weight",
+    prior_student_t(df = 6),
+    fixed_unit_scale = TRUE
+  )
+  vcov_sd_prior <- .normalise_joinme_prior_component(
+    vcov_sd_prior,
+    "vcov_sd",
+    prior_student_t(df = 6)
+  )
+  vcov_corr_prior <- .normalise_joinme_prior_component(
+    vcov_corr_prior,
+    "vcov_corr",
+    prior_student_t(df = 6)
+  )
+  lkj_prior <- .normalise_joinme_lkj_prior(lkj_prior)
 
-  # Beta priors (fixed effects)
-  if (!is.null(beta_prior)) {
-    if (is.numeric(beta_prior)) {
-      if (length(beta_prior) == 1) {
-        priors$beta_scale <- rep(beta_prior, 100) # Will be truncated to P
-      } else {
-        priors$beta_scale <- as.numeric(beta_prior)
-      }
-    } else if (is.list(beta_prior)) {
-      priors$beta_scale <- beta_prior$scale %||% beta_prior$sd %||% 2
-      if (length(priors$beta_scale) == 1) {
-        priors$beta_scale <- rep(priors$beta_scale, 100)
-      }
+  beta <- .encode_joinme_prior(beta_prior)
+  alpha <- .encode_joinme_prior(alpha_prior)
+  iota <- .encode_joinme_prior(iota_prior)
+  marker <- .encode_joinme_prior(marker_prior)
+  marker_weight <- .encode_joinme_prior(marker_weight_prior)
+  vcov_sd <- .encode_joinme_prior(vcov_sd_prior)
+  vcov_corr <- .encode_joinme_prior(vcov_corr_prior)
+
+  list(
+    beta = beta,
+    alpha = alpha,
+    iota = iota,
+    marker = marker,
+    marker_weight = marker_weight,
+    vcov_sd = vcov_sd,
+    vcov_corr = vcov_corr,
+    lkj_eta = as.numeric(lkj_prior$eta)
+  )
+}
+
+#' Encode one validated prior declaration for Stan data
+#'
+#' @param prior A normalised `joinme_prior_spec` object.
+#'
+#' @return A list containing the integer family code and fixed
+#'   hyperparameters used by the reusable Stan prior module.
+#' @keywords internal
+#' @noRd
+.encode_joinme_prior <- function(prior) {
+  family_codes <- c(
+    student_t = 1L,
+    normal = 2L,
+    laplace = 3L,
+    horseshoe = 4L
+  ) # stable R-to-Stan family-code dictionary
+  list(
+    family = unname(family_codes[[prior$family]]),
+    mu = as.numeric(prior$mu),
+    scale = as.numeric(prior$scale),
+    df = if (is.finite(prior$df)) prior$df else 1,
+    global_df = if (is.finite(prior$global_df)) prior$global_df else 1,
+    global_scale = if (is.finite(prior$global_scale)) prior$global_scale else 1,
+    slab_df = if (is.finite(prior$slab_df)) prior$slab_df else 4,
+    slab_scale = if (is.finite(prior$slab_scale)) prior$slab_scale else 2
+  )
+}
+
+#' Materialise coefficient-prior declarations at fitted block dimensions
+#'
+#' @description
+#' Scalar locations and scales are recycled only after formula parsing reveals
+#' the exact number and order of coefficients. Non-scalar declarations must
+#' match that number exactly, preventing silent partial recycling across
+#' scientifically different parameters.
+#'
+#' @param priors Named list of encoded prior declarations. This may be the
+#'   output from [.build_priors()] or a bespoke list for another coefficient
+#'   block, such as `class_regression`.
+#' @param dimensions Named integer vector giving the fitted dimension of every
+#'   prior block to materialise.
+#'
+#' @return Named Stan-data fields for every requested prior block.
+#' @keywords internal
+#' @noRd
+.materialise_joinme_prior_data <- function(priors, dimensions) {
+  expand_values <- function(values, number_parameters, component, field) {
+    values <- as.numeric(values)
+    if (number_parameters == 0L) return(numeric(0))
+    if (length(values) == 1L) return(rep.int(values, number_parameters))
+    if (length(values) != number_parameters) {
+      cli::cli_abort(c(
+        x = "Prior {.arg {component}} provides {length(values)} {field} values for {number_parameters} parameters.",
+        i = "Supply one value or exactly one value per parameter in the fitted block."
+      ))
     }
-  } else {
-    priors$beta_scale <- rep(2.0, 100) # Default: normal(0, 2)
+    values
   }
 
-  # Alpha priors (baseline hazard)
-  if (!is.null(alpha_prior)) {
-    if (is.numeric(alpha_prior)) {
-      priors$alpha_scale <- alpha_prior[1]
-    } else if (is.list(alpha_prior)) {
-      priors$alpha_scale <- alpha_prior$scale %||% alpha_prior$sd %||% 2
-    }
-  } else {
-    priors$alpha_scale <- 2.0 # Default
+  output <- list()
+  for (component in names(dimensions)) {
+    specification <- priors[[component]]
+    number_parameters <- as.integer(dimensions[[component]])
+    prefix <- paste0("prior_", component, "_")
+    output[[paste0(prefix, "family")]] <- as.integer(specification$family)
+    output[[paste0(prefix, "mu")]] <- expand_values(
+      specification$mu,
+      number_parameters,
+      component,
+      "location"
+    )
+    output[[paste0(prefix, "scale")]] <- expand_values(
+      specification$scale,
+      number_parameters,
+      component,
+      "scale"
+    )
+    output[[paste0(prefix, "df")]] <- as.numeric(specification$df)
+    output[[paste0(prefix, "global_df")]] <- as.numeric(specification$global_df)
+    output[[paste0(prefix, "global_scale")]] <- as.numeric(specification$global_scale)
+    output[[paste0(prefix, "slab_df")]] <- as.numeric(specification$slab_df)
+    output[[paste0(prefix, "slab_scale")]] <- as.numeric(specification$slab_scale)
   }
-
-  # Iota priors (fit-only functional transform intercept/slope shifts)
-  if (!is.null(iota_prior)) {
-    if (is.numeric(iota_prior)) {
-      priors$iota_scale <- iota_prior[1]
-    } else if (is.list(iota_prior)) {
-      priors$iota_scale <- iota_prior$scale %||% iota_prior$sd %||% 1
-    }
-  } else {
-    priors$iota_scale <- 1.0
-  }
-  # LKJ prior (correlation)
-  if (!is.null(lkj_prior)) {
-    priors$lkj_eta <- as.numeric(lkj_prior)
-  } else {
-    priors$lkj_eta <- 1.0 # Default: uniform
-  }
-
-  priors
+  output
 }

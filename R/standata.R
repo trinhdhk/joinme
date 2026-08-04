@@ -43,7 +43,10 @@
 #'   represent an observed survival process. The fitting entry points set this
 #'   to `FALSE` only when they have constructed an internal likelihood-neutral
 #'   scaffold for a longitudinal-only analysis.
-#' @param formulaVCov Covariance regression formula for id-specific marker-by-id effects.
+#' @param formulaVCov Covariance regression specification for id-specific
+#'   marker-by-id effects. A formula applies the same observed covariates to
+#'   both components. A named list, `list(sd = ~ ..., corr = ~ ...)`, regresses
+#'   standard deviations and off-diagonal partial correlations independently.
 #'   If the marker block omits the inner `( ... | id )`, then marker-by-id effects
 #'   are absent and covariance-style associations (`corr`, `vcov`) are not allowed.
 #'   Downstream, `corr` uses the off-diagonal entries of the subject-specific
@@ -103,10 +106,18 @@
 #' @param alpha_prior Prior specification for association parameters.
 #' @param iota_prior Prior specification for fit-only affine-shift intercept and
 #'   slope parameters used by functional association transforms.
+#' @param marker_prior Prior family for standardised marker random effects.
+#'   Location zero and scale one are enforced by [jm_prior()].
+#' @param marker_weight_prior Prior family for estimated marker-weight
+#'   perturbations. Location zero and scale one are enforced by [jm_prior()].
+#' @param vcov_sd_prior,vcov_corr_prior Prior families for the independently
+#'   packed standard-deviation and off-diagonal correlation coefficients.
 #' @param lkj_prior Prior specification for correlation structures.
 #' @param allow_marker_crosscorr Integer flag; 1 allows cross-marker correlation in marker RE.
-#' @param shrinkage Integer flag controlling shrinkage behaviour for marker-by-id effects. 
-#'   0 = student_t(6, 0, 1), 1 = double_exponential(0, 1), 2 = std_normal();
+#' @param shrinkage Compatibility flag used by latent-class component
+#'   distributions and simulation: 0 = Student-t(6), 1 = Laplace, and
+#'   2 = Normal. Ordinary coefficient and marker priors are declared separately
+#'   through [jm_prior()].
 #' @param marker_weights Optional base weights for marker-specific association
 #'   components. If `shared_marker_weights = TRUE`, provide one numeric vector of
 #'   length D (or one named numeric vector keyed by marker level) that is shared
@@ -118,8 +129,8 @@
 #' @param fixed_marker_weights Logical; if TRUE, marker weights are kept fixed
 #'   at `marker_weights` (no perturbation). If FALSE, marker weights are estimated
 #'   via signed additive perturbations,
-#'   `marker_weights + z_marker_weights`. The standardized latent family is
-#'   selected by `shrinkage`: Student-t(6), Laplace, or Normal for 0, 1, or 2.
+#'   `marker_weights + z_marker_weights`. The standardised latent family is
+#'   selected by `marker_weight_prior`.
 #' @param shared_marker_weights Logical; if TRUE, all active weighted
 #'   marker-based association terms share one marker-weight structure. If FALSE,
 #'   each active weighted marker-based association term gets its own marker-weight
@@ -161,6 +172,10 @@ joinme_standata <- function(
   beta_prior = NULL,
   alpha_prior = NULL,
   iota_prior = NULL,
+  marker_prior = NULL,
+  marker_weight_prior = NULL,
+  vcov_sd_prior = NULL,
+  vcov_corr_prior = NULL,
   lkj_prior = NULL,
   allow_marker_crosscorr = 1L,
   shrinkage = 0L,
@@ -224,7 +239,16 @@ joinme_standata <- function(
 
   # Workflow: parse formulas -> build matrices -> assemble survival basis -> pack list
   # Handle mixed families
-  priors <- .build_priors(beta_prior = beta_prior, alpha_prior = alpha_prior, iota_prior = iota_prior, lkj_prior = lkj_prior)
+  priors <- .build_priors(
+    beta_prior = beta_prior,
+    alpha_prior = alpha_prior,
+    iota_prior = iota_prior,
+    marker_prior = marker_prior,
+    marker_weight_prior = marker_weight_prior,
+    vcov_sd_prior = vcov_sd_prior,
+    vcov_corr_prior = vcov_corr_prior,
+    lkj_prior = lkj_prior
+  )
   
   # Parse lme4 bars
   f_exp <- reformulas::expandDoubleVerts(formulaLong)
@@ -464,7 +488,7 @@ joinme_standata <- function(
   )
 
   # Marker-weight estimation controls
-  # - estimate_marker_weights_active toggles whether shrinkage is applied in Stan
+  # - estimate_marker_weights_active toggles whether the declared marker-weight prior is applied in Stan
     # Independence flags from lme4-style double-bar syntax
     # - (... || id) enforces diagonal id RE covariance
     # - (... || marker) enforces diagonal marker RE covariance
@@ -709,8 +733,8 @@ joinme_standata <- function(
   W <- .mm_event(formulaEvent, dataEvent)
   p_w <- ncol(W)
 
-  # Covariance covariates Xcov
-  # - used to build subject-specific lower-triangular factors L_i in Stan
+  # Covariance-regression covariates
+  # - independent SD and off-diagonal correlation designs build each L_i
   formulaVCov <- .get_vcov_formula(
     formulaVCov = formulaVCov,
     default = ~ 1,
@@ -722,8 +746,10 @@ joinme_standata <- function(
     time_var = time_var,
     context = "joinme_standata()"
   )
-  K_cov <- vcov_design$K_cov
-  Xcov <- vcov_design$Xcov
+  K_cov_sd <- vcov_design$K_cov_sd # number of observed predictors for the standard-deviation regression
+  Xcov_sd <- vcov_design$Xcov_sd # subject-aligned standard-deviation regression matrix
+  K_cov_corr <- vcov_design$K_cov_corr # number of observed predictors for off-diagonal partial correlations
+  Xcov_corr <- vcov_design$Xcov_corr # subject-aligned correlation regression matrix
 
   # Survival outcomes (scaled)
   # - S_entry/S_event are interval bounds on [0,1] after scaling by tmax
@@ -857,15 +883,6 @@ joinme_standata <- function(
     idm_design = idm_templates
   )
 
-  # Prior scales (align to P)
-  beta_scale <- as.numeric(priors$beta_scale)
-  if (length(beta_scale) == 0) beta_scale <- 2.5
-  if (length(beta_scale) < P) {
-    # beta_scale <- c(beta_scale, rep(2.0, P - length(beta_scale)))
-    beta_scale <- rep(beta_scale, length.out = P)
-  }
-  beta_scale <- beta_scale[seq_len(P)]
-
   allow_marker_crosscorr <- as.integer(allow_marker_crosscorr)
   if (!allow_marker_crosscorr %in% c(0L, 1L)) {
     cli::cli_abort(c(
@@ -904,6 +921,43 @@ joinme_standata <- function(
     transforms,
     n_corr_components = M_corr_tf,
     n_vcov_components = M_vcov_tf
+  )
+
+  # Materialise every prior only after the formula and transformation parsers
+  # have established the exact dimensions. Association alpha ordering is the
+  # six scalar current-value/current-slope channels followed by corr and vcov
+  # components. Iota ordering mirrors the transformed-parameter declarations.
+  n_alpha_prior <- 6L + M_corr_tf + M_vcov_tf
+  iota_suffixes <- c(
+    "cv", "cs", "corr", "vcov",
+    "cv_mean", "cv_marker", "cs_mean", "cs_marker"
+  )
+  iota_multipliers <- c(1L, 1L, M_corr_tf, M_vcov_tf, 1L, 1L, 1L, 1L)
+  n_iota_prior <- sum(vapply(seq_along(iota_suffixes), function(index) {
+    suffix <- iota_suffixes[[index]]
+    multiplier <- iota_multipliers[[index]]
+    multiplier * (
+      as.integer(functional_tf_data[[paste0("estimate_iota_intercept_", suffix)]] %||% 0L) +
+        as.integer(functional_tf_data[[paste0("estimate_iota_slope_", suffix)]] %||% 0L)
+    )
+  }, integer(1)))
+  prior_stan_data <- .materialise_joinme_prior_data(
+    priors,
+    dimensions = c(
+      beta = P,
+      alpha = n_alpha_prior,
+      iota = n_iota_prior,
+      marker = D * R_mk,
+      marker_weight = D * marker_weight_spec$n_sets * estimate_marker_weights_active,
+      vcov_sd = Q_idm * (1L + K_cov_sd),
+      vcov_corr = ((Q_idm * (Q_idm - 1L)) %/% 2L) * (1L + K_cov_corr)
+    )
+  )
+  prior_stan_data$n_alpha_prior <- as.integer(n_alpha_prior)
+  prior_stan_data$n_iota_prior <- as.integer(n_iota_prior)
+  prior_stan_data$P_vcov_sd <- as.integer(Q_idm * (1L + K_cov_sd))
+  prior_stan_data$P_vcov_corr <- as.integer(
+    ((Q_idm * (Q_idm - 1L)) %/% 2L) * (1L + K_cov_corr)
   )
 
   # if (af$assoc_cv_total == 0 && af$assoc_cv_mean == 1 && af$assoc_cv_marker == 1 &&
@@ -988,8 +1042,10 @@ joinme_standata <- function(
     tau_fixed = as.numeric(tau_fixed_value),
     p_w = as.integer(p_w),
     W = W,
-    K_cov = as.integer(K_cov),
-    Xcov = Xcov,
+    K_cov_sd = as.integer(K_cov_sd),
+    Xcov_sd = Xcov_sd,
+    K_cov_corr = as.integer(K_cov_corr),
+    Xcov_corr = Xcov_corr,
     Kbs = as.integer(Kbs),
     Bs_event_c = Bs_event_c,
     Bs_gk_c = Bs_gk_c,
@@ -1103,9 +1159,6 @@ joinme_standata <- function(
     # --------------------------
     # PRIOR SCALES 
     # --------------------------
-    beta_scale = as.numeric(beta_scale),
-    alpha_scale = as.numeric(priors$alpha_scale),
-    iota_scale = as.numeric(priors$iota_scale),
     lkj_eta = as.numeric(priors$lkj_eta),
 
     # --------------------------
@@ -1206,7 +1259,7 @@ joinme_standata <- function(
   # JoiNMe fit receives zero-dimensional mixture fields, whereas `joinme_mix()`
   # supplies a checked specification that activates only the requested
   # random-effect blocks.  In either case the same Stan likelihood is used.
-  standata_complete <- c(standata_base, functional_tf_data)
+  standata_complete <- c(standata_base, functional_tf_data, prior_stan_data)
   mixture_standata <- .build_mixture_standata(
     stan_data = standata_complete,
     mixture = mixture

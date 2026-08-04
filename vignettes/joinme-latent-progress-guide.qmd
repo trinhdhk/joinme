@@ -125,7 +125,10 @@ fit_covariance <- joinme_mix(
   data_long,
   event_formula,
   data_event,
-  formulaVCov = ~ treatment + age,
+  formulaVCov = list(
+    sd = ~ treatment + age,
+    corr = ~ baseline_score
+  ),
   n_classes = 3,
   class_type = "vcov",
   assoc = "vcov"
@@ -133,6 +136,8 @@ fit_covariance <- joinme_mix(
 ```
 
 The nested marker term must contain an inner subject random-effect term.
+The `sd` and `corr` formulae may contain different subject-level predictors;
+a single formula remains shorthand for applying the same design to both.
 The selected coordinates refer to the covariance-regression latent vector
 `z_L`, not to `w_idm` innovations.
 
@@ -287,7 +292,7 @@ fit_regularised <- joinme_mix(
   formulaClass = ~ treatment + age_at_entry,
   priors = jm_prior(
     class_probability = c(2, 2, 2),
-    class_regression = 1
+    class_regression = prior_normal(scale = 1)
   ),
   shrinkage = 0
 )
@@ -295,8 +300,9 @@ fit_regularised <- joinme_mix(
 
 - `class_probability` is the Dirichlet concentration for zero-covariate class
   probabilities.
-- `class_regression` is the Normal prior scale for coefficients introduced by
-  `formulaClass`.
+- `class_regression` selects the Normal, Student-t, Laplace, or regularised
+  horseshoe prior for coefficients introduced by `formulaClass`; its `mu` and
+  `scale` may be scalar or coefficient-specific.
 - `class_ordering = "intercept"` orders only the selected random-intercept
   location; slope locations remain unrestricted.
 - `class_ordering = "probability"` orders baseline class probabilities,
