@@ -68,7 +68,8 @@ suppressPackageStartupMessages({
 #'
 #' @return Named list with parsed event-process vectors:
 #'   `event_start`, `event_stop`, `event_time`, `event_status`,
-#'   `d_event_exact`, `d_event_any`, `event_censor_type`, and `surv_type`.
+#'   `d_event_exact`, `d_event_any`, `event_censor_type`, `surv_type`, and the
+#'   names of the variables defining the event-process clock.
 #' @keywords internal
 #' @noRd
 .get_event_model_vars <- function(formulaEvent, dataEvent, context = "JoiNMe") {
@@ -107,6 +108,36 @@ suppressPackageStartupMessages({
       }
     }
   }
+
+  # Retain the variable names used inside Surv().  The right-hand side of a
+  # Cox formula may contain a spline of the event clock itself, for example
+  # ns(event_time, df = 3):x.  At a quadrature ordinate that spline must be
+  # evaluated at the ordinate in original study-time units, rather than at the
+  # observed endpoint copied into every integration row.  Named control
+  # arguments such as `type` and `origin` are not event-time variables.
+  surv_value_arguments <- if (is.call(lhs_call)) as.list(lhs_call)[-1L] else list()
+  surv_argument_names <- names(surv_value_arguments) %||% rep("", length(surv_value_arguments))
+  retained_surv_arguments <- !(surv_argument_names %in% c("type", "origin"))
+  surv_value_arguments <- surv_value_arguments[retained_surv_arguments]
+  surv_argument_names <- surv_argument_names[retained_surv_arguments]
+  surv_argument_variables <- vapply(
+    surv_value_arguments,
+    function(argument) {
+      variables <- all.vars(argument)
+      if (length(variables) == 0L) NA_character_ else variables[[1L]]
+    },
+    character(1)
+  )
+  event_argument_variable <- function(formal_name, fallback_position) {
+    named_position <- which(surv_argument_names == formal_name)
+    position <- if (length(named_position) > 0L) named_position[[1L]] else fallback_position
+    if (length(position) != 1L || position < 1L || position > length(surv_argument_variables)) {
+      return(NA_character_)
+    }
+    surv_argument_variables[[position]]
+  } # named Surv arguments may be supplied in a different textual order
+  first_time_variable <- event_argument_variable("time", 1L)
+  second_time_variable <- event_argument_variable("time2", 2L)
 
   surv_mat <- unclass(y)
   if (!is.matrix(surv_mat) || ncol(surv_mat) < 2L) {
@@ -170,9 +201,15 @@ suppressPackageStartupMessages({
     is_interval <- st == 3L
 
     event_start <- ifelse(is_interval, t1, 0)
+    # `survival::Surv(..., type = "interval2")` normalises all four forms to
+    # its internal `type = "interval"` matrix.  For right, exact and left
+    # censoring the meaningful endpoint is stored in `time1`; `time2` is a
+    # placeholder for a left-censored row.  Only a proper interval uses both
+    # columns.  Reading `time2` for a left-censored row would silently replace
+    # the stated upper limit by that placeholder.
     event_stop <- ifelse(is_right, t1,
       ifelse(is_exact, t1,
-        ifelse(is_left, t2, t2)
+        ifelse(is_left, t1, t2)
       )
     )
 
@@ -218,6 +255,30 @@ suppressPackageStartupMessages({
   d_event_exact <- as.integer(event_censor_type == 1L)
   d_event_any <- as.integer(event_censor_type %in% c(1L, 2L, 3L))
 
+  # Identify the endpoint variable(s) that represent the event clock.  In a
+  # counting-process response the second time argument is the current risk-set
+  # time.  An interval2 response has two endpoint variables, either of which
+  # may be named on the Cox right-hand side, so both are retained and the
+  # design evaluator updates only those actually used by a formula.
+  event_start_var <- NA_character_
+  event_stop_var <- NA_character_
+  event_time_vars <- character(0)
+  if (surv_type_raw == "counting" || (surv_type_raw == "right" && ncol(surv_mat) >= 3L)) {
+    event_start_var <- first_time_variable
+    event_stop_var <- second_time_variable
+    event_time_vars <- event_stop_var
+  } else if (identical(surv_type, "interval2")) {
+    event_start_var <- first_time_variable
+    event_stop_var <- second_time_variable
+    event_time_vars <- c(event_start_var, event_stop_var)
+  } else {
+    event_stop_var <- first_time_variable
+    event_time_vars <- event_stop_var
+  }
+  event_time_vars <- unique(event_time_vars[
+    !is.na(event_time_vars) & nzchar(event_time_vars) & event_time_vars %in% names(dataEvent)
+  ])
+
   list(
     event_start = event_start,
     event_stop = event_stop,
@@ -226,8 +287,63 @@ suppressPackageStartupMessages({
     d_event_exact = d_event_exact,
     d_event_any = d_event_any,
     event_censor_type = as.integer(event_censor_type),
-    surv_type = surv_type
+    surv_type = surv_type,
+    event_start_var = event_start_var,
+    event_stop_var = event_stop_var,
+    event_time_vars = event_time_vars
   )
+}
+
+#' Expand an interval-censored outcome into its two likelihood contributions
+#'
+#' @description
+#' An observation known to fail in \eqn{(L, R]} contributes
+#' \eqn{S(L)-S(R)} to the event likelihood.  The common event-row
+#' representation evaluates one hazard integral per row, so this probability
+#' is written as the product
+#' \deqn{S(L)\{1-\exp[-(H(R)-H(L))]\}.}
+#' The first factor is represented by a right-censored risk row from zero to
+#' \eqn{L}; the second is represented by an interval-failure row from \eqn{L}
+#' to \eqn{R}.  This decomposition is exact and lets both rows use the same
+#' longitudinal association, event covariates and numerical integration rule.
+#'
+#' @param data_event Event data with one row per subject for a left- or
+#'   interval-censored response.  The internal columns `event_start`,
+#'   `event_stop`, `event_status` and `event_censor_type` must already be
+#'   present.
+#' @param context Character label used in explanatory error messages.
+#'
+#' @return The event data with one additional right-censored row for every
+#'   proper interval \eqn{(L,R]} having \eqn{L>0}.  Original covariates are
+#'   copied to the added row because `Surv(..., type = "interval2")` supplies
+#'   one covariate profile for the whole subject-level event observation.
+#' @keywords internal
+#' @noRd
+.expand_interval2_risk_rows <- function(data_event, context = "JoiNMe") {
+  required_columns <- c(
+    "event_start", "event_stop", "event_status", "event_censor_type"
+  ) # internal event quantities needed to define both risk contributions
+  missing_columns <- setdiff(required_columns, names(data_event)) # required quantities absent from the supplied event data
+  if (length(missing_columns) > 0L) {
+    cli::cli_abort(c(
+      x = "{context}: interval-censoring information is incomplete.",
+      i = "Missing internal columns: {paste(missing_columns, collapse = ', ')}."
+    ))
+  }
+
+  proper_interval <- data_event$event_censor_type == 3L &
+    data_event$event_start > 0 # rows representing a genuine interval (L, R] rather than (0, R]
+  if (!any(proper_interval)) {
+    return(data_event)
+  }
+
+  survival_to_lower <- data_event[proper_interval, , drop = FALSE] # copied profiles for the known event-free period [0, L]
+  survival_to_lower$event_stop <- survival_to_lower$event_start # lower inspection time L becomes the end of the first risk row
+  survival_to_lower$event_start <- 0 # interval2 describes censoring, not delayed entry, so risk begins at time zero
+  survival_to_lower$event_status <- 0 # no exact failure occurs at the lower inspection time
+  survival_to_lower$event_censor_type <- 0L # the first factor is the survival probability through L
+
+  rbind(data_event, survival_to_lower)
 }
 
 #' Build interval index ranges for event rows grouped by id
@@ -320,10 +436,11 @@ suppressPackageStartupMessages({
 
 #' Build the subject-level covariance-regression design matrix
 #'
-#' @param formulaVCov Canonical covariance-regression formula list returned by
-#'   [.get_vcov_formula()].
+#' @param formulaVCov Canonical covariance-regression formula list returned by .get_vcov_formula().
 #' @param dataEvent Event-level data with one row per subject.
-#' @param time_var Longitudinal time variable name, forbidden in `formulaVCov`.
+#' @param time_var Study-time variable name. Time transformations are evaluated
+#'   on its original scale and retained in the fitted template.
+#' @param templates Optional fitted SD and correlation model-matrix templates.
 #' @param context Character label for error messages.
 #'
 #' @return Named list with the canonical formulae and independent `sd` and
@@ -334,6 +451,7 @@ suppressPackageStartupMessages({
 .build_vcov_design <- function(formulaVCov,
                                dataEvent,
                                time_var,
+                               templates = NULL,
                                context = "JoiNMe") {
   canonical_formulae <- .get_vcov_formula(
     formulaVCov = formulaVCov,
@@ -352,14 +470,9 @@ suppressPackageStartupMessages({
 
     component_rhs <- stats::update(component_formula, . ~ .) # copy retaining formula environment and contrasts
     component_rhs[[2]] <- NULL # remove any accidental response so only the right-hand side defines the design
-    if (length(component_rhs) >= 3 && .expr_has_time(component_rhs[[3]], time_var)) {
-      cli::cli_abort(c(
-        x = "{context}: {.arg formulaVCov}${component} cannot include the time variable {.arg {time_var}}.",
-        i = "Covariance regressions are subject-level; remove time or move it to the longitudinal model."
-      ))
-    }
-
-    design <- .mm(component_rhs, dataEvent) # model matrix evaluated in the same subject order used by Stan
+    component_template <- templates[[component]] %||%
+      .make_model_matrix_template(component_rhs, dataEvent) # fitted spline and contrast definition on original event time
+    design <- .mm(component_template, dataEvent) # model matrix evaluated in the same subject order and original time units used by Stan
     if ("(Intercept)" %in% colnames(design)) {
       design <- design[, colnames(design) != "(Intercept)", drop = FALSE]
     } # component-specific intercepts are represented explicitly by alpha_L
@@ -368,6 +481,7 @@ suppressPackageStartupMessages({
     }
     list(
       formula = component_formula,
+      template = component_template,
       K = as.integer(ncol(design)),
       X = design
     ) # self-contained component record used unchanged by simulate and fit
@@ -379,6 +493,7 @@ suppressPackageStartupMessages({
     formulaVCov = canonical_formulae,
     sd = sd_design,
     corr = corr_design,
+    templates = list(sd = sd_design$template, corr = corr_design$template),
     K_cov_sd = sd_design$K,
     Xcov_sd = sd_design$X,
     K_cov_corr = corr_design$K,
@@ -391,13 +506,13 @@ suppressPackageStartupMessages({
 #' @param stan_data Fitted Stan-data metadata.
 #'
 #' @return A list containing independent SD/correlation dimensions and design
-#'   matrices, plus `legacy = TRUE` when both components came from the former
+#'   matrices, plus `shared_format = TRUE` when both components came from the former
 #'   shared `K_cov`/`Xcov` representation.
 #' @keywords internal
 #' @noRd
 .stored_vcov_design <- function(stan_data) {
-  legacy_design <- is.null(stan_data$K_cov_sd) && !is.null(stan_data$K_cov)
-  if (legacy_design) {
+  shared_design <- is.null(stan_data$K_cov_sd) && !is.null(stan_data$K_cov)
+  if (shared_design) {
     shared_dimension <- as.integer(stan_data$K_cov %||% 0L) # former common covariance-regression slope count
     shared_matrix <- as.matrix(
       stan_data$Xcov %||% matrix(0, nrow = stan_data$n_id %||% 0L, ncol = shared_dimension)
@@ -407,7 +522,7 @@ suppressPackageStartupMessages({
       k_corr = shared_dimension,
       x_sd = shared_matrix,
       x_corr = shared_matrix,
-      legacy = TRUE
+      shared_format = TRUE
     ))
   }
 
@@ -419,7 +534,7 @@ suppressPackageStartupMessages({
     k_corr = corr_dimension,
     x_sd = as.matrix(stan_data$Xcov_sd %||% matrix(0, nrow = number_subjects, ncol = sd_dimension)),
     x_corr = as.matrix(stan_data$Xcov_corr %||% matrix(0, nrow = number_subjects, ncol = corr_dimension)),
-    legacy = FALSE
+    shared_format = FALSE
   )
 }
 
@@ -911,99 +1026,95 @@ gk_quadrature <- function(nodes = 15L) {
   lapply(rhs_list, function(rhs) .make_model_matrix_template(rhs, data = data))
 }
 
-#' Detect raw linear time terms from model.matrix term labels
-#' @keywords internal
-#' @noRd
-.term_is_raw_time_linear <- function(term_label, time_var) {
-  if (is.null(term_label) || !nzchar(term_label)) {
-    return(FALSE)
-  }
-
-  expr <- tryCatch(parse(text = term_label)[[1]], error = function(e) NULL)
-  if (is.null(expr)) {
-    return(FALSE)
-  }
-
-  inspect <- function(node) {
-    if (is.name(node)) {
-      return(list(ok = TRUE, has_time = identical(as.character(node), time_var)))
-    }
-    if (!is.call(node)) {
-      return(list(ok = FALSE, has_time = FALSE))
-    }
-
-    op <- as.character(node[[1]])
-    if (length(op) != 1L || !op %in% c(":", "*")) {
-      return(list(ok = FALSE, has_time = FALSE))
-    }
-
-    pieces <- lapply(as.list(node)[-1], inspect)
-    list(
-      ok = all(vapply(pieces, function(piece) isTRUE(piece$ok), logical(1))),
-      has_time = any(vapply(pieces, function(piece) isTRUE(piece$has_time), logical(1)))
-    )
-  }
-
-  res <- inspect(expr)
-  isTRUE(res$ok) && isTRUE(res$has_time)
-}
-
-#' Detect coefficient indices that need original-time rescaling
-#' @keywords internal
-#' @noRd
-.time_rescale_idx_from_template <- function(template, time_var) {
-  if (!.is_model_matrix_template(template)) {
-    return(integer(0))
-  }
-
-  assign_idx <- as.integer(template$assign %||% integer(0))
-  if (length(assign_idx) == 0L) {
-    return(integer(0))
-  }
-
-  term_labels <- attr(template$terms, "term.labels") %||% character(0)
-  keep <- vapply(assign_idx, function(idx) {
-    if (!is.finite(idx) || idx < 1L || idx > length(term_labels)) {
-      return(FALSE)
-    }
-    .term_is_raw_time_linear(term_labels[[idx]], time_var = time_var)
-  }, logical(1))
-  which(keep)
-}
-
-#' Flatten time-rescale indices across a template list
-#' @keywords internal
-#' @noRd
-.time_rescale_idx_from_template_list <- function(templates, time_var) {
-  if (length(templates) == 0L) {
-    return(integer(0))
-  }
-
-  out <- integer(0)
-  offset <- 0L
-  for (template in templates) {
-    local_idx <- .time_rescale_idx_from_template(template, time_var = time_var)
-    if (length(local_idx) > 0L) {
-      out <- c(out, offset + local_idx)
-    }
-    offset <- offset + length(template$columns %||% character(0))
-  }
-  as.integer(out)
-}
-
 #' Survival/event model matrix
 #' @keywords internal
 #' @noRd
 .mm_event <- function(formulaEvent, data) {
   data <- as.data.frame(data)
   rownames(data) <- NULL
-  rhs <- stats::delete.response(stats::terms(formulaEvent))
-  X <- stats::model.matrix(rhs, data = data)
+  if (.is_model_matrix_template(formulaEvent)) {
+    X <- .mm(formulaEvent, data)
+  } else {
+    rhs <- stats::delete.response(stats::terms(formulaEvent))
+    X <- stats::model.matrix(rhs, data = data)
+  }
   if ("(Intercept)" %in% colnames(X)) {
     X <- X[, colnames(X) != "(Intercept)", drop = FALSE]
   }
   storage.mode(X) <- "double"
   X
+}
+
+#' Build a reusable event-regression model-matrix template
+#' @keywords internal
+#' @noRd
+.make_event_model_matrix_template <- function(formulaEvent, data) {
+  rhs <- stats::delete.response(stats::terms(formulaEvent)) # ordinary Cox right-hand side retaining its formula environment
+  .make_model_matrix_template(rhs, data = data) # spline knots, boundaries and contrasts learnt on original event time
+}
+
+#' Evaluate a model-matrix template at a matrix of study times
+#' @keywords internal
+#' @noRd
+.eval_template_on_times <- function(template, data, time_variables, times_mat) {
+  data <- as.data.frame(data) # one reference covariate record for every integration interval
+  times_mat <- as.matrix(times_mat) # original study-time ordinates, one row per reference record
+  n_records <- nrow(data) # number of independent covariate records
+  n_times <- ncol(times_mat) # number of quadrature ordinates per record
+  if (nrow(times_mat) != n_records) {
+    cli::cli_abort("The time-evaluation matrix must have one row per covariate record.")
+  }
+
+  evaluation_data <- data[rep(seq_len(n_records), each = n_times), , drop = FALSE]
+  evaluation_times <- as.vector(t(times_mat)) # record-major ordering expected by the Stan arrays
+  time_variables <- unique(as.character(time_variables))
+  time_variables <- time_variables[
+    !is.na(time_variables) & nzchar(time_variables) & time_variables %in% names(evaluation_data)
+  ]
+  for (time_variable in time_variables) {
+    evaluation_data[[time_variable]] <- evaluation_times
+  }
+
+  design <- .mm(template, evaluation_data) # splines use attributes learnt on the original-time training data
+  # evaluation_data is ordered as all times for record 1, followed by all
+  # times for record 2.  R arrays vary their first index fastest, so the
+  # temporary array must put time first and then be transposed to the
+  # record-by-time-by-coefficient order declared in Stan.
+  aperm(
+    array(design, dim = c(n_times, n_records, ncol(design))),
+    c(2L, 1L, 3L)
+  )
+}
+
+#' Replace event-clock columns by a supplied original-time vector
+#' @keywords internal
+#' @noRd
+.set_event_clock <- function(data, time_variables, original_time) {
+  data <- as.data.frame(data) # event or prediction records whose other covariates remain unchanged
+  original_time <- as.numeric(original_time) # current event time in the units supplied by the analyst
+  if (length(original_time) == 1L && nrow(data) != 1L) {
+    original_time <- rep(original_time, nrow(data))
+  }
+  if (length(original_time) != nrow(data)) {
+    cli::cli_abort("The event-clock vector must have length one or one value per event record.")
+  }
+  time_variables <- unique(as.character(time_variables))
+  time_variables <- time_variables[
+    !is.na(time_variables) & nzchar(time_variables) & time_variables %in% names(data)
+  ]
+  for (time_variable in time_variables) {
+    data[[time_variable]] <- original_time
+  }
+  data
+}
+
+#' Evaluate an event-regression template at a matrix of study times
+#' @keywords internal
+#' @noRd
+.eval_event_template_on_times <- function(template, dataEvent, time_variables, times_mat) {
+  evaluated <- .eval_template_on_times(template, dataEvent, time_variables, times_mat)
+  keep <- template$columns != "(Intercept)" # Cox intercept belongs to the baseline hazard
+  evaluated[, , keep, drop = FALSE]
 }
 
 #' @keywords internal
@@ -1027,7 +1138,7 @@ gk_quadrature <- function(nodes = 15L) {
 
   # Step 3: keep kappa and tau explicit. Unlike the alpha aliases above, these
   # names identify distinct statistical roles and are deliberately not inferred
-  # from generic labels such as "precision" or family-specific legacy labels.
+  # from generic labels such as "precision" or earlier family-specific labels.
   param
 }
 
@@ -1053,16 +1164,19 @@ gk_quadrature <- function(nodes = 15L) {
 }
 
 #' @keywords internal
-.parse_dist_lhs <- function(lhs_expr) {
-  lhs_txt <- paste(deparse(lhs_expr, width.cutoff = 500L), collapse = " ")
-  lhs_compact <- gsub("\\s+", "", lhs_txt)
+.parse_dist_selector_text <- function(selector_text, allow_marker = FALSE) {
+  # Preserve quoted marker labels whilst removing irrelevant surrounding
+  # whitespace. Marker names may contain spaces, whereas parameter and scope
+  # names follow ordinary R identifier rules.
+  selector_text <- trimws(as.character(selector_text)) # complete LHS or prior selector supplied by the user
+  selector_compact <- gsub("^\\s+|\\s+$", "", selector_text) # selector without leading or trailing whitespace
 
-  m <- regexec("^([A-Za-z_][A-Za-z0-9_]*)(?:\\[(.*)\\])?$", lhs_compact)
-  cap <- regmatches(lhs_compact, m)[[1]]
+  m <- regexec("^([A-Za-z_][A-Za-z0-9_]*)\\s*(?:\\[(.*)\\])?$", selector_compact)
+  cap <- regmatches(selector_compact, m)[[1]]
   if (length(cap) == 0) {
     cli::cli_abort(c(
-      x = "Invalid distributional regression LHS: {.val {lhs_txt}}.",
-      i = "Use {.code param ~ ...} or {.code param[family=name] ~ ...}."
+      x = "Invalid distributional selector: {.val {selector_text}}.",
+      i = "Use {.code param}, {.code param[family=name]}, or a quoted marker selector such as {.code param[marker='y']}."
     ))
   }
 
@@ -1074,21 +1188,51 @@ gk_quadrature <- function(nodes = 15L) {
     ))
   }
 
-  family_name <- NULL
-  scope_txt <- cap[3]
+  scope_type <- NULL # either family, marker, or NULL for the parameter-wide fallback
+  scope_value <- NULL # canonical family name or exact longitudinal marker label
+  scope_txt <- if (length(cap) >= 3L) cap[3] else NA_character_
   if (!is.na(scope_txt) && nzchar(scope_txt)) {
-    scope_m <- regexec("^(family|fam)=([A-Za-z0-9_.-]+)$", scope_txt)
+    scope_m <- regexec("^\\s*(family|fam|marker|response)\\s*=\\s*(.+?)\\s*$", scope_txt)
     scope_cap <- regmatches(scope_txt, scope_m)[[1]]
     if (length(scope_cap) == 0) {
       cli::cli_abort(c(
-        x = "Invalid distributional formula scope: {.val [{scope_txt}]}",
-        i = "Use {.code [family=<name>]} (example: {.code sigma[family=student_t] ~ 1 + time})."
+        x = "Invalid distributional scope: {.val [{scope_txt}]}",
+        i = "Use {.code [family=<name>]} or {.code [marker='<marker>']}."
       ))
     }
-    family_name <- .canonical_family_name(scope_cap[3])
+    scope_type <- if (scope_cap[2] %in% c("family", "fam")) "family" else "marker"
+    raw_value <- trimws(scope_cap[3]) # family alias or marker label before quote removal
+    quoted <- grepl("^(['\"]).*\\1$", raw_value) # whether the selector value has matching quotation marks
+    if (quoted) raw_value <- substring(raw_value, 2L, nchar(raw_value) - 1L)
+    if (!nzchar(raw_value)) {
+      cli::cli_abort("Distributional selector values must not be empty.")
+    }
+    if (identical(scope_type, "family")) {
+      scope_value <- .canonical_family_name(raw_value)
+    } else {
+      if (!isTRUE(allow_marker)) {
+        cli::cli_abort(c(
+          x = "Marker-scoped distributional formulas are not defined by {.arg formulaDist}.",
+          i = "Use marker selectors in {.fn jm_prior}; formulaDist continues to use family-scoped coefficient blocks."
+        ))
+      }
+      scope_value <- raw_value
+    }
   }
 
-  list(param = param, family = family_name)
+  list(
+    param = param,
+    family = if (identical(scope_type, "family")) scope_value else NULL,
+    marker = if (identical(scope_type, "marker")) scope_value else NULL,
+    scope_type = scope_type,
+    scope_value = scope_value
+  )
+}
+
+#' @keywords internal
+.parse_dist_lhs <- function(lhs_expr) {
+  lhs_txt <- paste(deparse(lhs_expr, width.cutoff = 500L), collapse = " ")
+  .parse_dist_selector_text(lhs_txt, allow_marker = FALSE)
 }
 
 #' Normalise distributional formula input
@@ -1219,18 +1363,20 @@ gk_quadrature <- function(nodes = 15L) {
 #' Build distributional design matrix
 #' @keywords internal
 #' @noRd
-.build_dist_matrix <- function(formula, data, family_by_row = NULL) {
+.build_dist_matrix <- function(formula, data, family_by_row = NULL, template = NULL) {
   # Construct fixed-effect matrix for distributional regression
   if (is.null(formula)) {
-    return(list(P = 0L, X = matrix(0.0, nrow(data), 0), cols = character(0)))
+    return(list(P = 0L, X = matrix(0.0, nrow(data), 0), cols = character(0), template = NULL))
   }
 
   if (.is_dist_scope(formula)) {
     x_parts <- list()
     col_parts <- character(0)
+    fitted_templates <- list(default = NULL, by_family = list()) # fitted transformation records retained for all scoped formulae
 
     if (!is.null(formula$default)) {
-      base_default <- .build_dist_matrix(formula$default, data)
+      base_default <- .build_dist_matrix(formula$default, data, template = template$default)
+      fitted_templates$default <- base_default$template
       if (base_default$P > 0) {
         Xd <- base_default$X
         colnames(Xd) <- paste0("all::", base_default$cols)
@@ -1250,7 +1396,8 @@ gk_quadrature <- function(nodes = 15L) {
       family_by_row <- as.character(family_by_row)
 
       for (family_name in names(fam_specs)) {
-        base_fam <- .build_dist_matrix(fam_specs[[family_name]], data)
+        base_fam <- .build_dist_matrix(fam_specs[[family_name]], data, template = template$by_family[[family_name]])
+        fitted_templates$by_family[[family_name]] <- base_fam$template
         if (base_fam$P == 0) next
         gate <- as.numeric(family_by_row == family_name)
         Xf <- base_fam$X * gate
@@ -1261,19 +1408,25 @@ gk_quadrature <- function(nodes = 15L) {
     }
 
     if (length(x_parts) == 0) {
-      return(list(P = 0L, X = matrix(0.0, nrow(data), 0), cols = character(0)))
+      return(list(P = 0L, X = matrix(0.0, nrow(data), 0), cols = character(0), template = fitted_templates))
     }
     X <- do.call(cbind, x_parts)
     storage.mode(X) <- "double"
-    return(list(P = ncol(X), X = X, cols = col_parts))
+    return(list(
+      P = ncol(X),
+      X = X,
+      cols = col_parts,
+      template = fitted_templates
+    ))
   }
 
   if (!inherits(formula, "formula")) formula <- stats::as.formula(formula)
   rhs <- stats::update(formula, . ~ .)
   rhs[[2]] <- NULL
   rhs <- reformulas::nobars(rhs)
-  X <- .mm(rhs, data)
-  list(P = ncol(X), X = X, cols = colnames(X))
+  fitted_template <- template %||% .make_model_matrix_template(rhs, data) # formula transformation learnt once on original longitudinal time
+  X <- .mm(fitted_template, data)
+  list(P = ncol(X), X = X, cols = colnames(X), template = fitted_template)
 }
 
 #' Parse mixed-effects terms for distributional regression
@@ -1573,12 +1726,17 @@ gk_quadrature <- function(nodes = 15L) {
   z_vals[!is.finite(z_vals)] <- 0.0
   z_vals <- pmax(-0.999999, pmin(0.999999, z_vals))
 
-  scale_prod <- 1.0
-  for (c in seq_len(row_index - 1L)) {
-    out[c] <- scale_prod * z_vals[c]
-    scale_prod <- scale_prod * sqrt(pmax(1e-12, 1.0 - z_vals[c]^2))
+  # Each unconstrained predictor is mapped to a partial correlation.  The
+  # accumulated square-root product converts those partial correlations into
+  # one row of a Cholesky correlation factor.  Consequently every completed
+  # row has Euclidean norm one and the separately modelled standard deviation
+  # retains its marginal interpretation.
+  remaining_scale <- 1.0 # square root of the variance not assigned to earlier coordinates
+  for (column_index in seq_len(row_index - 1L)) {
+    out[column_index] <- remaining_scale * z_vals[column_index]
+    remaining_scale <- remaining_scale * sqrt(max(1e-12, 1.0 - z_vals[column_index]^2))
   }
-  out[row_index] <- scale_prod
+  out[row_index] <- remaining_scale
   out
 }
 
@@ -1593,12 +1751,16 @@ gk_quadrature <- function(nodes = 15L) {
   }
 
   out <- numeric(row_index - 1L)
-  scale_prod <- 1.0
+  remaining_scale <- 1.0 # scale left after recovering preceding partial correlations
   for (c in seq_len(row_index - 1L)) {
-    z_val <- if (abs(scale_prod) < 1e-12) 0.0 else chol_row[c] / scale_prod
+    z_val <- if (remaining_scale > sqrt(.Machine$double.eps)) {
+      chol_row[c] / remaining_scale
+    } else {
+      0.0
+    } # partial correlation before the sequential Cholesky scaling
     z_val <- pmax(-0.999999, pmin(0.999999, z_val))
     out[c] <- atanh(z_val)
-    scale_prod <- scale_prod * sqrt(pmax(1e-12, 1.0 - z_val^2))
+    remaining_scale <- remaining_scale * sqrt(max(1e-12, 1.0 - z_val^2))
   }
   out
 }
@@ -1837,9 +1999,9 @@ gk_quadrature <- function(nodes = 15L) {
 #'
 #' Transform codes: 0 identity, 1 exponential, 2 logarithm, 3 inverse
 #' logit, 4 standard normal CDF (`Phi`), 5 square root, and 6 cube root.
-#' The legacy flag table does not encode the probit quantile; new
+#' The earlier flag table does not encode the probit quantile; new
 #' transformations use functional-bytecode instruction 27 for `inv_Phi`.
-#' Restrictions: log and sqrt are restricted to cv_mean (legacy constraint).
+#' Restrictions: log and sqrt are restricted to cv_mean (earlier constraint).
 #'
 #' @keywords internal
 #' @noRd
@@ -1932,7 +2094,37 @@ gk_quadrature <- function(nodes = 15L) {
     return(array(0.0, dim = c(n_id, K, 0)))
   }
   X <- do.call(cbind, mats)
-  array(X, dim = c(n_id, K, ncol(X)))
+  # Rows in X are time-within-subject, whereas the first R array index varies
+  # fastest.  Form the array as time-by-subject first and transpose it to the
+  # subject-by-time order consumed by Stan.
+  aperm(array(X, dim = c(K, n_id, ncol(X))), c(2L, 1L, 3L))
+}
+
+#' Convert an event-integration ordinate to original study time
+#'
+#' @description
+#' The event likelihood integrates on a dimensionless axis, whereas every
+#' formula-derived design is defined in the study-time units supplied by the
+#' analyst. This conversion is the sole boundary between the integration
+#' coordinate and the original-time design coordinates. It preserves vector,
+#' matrix and array dimensions so the result can be passed directly to any
+#' submodel design evaluator.
+#'
+#' @param event_ordinate Numeric event-integration ordinate or collection of
+#'   ordinates, usually in `[0, 1]`.
+#' @param event_time_scale Positive conversion from the event-integration axis
+#'   to original study time.
+#'
+#' @return `event_ordinate * event_time_scale`, retaining all dimensions.
+#' @keywords internal
+#' @noRd
+.event_ordinate_to_original_time <- function(event_ordinate,
+                                               event_time_scale) {
+  event_time_scale <- as.numeric(event_time_scale) # original study-time units represented by one complete event-integration axis
+  if (length(event_time_scale) != 1L || !is.finite(event_time_scale) || event_time_scale <= 0) {
+    cli::cli_abort("The event time scale must be one positive finite number.")
+  }
+  event_ordinate * event_time_scale
 }
 
 #' Evaluate RHS list at event times
@@ -1967,6 +2159,55 @@ gk_quadrature <- function(nodes = 15L) {
   Bs_event_c <- sweep(Bs_event_raw, 2, colm_use, "-")
   Bs_gk_c <- sweep(Bs_gk_raw, MARGIN = 3, STATS = colm_use, FUN = "-")
   list(Bs_event_c = Bs_event_c, Bs_gk_c = Bs_gk_c, col_means = colm)
+}
+
+#' Give baseline-hazard coefficients stable scientific labels
+#'
+#' @description
+#' Spline constructors commonly label their columns with bare integers. Those
+#' labels describe matrix positions rather than statistical terms and become
+#' especially obscure in a posterior summary. This helper makes the naming
+#' rule depend on the declared baseline-hazard representation: B- and natural-
+#' spline columns are named `basis_1`, `basis_2`, and so forth; formula columns
+#' retain their model-matrix term names; and piecewise-linear columns retain
+#' informative segment names or receive `segment_1`, `segment_2`, and so forth.
+#'
+#' @param basehaz Baseline-hazard type or a specification containing `type`.
+#' @param n_terms Number of fitted baseline-hazard coefficients.
+#' @param supplied_names Optional names attached to the constructed design
+#'   matrix or retained in fitted standata.
+#'
+#' @return A character vector of length `n_terms`.
+#' @keywords internal
+#' @noRd
+.basehaz_term_labels <- function(basehaz, n_terms, supplied_names = NULL) {
+  number_terms <- as.integer(n_terms) # number of coefficient labels required by the fitted baseline-hazard design
+  if (length(number_terms) != 1L || is.na(number_terms) || number_terms < 0L) {
+    cli::cli_abort("{.arg n_terms} must be one non-negative integer.")
+  }
+  if (number_terms == 0L) {
+    return(character(0))
+  }
+
+  hazard_type <- if (is.list(basehaz)) basehaz$type else basehaz # public specification objects and stored character types share this field
+  hazard_type <- tolower(as.character(hazard_type %||% "bs")[[1L]]) # older fitted objects without metadata are conservatively treated as spline fits
+  candidate_names <- as.character(supplied_names %||% character(0)) # names supplied by the formula or basis constructor
+  names_are_complete <- length(candidate_names) == number_terms && all(!is.na(candidate_names)) && all(nzchar(candidate_names)) # only complete labels can safely be aligned by coefficient position
+
+  if (hazard_type %in% c("bs", "ns")) {
+    return(paste0("basis_", seq_len(number_terms)))
+  }
+  if (identical(hazard_type, "formula")) {
+    if (names_are_complete) return(candidate_names)
+    return(paste0("term_", seq_len(number_terms)))
+  }
+  if (hazard_type %in% c("pwlin", "piecewise", "piecewise_linear")) {
+    names_are_positions <- names_are_complete && all(grepl("^[[:space:]]*[0-9]+[[:space:]]*$", candidate_names)) # bare integer columns carry no segment interpretation
+    if (names_are_complete && !names_are_positions) return(candidate_names)
+    return(paste0("segment_", seq_len(number_terms)))
+  }
+  if (names_are_complete) return(candidate_names)
+  paste0("basis_", seq_len(number_terms))
 }
 
 #' Construct a zero-dimension marker-only block
@@ -2286,67 +2527,6 @@ gk_quadrature <- function(nodes = 15L) {
   list(mk_rhs_list = mk_rhs_list, idm_rhs_list = idm_rhs_list, idm_group_exprs = idm_group_exprs, marker_terms = marker_terms)
 }
 
-# ---- time-index metadata for internal scaling in Stan -----------------
-
-#' Detect indices of time-related columns in a design matrix
-#'
-#' @param colnames_vec Character vector of column names.
-#' @param time_var Time variable name.
-#' @return Integer vector of indices.
-#' @keywords internal
-#' @noRd
-.detect_time_cols <- function(colnames_vec, time_var) {
-  if (is.null(colnames_vec) || length(colnames_vec) == 0) {
-    return(integer(0))
-  }
-  idx <- which(colnames_vec == time_var)
-  if (length(idx) == 0) {
-    pat <- paste0("(^", time_var, "$)|(^", time_var, "\\b)|\\b", time_var, "\\b")
-    idx <- grep(pat, colnames_vec)
-  }
-  as.integer(idx)
-}
-
-#' Build time-index metadata list for Stan
-#'
-#' @return named list with n_time_* and idx_time_* values.
-#' @keywords internal
-#' @noRd
-.make_time_index_metadata <- function(x_cols = NULL,
-                                      zid_cols = NULL,
-                                      zmk_cols = NULL,
-                                      zidm_cols = NULL,
-                                      time_var,
-                                      fixed_design = NULL,
-                                      id_design = NULL,
-                                      marker_design = NULL,
-                                      idm_design = NULL) {
-  has_templates <- !is.null(fixed_design) || !is.null(id_design) || !is.null(marker_design) || !is.null(idm_design)
-
-  if (has_templates) {
-    idx_beta <- .time_rescale_idx_from_template(fixed_design, time_var = time_var)
-    idx_uid <- .time_rescale_idx_from_template_list(id_design %||% list(), time_var = time_var)
-    idx_vmk <- .time_rescale_idx_from_template_list(marker_design %||% list(), time_var = time_var)
-    idx_idm <- .time_rescale_idx_from_template_list(idm_design %||% list(), time_var = time_var)
-  } else {
-    idx_beta <- .detect_time_cols(x_cols, time_var)
-    idx_uid <- .detect_time_cols(zid_cols, time_var)
-    idx_vmk <- .detect_time_cols(zmk_cols, time_var)
-    idx_idm <- .detect_time_cols(zidm_cols, time_var)
-  }
-
-  list(
-    n_time_beta = length(idx_beta),
-    idx_time_beta = idx_beta,
-    n_time_uid = length(idx_uid),
-    idx_time_uid = idx_uid,
-    n_time_vmk = length(idx_vmk),
-    idx_time_vmk = idx_vmk,
-    n_time_idm = length(idx_idm),
-    idx_time_idm = idx_idm
-  )
-}
-
 # ---- Stan engine helpers ---------------------------------------------------
 
 #' Detect whether a Stan backend is currently usable
@@ -2463,7 +2643,7 @@ gk_quadrature <- function(nodes = 15L) {
   posterior::as_draws_matrix(d)
 }
 
-#' Unified draws array helper (keeps chains separate)
+#' Draws array helper
 #' @keywords internal
 #' @noRd
 .get_draws_array <- function(fit, variables = NULL, draws = NULL, seed = 1) {
@@ -2563,6 +2743,12 @@ gk_quadrature <- function(nodes = 15L) {
 .stan_data_names <- function(stan_file) {
   lines <- .read_stan_with_includes(stan_file)
   if (length(lines) == 0) return(character(0))
+  # Remove complete Doxygen and ordinary block comments before looking for
+  # declarations. Semicolons in explanatory prose are punctuation, not Stan
+  # variables; retaining them can otherwise create fictitious required data.
+  stan_text <- paste(lines, collapse = "\n") # included Stan source in its resolved order
+  stan_text <- gsub("(?s)/\\*.*?\\*/", "", stan_text, perl = TRUE) # source with all block comments removed across line boundaries
+  lines <- strsplit(stan_text, "\n", fixed = TRUE)[[1L]] # comment-free source restored to one element per line
   data_start <- grep("^\\s*data\\s*\\{", lines)
   if (length(data_start) == 0) return(character(0))
   start_idx <- data_start[1]
@@ -2658,28 +2844,6 @@ gk_quadrature <- function(nodes = 15L) {
   sd
 }
 
-#' Coerce time index fields for rstan
-#' @keywords internal
-#' @noRd
-.coerce_rstan_time_indices <- function(sd) {
-  if (is.null(sd$idx_time_idm) && !is.null(sd$idx_time_widm)) {
-    sd$idx_time_idm <- sd$idx_time_widm
-  }
-  if (is.null(sd$n_time_idm) && !is.null(sd$n_time_widm)) {
-    sd$n_time_idm <- sd$n_time_widm
-  }
-
-  idx_names <- c("idx_time_beta", "idx_time_uid", "idx_time_vmk", "idx_time_idm")
-  n_names <- c("n_time_beta", "n_time_uid", "n_time_vmk", "n_time_idm")
-  for (i in seq_along(idx_names)) {
-    idx <- sd[[idx_names[i]]] %||% integer(0)
-    idx <- as.integer(idx)
-    sd[[n_names[i]]] <- length(idx)
-    sd[[idx_names[i]]] <- array(idx, dim = c(length(idx)))
-  }
-  sd
-}
-
 #' Preserve zero-length mixture arrays for Stan data writers
 #'
 #' @description
@@ -2755,8 +2919,19 @@ gk_quadrature <- function(nodes = 15L) {
 #' @keywords internal
 #' @noRd
 .warn_experimental <- function(feature_name) {
+  if (.devmode()) invisible()
   cli::cli_warn(c(
     x = "The feature {.val {feature_name}} is experimental and may not be correct.",
     i = "Use with caution and report any issues on Github repository."
+  ))
+}
+
+#' Experimental feature block
+#' @keywords internal
+#' @noRd
+.stop_experimental <- function(feature_name) {
+  if (.devmode()) return(invisible(TRUE))
+  cli::cli_abort(c(
+    x = "The feature {.val {feature_name}} is under construction and must not be used unless you are a developer."
   ))
 }

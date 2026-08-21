@@ -241,7 +241,7 @@
 #' contributions rather than separate baseline-hazard intercepts.
 #'
 #' The modern API uses `knots` (or the synonymous `cutpoints`) and `direction`.
-#' The former `x`/`y` API remains accepted for fitted models.  In that legacy
+#' The former `x`/`y` API remains accepted for fitted models. In that earlier
 #' form, `x` supplies the knots and `y` is used only to infer the direction when
 #' `direction` is omitted; it never fixes the fitted association curve.  The
 #' simulation implementation intentionally retains its former fixed `x`/`y`
@@ -262,7 +262,7 @@
   knots <- spec$knots %||% spec$cutpoints %||% spec$x
   if (is.null(knots)) {
     cli::cli_abort(c(
-      x = "Fitted piecewise-linear associations require {.arg knots} (or legacy {.arg x}).",
+      x = "Fitted piecewise-linear associations require {.arg knots} (or the earlier {.arg x} alias).",
       i = "For example, use list(type = 'pwlin', knots = c(-2, -1, 0, 1, 2), direction = 'increasing')."
     ))
   }
@@ -274,19 +274,19 @@
     ))
   }
 
-  legacy_y <- spec$y
-  if (!is.null(legacy_y)) {
-    legacy_y <- as.numeric(legacy_y)
-    if (length(legacy_y) != length(knots) || any(!is.finite(legacy_y))) {
+  supplied_y <- spec$y
+  if (!is.null(supplied_y)) {
+    supplied_y <- as.numeric(supplied_y)
+    if (length(supplied_y) != length(knots) || any(!is.finite(supplied_y))) {
       cli::cli_abort(c(
-        x = "Legacy {.arg y} must be finite and have one value per knot.",
+        x = "The earlier {.arg y} field must be finite and have one value per knot.",
         i = "The values no longer fix a fitted curve; omit y and state direction explicitly for new analyses."
       ))
     }
   }
 
-  inferred_direction <- if (is.null(legacy_y)) "increasing" else {
-    .infer_monotone_direction(knots, legacy_y)
+  inferred_direction <- if (is.null(supplied_y)) "increasing" else {
+    .infer_monotone_direction(knots, supplied_y)
   }
   direction <- .get_monotone_direction(spec$direction, default = inferred_direction)
 
@@ -304,7 +304,7 @@
     type = "pwlin",
     knots = knots,
     x = knots,
-    legacy_y = legacy_y,
+    supplied_y = supplied_y,
     direction = .monotone_direction_label(direction),
     spline_direction = direction,
     coeff = seq(0, direction, length.out = n_knots),
@@ -369,7 +369,7 @@
 #'       bounded expit-scale input. User-supplied training `x` values and
 #'       explicit `knots` for these transform types must therefore already be
 #'       specified on the expit scale in `[0, 1]`.
-#'     - pwlin: knots (or cutpoints/x) and direction; legacy y is accepted but
+#'     - pwlin: knots (or cutpoints/x) and direction; the earlier y field is accepted but
 #'       does not determine the fitted ordinates
 #'
 #' Defaults and minimal examples:
@@ -417,6 +417,7 @@
 #' @section Usage:
 #' Use `build_standata_transforms()` to construct the data list entries,
 #' and `validate_transforms()` to verify consistency before sampling.
+#' @export
 build_standata_transforms <- function(
   transform_list = NULL,
   default_mode = 0,  # 0 = identity
@@ -762,7 +763,7 @@ validate_transforms <- function(standata) {
 #'   cs_total = spec_cs,
 #'   corr = spec_corr
 #' )
-#' standata_tf <- joinme:::build_standata_transforms(transforms)
+#' standata_tf <- build_standata_transforms(transforms)
 example_transform_spec <- function() {
   help('example_transform_spec')
 }
@@ -773,7 +774,7 @@ example_transform_spec <- function() {
 #' Fits a monotone I-spline transformation with a smoothness penalty and
 #' returns a transform specification compatible with `build_standata_transforms()`.
 #'
-#' This helper is the legacy plug-in constructor for `type = "ispline_penalised"`.
+#' This helper is the plug-in constructor for `type = "ispline_penalised"`.
 #' Its defaults are `n_knots = 6`, `degree = 3`, `lambda = 1.0`,
 #' `weights = NULL` (equal weights), and `diff_order = 2`.
 #' Returned coefficients follow the same anchored convention as the Stan-
@@ -837,7 +838,7 @@ penalized_ispline_transform <- function(...) {
 #' Build Stan-estimated penalised I-spline specification
 #'
 #' @description
-#' Construct the standata payload for a penalised I-spline whose coefficients
+#' Construct the standata values for a penalised I-spline whose coefficients
 #' will be estimated inside Stan. This path keeps the knot sequence fixed while
 #' initializing a monotone coefficient vector and the associated penalty
 #' metadata.

@@ -46,6 +46,18 @@ JoiNMeFit <- R6::R6Class(
     tmax = NULL,
     dataLong = NULL,
     dataEvent = NULL,
+    #' @description Initialize a `JoiNMeFit` object.
+    #' @param fit CmdStanR or rstan fit object.
+    #' @param stan_data Stan data list used to fit the model.
+    #' @param formulaLong Longitudinal formula used to fit the model.
+    #' @param formulaEvent Event formula used to fit the model.
+    #' @param formulaVCov Covariance-predictor formula used to fit the model.
+    #' @param config Configuration list used to fit the model.
+    #' @param call Original function call used to fit the model.
+    #' @param tmax Maximum time used to fit the model.
+    #' @param dataLong Longitudinal data frame used to fit the model.
+    #' @param dataEvent Event data frame used to fit the model.
+    #' @return A `JoiNMeFit` object
     initialize = function(
       fit,
       stan_data,
@@ -82,6 +94,8 @@ JoiNMeFit <- R6::R6Class(
       private$cache <- list()
       invisible(self)
     },
+    #' @description Print method for `JoiNMeFit` objects.
+    #' @return Invisibly returns `x`.
     print = function(...) {
       .cli_summary_heading(
         if (isTRUE(self$config$include_survival %||% TRUE)) {
@@ -139,12 +153,26 @@ JoiNMeFit <- R6::R6Class(
 #' from `JoiNMeFit` and adds the checked mixture description used by
 #' class-specific summaries, plots, and predictions.
 #'
-#' @export
+#' @keywords internal
+#' @noRd
 JoiNMeMixFit <- R6::R6Class(
   classname = "JoiNMeMixFit",
   inherit = JoiNMeFit,
   public = list(
     mixture = NULL,
+    #' @description Initialize a `JoiNMeMixFit` object.
+    #' @param fit CmdStanR or rstan fit object.
+    #' @param stan_data Stan data list used to fit the model.
+    #' @param formulaLong Longitudinal formula used to fit the model.
+    #' @param formulaEvent Event formula used to fit the model.
+    #' @param formulaVCov Covariance-predictor formula used to fit the model.
+    #' @param config Configuration list used to fit the model.
+    #' @param call Original function call used to fit the model.
+    #' @param tmax Maximum time used to fit the model.
+    #' @param dataLong Longitudinal data frame used to fit the model.
+    #' @param dataEvent Event data frame used to fit the model.
+    #' @param mixture Checked mixture description used to fit the model.
+    #' @return A `JoiNMeMixFit` object inheriting from `JoiNMeFit`.
     initialize = function(
       fit,
       stan_data,
@@ -177,6 +205,8 @@ JoiNMeMixFit <- R6::R6Class(
         class(self)
       ))
     },
+    #' @description Print method for `JoiNMeMixFit` objects.
+    #' @return Invisibly returns `x`.
     print = function(...) {
       .cli_summary_heading("Latent-progress joint model", level = 1L)
       if (!is.null(self$call)) {
@@ -265,12 +295,13 @@ JoiNMeDynPred <- R6::R6Class(
 #' Prediction container inheriting the complete `JoiNMeDynPred` interface and
 #' retaining the mixture definition of its parent fit.
 #'
-#' @export
+#' @noRd
 JoiNMeMixDynPred <- R6::R6Class(
   classname = "JoiNMeMixDynPred",
   inherit = JoiNMeDynPred,
   public = list(
     mixture = NULL,
+
     initialize = function(
       predictions,
       quantiles,
@@ -455,15 +486,7 @@ JoiNMeStanData <- R6::R6Class(
         include_survival = isTRUE(
           as.integer(sd$include_survival %||% 1L) == 1L
         ), # whether survival observations contributed to the fitted likelihood
-        # tmax_internal = sd$tmax,
-        time_indices = list(
-          idx_time_beta = sd$idx_time_beta,
-          idx_time_uid = sd$idx_time_uid,
-          idx_time_vmk = sd$idx_time_vmk,
-          idx_time_idm = sd$idx_time_idm
-        ),
-        marker_weights = sd$marker_weights,
-        fixed_marker_weights = sd$fixed_marker_weights,
+        marker_weight_offsets = sd$marker_weight_offsets,
         basehaz = sd$basehaz,
         n_knots = sd$basehaz_n_knots,
         basehaz_n_knots = sd$basehaz_n_knots,

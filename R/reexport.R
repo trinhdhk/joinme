@@ -12,6 +12,10 @@ rstantools::posterior_epred
 #' @export
 rstantools::posterior_predict
 
+#' @importFrom rstantools posterior_interval
+#' @export
+rstantools::posterior_interval
+
 #' @importFrom brms posterior_summary
 #' @export
 brms::posterior_summary

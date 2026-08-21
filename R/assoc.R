@@ -50,7 +50,7 @@ assoc.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary 
   assertthat::assert_that(is.numeric(digits) && digits >= 0, msg = "digits must be non-negative.")
 
   cache_key <- if (isTRUE(summary)) {
-    paste0("posterior_assoc_schema=2_summary_", draws, "_", digits)
+    paste0("posterior_assoc_summary_", draws, "_", digits)
   } else {
     paste0("posterior_assoc_draws_", draws)
   }

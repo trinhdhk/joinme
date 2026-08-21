@@ -9,8 +9,8 @@
 #' without changing its execution contract.
 #'
 #' The authoritative instruction protocol is documented in
-#' `inst/stan/helper/bytecode/README.md` and mirrored by the Stan module under
-#' `inst/stan/helper/bytecode`.
+#' `inst/stan/include/etc/bytecode/README.md` and mirrored by the Stan module under
+#' `inst/stan/include/etc/bytecode`.
 #'
 #' @keywords internal
 NULL
@@ -111,7 +111,7 @@ verify_bytecode <- function(bytecode, const_data) {
 #' @description
 #' Returns the operation identifiers that consume one stack value and replace
 #' it with one transformed value. The same list is used by validation and by
-#' legacy one-operation program normalisation.
+#' earlier one-operation program normalisation.
 #'
 #' @return Integer vector of unary operation identifiers.
 #' @keywords internal
@@ -396,7 +396,7 @@ eval_bytecode_vector <- function(
     }
   )
 
-  # Backward compatibility: some legacy saved transforms encoded unary maps like
+  # Backward compatibility: some earlier saved transforms encoded unary maps like
   # softplus(x) as [SOFTPLUS] rather than [PUSH_X, SOFTPLUS]. Prepend PUSH_X so
   # replay in R and Stan stays stable for old fitted objects used in prediction.
   if (length(code) > 0L && code[[1]] %in% .bytecode_unary_ops()) {

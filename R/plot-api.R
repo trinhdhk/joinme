@@ -138,7 +138,7 @@ diagnostic_plot <- function(object,
 #' @description
 #' Provides a JoiNMe-friendly wrapper around `bayesplot::mcmc_*` functions. The
 #' posterior draws are first relabelled with user-facing parameter names via
-#' [draws()], after which the selected bayesplot geometry is applied.
+#' [posterior_draws()], after which the selected bayesplot geometry is applied.
 #'
 #' @param object A `JoiNMeFit` or `JoiNMeDynPred` object.
 #' @param pars Deprecated alias of `variable`.
@@ -179,7 +179,7 @@ mcmc_plot <- function(object,
     }
   }
 
-  draws_obj <- draws(object, format = "draws_array")
+  draws_obj <- posterior_draws(object, format = "draws_array")
   all_vars <- posterior::variables(draws_obj)
   if (is.null(variable)) {
     variable <- setdiff(all_vars, "lp__")
@@ -204,7 +204,7 @@ mcmc_plot <- function(object,
     ))
   }
 
-  plot_draws <- draws(object, variables = variable, regex = regex, draws = draws, seed = seed, format = "draws_array")
+  plot_draws <- posterior_draws(object, variables = variable, regex = regex, draws = draws, seed = seed, format = "draws_array")
 
   plot_fun <- switch(
     type,

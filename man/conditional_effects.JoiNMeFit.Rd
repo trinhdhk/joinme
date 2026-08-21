@@ -19,6 +19,8 @@
   surface = FALSE,
   markers = NULL,
   draws = NULL,
+  summary = TRUE,
+  reuse_fitted_re = FALSE,
   seed = 1,
   plot = TRUE,
   ...
@@ -62,14 +64,14 @@ controlled separately by \code{event_scale}.}
 
 \item{longitudinal_estimand}{Longitudinal quantity to evaluate.
 \code{"population"} uses only the fixed-effect contribution, corresponding to
-exclusion of group-level effects in \code{brms}. \code{"marker"} adds the fitted
-marker-level deviation but excludes subject and marker-by-subject
-deviations. \code{"marginal_marker"} first calculates each selected marker's
-posterior prediction, including its marker-level deviation and fitted
-inverse link, and then takes an equally weighted mean across markers within
-every posterior draw. Thus, on the expected-response scale it estimates an
-average of marker responses rather than the response obtained from an
-averaged linear predictor.}
+exclusion of group-level effects in \code{brms}, and averages the selected
+marker trajectories within each posterior draw. \code{"marker"} adds the fitted
+marker-level deviation and retains a separate trajectory for every selected
+marker. \code{"marginal_marker"} also adds the marker-level deviation but then
+takes an equally weighted mean across selected markers within every draw.
+Marker-specific inverse links are applied before either marker average.
+Subject and marker-by-subject deviations are excluded unless
+\code{reuse_fitted_re = TRUE}.}
 
 \item{event_scale}{Event-process estimand. \code{"hazard_ratio"} returns the
 covariate-specific proportional-hazards multiplier \verb{exp(W gamma)};
@@ -84,29 +86,47 @@ represented by a small set of conditioning curves.}
 
 \item{markers}{Optional character vector restricting longitudinal results to
 selected marker levels. By default all fitted markers are used. For
-\code{longitudinal_estimand = "marginal_marker"}, this argument defines the
-markers entering the equally weighted posterior average.}
+\code{longitudinal_estimand = "population"} or \code{"marginal_marker"}, this
+argument defines the markers entering the equally weighted posterior
+average.}
 
 \item{draws}{Optional positive integer limiting the posterior draws used in
 the calculation. \code{NULL} uses all available draws.}
 
+\item{summary}{Logical. If \code{TRUE}, return posterior centres, standard errors,
+and credible intervals. If \code{FALSE}, return a tidy draw-level data frame.
+Each row contains one posterior value, its \code{.draw} index, its \code{.value}, and
+the complete condition and estimand description. Draw-level results are
+returned without plotting.}
+
+\item{reuse_fitted_re}{Logical. If \code{TRUE}, \code{conditions} must contain the
+fitted subject identifier. Subject and marker-by-subject posterior effects
+for those identifiers are added draw by draw, avoiding a separate dynamic
+random-effect fit. All identifiers must have occurred during fitting.}
+
 \item{seed}{Integer seed used when posterior draws are subsampled.}
 
-\item{plot}{Logical. If \code{TRUE}, construct and display conditional-effects
-plots. If \code{FALSE}, return the underlying \code{JoiNMeConditionalEffects} data
-object. The data object can subsequently be plotted with \code{plot()}.}
+\item{plot}{Logical. If \code{TRUE} and \code{summary = TRUE}, construct and display
+conditional-effects plots. If \code{FALSE}, return the underlying
+\code{JoiNMeConditionalEffects} object. \code{summary = FALSE} always returns the
+draw-level object without plotting.}
 
 \item{...}{Additional arguments passed to the plotting method when
-\code{plot = TRUE}, for example \code{points}, \code{rug}, \code{stype}, or \code{theme}; see
-\code{\link[brms:conditional_effects]{brms::conditional_effects()}} for the corresponding graphical arguments.}
+\code{plot = TRUE}, for example \code{points}, \code{rug}, \code{stype}, \code{theme}, or the
+conditional-plot arrangement arguments; see
+\code{\link[=plot.JoiNMeConditionalEffects]{plot.JoiNMeConditionalEffects()}} and \code{\link[brms:conditional_effects]{brms::conditional_effects()}}.}
 }
 \value{
-If \code{plot = FALSE}, a \code{JoiNMeConditionalEffects} object: a named list
+If \code{summary = TRUE} and \code{plot = FALSE}, a
+\code{JoiNMeConditionalEffects} object: a named list
 with one component per requested process. Each process component is a
 \code{brms_conditional_effects}-compatible named list containing one data frame
 per effect. Longitudinal tables identify their estimand in
-\code{longitudinal_estimand__}. If \code{plot = TRUE}, a similarly nested named list
-of \code{ggplot} objects is returned invisibly after plotting.
+\code{longitudinal_estimand__}. With \code{summary = FALSE}, each effect is a tidy
+data frame with one row per posterior draw and estimand, identified by
+\code{.draw}, \code{.value}, and \code{estimand__}. If \code{summary = TRUE} and \code{plot = TRUE},
+the plotting method invisibly returns either the similarly nested named
+list of \code{ggplot} objects or an arranged \code{patchwork} display.
 }
 \description{
 \code{conditional_effects()} evaluates model-implied changes in the longitudinal
@@ -121,11 +141,12 @@ expected response, the event relative hazard, or both. Longitudinal effects
 may contain only the fixed-effect contribution, add the fitted marker-level
 deviation, or average marker-specific predictions over the selected markers.
 Subject- and marker-by-subject deviations are excluded from all three
-longitudinal estimands. Event effects describe the proportional-hazards
-multiplier \verb{exp(W gamma)} (or its logarithm), with the baseline hazard and
-longitudinal association contribution held fixed. Consequently, event
-contrasts isolate the part of the event process attributable to covariates
-in \code{formulaEvent}.
+longitudinal estimands unless \code{reuse_fitted_re = TRUE} explicitly selects a
+subject represented in the fitted model. Event effects describe the
+proportional-hazards multiplier \verb{exp(W gamma)} (or its logarithm), with the
+baseline hazard and longitudinal association contribution held fixed.
+Consequently, event contrasts isolate the part of the event process
+attributable to covariates in \code{formulaEvent}.
 
 The returned data follow the \code{brms} conditional-effects convention. Each
 effect table contains \code{estimate__}, \code{se__}, \code{lower__}, \code{upper__}, and
@@ -140,9 +161,13 @@ Numeric predictors not named in an effect are held at their observed mean;
 factors are held at their first level. Values supplied in \code{conditions}
 override those defaults. Group-level subject deviations are excluded, as in
 the default \code{re_formula = NA} behavior of \code{brms::conditional_effects()}.
-Marker-level deviations are also excluded for the \code{"population"} estimand,
-retained for the \code{"marker"} estimand, and integrated by finite averaging for
-the \code{"marginal_marker"} estimand.
+Marker-level deviations are excluded for the \code{"population"} estimand,
+retained separately for the \code{"marker"} estimand, and integrated by finite
+averaging for the \code{"marginal_marker"} estimand. Population and
+marker-marginal results each contain one trajectory per condition because
+their selected marker trajectories are averaged draw by draw. When fitted
+random effects are reused, the selected subject and marker-by-subject
+deviations enter all three estimands.
 
 The event result is a relative-hazard effect rather than a dynamic survival
 prediction. Dynamic survival probabilities depend on a subject's observed
@@ -166,7 +191,7 @@ cond_eff <- conditional_effects(
   process = c("longitudinal", "event"),
   plot = FALSE
 )
-plot(cond_eff, ask = FALSE)
+plot(cond_eff, arrange = "grid", ncol = 2, guides = "collect")
 
 # Request marker-specific longitudinal expected responses.
 conditional_effects(

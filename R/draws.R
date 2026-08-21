@@ -4,7 +4,7 @@
 #' Returns posterior draws in `posterior`-compatible formats with user-facing
 #' parameter names.
 #'
-#' Compared with [extract()], `draws()` is the convenience layer for downstream
+#' Compared with [extract()], `posterior_draws()` is the convenience layer for downstream
 #' posterior workflows. It is designed for tasks such as `posterior`
 #' summarisation, `bayesplot` visualisation, regex-based variable selection, and
 #' any workflow that expects a standard draws object.
@@ -18,19 +18,19 @@
 #' the first request so later summaries, diagnostics, and plotting methods can
 #' reuse the same renamed draw collection without re-reading the backend fit.
 #'
-#' Use `draws()` when you want:
+#' Use `posterior_draws()` when you want:
 #' - one posterior object containing renamed variables,
 #' - `posterior::subset_draws()` and regex-style variable filtering,
 #' - `bayesplot` directly, similar to [mcmc_plot()],
 #' - a standard draws array/matrix/data frame rather than a component-specific
 #'   extraction result.
-#' - `as.array` is a shorthand for `draws(format = "draws_array")`.
+#' - `as.array` is a shorthand for `posterior_draws(format = "draws_array")`.
 #'
 #' Use [extract()] instead when you want:
 #' - one model component at a time (`"fixef"`, `"assoc"`, `"gamma_w"`, `"basehaz"`, etc.),
 #' - the explicit `term_map` telling you how user-facing labels map back to raw
 #'   Stan variables,
-#' - special structured payloads such as `what = "association_plot"`,
+#' - special structured results such as `what = "association_plot"`,
 #' - prediction draw blocks separated by semantic role before flattening.
 #'
 #' @param object A supported JoiNMe object.
@@ -46,7 +46,7 @@
 #'   `"draws_matrix"`, and `"draws_df"`.
 #' @param x A fitted `JoiNMeFit` or dynamic-prediction `JoiNMeDynPred` object
 #'   passed to the corresponding `as.array()` method.
-#' @param ... Additional arguments forwarded from `as.array()` to [draws()];
+#' @param ... Additional arguments forwarded from `as.array()` to [posterior_draws()];
 #'   otherwise unused.
 #'
 #' @return A posterior draw object in the requested format. The result is a
@@ -54,8 +54,8 @@
 #'   `posterior::summarise_draws()`, `posterior::subset_draws()`, and
 #'   `bayesplot`-style visualisation.
 #' @export
-draws <- function(object, ...) {
-  UseMethod("draws")
+posterior_draws <- function(object, ...) {
+  UseMethod("posterior_draws")
 }
 
 #' @keywords internal
@@ -87,8 +87,7 @@ draws <- function(object, ...) {
     chosen_fixed <- as.character(fixed_map$variable)
     if (length(chosen_fixed) > 0L) {
       beta_raw <- paste0("beta[", seq_len(p), "]")
-      beta_scaled <- paste0("beta_scaled[", seq_len(p), "]")
-      drop_beta <- setdiff(c(beta_raw, beta_scaled), chosen_fixed)
+      drop_beta <- setdiff(beta_raw, chosen_fixed)
       leftover <- setdiff(leftover, drop_beta)
     }
   }
@@ -174,13 +173,13 @@ draws <- function(object, ...) {
 #' @noRd
 .flatten_dynpred_regular_block <- function(object, what) {
   ext <- tryCatch(extract.JoiNMeDynPred(object, what = what), error = function(e) NULL)
-  if (is.null(ext) || is.null(ext$draws) || !length(ext$draws)) {
+  if (is.null(ext) || is.null(ext$posterior_draws) || !length(ext$posterior_draws)) {
     return(NULL)
   }
 
   mats <- list()
-  for (id_nm in names(ext$draws)) {
-    entry <- ext$draws[[id_nm]]
+  for (id_nm in names(ext$posterior_draws)) {
+    entry <- ext$posterior_draws[[id_nm]]
     if (is.list(entry) && !is.matrix(entry)) {
       for (scale_nm in names(entry)) {
         mats[[paste0(id_nm, "::", scale_nm)]] <- entry[[scale_nm]]
@@ -288,7 +287,7 @@ draws <- function(object, ...) {
   if (!length(blocks)) {
     cli::cli_abort(c(
       x = "No stored posterior draws are available for this prediction object.",
-      i = "Generate predictions with draw outputs enabled before calling {.fn draws}."
+      i = "Generate predictions with draw outputs enabled before calling {.fn posterior_draws}."
     ))
   }
 
@@ -313,9 +312,9 @@ draws <- function(object, ...) {
   draw_array
 }
 
-#' @rdname draws
+#' @rdname posterior_draws
 #' @export
-draws.JoiNMeFit <- function(object, variables = NULL, regex = FALSE, draws = NULL, seed = 1,
+posterior_draws.JoiNMeFit <- function(object, variables = NULL, regex = FALSE, draws = NULL, seed = 1,
                             what = c("all", "basehaz", "baseline_hazard"),
                             format = c("draws_array", "draws_matrix", "draws_df"), ...) {
   
@@ -334,7 +333,7 @@ draws.JoiNMeFit <- function(object, variables = NULL, regex = FALSE, draws = NUL
       seed = seed,
       keep_chains = TRUE
     )
-    arr <- ext$draws
+    arr <- ext$posterior_draws
     arr <- .subset_draws(arr, variables = variables, regex = regex, draws = NULL, seed = seed)
     return(.format_draws(arr, format = format))
   }
@@ -344,9 +343,9 @@ draws.JoiNMeFit <- function(object, variables = NULL, regex = FALSE, draws = NUL
   .format_draws(draw_array, format = format)
 }
 
-#' @rdname draws
+#' @rdname posterior_draws
 #' @export
-draws.JoiNMeDynPred <- function(object, variables = NULL, regex = FALSE, draws = NULL, seed = 1,
+posterior_draws.JoiNMeDynPred <- function(object, variables = NULL, regex = FALSE, draws = NULL, seed = 1,
                                 format = c("draws_array", "draws_matrix", "draws_df"), ...) {
   
   draw_array <- .dynpred_cached_draws_array(object)
@@ -354,14 +353,14 @@ draws.JoiNMeDynPred <- function(object, variables = NULL, regex = FALSE, draws =
   .format_draws(draw_array, format = format)
 }
 
-#' @rdname draws
+#' @rdname posterior_draws
 #' @export
 as.array.JoiNMeFit <- function(x, ...) {
-  as.array(draws.JoiNMeFit(x, format = "draws_array", ...))
+  as.array(posterior_draws.JoiNMeFit(x, format = "draws_array", ...))
 }
 
-#' @rdname draws
+#' @rdname posterior_draws
 #' @export
 as.array.JoiNMeDynPred <- function(x, ...) {
-  as.array(draws.JoiNMeDynPred(x, format = "draws_array", ...))
+  as.array(posterior_draws.JoiNMeDynPred(x, format = "draws_array", ...))
 }

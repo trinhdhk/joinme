@@ -27,14 +27,29 @@
 #'
 #' Marker weights (see `joinme_standata()`) are used to form marker-average summaries
 #' for both current value (CV) and current slope (CS) association components. When
-#' `shared_marker_weights = TRUE`, all weighted marker-based association terms share
-#' one marker-weight structure. When `shared_marker_weights = FALSE`, each active
+#' `priors$marker_weights$shared = TRUE`, all weighted marker-based association terms share
+#' one marker-weight structure. When `priors$marker_weights$shared = FALSE`, each active
 #' weighted marker-based association term (`cv_total`, `cs_total`, `cv_marker`,
 #' `cs_marker`) gets its own marker-weight structure. When
-#' `fixed_marker_weights = FALSE`, signed perturbations are estimated around the
-#' supplied base weights. The effective marker intensities are used directly,
-#' without additional normalisation, to scale the corresponding association
-#' contribution.
+#' the family is stochastic, one common mean per weight set and signed
+#' marker-specific departures are estimated around the offset declared in
+#' `priors$marker_weights$offset`. Each offset vector must be wholly named or
+#' wholly unnamed. The common mean uses
+#' `jm_prior(marker_weights = list(intercept = ...))`; standardised departures
+#' use the centred unit-scale family named by `marker_weights$family`, for
+#' example `jm_prior(marker_weights = list(family = "laplace"))`. The family
+#' intercept is a fitting prior and does not set a simulation truth. A bare
+#' numeric value retains the ordinary prior-scale shorthand. The marker-only
+#' current-value and slope channels can supply little
+#' information about a common shift when the average centred marker trajectory
+#' is close to zero, so this location prior is substantively important. The family
+#' name `"student_t"` learns set-specific degrees of freedom; each excess above
+#' two has a `Gamma(2, 0.1)` shape--rate prior. A
+#' `prior_student_t(df = ...)` declaration always fixes `df` instead. The
+#' family names `"constant"` and `"none"` instead use the declared offset as
+#' the complete marker weight and fit neither a common mean nor departures. The
+#' effective marker intensities are used directly, without additional
+#' normalisation, to scale the corresponding association contribution.
 #'
 #' The returned `JoiNMeFit` object stores a compact association plotting bundle
 #' containing only the posterior quantities needed to draw association curves
@@ -43,7 +58,7 @@
 #' without needing the full transient CmdStan CSV outputs.
 #'
 #' For CmdStanR fits, `joinme()` also eagerly imports the CSV-backed fit
-#' contents in memory before returning. This mirrors the loading step used by
+#' contents in memory before returning. This mirrors the loading operation used by
 #' `cmdstanr::save_object()` so later `saveRDS()` calls do not rely on the
 #' original CmdStan CSV files remaining on disk.
 #'
@@ -124,7 +139,7 @@
 #' - `x`: raw association-feature values used either to define training pairs or
 #'   to help derive knot locations.
 #' - `y`: optional target transformed values at those `x` points. Supplying `y`
-#'   activates the legacy plug-in fit; omitting it activates Stan estimation.
+#'   activates the plug-in fit; omitting it activates Stan estimation.
 #' - `lambda`: smoothness control (larger = smoother transform).
 #' - `direction`: monotone orientation for penalised spline families. Accepted
 #'   values are `"increasing"` and `"decreasing"`. When `y` is supplied, the
@@ -167,12 +182,20 @@
 #'   `survival::Surv(start, stop, status)`,
 #'   `survival::Surv(time, status, type = "left")`, and
 #'   `survival::Surv(time1, time2, type = "interval2")`.
-#'   The legacy `type = "interval"` representation is not supported.
+#'   The former `type = "interval"` representation is not supported.
+#'   An `interval2` response must contain one row per id and presently describes
+#'   one event type. Its full likelihood is evaluated as
+#'   \eqn{S(L)-S(R)} for \eqn{L<T\le R}; the lower inspection limit is not
+#'   treated as delayed entry. The event covariates on that row are held over
+#'   the represented risk time, whilst longitudinal association terms remain
+#'   time-varying. See the model-interpretation vignette for all four censoring
+#'   contributions.
 #' @param dataEvent Optional event-process data with either one row per id
 #'   (`Surv(time, status)`) or multiple interval rows per id
 #'   (`Surv(start, stop, status)`). Covariates in `formulaEvent` may vary by
-#'   interval. Leave this and `formulaEvent` as `NULL` for longitudinal-only
-#'   fitting.
+#'   interval for a counting-process response. Left- and interval-censored
+#'   responses require one row per id. Leave this and `formulaEvent` as `NULL`
+#'   for longitudinal-only fitting.
 #' @param formulaVCov Covariance regression specification for id-specific
 #'   marker-by-id effects. Supply one formula to share its observed covariates,
 #'   or `list(sd = ~ ..., corr = ~ ...)` to model standard deviations and
@@ -228,8 +251,7 @@
 #'     otherwise.
 #'   - force_recompile: logical; recompile the Stan model if needed.
 #'   - quadrature_nodes: optional positive integer total node target for survival
-#'     integration. Allowed values are exactly 7/15/31/41/51/61. Only the node
-#'     count is passed to Stan; GK nodes/weights are fixed in the Stan code.
+#'     integration. Allowed values are exactly 7/15/31/41/51/61. 
 #'   - vcov_diag_link: "softplus" or "exp" for covariance regression diagonals.
 #' @param draws Optional number of posterior draws used for summaries (not sampling).
 #' @param families Marker-specific family specification (optional).
@@ -250,20 +272,19 @@
 #'   `joinme_tf(cv_total = ~ expit(x, intercept = TRUE, slope = TRUE))`, which
 #'   is fitted as `expit(iota_1 + iota_2 * x)`. See details.
 #'
-#' @param priors Prior declaration from [jm_prior()]. Separate coefficient
-#'   families may be supplied for `beta`, `alpha`, `iota`, `marker`,
-#'   `marker_weight`, `vcov_sd`, `vcov_corr`, and `class_regression`, together with an LKJ declaration
-#'   for correlations. `class_regression` applies to coefficients introduced
-#'   by `formulaClass` in [joinme_mix()].
-#' @param fixed_marker_weights Logical; if TRUE, marker weights are fixed at the
-#'   supplied base values. If FALSE, marker-weight perturbations are estimated
-#'   using `priors$marker_weight`. Their location and ordinary scale remain
-#'   fixed at zero and one so the supplied base weights retain their meaning.
-#' @param shared_marker_weights Logical; if TRUE, all weighted marker-based
-#'   association terms share one marker-weight structure. If FALSE, each active
-#'   weighted marker-based association term gets its own marker-weight structure.
-#'   When `marker_weights` is a named list, use names `cv_total`, `cs_total`,
-#'   `cv_marker`, and `cs_marker`.
+#' @param priors Prior declaration from [jm_prior()]. Global `intercept` and
+#'   `slope` declarations may be replaced independently within `longitudinal`,
+#'   `survival`, `vcov`, `assoc`, `functional`, `marker_weights`, and named
+#'   distributional regressions. Distributional names may use family or marker
+#'   selectors, for example `` `sigma[family='student']` `` or
+#'   `` `sigma[marker='y']` ``; marker selection requires a uniquely associated
+#'   family-scoped `formulaDist` block. `marker$family`, `class$slope`, and an
+#'   LKJ declaration govern their distinct structures.
+#'   The `priors$marker_weights` component contains the complete marker-weight
+#'   declaration. Its `offset` is added to fitted weights and must be wholly
+#'   named or wholly unnamed. Set `family = "constant"` (or `"none"`) to use
+#'   that offset exactly. Otherwise the model adds a fitted common location and
+#'   standardised marker-specific departures from the declared family.
 #' @param basehaz An object of class `joinme_basehaz` created by `joinme_basehaz()`.
 #' This controls the baseline hazard parameterisation and spline basis. See `?joinme_basehaz` for details.
 #' @param fit logical; if TRUE, the model is fitted and a `JoiNMeFit` object is returned. If FALSE, only the Stan data list is returned.
@@ -308,14 +329,12 @@ joinme <- function(
   families = NULL,
   transforms = NULL,
   priors = joinme_priors(),
-  fixed_marker_weights = FALSE,
-  shared_marker_weights = TRUE,
   basehaz = joinme_basehaz(),
   fit = TRUE,
   seed = NULL,
   ...
 ) {
-  # Step 1: identify whether the user supplied a complete event process before
+  # Identify whether the user supplied a complete event process before
   # constructing any internal scaffold. A formula without event data, or event
   # data without its formula, has no unambiguous statistical interpretation and
   # is therefore rejected rather than silently treated as longitudinal-only.
@@ -327,11 +346,28 @@ joinme <- function(
     ))
   }
 
-  # Step 2: resolve association terms before calling `joinme_standata()`,
-  # whose historical default is `cv_mean`. That default remains appropriate
-  # for a joint longitudinal--survival model, but it must not accidentally
+  # Resolve association terms before calling `joinme_standata()`,
+  # That default remains appropriate for a joint longitudinal--survival model, but it must not accidentally
   # introduce a prior-only association parameter in a longitudinal-only fit.
   dot_arguments <- list(...)
+  dot_argument_names <- names(dot_arguments) # names used to match additional arguments to the standata constructor
+  if (length(dot_arguments) > 0L &&
+      (is.null(dot_argument_names) || any(is.na(dot_argument_names) | !nzchar(dot_argument_names)))) {
+    cli::cli_abort(c(
+      x = "Every argument supplied through {.arg ...} must be named.",
+      i = "Use the argument names documented for {.fn joinme_standata}."
+    ))
+  }
+  unknown_dot_arguments <- setdiff(
+    dot_argument_names,
+    names(formals(joinme_standata))
+  ) # names that cannot be interpreted by the shared data constructor
+  if (length(unknown_dot_arguments) > 0L) {
+    cli::cli_abort(c(
+      x = "Unknown argument{?s}: {.field {unknown_dot_arguments}}.",
+      i = "Arguments supplied through {.arg ...} must be recognised by {.fn joinme_standata}."
+    ))
+  }
   association_terms <- dot_arguments$assoc
   if (is.null(association_terms)) {
     association_terms <- if (has_survival_process) {
@@ -348,7 +384,7 @@ joinme <- function(
   }
   dot_arguments$assoc <- association_terms
 
-  # Step 3: construct one administrative, event-free row per subject when the
+  # Construct one administrative, event-free row per subject when the
   # analysis contains no survival outcome. Positive follow-up keeps the common
   # time-design code well-defined; `include_survival = FALSE` below then sets
   # all event likelihood contributions to exactly zero before sampling.
@@ -374,7 +410,7 @@ joinme <- function(
     transforms,
     validate = FALSE
   ))
-  priors <- unclass(.joinme_priors_(priors, validate = TRUE))
+  priors <- .joinme_priors_(priors, validate = TRUE)
 
   if (length(control) > 0 && is.null(names(control))) {
     cli::cli_abort(c(
@@ -411,16 +447,7 @@ joinme <- function(
       formulaDist = formulaDist,
       families = families,
       transforms = transforms,
-      beta_prior = priors$beta,
-      alpha_prior = priors$alpha,
-      iota_prior = priors$iota,
-      marker_prior = priors$marker,
-      marker_weight_prior = priors$marker_weight,
-      vcov_sd_prior = priors$vcov_sd,
-      vcov_corr_prior = priors$vcov_corr,
-      lkj_prior = priors$lkj,
-      fixed_marker_weights = fixed_marker_weights,
-      shared_marker_weights = shared_marker_weights,
+      prior_specification = priors,
       quadrature_nodes = quadrature_nodes,
       vcov_diag_link = vcov_diag_link,
       basehaz = basehaz$type,
@@ -567,7 +594,6 @@ joinme <- function(
   sd_stan$grainsize <- grainsize
 
   # Ensure time index arrays are preserved for cmdstanr JSON (avoid auto-unbox)
-  sd_stan <- .coerce_rstan_time_indices(sd_stan)
   sd_stan <- .coerce_rstan_mixture_data(sd_stan)
 
   # Coerce arrays/vectors consistently for both cmdstanr and rstan
@@ -575,20 +601,14 @@ joinme <- function(
   sd_stan <- .coerce_rstan_vectors(
     sd_stan,
     c(
-      "prior_beta_mu",
-      "prior_beta_scale",
-      "prior_alpha_mu",
-      "prior_alpha_scale",
-      "prior_iota_mu",
-      "prior_iota_scale",
-      "prior_marker_mu",
-      "prior_marker_scale",
-      "prior_marker_weight_mu",
-      "prior_marker_weight_scale",
-      "prior_vcov_sd_mu",
-      "prior_vcov_sd_scale",
-      "prior_vcov_corr_mu",
-      "prior_vcov_corr_scale",
+      "prior_regression_mu",
+      "prior_regression_scale",
+      "prior_regression_df",
+      "prior_regression_horseshoe_local_df",
+      "prior_regression_horseshoe_global_df",
+      "prior_regression_horseshoe_global_scale",
+      "prior_regression_horseshoe_slab_df",
+      "prior_regression_horseshoe_slab_scale",
       "prior_class_regression_mu",
       "prior_class_regression_scale",
       "const_data_cv",

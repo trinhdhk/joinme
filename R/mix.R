@@ -69,7 +69,7 @@
 #' unavailable in this mode.
 #'
 #' @param formulaLong,dataLong,formulaVCov,formulaDist,control,draws,families,
-#'   transforms,priors,fixed_marker_weights,shared_marker_weights,basehaz,fit,
+#'   transforms,priors,basehaz,fit,
 #'   seed Arguments with the same meaning as in [joinme()].
 #' @param formulaEvent Optional survival formula.  Supply this together with
 #'   `dataEvent`, or leave both `NULL` for a longitudinal-only mixture.
@@ -92,7 +92,7 @@
 #'   no order. The default is `"intercept"` for a shared class formula and
 #'   `"none"` for a list of `n_classes` class-specific formulae.
 #' @param ... Additional arguments passed to [joinme_standata()], including
-#'   `assoc`, `marker_weights`, `id_var`, `marker_var`, `time_var`, and
+#'   `assoc`, `id_var`, `marker_var`, `time_var`, and
 #'   `shrinkage`.
 #'
 #' @return If `fit = TRUE`, a `JoiNMeMixFit` object inheriting from
@@ -109,7 +109,7 @@
 #'   n_classes = 3,
 #'   class_type = c("subject", "vcov"),
 #'   formulaClass = ~ treatment + age,
-#'   priors = jm_prior(class_probability = rep(2, 3)),
+#'   priors = jm_prior(class = list(baseline_prob = rep(2, 3))),
 #'   assoc = c("cv_total")
 #' )
 #'
@@ -134,8 +134,6 @@ joinme_mix <- function(
   families = NULL,
   transforms = NULL,
   priors = joinme_priors(),
-  fixed_marker_weights = FALSE,
-  shared_marker_weights = TRUE,
   basehaz = joinme_basehaz(),
   n_classes = 2L,
   formulaClass = ~1,
@@ -146,11 +144,13 @@ joinme_mix <- function(
   seed = NULL,
   ...
 ) {
-  prior_specification <- unclass(
-    .joinme_priors_(priors, validate = TRUE)
+  .stop_experimental("joinme_mix()")
+  prior_specification <- .joinme_priors_(
+    priors,
+    validate = TRUE
   ) # validated common and latent-class prior declarations
 
-  # Step 1: distinguish a genuine survival analysis from a longitudinal-only
+  # Distinguish a genuine survival analysis from a longitudinal-only
   # analysis.  Requiring the formula and data together prevents a partly
   # specified event process from being mistaken for a censored analysis.
   has_survival_process <- !is.null(formulaEvent) || !is.null(dataEvent)
@@ -167,7 +167,7 @@ joinme_mix <- function(
     association_terms <- if (has_survival_process) "cv_mean" else character(0)
   }
 
-  # Step 2: a longitudinal-only fit still needs the common matrix-building
+  # A longitudinal-only fit still needs the common matrix-building
   # machinery to know the study time scale.  The scaffold copies one observed
   # row per subject so every longitudinal covariate used in a design
   # template remains available.  Its survival contribution is removed later by
@@ -191,7 +191,7 @@ joinme_mix <- function(
     dataEvent <- event_scaffold
   }
 
-  # Step 3: retain the user's mixture request as a plain specification.  Its
+  # Retain the user's mixture request as a plain specification. Its
   # dimensions can only be checked after the ordinary formula parser has built
   # the four random-effect blocks, so final validation occurs in
   # `.build_mixture_standata()`.
@@ -226,9 +226,7 @@ joinme_mix <- function(
     n_classes = n_classes,
     class_type = selected_types,
     class_dimensions = class_dimensions,
-    class_probability_concentration =
-      prior_specification$class_probability,
-    class_regression_prior = prior_specification$class_regression,
+    class_prior = prior_specification$class,
     class_design = class_design,
     class_ordering = resolved_class_ordering,
     include_survival = has_survival_process
@@ -237,7 +235,7 @@ joinme_mix <- function(
   dot_arguments$assoc <- association_terms
   dot_arguments$mixture <- mixture_specification
 
-  # Step 4: invoke the established JoiNMe preparation path.  `fit = FALSE`
+  # Invoke the established JoiNMe preparation path. `fit = FALSE`
   # deliberately stops immediately before sampling; the returned holder is
   # then marked so its existing sampler constructs the mixture subclass.
   joinme_arguments <- c(
@@ -253,8 +251,6 @@ joinme_mix <- function(
       families = families,
       transforms = transforms,
       priors = priors,
-      fixed_marker_weights = fixed_marker_weights,
-      shared_marker_weights = shared_marker_weights,
       basehaz = basehaz,
       fit = FALSE,
       seed = seed
@@ -1047,7 +1043,7 @@ joinme_mix <- function(
   }
 
   # The covariance-regression block follows the same lower-triangular indexing
-  # as Stan's `fit_cov_index.stan`.
+  # as `include/submodels/longitudinal/transformed_data/fit.stan`.
   covariance_dimension <- if (
     as.integer(stan_data$indep_idmarker_cov %||% 0L) == 1L
   ) {
@@ -1168,9 +1164,10 @@ joinme_mix <- function(
     0L
   } # sole packed random-intercept coordinate receiving a strict location order
 
+  class_prior <- mixture$class_prior %||% list() # baseline-probability and formulaClass slope prior declarations
   probability_prior <- as.numeric(
-    mixture$class_probability_concentration %||% 1
-  ) # Dirichlet concentration supplied through jm_prior()
+    class_prior$baseline_prob %||% 1
+  ) # Dirichlet concentration supplied through jm_prior(class = ...)
   if (length(probability_prior) == 1L) {
     probability_prior <- rep(probability_prior, n_classes)
   }
@@ -1180,7 +1177,7 @@ joinme_mix <- function(
       any(probability_prior <= 0)
   ) {
     cli::cli_abort(
-      "{.arg priors$class_probability} must be positive and have length one or {.arg n_classes}."
+      "{.arg priors$class$baseline_prob} must be positive and have length one or {.arg n_classes}."
     )
   }
   class_design <- mixture$class_design %||% list(
@@ -1224,17 +1221,17 @@ joinme_mix <- function(
     )
   }
 
-  # Materialise the class-regression prior only after both allocation-domain
+  # Assemble the class-regression prior only after both allocation-domain
   # designs have established the exact concatenated coefficient dimension.
   # This delayed expansion permits a concise scalar prior whilst making a
   # coefficient-specific vector unambiguous and safe to validate.
-  class_regression_declaration <- mixture$class_regression_prior
+  class_regression_declaration <- class_prior$slope
   class_regression_declaration <- .normalise_joinme_prior_component(
     class_regression_declaration,
-    name = "class_regression",
+    name = "class$slope",
     default = prior_normal()
   ) # validated family declaration shared by subject and marker class regressions
-  class_regression_prior_data <- .materialise_joinme_prior_data(
+  class_regression_prior_data <- .assemble_joinme_prior_data(
     priors = list(
       class_regression = .encode_joinme_prior(class_regression_declaration)
     ),
@@ -1300,8 +1297,10 @@ joinme_mix <- function(
       total_dimension = total_dimension,
       ordering = ordering_name,
       ordered_location_coordinate = ordered_location_coordinate,
-      class_probability = probability_prior,
-      class_regression_prior = class_regression_declaration,
+      class = list(
+        baseline_prob = probability_prior,
+        slope = class_regression_declaration
+      ),
       class_design = class_design,
       distribution = c(
         "student_t_6",

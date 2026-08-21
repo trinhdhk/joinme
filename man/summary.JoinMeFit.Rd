@@ -14,7 +14,15 @@
   ...
 )
 
-\method{posterior_summary}{JoiNMeFit}(object, ...)
+\method{posterior_summary}{JoiNMeFit}(
+  object,
+  what = c("model", "fixef", "ranef", "coef"),
+  draws = NULL,
+  seed = 1,
+  digits = 3,
+  summary = TRUE,
+  ...
+)
 }
 \arguments{
 \item{object}{A JoiNMe fit object.}
@@ -28,17 +36,32 @@
 \item{include_corr}{Logical; include covariance summaries.}
 
 \item{...}{Unused.}
+
+\item{what}{Posterior view to return. \code{"model"} gives the complete fitted
+model summary. \code{"fixef"}, \code{"ranef"}, and \code{"coef"} provide the common
+reporting layer used by the corresponding high-level methods.}
+
+\item{summary}{Logical. For a coefficient view, \code{TRUE} returns posterior
+summaries and \code{FALSE} returns its structured draw-level extraction.}
 }
 \value{
 A \code{summary_JoiNMeFit} object. Its \code{tables} element includes
-posterior association coefficients, transform parameters, and, when an
+posterior association coefficients, a compact marker-weight table with
+common locations and within-set spreads, transform parameters, and, when an
 ordered piecewise-linear association is active, \code{piecewise_ordinates}
 containing the relative log-hazard and hazard-ratio contribution at every
-knot.
+knot. Declared marker-weight offsets are retained in
+\code{metadata$marker_weight_offsets} and printed above the posterior tables.
 }
 \description{
 Builds posterior summaries for the longitudinal process, survival process,
 association terms, and optional covariance blocks. For survival, the summary
 reports \code{survival_process} when the event model
 contains non-intercept covariates beyond association features.
+}
+\details{
+For coefficient views, this is the reporting layer between \code{\link[=extract]{extract()}} and
+the conventional \code{\link[nlme:fixef]{fixef()}}, \code{\link[nlme:ranef]{ranef()}}, and \code{\link[=coef]{coef()}} methods. The high-level
+methods delegate here; requests with \code{summary = FALSE} continue to the
+component-aware draw representation owned by \code{extract()}.
 }

@@ -107,7 +107,7 @@ parse_transform_expr <- function(expr, iota_nodes = NULL) {
   # Step 3: validate stack consistency so runtime evaluation is deterministic.
   verify_bytecode(result$bytecode, result$const_data)
 
-  # Step 4: return canonical bytecode payload.
+  # Return the canonical bytecode representation.
   list(
     bytecode = result$bytecode,
     const_data = result$const_data,

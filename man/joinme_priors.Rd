@@ -2,31 +2,151 @@
 % Please edit documentation in R/specs.R
 \name{joinme_priors}
 \alias{joinme_priors}
+\alias{joinme_prior}
 \alias{jm_priors}
-\title{Declare priors with validation}
+\alias{jm_prior}
+\title{Declare priors by scientific model component}
 \usage{
 joinme_priors(
-  beta = NULL,
-  alpha = NULL,
-  iota = NULL,
+  ...,
+  intercept = NULL,
+  slope = NULL,
+  longitudinal = NULL,
+  survival = NULL,
+  baseline = NULL,
+  vcov = NULL,
+  marker_weights = NULL,
+  assoc = NULL,
+  functional = NULL,
+  marker = NULL,
   lkj = NULL,
+  class = NULL,
   .validate = TRUE
 )
 
-jm_priors(beta = NULL, alpha = NULL, iota = NULL, lkj = NULL, .validate = TRUE)
+jm_priors(
+  ...,
+  intercept = NULL,
+  slope = NULL,
+  longitudinal = NULL,
+  survival = NULL,
+  baseline = NULL,
+  vcov = NULL,
+  marker_weights = NULL,
+  assoc = NULL,
+  functional = NULL,
+  marker = NULL,
+  lkj = NULL,
+  class = NULL,
+  .validate = TRUE
+)
+
+jm_prior(
+  ...,
+  intercept = NULL,
+  slope = NULL,
+  longitudinal = NULL,
+  survival = NULL,
+  baseline = NULL,
+  vcov = NULL,
+  marker_weights = NULL,
+  assoc = NULL,
+  functional = NULL,
+  marker = NULL,
+  lkj = NULL,
+  class = NULL,
+  .validate = TRUE
+)
+
+joinme_prior(
+  ...,
+  intercept = NULL,
+  slope = NULL,
+  longitudinal = NULL,
+  survival = NULL,
+  baseline = NULL,
+  vcov = NULL,
+  marker_weights = NULL,
+  assoc = NULL,
+  functional = NULL,
+  marker = NULL,
+  lkj = NULL,
+  class = NULL,
+  .validate = TRUE
+)
 }
 \arguments{
-\item{beta}{Beta prior specification. Use either a numeric scale (or vector of
-scales) or a list with \code{scale}/\code{sd}.}
+\item{...}{Named distributional-parameter prior components, such as
+\code{sigma = list(intercept = ..., slope = ...)},
+\code{`sigma[family='student']` = list(slope = ...)}, or
+\code{`sigma[marker='y']` = list(intercept = ...)}.}
 
-\item{alpha}{Alpha prior specification. Use either a numeric scale or a list
-with \code{scale}/\code{sd}.}
+\item{intercept, slope}{Global coefficient priors. These arguments must be
+created with a \verb{prior_*()} function. Fixed numerical coefficients belong
+to \code{\link[=jm_truth]{jm_truth()}} and are rejected here because a constant is not a prior
+distribution.}
 
-\item{iota}{Iota prior specification for fit-only affine-shift intercept and
-slope parameters in functional association transforms. Use either a numeric
-scale or a list with \code{scale}/\code{sd}.}
+\item{longitudinal}{A bare prior declaration in complete longitudinal
+model-matrix order, or a named list containing \code{intercept} and/or \code{slope}
+declarations in their separate role-wise orders.}
 
-\item{lkj}{LKJ concentration parameter.}
+\item{survival}{Slope prior for event-model covariates. It may be supplied
+directly or as \code{list(slope = ...)}.}
+
+\item{baseline}{Intercept and slope priors for a formula-based baseline
+hazard.}
+
+\item{vcov}{A shared covariance-regression declaration, an
+intercept/slope/latent list, or a list with \code{sd} and \code{corr} components.
+The last form permits distinct population declarations for marginal
+scales and off-diagonal partial correlations. \code{intercept} and \code{slope}
+govern their regression coefficients; \code{latent} governs the loading of
+unexplained subject variation in the corresponding linear predictor.}
+
+\item{marker_weights}{A list with \code{offset}, \code{intercept}, \code{family}, and
+\code{shared}. The logical \code{shared} value determines whether active weighted
+association terms use one common marker-weight set (\code{TRUE}, the default)
+or distinct sets (\code{FALSE}).
+\code{offset} is the known contribution to each marker weight. It accepts one
+numeric vector whose entries are either all named by marker or all
+unnamed, or a named collection of such vectors for unshared association
+terms. Partly named vectors are rejected because their marker alignment is
+not statistically defined. \code{intercept} is the ordinary coefficient prior
+for each fitted common marker-weight location and may therefore declare
+its own location and scale; when omitted, it inherits the global
+\code{intercept} declaration. It must be created with a \verb{prior_*()} function.
+\code{family}
+governs only the centred unit-scale
+departure law for marker-specific deviations.
+Accepted stochastic values are \code{"student_t"}, \code{"normal"}, \code{"laplace"}, and
+\code{"horseshoe"}. Values \code{"constant"} and \code{"none"} are synonymous: the
+offset is then used exactly, with no fitted location or departure. The
+family name \code{"student_t"} fits one degrees-of-freedom
+value above two per active weight set under a shifted \code{Gamma(2, 0.1)}
+prior. \verb{prior_*()} objects are not accepted for \code{family} because
+marker-weight departures retain location zero and ordinary scale one.
+\code{marker_weights} itself must be a named list; bare
+prior declarations are rejected to avoid confusing the common-location
+prior with the departure family. Fixed common locations belong to
+\code{\link[=jm_truth]{jm_truth()}}.}
+
+\item{assoc}{Slope prior for longitudinal--event association coefficients.}
+
+\item{functional}{Intercept and slope priors for fitted affine shifts inside
+functional association transformations.}
+
+\item{marker}{A family-only prior declaration for standardised marker-level
+random effects. Location zero and scale one are enforced.}
+
+\item{lkj}{An object from \code{\link[=prior_lkj]{prior_lkj()}} or a positive numeric concentration.}
+
+\item{class}{A named list with \code{baseline_prob}, the positive Dirichlet
+concentration for baseline class probabilities, and \code{slope}, the prior
+declaration for coefficients from \code{formulaClass}. A scalar
+\code{baseline_prob} is repeated over classes; a vector may provide one
+concentration per class. The slope remains one prior block because
+class-specific formula lists share a reference-class parameterisation.
+When omitted, \code{class$slope} inherits the global \code{slope} declaration.}
 
 \item{.validate}{Logical; if \code{TRUE} (default), validate the resulting prior
 declarations immediately.}
@@ -35,24 +155,47 @@ declarations immediately.}
 An object of class \code{joinme_priors}.
 }
 \description{
-\code{joinme_priors()} is a user-facing wrapper for prior declarations passed to
-\code{joinme()}. It validates the exposed prior components and returns a
-structured object that can be supplied directly as the \code{priors} argument.
+\code{jm_prior()} names priors by the part of the statistical model they govern,
+rather than by internal coefficient letters. \code{intercept} and \code{slope} are
+global fallbacks. A component-specific declaration replaces only the named
+role, leaving the other role to inherit its global fallback.
 
-Exposed components are:
-\itemize{
-\item \code{beta}: longitudinal/survival regression prior scale(s)
-\item \code{alpha}: association prior scale
-\item \code{iota}: fit-only affine-shift prior scale for functional association transforms
-\item \code{lkj}: LKJ concentration parameter
-}
+Components with ordinary regression roles are \code{longitudinal}, \code{vcov}, and
+\code{functional}. \code{survival} and \code{assoc} are slope-only because the baseline
+hazard supplies the event-process intercept. \code{marker_weights} is special:
+its \code{offset} gives the known marker-specific contribution, \code{shared} selects
+one common set or term-specific sets, \code{intercept} governs each fitted common
+weight location, and \code{family} selects only the centred, unit-scale
+distribution of marker-specific departures.
+Names appearing on the left-hand side of \code{formulaDist} (\code{sigma}, \code{nu},
+\code{phi}, \code{alpha}, \code{kappa}, and \code{tau}) may be supplied through \code{...}, each with
+its own intercept and slope priors. Bracket selectors refine a declaration
+to a family-scoped coefficient block, for example
+\code{`sigma[family='student']` = list(slope = prior_normal())}. A marker
+selector such as \code{`sigma[marker='y']`} is accepted when that marker
+uniquely identifies one family-scoped coefficient block. If several markers
+share the block, use its family selector because the fitted coefficient is
+shared and cannot receive different marker-specific priors.
 }
 \examples{
-pri <- joinme_priors(
-  beta = list(scale = 2.5),
-  alpha = list(scale = 1.0),
-  iota = list(scale = 1.0),
-  lkj = 2
+pri <- jm_prior(
+  intercept = prior_student_t(df = 6, scale = 2),
+  slope = prior_normal(scale = 1),
+  longitudinal = list(slope = prior_normal(scale = 0.5)),
+  marker_weights = list(
+    offset = c(marker_a = 0, marker_b = 0.25),
+    intercept = prior_normal(scale = 0.75),
+    family = "student_t",
+    shared = TRUE
+  ),
+  assoc = prior_student_t(df = 4, scale = 1),
+  sigma = list(intercept = prior_normal(), slope = prior_normal(scale = 0.5)),
+  `sigma[family='student']` = list(slope = prior_student_t(df = 4)),
+  lkj = prior_lkj(2),
+  class = list(
+    baseline_prob = c(2, 2, 2),
+    slope = prior_normal(scale = 1)
+  )
 )
 print(pri)
 }

@@ -67,7 +67,22 @@ vcov.JoiNMeFit <- function(object, what = NULL, draws = NULL, ...) {
       rhat <- suppressWarnings(tryCatch(as.numeric(posterior::rhat(vals)), error = function(e) NA_real_))
       ess_bulk <- suppressWarnings(tryCatch(as.numeric(posterior::ess_basic(vals)), error = function(e) NA_real_))
       ess_tail <- suppressWarnings(tryCatch(as.numeric(posterior::ess_tail(vals)), error = function(e) NA_real_))
-      out[[length(out) + 1]] <- cbind(block = label, row = r, col = c, t(ss), Rhat = rhat, ess_bulk = ess_bulk, ess_tail = ess_tail)
+      # Keep the same compact inferential schema used in model summaries.
+      # Mean, Median, and SD are aliases of Estimate/Est.Error and are
+      # intentionally omitted from covariance reporting tables.
+      out[[length(out) + 1]] <- data.frame(
+        block = label,
+        row = r,
+        col = c,
+        Estimate = as.numeric(ss[["Estimate"]]),
+        Est.Error = as.numeric(ss[["Est.Error"]]),
+        Q2.5 = as.numeric(ss[["Q2.5"]]),
+        Q97.5 = as.numeric(ss[["Q97.5"]]),
+        Rhat = rhat,
+        ess_bulk = ess_bulk,
+        ess_tail = ess_tail,
+        stringsAsFactors = FALSE
+      )
     }
     df <- as.data.frame(do.call(rbind, out), stringsAsFactors = FALSE)
     df$row <- as.integer(df$row)

@@ -33,7 +33,11 @@
 
 \item{dataEvent}{Optional updated event dataset.}
 
-\item{formulaVCov}{Optional updated covariance formula (full or update form).}
+\item{formulaVCov}{Optional updated covariance regression. Supply one formula
+to update both components, or \code{list(sd = ~ ..., corr = ~ ...)} to update
+the standard-deviation and off-diagonal correlation regressions
+independently. Update formulae containing \code{.} are supported within each
+component.}
 
 \item{formulaDist}{Optional distributional regression formulas with parameter
 names on the LHS (e.g., \code{sigma ~ 1 + time}).}
@@ -51,10 +55,13 @@ names on the LHS (e.g., \code{sigma ~ 1 + time}).}
 \item{.env}{Optional environment for evaluating the updated call.
 If NULL, the parent frame is used. When failed, the environment of the original formulaLong is used.}
 
-\item{...}{Additional arguments passed to \code{joinme()}.}
+\item{...}{Additional arguments passed to \code{joinme()}, or to \code{joinme_mix()}
+when \code{object} is a latent-progress mixture.}
 }
 \value{
-A refitted JoiNMe object.
+A refitted JoiNMe object. Mixture fits retain their mixture entry
+point and class specification. Any longitudinal-only fit remains
+longitudinal only unless new event inputs are supplied explicitly.
 }
 \description{
 Refits a JoiNMe model using the stored call, with optional updates to formulas,

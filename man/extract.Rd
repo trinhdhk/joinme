@@ -12,19 +12,26 @@ extract(object, ...)
 \item{...}{Additional method-specific arguments.}
 }
 \description{
-S3 generic to extract component-specific posterior payloads from
+S3 generic to extract component-specific posterior results from
 \code{JoiNMeFit} and \code{JoiNMeDynPred} objects.
 
-Compared with \code{\link[=draws]{draws()}}, \code{extract()} provides lower-level
+Together with \code{\link[=posterior_draws]{posterior_draws()}}, \code{extract()} is the lowest public posterior
 interface. It works component by component and returns the metadata needed to
 understand how a requested summary term maps back to the stored Stan
 variables or prediction draw blocks.
 
+The coefficient hierarchy is deliberately one-directional. \code{extract()} owns
+the draw-level representations selected by \code{what = "fixed_effects"},
+\code{"random_effects"}, and \code{"coefficients"}; \code{\link[brms:posterior_summary]{posterior_summary()}} summarises
+those representations; and \code{\link[nlme:fixef]{fixef()}}, \code{\link[nlme:ranef]{ranef()}}, and \code{\link[=coef]{coef()}} are the
+conventional high-level entry points. This single path avoids parallel
+coefficient APIs with competing semantics.
+
 Use \code{extract()} when you need a specific model component, the corresponding
-\code{term_map}, or a specialised payload such as \code{what = "association_plot"}.
-Use \code{\link[=draws]{draws()}} when you want a single posterior object ready for \code{posterior}
+\code{term_map}, or a specialised result such as \code{what = "association_plot"}.
+Use \code{\link[=posterior_draws]{posterior_draws()}} when you want a single posterior object ready for \code{posterior}
 or \code{bayesplot} workflows.
 }
 \seealso{
-\code{\link[=draws]{draws()}}
+\code{\link[=posterior_draws]{posterior_draws()}}
 }

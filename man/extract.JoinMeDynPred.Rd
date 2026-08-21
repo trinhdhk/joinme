@@ -26,16 +26,16 @@
 \value{
 A list with fields:
 \itemize{
-\item \code{draws}: numeric matrix or list of matrices
+\item \code{posterior_draws}: numeric matrix or list of matrices
 \item \code{meta}: extraction metadata
 }
 }
 \description{
 Extracts stored prediction draw blocks without flattening them first.
 
-This is the structured companion to \code{\link[=draws.JoiNMeDynPred]{draws.JoiNMeDynPred()}}. Use
+This is the structured companion to \code{\link[=posterior_draws.JoiNMeDynPred]{posterior_draws.JoiNMeDynPred()}}. Use
 \code{extract()} when you want to keep the original prediction block semantics
 (\code{longitudinal}, \code{survival}, \code{cumhaz}, random effects, and scale/id filters).
-Use \code{\link[=draws]{draws()}} when you want those blocks flattened into one
+Use \code{\link[=posterior_draws]{posterior_draws()}} when you want those blocks flattened into one
 \code{posterior}-compatible draw object with composite variable labels.
 }

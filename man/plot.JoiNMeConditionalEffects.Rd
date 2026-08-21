@@ -4,7 +4,19 @@
 \alias{plot.JoiNMeConditionalEffects}
 \title{Plot JoiNMe conditional effects}
 \usage{
-\method{plot}{JoiNMeConditionalEffects}(x, plot = TRUE, ask = FALSE, ...)
+\method{plot}{JoiNMeConditionalEffects}(
+  x,
+  plot = TRUE,
+  ask = FALSE,
+  arrange = c("separate", "grid", "row", "column", "design"),
+  ncol = NULL,
+  nrow = NULL,
+  design = NULL,
+  widths = NULL,
+  heights = NULL,
+  guides = c("keep", "collect", "auto"),
+  ...
+)
 }
 \arguments{
 \item{x}{A \code{JoiNMeConditionalEffects} object.}
@@ -14,13 +26,32 @@ If \code{FALSE}, return the plots without drawing them.}
 
 \item{ask}{Logical. Whether to prompt before drawing a subsequent plot.}
 
+\item{arrange}{Arrangement of multiple plots. \code{"separate"} retains a named
+list and draws one figure at a time; \code{"grid"} uses an automatically sized
+grid; \code{"row"} or \code{"column"} uses a single row or column; and \code{"design"}
+follows the layout supplied through \code{design}.}
+
+\item{ncol, nrow}{Optional positive whole numbers giving the grid dimensions
+when \code{arrange = "grid"}.}
+
+\item{design}{A patchwork design string or area description used when
+\code{arrange = "design"}. The panels follow their returned order: all
+longitudinal effects first, followed by all event effects.}
+
+\item{widths, heights}{Optional positive numeric vectors giving relative
+column widths and row heights in the arranged display.}
+
+\item{guides}{How legends are treated across an arranged display. One of
+\code{"keep"}, \code{"collect"}, or \code{"auto"}.}
+
 \item{...}{Arguments passed to the \code{brms_conditional_effects} plot method,
 including \code{points}, \code{rug}, \code{stype}, \code{line_args}, \code{surface_args}, and
 \code{theme}.}
 }
 \value{
-Invisibly, a named list by process and effect containing \code{ggplot}
-objects.
+Invisibly, a named list by process and effect when
+\code{arrange = "separate"}, or one \code{patchwork} display for every other
+arrangement.
 }
 \description{
 Plots the process-specific effect tables returned by

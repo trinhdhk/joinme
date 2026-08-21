@@ -18,15 +18,9 @@ joinme_standata(
   assoc = c("cv_mean"),
   families = NULL,
   transforms = NULL,
-  beta_prior = NULL,
-  alpha_prior = NULL,
-  iota_prior = NULL,
-  lkj_prior = NULL,
+  prior_specification = NULL,
   allow_marker_crosscorr = 1L,
   shrinkage = 0L,
-  marker_weights = NULL,
-  fixed_marker_weights = FALSE,
-  shared_marker_weights = TRUE,
   basehaz = c("bs", "ns", "formula"),
   basehaz_n_knots = 5L,
   basehaz_knots = NULL,
@@ -35,6 +29,8 @@ joinme_standata(
   tau_spline = 0.4,
   quadrature_nodes = NULL,
   vcov_diag_link = c("softplus", "exp"),
+  mixture = NULL,
+  include_survival = TRUE,
   seed = .Random.seed[[1]]
 )
 }
@@ -59,15 +55,25 @@ Supported LHS forms are:
 \item \code{survival::Surv(start, stop, status)}
 \item \code{survival::Surv(time, status, type = "left")}
 \item \code{survival::Surv(time1, time2, type = "interval2")}
-The legacy \code{type = "interval"} form is intentionally rejected.
+The former \code{type = "interval"} form is intentionally rejected.
+For an interval-censored event in \eqn{(L,R]}, the prepared data contain
+an event-free row from zero to \eqn{L} and a failure-within-interval row
+from \eqn{L} to \eqn{R}. Their log-likelihood contributions sum to
+\eqn{\log\{S(L)-S(R)\}}. This is a full event likelihood, not a Cox
+partial likelihood.
 }}
 
 \item{dataEvent}{Event-process data with either one row per id
 (\code{Surv(time, status)}) or multiple time-split rows per id
 (\code{Surv(start, stop, status)}).
-Covariates referenced in \code{formulaEvent} may vary by interval in the split form.}
+Covariates referenced in \code{formulaEvent} may vary by interval in the split
+form. Left- and interval-censored responses require one row per id and
+presently describe one event type.}
 
-\item{formulaVCov}{Covariance regression formula for id-specific marker-by-id effects.
+\item{formulaVCov}{Covariance regression specification for id-specific
+marker-by-id effects. A formula applies the same observed covariates to
+both components. A named list, \code{list(sd = ~ ..., corr = ~ ...)}, regresses
+standard deviations and off-diagonal partial correlations independently.
 If the marker block omits the inner \code{( ... | id )}, then marker-by-id effects
 are absent and covariance-style associations (\code{corr}, \code{vcov}) are not allowed.
 Downstream, \code{corr} uses the off-diagonal entries of the subject-specific
@@ -131,42 +137,29 @@ Functional transforms may request fit-only affine-shift parameters through
 Ordered piecewise-linear fits use
 \code{list(type = "pwlin", knots = ..., direction = "increasing")} (or
 \code{"decreasing"}). Their knot ordinates are estimated from simplex
-increments; legacy \code{x} is accepted as an alias for \code{knots}, while
-legacy \code{y} no longer fixes the fitted curve.}
+increments; the earlier \code{x} field is accepted as an alias for \code{knots}, while
+the earlier \code{y} field no longer fixes the fitted curve.}
 
-\item{beta_prior}{Prior specification for longitudinal fixed effects.}
-
-\item{alpha_prior}{Prior specification for association parameters.}
-
-\item{iota_prior}{Prior specification for fit-only affine-shift intercept and
-slope parameters used by functional association transforms.}
-
-\item{lkj_prior}{Prior specification for correlation structures.}
+\item{prior_specification}{A component-based \code{\link[=jm_prior]{jm_prior()}} declaration.
+Global \code{intercept} and \code{slope} declarations are inherited unless a
+scientific component supplies the corresponding role explicitly.
+Marker-weighted associations are governed entirely by its
+\code{marker_weights} component. \code{marker_weights$offset} is a wholly named or
+wholly unnamed numeric vector; with term-specific weights it may instead
+be a named collection indexed by \code{cv_total}, \code{cs_total}, \code{cv_marker}, or
+\code{cs_marker}. \code{marker_weights$family = "constant"} (or \code{"none"}) uses the
+offset exactly and fits no marker-weight coefficient. A stochastic family
+fits \verb{offset + common location + unit-scale marker departure}, with the
+common-location fitting prior in \code{marker_weights$intercept}. It does not
+supply a population value to simulation. The association slope
+supplies the multiplier for the completed weighted marker feature.}
 
 \item{allow_marker_crosscorr}{Integer flag; 1 allows cross-marker correlation in marker RE.}
 
-\item{shrinkage}{Integer flag controlling shrinkage behaviour for marker-by-id effects.
-0 = student_t(6, 0, 1), 1 = double_exponential(0, 1), 2 = std_normal();}
-
-\item{marker_weights}{Optional base weights for marker-specific association
-components. If \code{shared_marker_weights = TRUE}, provide one numeric vector of
-length D (or one named numeric vector keyed by marker level) that is shared
-across all active weighted association terms. If
-\code{shared_marker_weights = FALSE}, you may instead provide a named list with
-entries \code{cv_total}, \code{cs_total}, \code{cv_marker}, and \code{cs_marker}. Each supplied
-entry is aligned to marker order and used only for the matching active
-weighted association term.}
-
-\item{fixed_marker_weights}{Logical; if TRUE, marker weights are kept fixed
-at \code{marker_weights} (no perturbation). If FALSE, marker weights are estimated
-via signed additive perturbations,
-\code{marker_weights + z_marker_weights}. The standardized latent family is
-selected by \code{shrinkage}: Student-t(6), Laplace, or Normal for 0, 1, or 2.}
-
-\item{shared_marker_weights}{Logical; if TRUE, all active weighted
-marker-based association terms share one marker-weight structure. If FALSE,
-each active weighted marker-based association term gets its own marker-weight
-structure.}
+\item{shrinkage}{Compatibility flag used by latent-class component
+distributions and simulation: 0 = Student-t(6), 1 = Laplace, and
+2 = Normal. Ordinary coefficient and marker priors are declared separately
+through \code{\link[=jm_prior]{jm_prior()}}.}
 
 \item{basehaz}{Baseline hazard basis type: "bs", "ns", or "formula".}
 
@@ -181,11 +174,19 @@ structure.}
 \item{tau_spline}{Prior scale for spline coefficients (penalised spline).}
 
 \item{quadrature_nodes}{Optional positive integer target for total quadrature
-points. Allowed values are exactly \code{7}, \code{15}, \code{31}, \code{41}, \code{51}, and \code{61}.
-Only the node count is passed to Stan; GK nodes/weights are fixed in Stan.}
+points. Allowed values are exactly \code{7}, \code{15}, \code{31}, \code{41}, \code{51}, and \code{61}.}
 
 \item{vcov_diag_link}{Link for the subject-specific standard deviation regression:
 "softplus" or "exp".}
+
+\item{mixture}{Internal latent-progress mixture specification. The public
+interface is \code{\link[=joinme_mix]{joinme_mix()}}; ordinary \code{\link[=joinme]{joinme()}} calls leave this as
+\code{NULL}, which contributes no mixture parameters or mixture prior.}
+
+\item{include_survival}{Logical indicator that the supplied event rows
+represent an observed survival process. The fitting entry points set this
+to \code{FALSE} only when they have constructed an internal likelihood-neutral
+scaffold for a longitudinal-only analysis.}
 
 \item{seed}{Optional random seed for deterministic components of standata.}
 
@@ -197,14 +198,8 @@ This function process the input from \code{fit} to prepare standata for Joint Ne
 \details{
 This builder performs three key steps:
 \enumerate{
-\item Constructs fixed-effect and random-effect design matrices on a scaled time axis.
+\item Constructs fixed-effect and random-effect design matrices.
 \item Creates distributional regression matrices (including optional random effects).
 \item Assembles spline bases and Gauss-Kronrod nodes for survival integration.
-Only the node count is passed to Stan; nodes/weights are hardcoded in the
-Stan functions that evaluate the cumulative hazard.
 }
-
-Time is scaled internally as \code{t_scaled = t/t_max} for numerical stability; indices
-are recorded to rescale time-associated coefficients back to the original units
-inside Stan.
 }

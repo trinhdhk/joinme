@@ -14,10 +14,12 @@
 #' @param ... Unused.
 #'
 #' @return A `summary_JoiNMeFit` object. Its `tables` element includes
-#'   posterior association coefficients, transform parameters, and, when an
+#'   posterior association coefficients, a compact marker-weight table with
+#'   common locations and within-set spreads, transform parameters, and, when an
 #'   ordered piecewise-linear association is active, `piecewise_ordinates`
 #'   containing the relative log-hazard and hazard-ratio contribution at every
-#'   knot.
+#'   knot. Declared marker-weight offsets are retained in
+#'   `metadata$marker_weight_offsets` and printed above the posterior tables.
 #' @export
 summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], digits = 3,
                            include_corr = TRUE, ...) {
@@ -32,7 +34,7 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
   assertthat::assert_that(is.numeric(digits) && digits >= 0, msg = "digits must be non-negative.")
 
   cache_key <- paste0(
-    "summary_schema=2_draws=", draws,
+    "summary_draws=", draws,
     "_seed=", seed,
     "_digits=", digits,
     "_corr=", as.integer(include_corr)
@@ -50,7 +52,7 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
     extract.JoiNMeFit(object, what = "gamma_w", draws = draws, seed = seed, keep_chains = TRUE),
     error = function(e) NULL
   )
-  s_g <- .summarise_named_draws(g_ext$draws %||% NULL, digits = digits)
+  s_g <- .summarise_named_draws(g_ext$posterior_draws %||% NULL, digits = digits)
 
   s_basehaz <- NULL
   k_event <- as.integer(sd$K_event %||% 1L)
@@ -63,7 +65,11 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
       var_idx <- regmatches(as.character(s_basehaz$variable), regexec("^bs_gamma_c\\[(\\d+),(\\d+)\\]$", as.character(s_basehaz$variable)))
       k_idx <- vapply(var_idx, function(x) as.integer(x[2]), integer(1))
       j_idx <- vapply(var_idx, function(x) as.integer(x[3]), integer(1))
-      bh_terms <- as.character(sd$basehaz_cols %||% paste0("basis_", seq_len(k_bs)))
+      bh_terms <- .basehaz_term_labels(
+        basehaz = sd$basehaz %||% cfg$basehaz %||% "bs",
+        n_terms = k_bs,
+        supplied_names = sd$basehaz_cols
+      ) # also repairs bare integer spline labels retained by previously fitted objects
       if (length(bh_terms) < max(j_idx)) {
         bh_terms <- c(bh_terms, paste0("basis_", seq.int(length(bh_terms) + 1L, max(j_idx))))
       }
@@ -148,82 +154,21 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
     extract.JoiNMeFit(object, what = "assoc", draws = draws, seed = seed, keep_chains = TRUE),
     error = function(e) NULL
   )
-  s_a <- .summarise_named_draws(a_ext$draws %||% NULL, digits = digits)
+  s_a <- .summarise_named_draws(a_ext$posterior_draws %||% NULL, digits = digits)
 
-  # Marker-weight association summaries are shown only when marker-weighted
-  # association terms are active (cv_total/cv_marker/cs_total/cs_marker).
-  show_marker_weights <- isTRUE(sd$assoc_cv_total == 1) ||
-    isTRUE(sd$assoc_cv_marker == 1) ||
-    isTRUE(sd$assoc_cs_total == 1) ||
-    isTRUE(sd$assoc_cs_marker == 1)
-
-  if (sd$D > 0 && show_marker_weights) {
-    marker_terms <- sd$marker_levels %||% paste0("marker_", seq_len(sd$D))
-    shared_weights <- isTRUE(as.integer(sd$shared_marker_weights %||% 1L) == 1L)
-    weight_term_keys <- .active_weighted_assoc_terms(sd)
-    if (shared_weights && length(weight_term_keys) > 1L) {
-      weight_term_keys <- weight_term_keys[1L]
-    }
-
-    weight_tables <- lapply(weight_term_keys, function(term_key) {
-      weight_arr <- .association_marker_weight_array(object, term_key = term_key, draws = draws, seed = seed, all_vars = all_vars)
-      if (!is.null(weight_arr)) {
-        labels <- vapply(marker_terms, function(marker_label) {
-          .marker_weight_summary_label(term_key, marker_label, shared_marker_weights = shared_weights)
-        }, character(1))
-        return(.assoc_summary_from_draw_array(weight_arr, term_labels = labels, digits = digits))
-      }
-
-      base_by_term <- sd$marker_weights_by_term %||% list()
-      base_weights <- as.numeric(base_by_term[[term_key]] %||% sd$marker_weights %||% rep(1, sd$D))
-      if (length(base_weights) != sd$D) {
-        return(NULL)
-      }
-
-      data.frame(
-        term = vapply(marker_terms, function(marker_label) {
-          .marker_weight_summary_label(term_key, marker_label, shared_marker_weights = shared_weights)
-        }, character(1)),
-        Estimate = round(base_weights, digits),
-        Est.Error = NA_real_,
-        Q2.5 = NA_real_,
-        Q97.5 = NA_real_,
-        Rhat = NA_real_,
-        ess_bulk = NA_real_,
-        ess_tail = NA_real_,
-        stringsAsFactors = FALSE
-      )
-    })
-    weight_tables <- Filter(Negate(is.null), weight_tables)
-    if (length(weight_tables) > 0L) {
-      s_mw <- do.call(rbind, weight_tables)
-      if (!is.null(s_a) && "term" %in% names(s_a)) {
-        s_mw <- s_mw[
-          !as.character(s_mw$term) %in% as.character(s_a$term),
-          ,
-          drop = FALSE
-        ] # avoid re-appending marker weights already returned by extract(what = "assoc")
-      }
-      if (nrow(s_mw) == 0L) {
-        s_mw <- NULL
-      }
-      if (is.null(s_a)) {
-        s_a <- s_mw
-      } else if (!is.null(s_mw)) {
-        all_cols <- union(names(s_a), names(s_mw))
-        add_missing_cols <- function(tbl, cols) {
-          miss <- setdiff(cols, names(tbl))
-          if (length(miss) > 0L) {
-            for (nm in miss) tbl[[nm]] <- NA_real_
-          }
-          tbl[, cols, drop = FALSE]
-        }
-        s_a <- add_missing_cols(s_a, all_cols)
-        s_mw <- add_missing_cols(s_mw, all_cols)
-        s_a <- rbind(s_a, s_mw)
-      }
-    }
-  }
+  # Marker weights have their own compact model summary. Individual effective
+  # weights are deliberately excluded here: marker_weights() and coef() return
+  # the effective values, fixef() returns fitted set means, and ranef() returns
+  # marker-specific departures after removing the means and declared offsets.
+  # For each fitted shared or term-specific set, report only its common location
+  # and the posterior root-mean-square realised departure around that location.
+  s_marker_weights <- .marker_weight_set_summary(
+    object,
+    draws = draws,
+    seed = seed,
+    digits = digits,
+    all_vars = all_vars
+  )
 
   # Distributional parameter summaries (family-aware, marker-labeled)
   #
@@ -311,23 +256,23 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
       # their posterior slope names and scientific labels are assembled
       # independently. Earlier fitted objects stored one shared beta_L array;
       # that representation remains readable without changing new fits.
-      covariance_design <- .stored_vcov_design(sd) # current split design or a read-only legacy shared-design view
+      covariance_design <- .stored_vcov_design(sd) # current split design or a read-only earlier shared-design view
       k_cov_sd <- covariance_design$k_sd
       k_cov_corr <- covariance_design$k_corr
-      if (isTRUE(covariance_design$legacy) && m_cov > 0L && k_cov_sd > 0L) {
+      if (isTRUE(covariance_design$shared_format) && m_cov > 0L && k_cov_sd > 0L) {
         shared_labels <- colnames(covariance_design$x_sd) %||% paste0("k", seq_len(k_cov_sd))
-        beta_legacy_vars <- as.vector(outer(
+        beta_shared_vars <- as.vector(outer(
           seq_len(m_cov), seq_len(k_cov_sd),
           function(m, k) paste0("beta_L[", m, ",", k, "]")
         ))
-        beta_legacy_tbl <- .summarize_block_parameters(
-          beta_legacy_vars,
+        beta_shared_tbl <- .summarize_block_parameters(
+          beta_shared_vars,
           block_labels = rep(alpha_blocks, times = k_cov_sd),
           term_labels = rep(shared_labels, each = m_cov),
           row_labels = rep(rc_map[, 1], times = k_cov_sd),
           col_labels = rep(rc_map[, 2], times = k_cov_sd)
         )
-        if (!is.null(beta_legacy_tbl)) reg_rows[[length(reg_rows) + 1L]] <- beta_legacy_tbl
+        if (!is.null(beta_shared_tbl)) reg_rows[[length(reg_rows) + 1L]] <- beta_shared_tbl
       } else if (q_idm > 0L && k_cov_sd > 0L) {
         sd_labels <- colnames(covariance_design$x_sd) %||% paste0("k", seq_len(k_cov_sd))
         beta_sd_vars <- as.vector(outer(
@@ -345,7 +290,7 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
       }
 
       correlation_map <- rc_map[rc_map[, 1] != rc_map[, 2], , drop = FALSE]
-      if (!isTRUE(covariance_design$legacy) && nrow(correlation_map) > 0L && k_cov_corr > 0L) {
+      if (!isTRUE(covariance_design$shared_format) && nrow(correlation_map) > 0L && k_cov_corr > 0L) {
         corr_labels <- colnames(covariance_design$x_corr) %||% paste0("k", seq_len(k_cov_corr))
         beta_corr_vars <- as.vector(outer(
           seq_len(nrow(correlation_map)), seq_len(k_cov_corr),
@@ -576,6 +521,7 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
     s_basehaz <- NULL
     s_surv <- NULL
     s_a <- NULL
+    s_marker_weights <- NULL
     transform_params <- NULL
     piecewise_ordinates <- NULL
   }
@@ -585,6 +531,7 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
     s_basehaz,
     s_surv,
     s_a,
+    s_marker_weights,
     transform_params,
     s_d,
     s_dr,
@@ -603,6 +550,7 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
       baseline_hazard = s_basehaz,
       survival_process = s_surv,
       assoc = s_a,
+      marker_weights = s_marker_weights,
       transform_parameters = transform_params,
       piecewise_ordinates = piecewise_ordinates,
       distributional = s_d,
@@ -625,6 +573,11 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
         "joint longitudinal-survival"
       } else {
         "not fitted"
+      },
+      marker_weight_offsets = if (has_survival_process) {
+        .marker_weight_offset_metadata(sd)
+      } else {
+        NULL
       },
       transforms = if (has_survival_process) {
         cfg$transforms
@@ -654,8 +607,7 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
 #' class parameter must not disappear from the headline diagnostics merely
 #' because the ordinary joint-model summary was assembled first.
 #'
-#' @param sampler_diagnostics Named diagnostics returned by
-#'   [.joinme_sampler_diagnostics()].
+#' @param sampler_diagnostics Named diagnostics returned by .joinme_sampler_diagnostics().
 #' @param reported_tables A possibly nested list of posterior summary tables.
 #'
 #' @return A data frame in the common diagnostics schema.
@@ -846,9 +798,70 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
 
 #' @importFrom brms posterior_summary
 #' @rdname summary.JoiNMeFit
+#' @param what Posterior view to return. `"model"` gives the complete fitted
+#'   model summary. `"fixef"`, `"ranef"`, and `"coef"` provide the common
+#'   reporting layer used by the corresponding high-level methods.
+#' @param summary Logical. For a coefficient view, `TRUE` returns posterior
+#'   summaries and `FALSE` returns its structured draw-level extraction.
+#' @details
+#' For coefficient views, this is the reporting layer between [extract()] and
+#' the conventional [fixef()], [ranef()], and [coef()] methods. The high-level
+#' methods delegate here; requests with `summary = FALSE` continue to the
+#' component-aware draw representation owned by `extract()`.
 #' @export
-posterior_summary.JoiNMeFit <- function(object, ...) {
-  summary(object, ...)
+posterior_summary.JoiNMeFit <- function(
+  object,
+  what = c("model", "fixef", "ranef", "coef"),
+  draws = NULL,
+  seed = 1,
+  digits = 3,
+  summary = TRUE,
+  ...
+) {
+  what <- match.arg(what) # requested reporting layer within the fitted model
+  if (identical(what, "model")) {
+    return(summary.JoiNMeFit(
+      object,
+      draws = draws,
+      seed = seed,
+      digits = digits,
+      ...
+    ))
+  }
+
+  # Draw-level coefficient requests belong to the extraction layer. Routing
+  # them here, before any tabulation, keeps the public hierarchy strictly
+  # one-directional: coefficient method -> posterior_summary() -> extract().
+  if (!isTRUE(summary)) {
+    extraction_view <- switch(
+      what,
+      fixef = "fixed_effects",
+      ranef = "random_effects",
+      coef = "coefficients"
+    ) # component-aware selector owned by extract.JoiNMeFit()
+    return(extract(
+      object,
+      what = extraction_view,
+      draws = draws,
+      seed = seed,
+      keep_chains = FALSE
+    )$posterior_draws)
+  }
+
+  component_function <- switch(
+    what,
+    fixef = .summarise_fixed_effect_posterior,
+    ranef = .summarise_random_effect_posterior,
+    coef = .summarise_combined_coefficient_posterior
+  ) # one implementation owner for every coefficient view
+  component_function(
+    object,
+    draws = draws,
+    seed = seed,
+    digits = digits,
+    summary = summary,
+    ...
+  )
 }
 
 #' @rdname summary.JoiNMeDynPred
@@ -856,6 +869,229 @@ posterior_summary.JoiNMeFit <- function(object, ...) {
 #' @export
 posterior_summary.JoiNMeDynPred <- function(object, ...) {
   summary(object, ...)
+}
+
+#' Central posterior credible intervals for JoiNMe models
+#'
+#' @description
+#' Computes central posterior credible intervals through
+#' [rstantools::posterior_interval()]. The method uses the same scientific
+#' coefficient views as [posterior_summary()]: the complete fitted posterior,
+#' population-level coefficients, group-specific deviations, or their combined
+#' coefficients.
+#'
+#' @details
+#' For `what = "model"`, the returned matrix has one row per friendly posterior
+#' parameter name. The `variables` argument selects those names after JoiNMe has
+#' translated the Stan coordinates into their reported statistical terms.
+#'
+#' The `fixef` view is also rectangular and therefore returns an interval
+#' matrix. The `ranef` and `coef` views contain several statistically distinct
+#' coefficient tables. Their nested list structure is retained, while each
+#' draw-level `value` column is replaced by the two interval limits. This keeps
+#' subject, marker, event, distributional-family, association-term, and
+#' covariance identities explicit.
+#'
+#' Every interval is calculated by the default matrix method of
+#' [rstantools::posterior_interval()]. Consequently, `prob` is the total
+#' posterior probability contained between the two central quantiles.
+#'
+#' @param object A fitted `JoiNMeFit` object. Latent-class fits inherit this
+#'   method through `JoiNMeMixFit`.
+#' @param prob A single number strictly between zero and one giving the
+#'   posterior probability contained in the interval. The default is `0.9`,
+#'   following `rstantools`.
+#' @param what Posterior view to interval: `"model"`, `"fixef"`, `"ranef"`,
+#'   or `"coef"`.
+#' @param variables Optional character vector selecting friendly parameter
+#'   names when `what = "model"`.
+#' @param regex Logical; when `TRUE`, interpret `variables` as regular
+#'   expressions. This argument applies only to `what = "model"`.
+#' @param draws Optional number of posterior draws to retain before computing
+#'   the intervals.
+#' @param seed Integer seed used when posterior draws are subsampled.
+#' @param ... Additional arguments passed to
+#'   [rstantools::posterior_interval()].
+#'
+#' @return For `what = "model"` or `what = "fixef"`, a numeric matrix with one
+#'   row per term and two probability-labelled columns. For `what = "ranef"`
+#'   or `what = "coef"`, a nested list of data frames retaining the coefficient
+#'   identifiers and containing the same two probability-labelled columns.
+#'
+#' @importFrom rstantools posterior_interval
+#' @export
+posterior_interval.JoiNMeFit <- function(
+  object,
+  prob = 0.9,
+  what = c("model", "fixef", "ranef", "coef"),
+  variables = NULL,
+  regex = FALSE,
+  draws = NULL,
+  seed = 1,
+  ...
+) {
+  what <- match.arg(what) # scientific posterior view whose uncertainty is requested
+
+  # The complete posterior is already represented by one friendly-named draws
+  # matrix. Passing it directly to rstantools preserves its established row and
+  # probability-column convention without duplicating interval calculations.
+  if (identical(what, "model")) {
+    posterior_matrix <- posterior_draws(
+      object,
+      variables = variables,
+      regex = regex,
+      draws = draws,
+      seed = seed,
+      format = "draws_matrix"
+    ) # retained posterior draws with reported parameter names
+    return(rstantools::posterior_interval(
+      as.matrix(posterior_matrix),
+      prob = prob,
+      ...
+    ))
+  }
+
+  if (!is.null(variables)) {
+    cli::cli_abort(c(
+      x = "{.arg variables} is available only when {.code what = 'model'}.",
+      i = "The coefficient views retain several identifier columns; select the desired table from the returned structure."
+    ))
+  }
+
+  # Reuse the draw-level layer underlying posterior_summary(), fixef(), ranef(),
+  # and coef(). This ensures intervals and conventional summaries refer to
+  # precisely the same coefficients and scientific scales.
+  coefficient_draws <- posterior_summary(
+    object,
+    what = what,
+    draws = draws,
+    seed = seed,
+    summary = FALSE
+  ) # matrix for fixed effects; nested draw tables for random or combined effects
+
+  .joinme_posterior_interval_structure(
+    coefficient_draws,
+    prob = prob,
+    ...
+  )
+}
+
+#' @keywords internal
+#' @noRd
+.joinme_posterior_interval_structure <- function(object, prob, ...) {
+  # Rectangular components can be delegated immediately to the authoritative
+  # rstantools calculation. Coercion removes posterior-specific matrix classes
+  # while retaining the term names required for interval row labels.
+  if (is.matrix(object)) {
+    return(rstantools::posterior_interval(as.matrix(object), prob = prob, ...))
+  }
+
+  # Draw-level coefficient tables use one row per posterior draw and coefficient
+  # identity. All columns other than the numerical decomposition are therefore
+  # grouping variables that must remain in the interval result.
+  if (is.data.frame(object) && all(c("draw", "value") %in% names(object))) {
+    identity_columns <- setdiff(
+      names(object),
+      c("draw", "value", "fixed", "random")
+    ) # columns uniquely identifying a scientific coefficient
+
+    if (length(identity_columns) == 0L) {
+      interval <- rstantools::posterior_interval(
+        matrix(object$value, ncol = 1L, dimnames = list(NULL, "value")),
+        prob = prob,
+        ...
+      )
+      return(as.data.frame(interval, check.names = FALSE))
+    }
+
+    # Interaction creates a stable group index without converting the original
+    # identifiers themselves; their types and displayed values are copied from
+    # the first posterior row in each group below.
+    grouping_factors <- lapply(
+      object[identity_columns],
+      factor,
+      exclude = NULL
+    ) # factors retaining missing identifiers as an explicit level
+    coefficient_group <- do.call(
+      interaction,
+      c(grouping_factors, list(drop = TRUE, lex.order = TRUE))
+    ) # draw-table row membership for each distinct coefficient
+    group_rows <- split(seq_len(nrow(object)), coefficient_group)
+
+    interval_rows <- lapply(group_rows, function(row_index) {
+      coefficient_values <- as.numeric(object$value[row_index]) # posterior sample for one coefficient
+      coefficient_name <- paste(
+        vapply(object[identity_columns][row_index[1L], , drop = FALSE], as.character, character(1L)),
+        collapse = ": "
+      ) # temporary matrix label used only during the rstantools calculation
+      interval <- rstantools::posterior_interval(
+        matrix(coefficient_values, ncol = 1L, dimnames = list(NULL, coefficient_name)),
+        prob = prob,
+        ...
+      )
+      cbind(
+        object[row_index[1L], identity_columns, drop = FALSE],
+        as.data.frame(interval, check.names = FALSE),
+        row.names = NULL
+      )
+    })
+    return(do.call(rbind, interval_rows))
+  }
+
+  # Nested coefficient views are traversed without changing their names or
+  # statistical hierarchy. Null and empty components remain absent or empty,
+  # matching the corresponding posterior_summary() result.
+  if (is.list(object)) {
+    return(lapply(
+      object,
+      .joinme_posterior_interval_structure,
+      prob = prob,
+      ...
+    ))
+  }
+
+  object
+}
+
+#' Central posterior credible intervals for dynamic predictions
+#'
+#' @description
+#' Flattens the stored dynamic-prediction draws using [posterior_draws()] and
+#' computes central credible intervals with
+#' [rstantools::posterior_interval()]. Composite parameter names retain the
+#' subject, marker, prediction scale, and evaluation-time identities.
+#'
+#' @inheritParams posterior_interval.JoiNMeFit
+#' @param object A `JoiNMeDynPred` dynamic-prediction object. Latent-class
+#'   predictions inherit this method through `JoiNMeMixDynPred`.
+#'
+#' @return A numeric matrix with one row per selected prediction quantity and
+#'   two probability-labelled interval columns.
+#'
+#' @importFrom rstantools posterior_interval
+#' @export
+posterior_interval.JoiNMeDynPred <- function(
+  object,
+  prob = 0.9,
+  variables = NULL,
+  regex = FALSE,
+  draws = NULL,
+  seed = 1,
+  ...
+) {
+  posterior_matrix <- posterior_draws(
+    object,
+    variables = variables,
+    regex = regex,
+    draws = draws,
+    seed = seed,
+    format = "draws_matrix"
+  ) # flattened dynamic-prediction draws with explicit scientific identities
+  rstantools::posterior_interval(
+    as.matrix(posterior_matrix),
+    prob = prob,
+    ...
+  )
 }
 
 #' Summary of JoiNMe dynamic prediction

@@ -12,7 +12,6 @@ run_joinme_example <- function() {
   sim <- simulate_joinme(
     n_id = 50,
     families = rep("student_t", 10),
-    n_obs_per_marker_per_id = 10,
     times_obs = seq(0, 8, length.out = 16),
     seed = 42
   )
@@ -41,7 +40,11 @@ run_joinme_example <- function() {
       corr = "identity"
     ),
     formulaDist = list(sigma = sigma ~ 1 + time),
-    priors = joinme_priors(beta = list(scale = 2.5), alpha = list(scale = 1.0), lkj = 2),
+    priors = joinme_priors(
+      intercept = prior_student_t(df = 6, scale = 2.5),
+      slope = prior_student_t(df = 6, scale = 1),
+      lkj = 2
+    ),
     control = list(
       parallel_chains = 2,
       iter_warmup = 200,

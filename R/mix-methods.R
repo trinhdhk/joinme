@@ -29,9 +29,7 @@ posterior_class.JoiNMeMixFit <- function(
   digits = 3,
   summary = TRUE
 ) {
-  if (!inherits(object, "JoiNMeMixFit")) {
-    cli::cli_abort("{.arg object} must be a JoiNMeMixFit object.")
-  }
+  .stop_experimental("posterior_class()")
   mixture <- object$mixture %||% object$config$mixture %||% list()
   number_classes <- as.integer(mixture$n_classes %||% 0L)
   if (number_classes < 2L) {
@@ -48,7 +46,7 @@ posterior_class.JoiNMeMixFit <- function(
   allocation_domains <- mixture$allocation_domains %||% list()
   output <- list()
   if (length(allocation_domains$subject %||% character(0)) > 0L) {
-    output$subject <- .mixture_membership_domain(
+    output$subject <- .mixture_membership_(
       object = object,
       domain = "subject",
       number_units = as.integer(object$stan_data$n_id),
@@ -61,7 +59,7 @@ posterior_class.JoiNMeMixFit <- function(
     )
   }
   if (length(allocation_domains$marker %||% character(0)) > 0L) {
-    output$marker <- .mixture_membership_domain(
+    output$marker <- .mixture_membership_(
       object = object,
       domain = "marker",
       number_units = as.integer(object$stan_data$D),
@@ -126,6 +124,7 @@ posterior_class.JoiNMeMixDynPred <- function(
   digits = 3,
   summary = TRUE
 ) {
+  .stop_experimental("posterior_class()")
   conditional_draws <- object$draws$posterior_class %||% list()
   if (length(conditional_draws) == 0L) {
     cli::cli_abort(c(
@@ -370,7 +369,7 @@ posterior_class.JoiNMeMixDynPred <- function(
 #'
 #' @keywords internal
 #' @noRd
-.mixture_membership_domain <- function(
+.mixture_membership_ <- function(
   object,
   domain,
   number_units,
@@ -416,6 +415,10 @@ posterior_class.JoiNMeMixDynPred <- function(
     term_labels = variables,
     digits = digits
   ) # one diagnostic-aware summary row for every unit-by-class probability
+  probability_summary <- .mixture_summary_columns(
+    probability_summary,
+    identifier_columns = "term"
+  ) # retain the compact reporting schema and drop alias columns (Mean, Median, SD)
 
   rows <- vector("list", number_units * number_classes)
   row_position <- 1L
@@ -674,7 +677,7 @@ summary.JoiNMeMixFit <- function(
   ...
 ) {
   cache_key <- paste0(
-    "mixture_summary_schema=4_draws=",
+    "mixture_summary_draws=",
     draws,
     "_seed=",
     seed,
@@ -931,9 +934,6 @@ summary.JoiNMeMixFit <- function(
         Est.Error = unname(count_summary[["Est.Error"]]),
         Q2.5 = unname(count_summary[["Q2.5"]]),
         Q97.5 = unname(count_summary[["Q97.5"]]),
-        Rhat = NA_real_,
-        ess_bulk = NA_real_,
-        ess_tail = NA_real_,
         assigned_units = length(assigned_units),
         stringsAsFactors = FALSE
       )
@@ -959,13 +959,58 @@ summary.JoiNMeMixFit <- function(
   seed,
   digits
 ) {
+  mixture <- object$mixture %||% object$config$mixture
   design_record <- (
-    object$mixture %||% object$config$mixture
-  )$class_design[[domain]] # fitted class-design record for this allocation domain
-  covariate_labels <- design_record$columns %||% character(0)
-  number_covariates <- length(
-    covariate_labels
-  ) # compact class-regression coefficients in this domain
+    mixture$class_design %||% list()
+  )[[domain]] %||% list() # fitted class-design record for this allocation domain
+
+  # The fitted Stan dimension is the authoritative coefficient count.  Older
+  # serialized objects can carry placeholder column labels such as "class_:"
+  # even when no class-regression coefficient was estimated.
+  fitted_coefficient_count <- as.integer(
+    object$stan_data[[paste0("P_class_", domain)]] %||% 0L
+  )
+  if (
+    length(fitted_coefficient_count) != 1L ||
+      !is.finite(fitted_coefficient_count) ||
+      fitted_coefficient_count < 1L
+  ) {
+    return(NULL)
+  }
+
+  available_variables <- tryCatch(
+    posterior::variables(.get_draws_obj(object$fit)),
+    error = function(error) character(0)
+  ) # saved posterior variable names for this fitted object
+  coefficient_pattern <- paste0(
+    "^mix_class_coefficient_",
+    domain,
+    "\\[(\\d+)\\]$"
+  )
+  coefficient_variables <- grep(
+    coefficient_pattern,
+    available_variables,
+    value = TRUE
+  )
+  if (length(coefficient_variables) < 1L) {
+    # Zero-dimensional vectors are omitted from Stan output. Returning NULL
+    # keeps summaries aligned with the fitted posterior rather than metadata
+    # placeholders.
+    return(NULL)
+  }
+  coefficient_index <- suppressWarnings(as.integer(sub(
+    coefficient_pattern,
+    "\\1",
+    coefficient_variables
+  )))
+  coefficient_index <- coefficient_index[is.finite(coefficient_index)]
+  if (length(coefficient_index) < 1L) {
+    return(NULL)
+  }
+  number_covariates <- min(
+    fitted_coefficient_count,
+    max(coefficient_index)
+  ) # common coefficient count represented in both standata and draws
   if (number_covariates < 1L) {
     return(NULL)
   }
@@ -983,10 +1028,30 @@ summary.JoiNMeMixFit <- function(
     draws = draws,
     seed = seed
   ) # posterior draws of the requested domain coefficients
-  coefficient_labels <- design_record$coefficient_covariate %||%
-    covariate_labels # original design-column label for each coefficient
-  coefficient_class <- design_record$coefficient_class %||%
-    rep.int(1L, number_covariates) # class receiving each coefficient
+
+  coefficient_labels <- as.character(
+    design_record$coefficient_covariate %||% character(0)
+  )
+  coefficient_class <- as.integer(
+    design_record$coefficient_class %||% integer(0)
+  )
+
+  # Use fitted class-design labels when they are complete; otherwise retain a
+  # neutral statistical label based on coefficient position.
+  if (length(coefficient_labels) < number_covariates) {
+    coefficient_labels <- paste0(
+      "class_formula_covariate_",
+      seq_len(number_covariates)
+    )
+  } else {
+    coefficient_labels <- coefficient_labels[seq_len(number_covariates)]
+  }
+  if (length(coefficient_class) < number_covariates) {
+    coefficient_class <- rep.int(1L, number_covariates)
+  } else {
+    coefficient_class <- coefficient_class[seq_len(number_covariates)]
+  }
+
   output <- .assoc_summary_from_draw_array(
     coefficient_draws,
     term_labels = coefficient_labels,
@@ -1010,7 +1075,7 @@ summary.JoiNMeMixFit <- function(
 #' mean, median and standard-deviation aliases are intentionally excluded.
 #'
 #' @param table Posterior summary table returned by
-#'   [.assoc_summary_from_draw_array()].
+#'   .assoc_summary_from_draw_array().
 #' @param identifier_columns Columns identifying the scientific estimand.
 #'
 #' @return The mixture-specific reporting columns in a stable order.
@@ -1129,14 +1194,14 @@ summary.JoiNMeMixFit <- function(
     q_dimension > 1L &&
       as.integer(stan_data$indep_idmarker_cov %||% 0L) == 0L
   ) as.integer(q_dimension * (q_dimension - 1L) / 2L) else 0L
-  covariance_design <- .stored_vcov_design(stan_data) # split design or legacy common-design view
+  covariance_design <- .stored_vcov_design(stan_data) # split design or earlier common-design view
   k_sd <- covariance_design$k_sd # formulaVCov$sd slope count
   k_corr <- covariance_design$k_corr # formulaVCov$corr slope count
-  if (isTRUE(covariance_design$legacy) && q_dimension > 0L && k_sd > 0L) {
+  if (isTRUE(covariance_design$shared_format) && q_dimension > 0L && k_sd > 0L) {
     packed_dimension <- if (
       as.integer(stan_data$indep_idmarker_cov %||% 0L) == 1L
     ) q_dimension else as.integer(q_dimension * (q_dimension + 1L) / 2L) # former beta_L row count
-    legacy_beta <- .mixture_matrix_draws(
+    shared_beta <- .mixture_matrix_draws(
       object, "beta_L", packed_dimension, k_sd, draws, seed
     ) # posterior slopes stored by fits predating the split covariance formula
     diagonal_positions <- integer(q_dimension) # packed beta_L rows supplying SD predictors
@@ -1155,9 +1220,9 @@ summary.JoiNMeMixFit <- function(
         packed_position <- packed_position + 1L
       }
     }
-    beta_sd <- legacy_beta[, diagonal_positions, , drop = FALSE]
+    beta_sd <- shared_beta[, diagonal_positions, , drop = FALSE]
     beta_corr <- if (correlation_dimension > 0L) {
-      legacy_beta[, correlation_positions, , drop = FALSE]
+      shared_beta[, correlation_positions, , drop = FALSE]
     } else array(0, dim = c(draws, 0L, k_corr))
   } else {
     beta_sd <- if (q_dimension > 0L && k_sd > 0L) {
@@ -1347,7 +1412,9 @@ print.summary_JoiNMeMixFit <- function(x, ...) {
 #' fitted component probability, location and scale into the priors for newly
 #' sampled latent effects.  The new subject's history therefore informs a
 #' posterior probability vector over the fitted classes.  Combined compatible
-#' blocks retain one shared allocation.
+#' blocks retain one shared allocation. With `reuse_fitted_re = TRUE`, the
+#' fitted subject's realised effects and fitted allocation probabilities are
+#' retained draw by draw instead of evaluating a new-subject allocation.
 #'
 #' @inheritParams predict.JoiNMeFit
 #' @return A `JoiNMeMixDynPred` object inheriting from `JoiNMeDynPred`.
@@ -1360,6 +1427,7 @@ predict.JoiNMeMixFit <- function(
   newdataLong,
   newdataEvent = NULL,
   process = c("longitudinal", "event"),
+  reuse_fitted_re = FALSE,
   ...
 ) {
   mixture <- object$mixture %||% object$config$mixture
@@ -1376,8 +1444,8 @@ predict.JoiNMeMixFit <- function(
     if (is.null(newdataEvent)) {
       newdataEvent <- .longitudinal_only_event_scaffold(
         data_long = newdataLong,
-        id_variable = .JoiNMefit_call_arg_chr(object$call, "id_var", "id"),
-        time_variable = .JoiNMefit_call_arg_chr(
+        id_variable = .get_call_args(object$call, "id_var", "id"),
+        time_variable = .get_call_args(
           object$call,
           "time_var",
           "time"
@@ -1395,6 +1463,7 @@ predict.JoiNMeMixFit <- function(
     newdataLong = newdataLong,
     newdataEvent = newdataEvent,
     process = process,
+    reuse_fitted_re = reuse_fitted_re,
     ...
   )
   prediction$metadata$mixture <- mixture
@@ -1875,13 +1944,13 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
     cli::cli_abort("No fitted marker remains after applying {.arg marker}.")
   }
 
-  id_variable <- .JoiNMefit_call_arg_chr(object$call, "id_var", "id")
-  time_variable <- .JoiNMefit_call_arg_chr(
+  id_variable <- .get_call_args(object$call, "id_var", "id")
+  time_variable <- .get_call_args(
     object$call,
     "time_var",
     "time"
   )
-  marker_variable <- .JoiNMefit_call_arg_chr(
+  marker_variable <- .get_call_args(
     object$call,
     "marker_var",
     "marker"
@@ -1942,17 +2011,13 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
   )
   rownames(evaluation_data) <- NULL
 
-  design <- .JoiNMefit_longitudinal_design_matrices(
+  design <- ..longitudinal_design_matrices(
     fitted_model = object,
     longitudinal_evaluation_data = evaluation_data,
     time_variable = time_variable,
     marker_variable = marker_variable
   )
-  beta_variables <- paste0(
-    "beta_scaled[",
-    seq_len(as.integer(stan_data$P)),
-    "]"
-  )
+  beta_variables <- paste0("beta[", seq_len(as.integer(stan_data$P)), "]")
   beta_draws <- .get_draws_matrix(
     object$fit,
     variables = beta_variables,
@@ -2065,21 +2130,6 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
       )
     )
   }
-  covariance_row_scale <- rep(1, q_dimension)
-  time_indices_covariance <- as.integer(
-    stan_data$idx_time_idm %||%
-      stan_data$idx_time_widm %||%
-      integer(0)
-  )
-  time_indices_covariance <- time_indices_covariance[
-    time_indices_covariance >= 1L &
-      time_indices_covariance <= q_dimension
-  ]
-  if (length(time_indices_covariance) > 0L) {
-    covariance_row_scale[time_indices_covariance] <-
-      as.numeric(stan_data$tmax %||% 1)
-  }
-
   class_scale <- NULL
   class_location <- NULL
   marginal_subject_samples <- NULL
@@ -2288,7 +2338,6 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
           as.numeric(covariance_loading[draw, ]) *
             covariance_latent[draw, group, ]
         covariance_cholesky <-
-          diag(covariance_row_scale) %*%
             .mixture_cholesky_from_predictor(
               predictor = covariance_predictor,
               q_dimension = q_dimension,
@@ -2771,7 +2820,7 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
   )
   markers <- as.character(
     trajectory$evaluation_data[[
-      .JoiNMefit_call_arg_chr(object$call, "marker_var", "marker")
+      .get_call_args(object$call, "marker_var", "marker")
     ]]
   )
   marker_levels <- unique(markers)
@@ -3253,21 +3302,6 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
   } else {
     seq(0, 1, length.out = 60L)
   }
-  row_scale <- rep(1, q_dimension)
-  time_indices <- as.integer(
-    stan_data$idx_time_idm %||%
-      stan_data$idx_time_widm %||%
-      integer(0)
-  )
-  time_indices <- time_indices[
-    time_indices >= 1L &
-      time_indices <= q_dimension
-  ]
-  if (length(time_indices) > 0L) {
-    row_scale[time_indices] <- as.numeric(
-      stan_data$tmax %||% 1
-    )
-  }
   matrix_labels <- as.character(
     stan_data$zidm_cols %||%
       paste0("effect_", seq_len(q_dimension))
@@ -3319,7 +3353,7 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
           ) == 1L,
           diagonal_link = as.integer(stan_data$vcov_diag_link %||% 0L)
         )
-        covariance <- tcrossprod(diag(row_scale) %*% cholesky)
+        covariance <- tcrossprod(cholesky)
         standard_deviation <- sqrt(diag(covariance))
         correlation <- covariance /
           outer(standard_deviation, standard_deviation)
@@ -3437,7 +3471,8 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
 #' Reconstruct a covariance Cholesky factor from one regression predictor
 #'
 #' @description
-#' This mirrors `fit_scaling_and_effects.stan`: diagonal predictors determine
+#' This mirrors `include/submodels/longitudinal/transformed_parameters/fit.stan`:
+#' diagonal predictors determine
 #' row standard deviations, whilst off-diagonal predictors are sequential
 #' partial correlations.  Keeping the factor available is necessary because
 #' `corr` and `vcov` associations use Cholesky-correlation and effective-scale
@@ -3472,19 +3507,12 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
       } else {
         softplus(predictor[diagonal_position])
       }
-      scale_product <- 1
+      cholesky[row, row] <- standard_deviation[row]
       for (column in seq_len(row)) {
         if (column < row) {
           partial_correlation <- tanh(predictor[position])
           cholesky[row, column] <-
-            standard_deviation[row] *
-              scale_product *
-              partial_correlation
-          scale_product <- scale_product *
-            sqrt(max(1e-12, 1 - partial_correlation^2))
-        } else {
-          cholesky[row, row] <-
-            standard_deviation[row] * scale_product
+            standard_deviation[row] * partial_correlation
         }
         position <- position + 1L
       }
@@ -3608,22 +3636,6 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
     seq(0, 1, length.out = points)
   }
 
-  # Current-slope coordinates are placed back on the original time scale
-  # before the `vcov` feature is extracted, just as in the fitted likelihood.
-  row_scale <- rep(1, q_dimension)
-  time_indices <- as.integer(
-    stan_data$idx_time_idm %||%
-      stan_data$idx_time_widm %||%
-      integer(0)
-  )
-  time_indices <- time_indices[
-    time_indices >= 1L &
-      time_indices <= q_dimension
-  ]
-  if (length(time_indices) > 0L) {
-    row_scale[time_indices] <- as.numeric(stan_data$tmax %||% 1)
-  }
-
   association_data <- .get_association_plot_data(
     object,
     seed = seed
@@ -3680,9 +3692,8 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
         feature_vector <- if (identical(term_key, "corr")) {
           .assoc_corr_features_from_chol(cholesky)
         } else {
-          effective_cholesky <- diag(row_scale) %*% cholesky
           .assoc_vcov_features_from_chol(
-            effective_cholesky,
+            cholesky,
             diagonal_only = diagonal_only
           )
         }

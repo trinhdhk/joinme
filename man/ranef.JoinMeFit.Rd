@@ -2,8 +2,18 @@
 % Please edit documentation in R/posterior.R
 \name{ranef.JoiNMeFit}
 \alias{ranef.JoiNMeFit}
+\alias{.summarise_random_effect_posterior}
 \title{Extract random effects}
 \usage{
+.summarise_random_effect_posterior(
+  object,
+  draws = NULL,
+  seed = 1,
+  digits = 3,
+  summary = TRUE,
+  ...
+)
+
 \method{ranef}{JoiNMeFit}(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...)
 }
 \arguments{
@@ -21,12 +31,17 @@ return the posterior extraction on the coefficient scale.}
 \item{...}{Unused.}
 }
 \value{
-A nested list with top-level entries \code{formulaLong} and \code{formulaDist}.
+A nested list with top-level entries \code{formulaLong}, \code{assoc}, and
+\code{formulaDist}.
 \code{formulaLong} contains random-effect summaries for longitudinal model
-components (\code{id}, \code{marker}, \code{marker_by_id_latent}, when present).
+components (\code{id}, \code{marker}, \code{marker_by_id_latent}, when present). \code{assoc}
+contains only marker-specific weight departures,
+calculated as effective weight minus fitted mean minus declared offset;
+\code{assoc_term} distinguishes term-specific weight sets.
 \code{formulaDist} contains distributional random-effect summaries organised by
 parameter and family scope (e.g., \code{sigma$student_t}, \code{nu$allFamilies}).
 }
 \description{
 Extract random effects
 }
+\keyword{internal}

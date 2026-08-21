@@ -119,22 +119,24 @@ diagnosis <- function(object, ...) {
 			}
 			id_cols <- setdiff(names(x), drop_cols)
 			out <- x[, c(id_cols, intersect(metric_cols, names(x))), drop = FALSE]
-			out$section <- if (length(path) >= 1L) path[[1L]] else NA_character_
-			out$subsection <- if (length(path) > 1L) {
-				paste(path[-1L], collapse = " / ")
-			} else {
-				NA_character_
-			}
-			out$parameter_label <- .diagnosis_parameter_label(out)
+			out$family <- if (length(path) >= 1L) path[[1L]] else NA_character_
+			# out$subsection <- if (length(path) > 1L) {
+			# 	paste(path[-1L], collapse = " / ")
+			# } else {
+			# 	NA_character_
+			# }
+			out$parameter <- .diagnosis_parameter_label(out)
 			keep_id_cols <- setdiff(
 				id_cols,
-				c("section", "subsection", "parameter_label")
+				c("family", 
+				# "subsection", 
+				"parameter")
 			)
 			out <- out[,
 				c(
-					"section",
-					"subsection",
-					"parameter_label",
+					"family",
+					# "subsection",
+					"parameter",
 					keep_id_cols,
 					intersect(metric_cols, names(out))
 				),
@@ -191,7 +193,7 @@ diagnosis.JoiNMeFit <- function(
 ) {
 	
 	cache_key <- paste0(
-		"diagnosis_schema=2_",
+		"diagnosis_",
 		draws %||% "default",
 		"_seed=",
 		seed,
@@ -395,7 +397,7 @@ diagnosis.JoiNMeFit <- function(
 				feature = feature_name,
 				chain = chain_index,
 				correlation_with_energy = correlation,
-				absolute_correlation = abs(correlation),
+				# absolute_correlation = abs(correlation),
 				stringsAsFactors = FALSE
 			) # one interpretable energy association for this feature and chain
 			row_position <- row_position + 1L
@@ -405,7 +407,8 @@ diagnosis.JoiNMeFit <- function(
 		rbind,
 		rows
 	) # complete long-form energy association table
-	output[order(-output$absolute_correlation), , drop = FALSE]
+	# output[order(-output$correlation_with_energy), , drop = FALSE]
+	dplyr::arrange(output, feature, chain)
 }
 
 #' Diagnose the likelihood scale trade-off in a mixture block
@@ -536,14 +539,14 @@ diagnosis.JoiNMeFit <- function(
 				ordinary_scale = block$ordinary_prefix,
 				likelihood_combination = block$likelihood_combination,
 				correlation = correlation,
-				absolute_correlation = abs(correlation),
-				interpretation = if (
-					is.finite(correlation) && correlation <= -0.3
-				) {
-					"material compensating scale movement"
-				} else {
-					"no strong negative linear trade-off detected"
-				},
+				# absolute_correlation = abs(correlation),
+				# interpretation = if (
+				# 	is.finite(correlation) && correlation <= -0.3
+				# ) {
+				# 	"material compensating scale movement"
+				# } else {
+				# 	"no strong negative linear trade-off detected"
+				# },
 				stringsAsFactors = FALSE
 			) # transparent class-block scale assessment for one chain
 			row_position <- row_position + 1L
@@ -562,7 +565,7 @@ diagnosis.JoiNMeFit <- function(
 #' behaviour, exploratory associations between energy and model blocks, and a
 #' direct assessment of the ordinary-scale/component-scale trade-off.
 #'
-#' @inheritParams diagnosis.JoiNMeFit
+#' @inheritParams diagnosis
 #'
 #' @return A `JoiNMeMix_diagnosis` object inheriting from
 #'   `JoiNMe_diagnosis`.
@@ -576,7 +579,7 @@ diagnosis.JoiNMeMixFit <- function(
 	...
 ) {
 	cache_key <- paste0(
-		"mixture_diagnosis_schema=3_",
+		"mixture_diagnosis_",
 		draws %||% "default",
 		"_seed=",
 		seed,
@@ -718,9 +721,9 @@ print.JoiNMe_diagnosis <- function(x, max_rows = 20, ...) {
 			x$energy_association,
 			max_rows
 		) # strongest absolute within-chain energy associations for concise printing
-		.cli_print_bullets(
-			"These correlations are exploratory indicators of posterior geometry, not causal tests or model-selection statistics."
-		)
+		# .cli_print_bullets(
+		# 	"These correlations are exploratory indicators of posterior geometry, not causal tests or model-selection statistics."
+		# )
 		.cli_print_table_section(
 			"Posterior features associated with energy",
 			energy_table,
@@ -743,7 +746,7 @@ print.JoiNMe_diagnosis <- function(x, max_rows = 20, ...) {
 #'
 #' @details The stored pointwise likelihood is evaluated by Stan with the full
 #'   fitted association contribution. This includes the posterior ordinates of
-#'   every ordered piecewise-linear transform; legacy `y` values are not used.
+#'   every ordered piecewise-linear transform; earlier `y` values are not used.
 #'
 #' @return A matrix
 #' @seealso [log_lik()]
@@ -2694,13 +2697,13 @@ stan_rhat.JoiNMeFit <- function(
 	...
 ) {
 	
-	draws_obj <- draws(object, format = "draws_array")
+	draws_obj <- posterior_draws(object, format = "draws_array")
 	vars <- posterior::variables(draws_obj)
 	vars <- .filter_diag_vars(vars, pars, regex_pars)
 	if (length(vars) == 0) {
 		return(data.frame(variable = character(0), rhat = numeric(0)))
 	}
-	draws_obj <- draws(
+	draws_obj <- posterior_draws(
 		object,
 		variables = vars,
 		draws = draws,
@@ -2723,13 +2726,13 @@ stan_ess.JoiNMeFit <- function(
 ) {
 	
 	type <- match.arg(type)
-	draws_obj <- draws(object, format = "draws_array")
+	draws_obj <- posterior_draws(object, format = "draws_array")
 	vars <- posterior::variables(draws_obj)
 	vars <- .filter_diag_vars(vars, pars, regex_pars)
 	if (length(vars) == 0) {
 		return(data.frame(variable = character(0), ess = numeric(0)))
 	}
-	draws_obj <- draws(
+	draws_obj <- posterior_draws(
 		object,
 		variables = vars,
 		draws = draws,
@@ -2755,13 +2758,13 @@ stan_mcse.JoiNMeFit <- function(
 ) {
 	
 	type <- match.arg(type)
-	draws_obj <- draws(object, format = "draws_array")
+	draws_obj <- posterior_draws(object, format = "draws_array")
 	vars <- posterior::variables(draws_obj)
 	vars <- .filter_diag_vars(vars, pars, regex_pars)
 	if (length(vars) == 0) {
 		return(data.frame(variable = character(0), mcse = numeric(0)))
 	}
-	draws_obj <- draws(
+	draws_obj <- posterior_draws(
 		object,
 		variables = vars,
 		draws = draws,

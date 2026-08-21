@@ -115,7 +115,8 @@ prior_normal <- function(mu = 0, scale = 1) {
 #'
 #' @inheritParams prior_normal
 #' @param df Positive fixed degrees of freedom. A single value is shared by the
-#'   complete parameter block.
+#'   complete parameter block. Marker-weight departures instead use the bare
+#'   family name `"student_t"`, whose degrees of freedom are fitted.
 #'
 #' @return A `joinme_prior_spec` object for use inside [jm_prior()].
 #' @export
@@ -268,46 +269,91 @@ make_prior_dist <- function(
   )
 }
 
-#' Declare priors with validation
+#' Declare priors by scientific model component
 #'
 #' @description
-#' `joinme_priors()` is a user-facing wrapper for prior declarations passed to
-#' `joinme()`. It validates the exposed prior components and returns a
-#' structured object that can be supplied directly as the `priors` argument.
+#' `jm_prior()` names priors by the part of the statistical model they govern,
+#' rather than by internal coefficient letters. `intercept` and `slope` are
+#' global fallbacks. A component-specific declaration replaces only the named
+#' role, leaving the other role to inherit its global fallback.
 #'
-#' Exposed components are:
-#' - `beta`: longitudinal fixed-effect coefficients;
-#' - `alpha`: coefficients multiplying transformed association summaries;
-#' - `iota`: fitted affine shifts for functional association transforms;
-#' - `marker`: standardised marker-level random effects;
-#' - `marker_weight`: estimated marker-weight perturbations;
-#' - `vcov_sd`: intercepts and slopes of the standard-deviation regression;
-#' - `vcov_corr`: intercepts and slopes of the off-diagonal correlation regression;
-#' - `lkj`: random-effect correlation matrices;
-#' - `class_probability`: Dirichlet concentration for baseline class probabilities
-#' - `class_regression`: class-membership regression coefficients.
+#' Components with ordinary regression roles are `longitudinal`, `vcov`, and
+#' `functional`. `survival` and `assoc` are slope-only because the baseline
+#' hazard supplies the event-process intercept. `marker_weights` is special:
+#' its `offset` gives the known marker-specific contribution, `shared` selects
+#' one common set or term-specific sets, `intercept` governs each fitted common
+#' weight location, and `family` selects only the centred, unit-scale
+#' distribution of marker-specific departures.
+#' Names appearing on the left-hand side of `formulaDist` (`sigma`, `nu`,
+#' `phi`, `alpha`, `kappa`, and `tau`) may be supplied through `...`, each with
+#' its own intercept and slope priors. Bracket selectors refine a declaration
+#' to a family-scoped coefficient block, for example
+#' `` `sigma[family='student']` = list(slope = prior_normal()) ``. A marker
+#' selector such as `` `sigma[marker='y']` `` is accepted when that marker
+#' uniquely identifies one family-scoped coefficient block. If several markers
+#' share the block, use its family selector because the fitted coefficient is
+#' shared and cannot receive different marker-specific priors.
 #'
-#' @param beta,alpha,iota,vcov_sd,vcov_corr Prior declarations made with [prior_normal()],
-#'   [prior_student_t()], [prior_laplace()] or [prior_horseshoe()]. Numeric
-#'   values remain supported as deprecated shorthand for Student-t(6) scales.
-#'   `vcov_sd` is packed as all standard-deviation intercepts followed by their
-#'   row-major slope matrix. `vcov_corr` uses the same order for off-diagonal
-#'   partial-correlation coordinates `(2,1), (3,1), (3,2), ...`.
-#' @param marker Prior family for standardised marker-level random effects.
-#'   Its location and scale are fixed at zero and one. Consequently a supplied
-#'   Normal, Student-t or Laplace declaration must retain `mu = 0` and
-#'   `scale = 1`; horseshoe hyper-scales must retain their unit defaults.
-#' @param marker_weight Prior family for estimated marker-weight perturbations.
-#'   The location and scale are likewise fixed at zero and one.
-#' @param lkj An object from [prior_lkj()] or a positive numeric concentration
-#'   retained for compatibility.
-#' @param class_probability Positive Dirichlet concentration for the baseline
-#'   class probabilities. A scalar is repeated over classes; a vector may give
-#'   one concentration per class.
-#' @param class_regression Prior declaration for coefficients from
-#'   `formulaClass`, made with the same constructors accepted by `beta`,
-#'   `alpha`, and `iota`. A positive numeric value remains accepted as shorthand
-#'   for `prior_normal(scale = value)`.
+#' @param intercept,slope Global coefficient priors. These arguments must be
+#'   created with a `prior_*()` function. Fixed numerical coefficients belong
+#'   to [jm_truth()] and are rejected here because a constant is not a prior
+#'   distribution.
+#' @param longitudinal A bare prior declaration in complete longitudinal
+#'   model-matrix order, or a named list containing `intercept` and/or `slope`
+#'   declarations in their separate role-wise orders.
+#' @param survival Slope prior for event-model covariates. It may be supplied
+#'   directly or as `list(slope = ...)`.
+#' @param baseline Intercept and slope priors for a formula-based baseline
+#'   hazard.
+#' @param vcov A shared covariance-regression declaration, an
+#'   intercept/slope/latent list, or a list with `sd` and `corr` components.
+#'   The last form permits distinct population declarations for marginal
+#'   scales and off-diagonal partial correlations. `intercept` and `slope`
+#'   govern their regression coefficients; `latent` governs the loading of
+#'   unexplained subject variation in the corresponding linear predictor.
+#' @param marker_weights A list with `offset`, `intercept`, `family`, and
+#'   `shared`. The logical `shared` value determines whether active weighted
+#'   association terms use one common marker-weight set (`TRUE`, the default)
+#'   or distinct sets (`FALSE`).
+#'   `offset` is the known contribution to each marker weight. It accepts one
+#'   numeric vector whose entries are either all named by marker or all
+#'   unnamed, or a named collection of such vectors for unshared association
+#'   terms. Partly named vectors are rejected because their marker alignment is
+#'   not statistically defined. `intercept` is the ordinary coefficient prior
+#'   for each fitted common marker-weight location and may therefore declare
+#'   its own location and scale; when omitted, it inherits the global
+#'   `intercept` declaration. It must be created with a `prior_*()` function.
+#'   `family`
+#'   governs only the centred unit-scale
+#'   departure law for marker-specific deviations.
+#'   Accepted stochastic values are `"student_t"`, `"normal"`, `"laplace"`, and
+#'   `"horseshoe"`. Values `"constant"` and `"none"` are synonymous: the
+#'   offset is then used exactly, with no fitted location or departure. The
+#'   family name `"student_t"` fits one degrees-of-freedom
+#'   value above two per active weight set under a shifted `Gamma(2, 0.1)`
+#'   prior. `prior_*()` objects are not accepted for `family` because
+#'   marker-weight departures retain location zero and ordinary scale one.
+#'   `marker_weights` itself must be a named list; bare
+#'   prior declarations are rejected to avoid confusing the common-location
+#'   prior with the departure family. Fixed common locations belong to
+#'   [jm_truth()].
+#' @param assoc Slope prior for longitudinal--event association coefficients.
+#' @param functional Intercept and slope priors for fitted affine shifts inside
+#'   functional association transformations.
+#' @param marker A family-only prior declaration for standardised marker-level
+#'   random effects. Location zero and scale one are enforced.
+#' @param ... Named distributional-parameter prior components, such as
+#'   `sigma = list(intercept = ..., slope = ...)`,
+#'   `` `sigma[family='student']` = list(slope = ...) ``, or
+#'   `` `sigma[marker='y']` = list(intercept = ...) ``.
+#' @param lkj An object from [prior_lkj()] or a positive numeric concentration.
+#' @param class A named list with `baseline_prob`, the positive Dirichlet
+#'   concentration for baseline class probabilities, and `slope`, the prior
+#'   declaration for coefficients from `formulaClass`. A scalar
+#'   `baseline_prob` is repeated over classes; a vector may provide one
+#'   concentration per class. The slope remains one prior block because
+#'   class-specific formula lists share a reference-class parameterisation.
+#'   When omitted, `class$slope` inherits the global `slope` declaration.
 #' @param .validate Logical; if `TRUE` (default), validate the resulting prior
 #'   declarations immediately.
 #'
@@ -317,46 +363,72 @@ make_prior_dist <- function(
 #'
 #' @examples
 #' pri <- jm_prior(
-#'   beta = prior_normal(mu = c(0, 1), scale = c(1, 0.5)),
-#'   alpha = prior_student_t(df = 4, scale = 1),
-#'   iota = prior_laplace(scale = 0.75),
-#'   marker = prior_normal(),
-#'   marker_weight = prior_student_t(df = 6),
-#'   vcov_sd = prior_normal(scale = 1),
-#'   vcov_corr = prior_student_t(df = 4, scale = 0.75),
+#'   intercept = prior_student_t(df = 6, scale = 2),
+#'   slope = prior_normal(scale = 1),
+#'   longitudinal = list(slope = prior_normal(scale = 0.5)),
+#'   marker_weights = list(
+#'     offset = c(marker_a = 0, marker_b = 0.25),
+#'     intercept = prior_normal(scale = 0.75),
+#'     family = "student_t",
+#'     shared = TRUE
+#'   ),
+#'   assoc = prior_student_t(df = 4, scale = 1),
+#'   sigma = list(intercept = prior_normal(), slope = prior_normal(scale = 0.5)),
+#'   `sigma[family='student']` = list(slope = prior_student_t(df = 4)),
 #'   lkj = prior_lkj(2),
-#'   class_probability = c(2, 2, 2),
-#'   class_regression = prior_normal(scale = 1)
+#'   class = list(
+#'     baseline_prob = c(2, 2, 2),
+#'     slope = prior_normal(scale = 1)
+#'   )
 #' )
 #' print(pri)
 joinme_priors <- function(
-  beta = NULL, # prior scale for fixed-effect coefficients
-  alpha = NULL, # prior scale for association coefficients
-  iota = NULL, # prior scale for fitted transformation shifts
+  ...,
+  intercept = NULL, # global prior inherited by intercept coefficients
+  slope = NULL, # global prior inherited by non-intercept regression coefficients
+  longitudinal = NULL, # longitudinal population intercept and slope priors
+  survival = NULL, # event-covariate slope prior; the baseline hazard is separate
+  baseline = NULL, # formula-based baseline-hazard coefficient priors
+  vcov = NULL, # SD and correlation regression intercept and slope priors
+  marker_weights = NULL, # marker-weight offset, common-location intercept prior, departure family, and sharing rule
+  assoc = NULL, # longitudinal-event association slope prior
+  functional = NULL, # affine transformation intercept and slope priors
   marker = NULL, # unit-scale family for standardised marker random effects
-  marker_weight = NULL, # unit-scale family for marker-weight perturbations
-  vcov_sd = NULL, # prior for standard-deviation covariance-regression coefficients
-  vcov_corr = NULL, # prior for off-diagonal correlation-regression coefficients
   lkj = NULL, # LKJ concentration for correlation matrices
-  class_probability = 1, # Dirichlet concentration for baseline class weights
-  class_regression = NULL, # family and hyperparameters for class-regression coefficients
+  class = NULL, # baseline probability concentration and formulaClass slope prior
   .validate = TRUE # whether to validate the assembled prior specification
 ) {
-  .joinme_priors_(
-    list(
-      beta = beta,
-      alpha = alpha,
-      iota = iota,
+  distributional <- list(...) # formulaDist left-hand-side prior components
+  if (length(distributional) > 0L &&
+      (is.null(names(distributional)) || any(names(distributional) %in% c("", NA_character_)))) {
+    cli::cli_abort(c(
+      x = "Distributional priors supplied through {.arg ...} must be named.",
+      i = "Use a left-hand-side name from {.arg formulaDist}, for example {.code sigma = list(intercept = prior_normal())}."
+    ))
+  }
+  prior_request <- list(
+      intercept = intercept,
+      slope = slope,
+      longitudinal = longitudinal,
+      survival = survival,
+      baseline = baseline,
+      vcov = vcov,
+      marker_weights = marker_weights,
+      assoc = assoc,
+      functional = functional,
       marker = marker,
-      marker_weight = marker_weight,
-      vcov_sd = vcov_sd,
-      vcov_corr = vcov_corr,
+      distributional = distributional,
       lkj = lkj,
-      class_probability = class_probability,
-      class_regression = class_regression
-    ),
-    validate = .validate
-  )
+      class = class
+    ) # analyst's probability distributions grouped by scientific component
+
+  # Every coefficient declaration in a fitting prior must be a probability
+  # distribution. Numerical values are meaningful for a truth declaration but
+  # would silently lose that meaning during fitting. Validate them before the
+  # ordinary prior normaliser can interpret a number as an historical scale
+  # shorthand.
+  .assert_joinme_prior_distributions(prior_request)
+  .joinme_priors_(prior_request, validate = .validate)
 }
 
 #' @rdname joinme_priors
@@ -370,6 +442,199 @@ jm_prior <- joinme_priors
 #' @rdname joinme_priors
 #' @export
 joinme_prior <- joinme_priors
+
+#' Declare population truths for JoiNMe simulation
+#'
+#' @description
+#' `jm_truth()` describes the population quantities used once to generate a
+#' complete data set. Its coefficient hierarchy follows [jm_prior()]: global
+#' `intercept` and `slope` declarations provide fallbacks, whilst named model
+#' components may replace either role.
+#'
+#' A finite numeric vector fixes the corresponding population coefficient. A
+#' `prior_*()` declaration draws one coefficient vector once at the beginning
+#' of a simulation. The realised vector is then held constant for every subject,
+#' marker and observation and is recorded in the returned simulation's `truth`.
+#' Thus, a distribution supplied here describes variation between simulated
+#' data sets, not variation between observations within one data set.
+#'
+#' The declaration also contains the baseline hazard and the covariance
+#' parameters for ordinary random-effect blocks. If a random-effect standard
+#' deviation is omitted, one value per coefficient is drawn from
+#' `Exponential(1)`. If its correlation matrix is omitted, one matrix is drawn
+#' from the LKJ distribution selected by `lkj`. These are the same population
+#' distributions used by the Stan fitting model.
+#'
+#' @param intercept,slope Global fixed values or `prior_*()` generating
+#'   distributions for intercept and non-intercept population coefficients.
+#' @param longitudinal Fixed values or generating distributions for the
+#'   longitudinal population regression. A named list may contain `intercept`
+#'   and `slope` separately.
+#' @param survival Fixed values or a generating distribution for event-model
+#'   covariate slopes.
+#' @param baseline Fixed values or generating distributions for coefficients
+#'   of a formula baseline hazard.
+#' @param vcov Covariance-regression truth. It may be shared between the
+#'   marginal-standard-deviation and correlation regressions, or supplied as
+#'   `list(sd = ..., corr = ...)`. Each part accepts `intercept`, `slope`, and
+#'   `latent` declarations.
+#' @param marker_weights A named list containing `offset`, `intercept`, `family`,
+#'   and `shared`. `offset` is a fixed marker-specific contribution;
+#'   `intercept` is a fixed or once-drawn common marker-weight location;
+#'   `family` governs centred unit-scale marker departures; and `shared`
+#'   determines whether weighted association terms share one set.
+#' @param assoc_coef Fixed values or a generating distribution for the active
+#'   longitudinal--event association coefficients, in their fitted order.
+#' @param functional Fixed values or generating distributions for affine
+#'   transformation intercepts and slopes.
+#' @param marker A `prior_*()` family declaration for standardised marker-level
+#'   effects. Its location and ordinary scale must remain zero and one.
+#' @param ... Named distributional-parameter truths corresponding to the
+#'   left-hand sides of `formulaDist`, including family or marker selectors.
+#' @param lkj An object created by [prior_lkj()]. Its concentration governs each
+#'   random-effect correlation matrix drawn when `re_params` omits `corr`.
+#' @param class A named list containing `baseline_prob` and `slope`, following
+#'   the class-membership roles accepted by [jm_prior()]. The slope may be fixed
+#'   or drawn once for each simulation.
+#' @param basehaz Baseline-hazard truth. Supply a hazard function, a formula in
+#'   `time`, a character family name, or a named list such as
+#'   `list(type = "weibull", shape = 1.4, scale = 6)`.
+#' @param re_params Named random-effect covariance declarations for `id`,
+#'   `marker`, and distributional regressions under `dist`. Each ordinary block
+#'   accepts `sd` and `corr`; either may be omitted and drawn once from the
+#'   fitted model's corresponding population distribution.
+#' @param .validate Logical; if `TRUE`, check the declaration immediately.
+#'
+#' @return An object of class `joinme_truth` for the `truth` argument of
+#'   [simulate_joinme()] or [simulate_joinme_mix()].
+#' @aliases joinme_truth
+#' @export
+#'
+#' @examples
+#' generating_truth <- jm_truth(
+#'   longitudinal = list(
+#'     intercept = 0,
+#'     slope = prior_normal(mu = 0.5, scale = 0.2)
+#'   ),
+#'   survival = c(treatment = -0.4),
+#'   assoc_coef = c(cv_mean = 0.3),
+#'   basehaz = list(type = "weibull", shape = 1.2, scale = 7),
+#'   re_params = list(id = list(sd = NULL, corr = NULL)),
+#'   lkj = prior_lkj(2)
+#' )
+joinme_truth <- function(
+  ...,
+  intercept = NULL, # global intercept truth or its between-simulation generating distribution
+  slope = NULL, # global slope truth or its between-simulation generating distribution
+  longitudinal = NULL, # longitudinal population coefficient truths
+  survival = NULL, # event-regression population coefficient truths
+  baseline = NULL, # formula baseline-hazard coefficient truths
+  vcov = NULL, # covariance-regression population truths
+  marker_weights = NULL, # marker-weight offsets, locations, departure family, and sharing rule
+  assoc_coef = NULL, # active longitudinal--event association coefficient truths
+  functional = NULL, # affine transformation coefficient truths
+  marker = NULL, # standardised marker-effect family
+  lkj = prior_lkj(1), # correlation-generating LKJ distribution
+  class = NULL, # class-membership probability and regression truths
+  basehaz = list(type = "weibull", shape = 1.4, scale = 6.0), # baseline-hazard function or family declaration
+  re_params = list(
+    id = list(sd = NULL, corr = NULL),
+    marker = list(sd = NULL, corr = NULL),
+    dist = list()
+  ), # ordinary random-effect covariance truths
+  .validate = TRUE # whether to check the assembled truth declaration
+) {
+  distributional <- list(...) # distributional population truths named by formulaDist left-hand sides
+  if (length(distributional) > 0L &&
+      (is.null(names(distributional)) || any(names(distributional) %in% c("", NA_character_)))) {
+    cli::cli_abort(c(
+      x = "Distributional truths supplied through {.arg ...} must be named.",
+      i = "Use a left-hand-side name from {.arg formulaDist}, for example {.code sigma = list(intercept = 0)}."
+    ))
+  }
+
+  # Retain the analyst's exact fixed-or-random declarations. The simulator
+  # resolves their dimensions only after the model matrices are known, which
+  # permits named vectors to follow the fitted coefficient order exactly.
+  truth_request <- list(
+    intercept = intercept,
+    slope = slope,
+    longitudinal = longitudinal,
+    survival = survival,
+    baseline = baseline,
+    vcov = vcov,
+    marker_weights = marker_weights,
+    assoc_coef = assoc_coef,
+    functional = functional,
+    marker = marker,
+    distributional = distributional,
+    lkj = lkj,
+    class = class,
+    basehaz = basehaz,
+    re_params = re_params
+  ) # complete data-generating declaration before formula dimensions are available
+
+  if (!is.list(re_params) || is.null(names(re_params))) {
+    cli::cli_abort("{.arg re_params} must be a named list.")
+  }
+  unknown_random_effect_blocks <- setdiff(names(re_params), c("id", "marker", "dist")) # unrecognised random-effect truth components
+  if (length(unknown_random_effect_blocks) > 0L) {
+    cli::cli_abort("Unknown {.arg re_params} component{?s}: {.field {unknown_random_effect_blocks}}.")
+  }
+  if (!(is.function(basehaz) || inherits(basehaz, "formula") || is.character(basehaz) || is.list(basehaz))) {
+    cli::cli_abort("{.arg basehaz} must be a function, formula, family name, or named list.")
+  }
+  if (!inherits(lkj, "joinme_lkj_prior")) {
+    cli::cli_abort("{.arg lkj} must be created with {.fn prior_lkj}.")
+  }
+  marker_family_declaration <- if (
+    is.list(marker) && !inherits(marker, "joinme_prior_spec")
+  ) marker$family else marker # unit-scale family declaration for standardised marker effects
+  if (!is.null(marker_family_declaration) &&
+      !inherits(marker_family_declaration, "joinme_prior_spec")) {
+    cli::cli_abort(c(
+      x = "{.arg marker} describes a centred unit-scale random-effect family and cannot be a fixed number.",
+      i = "Use a {.fn prior_student_t}, {.fn prior_normal}, {.fn prior_laplace}, or {.fn prior_horseshoe} declaration."
+    ))
+  }
+
+  # Construct the fitting-prior counterpart only from probability
+  # distributions. Fixed truths are replaced by the ordinary component
+  # defaults, whilst structural marker-weight settings remain identical so a
+  # recovery fit represents the data-generating marker feature correctly.
+  fitting_request <- truth_request[c(
+    "intercept", "slope", "longitudinal", "survival", "baseline", "vcov",
+    "marker_weights", "functional", "marker", "distributional", "lkj", "class"
+  )]
+  fitting_request$assoc <- truth_request$assoc_coef
+  fitting_request <- .remove_joinme_truth_constants(fitting_request)
+  fitting_priors <- .joinme_priors_(fitting_request, validate = .validate) # probability distributions retained for an optional recovery fit
+
+  structure(
+    truth_request,
+    class = c("joinme_truth", "list"),
+    fitting_priors = fitting_priors
+  )
+}
+
+#' @rdname joinme_truth
+#' @export
+jm_truth <- joinme_truth
+
+#' Print a JoiNMe simulation-truth declaration
+#'
+#' @param x A `joinme_truth` object.
+#' @param ... Unused.
+#'
+#' @return `x`, invisibly.
+#' @export
+print.joinme_truth <- function(x, ...) {
+  cat("Truth declaration for JoiNMe simulation\n")
+  populated <- names(x)[vapply(x, function(value) !is.null(value) && length(value) > 0L, logical(1))] # scientific components explicitly or structurally represented
+  cat("Components: ", paste(populated, collapse = ", "), "\n", sep = "")
+  cat("Population coefficients are fixed once per simulated data set.\n")
+  invisible(x)
+}
 
 #' @export
 print.joinme_priors <- function(x, ...) {
@@ -398,35 +663,92 @@ print.joinme_priors <- function(x, ...) {
     }
     paste(prior, collapse = ", ")
   }
-  class_probability_txt <- paste(priors$class_probability, collapse = ", ")
-
-  tbl <- data.frame(
-    component = c(
-      "beta",
-      "alpha",
-      "iota",
-      "marker",
-      "marker_weight",
-      "vcov_sd",
-      "vcov_corr",
-      "lkj",
-      "class_probability",
-      "class_regression"
+  role_rows <- function(component, specification) {
+    roles <- intersect(c("intercept", "slope", "latent", "family"), names(specification))
+    data.frame(
+      component = paste0(component, ".", roles),
+      value = vapply(specification[roles], describe_prior, character(1)),
+      stringsAsFactors = FALSE
+    )
+  }
+  distributional_rows <- function(parameter, specification) {
+    rows <- list(role_rows(parameter, specification)) # parameter-wide fallback roles
+    if (length(specification$by_family) > 0L) {
+      rows <- c(rows, lapply(names(specification$by_family), function(family_name) {
+        role_rows(
+          paste0(parameter, "[family=", family_name, "]"),
+          specification$by_family[[family_name]]
+        )
+      }))
+    }
+    if (length(specification$by_marker) > 0L) {
+      rows <- c(rows, lapply(names(specification$by_marker), function(marker_name) {
+        role_rows(
+          paste0(parameter, "[marker=", marker_name, "]"),
+          specification$by_marker[[marker_name]]
+        )
+      }))
+    }
+    do.call(rbind, rows)
+  }
+  describe_marker_weight_offset <- function(offset) {
+    if (is.null(offset)) return("default")
+    describe_vector <- function(values) {
+      value_names <- names(values)
+      if (is.null(value_names) || !all(nzchar(value_names))) {
+        return(paste(as.numeric(values), collapse = ", "))
+      }
+      paste0(value_names, " = ", as.numeric(values), collapse = ", ")
+    }
+    if (is.numeric(offset) && is.null(dim(offset))) return(describe_vector(offset))
+    if (is.list(offset) && !is.data.frame(offset)) {
+      return(paste(vapply(names(offset), function(term_name) {
+        paste0(term_name, ": [", describe_vector(offset[[term_name]]), "]")
+      }, character(1)), collapse = "; "))
+    }
+    paste(apply(as.matrix(offset), 1L, function(values) {
+      paste0("[", paste(as.numeric(values), collapse = ", "), "]")
+    }), collapse = "; ")
+  }
+  marker_weight_rows <- role_rows("marker_weights", priors$marker_weights) # common-location prior and standardised departure family
+  marker_weight_rows <- rbind(
+    data.frame(
+      component = "marker_weights.offset",
+      value = describe_marker_weight_offset(priors$marker_weights$offset),
+      stringsAsFactors = FALSE
     ),
-    value = c(
-      describe_prior(priors$beta),
-      describe_prior(priors$alpha),
-      describe_prior(priors$iota),
-      describe_prior(priors$marker),
-      describe_prior(priors$marker_weight),
-      describe_prior(priors$vcov_sd),
-      describe_prior(priors$vcov_corr),
-      describe_prior(priors$lkj),
-      class_probability_txt,
-      describe_prior(priors$class_regression)
+    data.frame(
+      component = "marker_weights.shared",
+      value = as.character(priors$marker_weights$shared),
+      stringsAsFactors = FALSE
     ),
-    stringsAsFactors = FALSE
+    marker_weight_rows
   )
+  if (identical(priors$marker_weights$family$family, "student_t")) {
+    family_row <- marker_weight_rows$component == "marker_weights.family" # Student-t departure row requiring fixed-versus-fitted df interpretation
+    marker_weight_rows$value[family_row] <- "student_t(fitted df: 2 + Gamma(2, 0.1); location = 0; scale = 1)"
+  } else if (identical(priors$marker_weights$family$family, "constant")) {
+    marker_weight_rows$value[marker_weight_rows$component == "marker_weights.intercept"] <- "not fitted"
+    marker_weight_rows$value[marker_weight_rows$component == "marker_weights.family"] <- "constant (offset used exactly)"
+  }
+  tbl <- do.call(rbind, c(
+    list(role_rows("global", priors$global)),
+    lapply(c("longitudinal", "survival", "baseline", "assoc", "functional"), function(component) {
+      role_rows(component, priors[[component]])
+    }),
+    list(
+      role_rows("vcov.sd", priors$vcov$sd),
+      role_rows("vcov.corr", priors$vcov$corr),
+      marker_weight_rows,
+      role_rows("marker", priors$marker),
+      do.call(rbind, lapply(names(priors$distributional), function(parameter) {
+        distributional_rows(parameter, priors$distributional[[parameter]])
+      })),
+      data.frame(component = "lkj", value = describe_prior(priors$lkj), stringsAsFactors = FALSE),
+      data.frame(component = "class.baseline_prob", value = paste(priors$class$baseline_prob, collapse = ", "), stringsAsFactors = FALSE),
+      data.frame(component = "class.slope", value = describe_prior(priors$class$slope), stringsAsFactors = FALSE)
+    )
+  ))
   cat("Prior specification for Joint Mixed Effects model\n")
   print(tbl, row.names = FALSE)
   invisible(x)
@@ -502,9 +824,9 @@ jm_basehaz <- joinme_basehaz
 #' @description
 #' `make_conditions()` is a thin wrapper around [brms::make_conditions()] so the
 #' resulting labelled condition tables can be passed directly to
-#' [conditional_effects.JoiNMeFit()]. Conditioning belongs to the conditional-
-#' effects estimand; neither [predict.JoiNMeFit()] nor `plot.JoiNMeFit()` accepts
-#' a `condition` argument.
+#' [conditional_effects.JoiNMeFit()] or [conditional_contrast()]. Conditioning
+#' belongs to the conditional-effects or conditional-contrast estimand; neither
+#' [predict.JoiNMeFit()] nor `plot.JoiNMeFit()` accepts a `condition` argument.
 #'
 #' @param x A data frame containing the baseline covariates used to define the
 #'   conditioning rows.
@@ -513,7 +835,7 @@ jm_basehaz <- joinme_basehaz
 #' @return A data frame with one row per requested condition and a `cond__`
 #'   column containing the profile labels used in conditional-effects facets.
 #'
-#' @seealso [conditional_effects.JoiNMeFit()],
+#' @seealso [conditional_effects.JoiNMeFit()], [conditional_contrast()],
 #'   [brms::make_conditions()]
 #' @export
 #' @importFrom brms make_conditions
@@ -843,129 +1165,272 @@ make_conditions <- function(x, ...) {
 
 #' @keywords internal
 .joinme_priors_ <- function(priors = NULL, validate = TRUE) {
+  if (inherits(priors, "joinme_priors")) {
+    return(priors)
+  }
   if (is.null(priors)) {
     priors <- list(
-      beta = NULL,
-      alpha = NULL,
-      iota = NULL,
+      intercept = NULL,
+      slope = NULL,
+      longitudinal = NULL,
+      survival = NULL,
+      baseline = NULL,
+      vcov = NULL,
+      marker_weights = NULL,
+      assoc = NULL,
+      functional = NULL,
       marker = NULL,
-      marker_weight = NULL,
-      vcov_sd = NULL,
-      vcov_corr = NULL,
+      distributional = list(),
       lkj = NULL,
-      class_probability = 1,
-      class_regression = NULL
+      class = NULL
     )
   }
-  priors <- if (inherits(priors, "joinme_priors")) unclass(priors) else priors
-
   if (!is.list(priors)) {
     cli::cli_abort(c(
       x = "{.arg priors} must be a named list or a {.fn joinme_priors} object.",
-      i = "Example: jm_prior(beta = prior_normal(scale = 2.5), alpha = prior_student_t(df = 6), lkj = prior_lkj(2))."
+      i = "Example: jm_prior(intercept = prior_normal(scale = 2.5), slope = prior_student_t(df = 6), lkj = prior_lkj(2))."
     ))
   }
   if (length(priors) > 0 && (is.null(names(priors)) || any(names(priors) %in% c("", NA_character_)))) {
     cli::cli_abort(c(
       x = "{.arg priors} must be a named list.",
-      i = "Allowed components are beta, alpha, iota, marker, marker_weight, vcov_sd, vcov_corr, lkj, class_probability, and class_regression."
+      i = "Prior components must be named by their scientific model role."
     ))
   }
 
   allowed <- c(
-    "beta",
-    "alpha",
-    "iota",
+    "intercept",
+    "slope",
+    "longitudinal",
+    "survival",
+    "baseline",
+    "vcov",
+    "marker_weights",
+    "assoc",
+    "functional",
     "marker",
-    "marker_weight",
-    "vcov_sd",
-    "vcov_corr",
+    "distributional",
     "lkj",
-    "class_probability",
-    "class_regression"
+    "class"
   )
   bad <- setdiff(names(priors), allowed)
   if (length(bad) > 0) {
     cli::cli_abort(c(
       x = "Unknown prior component(s): {paste(bad, collapse = ', ')}.",
-      i = "Allowed components: beta, alpha, iota, marker, marker_weight, vcov_sd, vcov_corr, lkj, class_probability, class_regression."
+      i = "Allowed components are intercept, slope, longitudinal, survival, baseline, vcov, marker_weights, assoc, functional, marker, distributional, lkj, and class."
     ))
   }
 
-  out <- list(
-    beta = .normalise_joinme_prior_component(
-      priors$beta,
-      name = "beta",
-      default = prior_student_t(df = 6, scale = 2)
-    ),
-    alpha = .normalise_joinme_prior_component(
-      priors$alpha,
-      name = "alpha",
-      default = prior_student_t(df = 6, scale = 1)
-    ),
-    iota = .normalise_joinme_prior_component(
-      priors$iota,
-      name = "iota",
-      default = prior_student_t(df = 6, scale = 1)
-    ),
-    marker = .normalise_joinme_prior_component(
-      priors$marker,
-      name = "marker",
-      default = prior_normal(),
-      fixed_unit_scale = TRUE
-    ),
-    marker_weight = .normalise_joinme_prior_component(
-      priors$marker_weight,
-      name = "marker_weight",
-      default = prior_student_t(df = 6),
-      fixed_unit_scale = TRUE
-    ),
-    vcov_sd = .normalise_joinme_prior_component(
-      priors$vcov_sd,
-      name = "vcov_sd",
-      default = prior_student_t(df = 6, scale = 1)
-    ),
-    vcov_corr = .normalise_joinme_prior_component(
-      priors$vcov_corr,
-      name = "vcov_corr",
-      default = prior_student_t(df = 6, scale = 1)
-    ),
-    lkj = .normalise_joinme_lkj_prior(priors$lkj),
-    class_probability = priors$class_probability %||% 1,
-    class_regression = if (is.numeric(priors$class_regression)) {
-      prior_normal(scale = priors$class_regression)
-    } else {
-      .normalise_joinme_prior_component(
-        priors$class_regression,
-        name = "class_regression",
-        default = prior_normal()
-      )
+  complete_prior_counter <- 0L # unique identifier for a bare prior spanning every role of one component
+  normalise_roles <- function(x, component, roles = c("intercept", "slope"), defaults) {
+    if (is.null(x)) x <- list()
+    if (inherits(x, "joinme_prior_spec")) {
+      complete_prior_counter <<- complete_prior_counter + 1L
+      complete_prior_id <- paste0(component, "#", complete_prior_counter) # groups role-specific views of one complete coefficient prior
+      x <- stats::setNames(lapply(roles, function(role) {
+        declaration <- x # copy retaining the full coefficient-wise hyperparameter vectors
+        attr(declaration, "complete_prior_id") <- complete_prior_id
+        declaration
+      }), roles)
+    } else if (is.numeric(x)) {
+      x <- stats::setNames(rep(list(x), length(roles)), roles)
     }
+    if (!is.list(x) || (length(x) > 0L && (is.null(names(x)) || any(!names(x) %in% roles)))) {
+      cli::cli_abort(c(
+        x = "Prior component {.arg {component}} must be a prior declaration or a list using {.field {roles}}.",
+        i = "Declare only the statistical roles that should override the global fallback."
+      ))
+    }
+    stats::setNames(lapply(roles, function(role) {
+      .normalise_joinme_prior_component(
+        x[[role]],
+        name = paste0(component, "$", role),
+        default = defaults[[role]]
+      )
+    }), roles)
+  }
+
+  global_intercept <- .normalise_joinme_prior_component(
+    priors$intercept, "intercept", prior_student_t(df = 6, scale = 2)
+  )
+  global_slope <- .normalise_joinme_prior_component(
+    priors$slope, "slope", prior_student_t(df = 6, scale = 1)
+  )
+  global_defaults <- list(intercept = global_intercept, slope = global_slope)
+
+  marker_weight_request <- priors$marker_weights %||% list()
+  if (inherits(marker_weight_request, "joinme_prior_spec")) {
+    cli::cli_abort(c(
+      x = "{.arg marker_weights} must be a named list, not a bare prior declaration.",
+      i = "Use a named declaration such as {.code marker_weights = list(offset = ..., intercept = ..., family = ..., shared = TRUE)}."
+    ))
+  }
+  if (!is.list(marker_weight_request) ||
+      (length(marker_weight_request) > 0L &&
+        (is.null(names(marker_weight_request)) || any(!names(marker_weight_request) %in% c("offset", "intercept", "family", "shared"))))) {
+    cli::cli_abort("{.arg marker_weights} must contain only {.field offset}, {.field intercept}, {.field family}, and {.field shared}.")
+  }
+  marker_weight_sets_shared <- marker_weight_request$shared %||% TRUE # whether active weighted association terms use one common marker-weight set
+  if (!is.logical(marker_weight_sets_shared) || length(marker_weight_sets_shared) != 1L || is.na(marker_weight_sets_shared)) {
+    cli::cli_abort("{.arg marker_weights$shared} must be TRUE or FALSE.")
+  }
+  marker_weight_offset <- .normalise_marker_weight_offset_request(
+    marker_weight_request$offset,
+    name = "marker_weights$offset"
+  ) # fixed numerical contribution added to every fitted marker weight, or the complete constant weight when family is constant
+  # Marker-weight departures are a standardised latent block with fixed
+  # location zero and fixed ordinary scale one. Their family is selected by a
+  # name because no coefficient-prior location or scale applies to this block.
+  marker_weight_family <- .normalise_marker_weight_family(
+    marker_weight_request$family,
+    "marker_weights$family",
+    default = "student_t"
   )
 
+  vcov_request <- priors$vcov %||% list()
+  vcov_roles <- c("intercept", "slope", "latent") # covariance-regression population roles used by fitting and simulation
+  vcov_defaults <- c(global_defaults, list(latent = global_slope)) # latent loadings use the global slope prior unless declared separately
+  if (inherits(vcov_request, "joinme_prior_spec") || is.numeric(vcov_request) ||
+      any(names(vcov_request) %in% vcov_roles)) {
+    shared_vcov <- normalise_roles(vcov_request, "vcov", roles = vcov_roles, defaults = vcov_defaults)
+    vcov_request <- list(sd = shared_vcov, corr = shared_vcov)
+  } else {
+    if (!is.list(vcov_request) || any(!names(vcov_request) %in% c("sd", "corr"))) {
+      cli::cli_abort("{.arg vcov} must use intercept/slope directly or contain {.field sd} and {.field corr} components.")
+    }
+    vcov_request <- list(
+      sd = normalise_roles(vcov_request$sd, "vcov$sd", roles = vcov_roles, defaults = vcov_defaults),
+      corr = normalise_roles(vcov_request$corr, "vcov$corr", roles = vcov_roles, defaults = vcov_defaults)
+    )
+  }
+
+  distributional_names <- c("sigma", "nu", "phi", "alpha", "kappa", "tau") # supported distributional regression parameters
+  distributional_request <- priors$distributional %||% list() # unparsed parameter-wide, family-scoped, or marker-scoped declarations
+  if (length(distributional_request) > 0L &&
+      (is.null(names(distributional_request)) || any(names(distributional_request) %in% c("", NA_character_)))) {
+    cli::cli_abort("{.arg distributional} prior components must be named by a {.arg formulaDist} left-hand side.")
+  }
+  requested_parameter_names <- vapply(names(distributional_request), function(selector_name) {
+    .canonical_dist_param(sub("\\[.*$", "", selector_name))
+  }, character(1)) # parameter part before an optional bracket selector
+  unknown_distributional <- unique(requested_parameter_names[!requested_parameter_names %in% distributional_names])
+  if (length(unknown_distributional) > 0L) {
+    cli::cli_abort(c(
+      x = "Unknown distributional prior component{?s}: {.val {paste(unknown_distributional, collapse = ', ')}}.",
+      i = "Use names that may occur on the left-hand side of formulaDist: sigma, nu, phi, alpha, kappa, or tau."
+    ))
+  }
+
+  parsed_distributional_request <- stats::setNames(lapply(distributional_names, function(parameter) {
+    list(default = NULL, by_family = list(), by_marker = list())
+  }), distributional_names) # declarations separated by parameter and scientific scope
+  for (selector_name in names(distributional_request)) {
+    selector <- .parse_dist_selector_text(selector_name, allow_marker = TRUE) # checked parameter, family, or marker selector
+    parameter_request <- parsed_distributional_request[[selector$param]] # accumulated declarations for this distributional parameter
+    if (is.null(selector$scope_type)) {
+      if (!is.null(parameter_request$default)) {
+        cli::cli_abort("Distributional prior selector {.val {selector_name}} is declared more than once.")
+      }
+      parameter_request$default <- distributional_request[[selector_name]]
+    } else {
+      scope_collection <- if (identical(selector$scope_type, "family")) "by_family" else "by_marker"
+      if (!is.null(parameter_request[[scope_collection]][[selector$scope_value]])) {
+        cli::cli_abort("Distributional prior selector {.val {selector_name}} is declared more than once.")
+      }
+      parameter_request[[scope_collection]][[selector$scope_value]] <- distributional_request[[selector_name]]
+    }
+    parsed_distributional_request[[selector$param]] <- parameter_request
+  }
+
+  normalised_distributional <- stats::setNames(lapply(distributional_names, function(parameter) {
+    request <- parsed_distributional_request[[parameter]] # all declarations for one distributional parameter
+    parameter_default <- normalise_roles(
+      request$default,
+      parameter,
+      defaults = global_defaults
+    ) # parameter-wide intercept and slope fallback
+    family_overrides <- lapply(names(request$by_family), function(family_name) {
+      normalise_roles(
+        request$by_family[[family_name]],
+        paste0(parameter, "[family=", family_name, "]"),
+        defaults = parameter_default
+      )
+    }) # role priors for explicitly family-scoped coefficients
+    names(family_overrides) <- names(request$by_family)
+    marker_overrides <- lapply(names(request$by_marker), function(marker_name) {
+      normalise_roles(
+        request$by_marker[[marker_name]],
+        paste0(parameter, "[marker=", marker_name, "]"),
+        defaults = parameter_default
+      )
+    }) # role priors resolved to a unique family-scoped block after marker levels are known
+    names(marker_overrides) <- names(request$by_marker)
+    c(parameter_default, list(by_family = family_overrides, by_marker = marker_overrides))
+  }), distributional_names)
+
+  class_request <- priors$class %||% list() # baseline allocation and formulaClass slope declarations
+  if (!is.list(class_request) ||
+      (length(class_request) > 0L &&
+        (is.null(names(class_request)) || any(!names(class_request) %in% c("baseline_prob", "slope"))))) {
+    cli::cli_abort(c(
+      x = "{.arg class} must be a named list containing only {.field baseline_prob} and {.field slope}.",
+      i = "For example, use {.code class = list(baseline_prob = 1, slope = prior_normal())}."
+    ))
+  }
+  class_baseline_probability <- class_request$baseline_prob %||% 1 # Dirichlet concentration before expansion to n_classes
   if (
-    !is.numeric(out$class_probability) ||
-      length(out$class_probability) < 1L ||
-      any(!is.finite(out$class_probability)) ||
-      any(out$class_probability <= 0)
+    !is.numeric(class_baseline_probability) ||
+      length(class_baseline_probability) < 1L ||
+      any(!is.finite(class_baseline_probability)) ||
+      any(class_baseline_probability <= 0)
   ) {
     cli::cli_abort(
-      "{.arg class_probability} must contain positive finite Dirichlet concentrations."
+      "{.arg class$baseline_prob} must contain positive finite Dirichlet concentrations."
     )
   }
-  out$class_probability <- as.numeric(out$class_probability)
-  if (isTRUE(validate)) {
-    .build_priors(
-      beta_prior = out$beta,
-      alpha_prior = out$alpha,
-      iota_prior = out$iota,
-      marker_prior = out$marker,
-      marker_weight_prior = out$marker_weight,
-      vcov_sd_prior = out$vcov_sd,
-      vcov_corr_prior = out$vcov_corr,
-      lkj_prior = out$lkj
+  class_slope_request <- class_request$slope # common family and hyperparameters for formulaClass slopes
+
+  out <- list(
+    global = global_defaults,
+    longitudinal = normalise_roles(priors$longitudinal, "longitudinal", defaults = global_defaults),
+    survival = normalise_roles(priors$survival, "survival", roles = "slope", defaults = list(slope = global_slope)),
+    baseline = normalise_roles(priors$baseline, "baseline", defaults = global_defaults),
+    vcov = vcov_request,
+    marker_weights = list(
+      offset = marker_weight_offset,
+      shared = isTRUE(marker_weight_sets_shared),
+      intercept = .normalise_joinme_prior_component(
+        marker_weight_request$intercept, "marker_weights$intercept", global_intercept
+      ),
+      family = marker_weight_family
+    ),
+    assoc = normalise_roles(priors$assoc, "assoc", roles = "slope", defaults = list(slope = global_slope)),
+    functional = normalise_roles(priors$functional, "functional", defaults = global_defaults),
+    distributional = normalised_distributional,
+    marker = list(family = .normalise_joinme_prior_component(
+      if (is.list(priors$marker) && !inherits(priors$marker, "joinme_prior_spec")) {
+        if (length(priors$marker) > 0L &&
+            (is.null(names(priors$marker)) || !identical(names(priors$marker), "family"))) {
+          cli::cli_abort("{.arg marker} may contain only the named {.field family} declaration.")
+        }
+        priors$marker$family
+      } else priors$marker,
+      "marker$family", prior_normal(), fixed_unit_scale = TRUE
+    )),
+    lkj = .normalise_joinme_lkj_prior(priors$lkj),
+    class = list(
+      baseline_prob = as.numeric(class_baseline_probability),
+      slope = if (is.numeric(class_slope_request)) {
+        global_slope
+      } else {
+        .normalise_joinme_prior_component(
+          class_slope_request,
+          name = "class$slope",
+          default = global_slope
+        )
+      }
     )
-  }
+  )
 
   structure(out, class = c("joinme_priors", "list"))
 }
@@ -1003,11 +1468,7 @@ make_conditions <- function(x, ...) {
     isTRUE(fixed_unit_scale) &&
       (
         !identical(as.numeric(output$mu), 0) ||
-          !identical(as.numeric(output$scale), 1) ||
-          (
-            identical(output$family, "horseshoe") &&
-              (!identical(output$global_scale, 1) || !identical(output$slab_scale, 2))
-          )
+          !identical(as.numeric(output$scale), 1)
       )
   ) {
     cli::cli_abort(c(
@@ -1017,6 +1478,156 @@ make_conditions <- function(x, ...) {
     ))
   }
   output
+}
+
+#' @keywords internal
+#' @noRd
+.normalise_marker_weight_family <- function(x, name, default = "student_t") {
+  family_request <- x %||% default # family label for the standardised marker-weight departure
+  if (inherits(family_request, "joinme_prior_spec")) {
+    cli::cli_abort(c(
+      x = "{.arg {name}} accepts a family name rather than a prior declaration.",
+      i = "Use {.code family = 'student_t'}, {.code 'normal'}, {.code 'laplace'}, {.code 'horseshoe'}, or {.code 'constant'}."
+    ))
+  }
+  family_name <- family_request
+  if (!is.character(family_name) || length(family_name) != 1L || !nzchar(family_name)) {
+    cli::cli_abort(c(
+      x = "{.arg {name}} must be one family name.",
+      i = "Family names are {.val student_t}, {.val normal}, {.val laplace}, {.val horseshoe}, {.val constant}, and {.val none}."
+    ))
+  }
+  family_name <- match.arg(
+    tolower(family_name),
+    c("student_t", "normal", "laplace", "horseshoe", "constant", "none")
+  )
+  if (identical(family_name, "none")) family_name <- "constant"
+
+  # A constant family has no stochastic departure and no fitted common
+  # location.  The ordinary prior fields are retained only so this declaration
+  # has the same predictable shape as the stochastic family declarations.
+  if (identical(family_name, "constant")) {
+    return(structure(list(
+      family = "constant",
+      mu = 0,
+      scale = 1,
+      df = Inf,
+      global_df = Inf,
+      global_scale = 1,
+      slab_df = Inf,
+      slab_scale = 1,
+      estimate_df = FALSE
+    ), class = c("joinme_prior_spec", "list")))
+  }
+
+  # A family name selects the standardised departure law. Student-t deliberately
+  # leaves df undeclared so fitting uses the shifted-Gamma distributional
+  # parameter; other families retain their fixed-unit-scale records.
+  output <- switch(
+    family_name,
+    student_t = prior_student_t(df = 6),
+    normal = prior_normal(),
+    laplace = prior_laplace(),
+    horseshoe = prior_horseshoe()
+  )
+  output$estimate_df <- identical(family_name, "student_t") # only the family label requests the moving shifted-Gamma degrees of freedom
+  output
+}
+
+#' Validate a marker-weight offset declaration before marker names are known
+#'
+#' @description
+#' The prior declaration is parsed before the longitudinal data establish the
+#' fitted marker order. This helper therefore checks the numerical and naming
+#' rules without reordering values. Alignment to the observed marker levels is
+#' performed later by `.normalise_marker_weight_vector()`.
+#'
+#' Every individual offset vector must use one of two complete conventions:
+#' either all entries are named, or no entries are named. A partly named vector
+#' is ambiguous because unnamed entries cannot be assigned to markers without
+#' relying on their incidental position.
+#'
+#' @param offset `NULL`, a numeric vector, a numeric matrix or data frame, or a
+#'   named list of numeric vectors indexed by weighted association term.
+#' @param name Name used in diagnostic messages.
+#'
+#' @return The checked declaration without changing its numerical values or
+#'   names.
+#' @keywords internal
+#' @noRd
+.normalise_marker_weight_offset_request <- function(offset, name) {
+  check_vector <- function(values, vector_name) {
+    if (!is.numeric(values) || length(values) < 1L || any(!is.finite(values))) {
+      cli::cli_abort("{.arg {vector_name}} must be a non-empty finite numeric vector.")
+    }
+    value_names <- names(values)
+    if (!is.null(value_names)) {
+      named <- !is.na(value_names) & nzchar(value_names)
+      if (any(named) && !all(named)) {
+        cli::cli_abort(c(
+          x = "{.arg {vector_name}} must be wholly named or wholly unnamed.",
+          i = "Name every marker entry, or remove every marker name and use fitted marker order."
+        ))
+      }
+      if (all(named) && anyDuplicated(value_names)) {
+        cli::cli_abort("{.arg {vector_name}} contains duplicated marker names.")
+      }
+    }
+    values
+  }
+
+  if (is.null(offset)) return(NULL)
+  if (is.numeric(offset) && is.null(dim(offset))) return(check_vector(offset, name))
+  if (is.matrix(offset) || is.data.frame(offset)) {
+    if (!all(vapply(offset, is.numeric, logical(1)))) {
+      cli::cli_abort("{.arg {name}} must contain only numeric marker offsets.")
+    }
+    if (any(!is.finite(as.matrix(offset)))) {
+      cli::cli_abort("{.arg {name}} must contain only finite marker offsets.")
+    }
+    column_names <- colnames(offset)
+    if (!is.null(column_names)) {
+      named_columns <- !is.na(column_names) & nzchar(column_names)
+      if (any(named_columns) && !all(named_columns)) {
+        cli::cli_abort("The marker columns of {.arg {name}} must be wholly named or wholly unnamed.")
+      }
+      if (all(named_columns) && anyDuplicated(column_names)) {
+        cli::cli_abort("The marker columns of {.arg {name}} contain duplicated names.")
+      }
+    }
+    row_names <- rownames(offset)
+    if (is.null(row_names) || anyNA(row_names) || any(!nzchar(row_names)) || anyDuplicated(row_names)) {
+      cli::cli_abort(c(
+        x = "The rows of {.arg {name}} must be uniquely named.",
+        i = "Name each row by its weighted association term."
+      ))
+    }
+    unknown_terms <- setdiff(row_names, .weighted_assoc_term_keys())
+    if (length(unknown_terms) > 0L) {
+      cli::cli_abort("The rows of {.arg {name}} contain unknown weighted association terms: {.val {paste(unknown_terms, collapse = ', ')}}.")
+    }
+    return(offset)
+  }
+  if (is.list(offset)) {
+    offset_names <- names(offset)
+    if (is.null(offset_names) || anyNA(offset_names) || any(!nzchar(offset_names)) || anyDuplicated(offset_names)) {
+      cli::cli_abort(c(
+        x = "{.arg {name}} must be a completely named list.",
+        i = "Name each vector by its weighted association term."
+      ))
+    }
+    unknown_terms <- setdiff(offset_names, .weighted_assoc_term_keys())
+    if (length(unknown_terms) > 0L) {
+      cli::cli_abort("{.arg {name}} contains unknown weighted association terms: {.val {paste(unknown_terms, collapse = ', ')}}.")
+    }
+    return(stats::setNames(lapply(seq_along(offset), function(index) {
+      check_vector(offset[[index]], paste0(name, "$", offset_names[[index]]))
+    }), offset_names))
+  }
+  cli::cli_abort(c(
+    x = "{.arg {name}} has an unsupported form.",
+    i = "Use a numeric vector, or a named collection of numeric vectors for term-specific offsets."
+  ))
 }
 
 #' @keywords internal
@@ -1031,6 +1642,6 @@ make_conditions <- function(x, ...) {
   }
   cli::cli_abort(c(
     x = "{.arg lkj} must be created with {.fn prior_lkj}.",
-    i = "A positive numeric concentration remains accepted for compatibility."
+    i = "A positive numeric concentration is also accepted."
   ))
 }

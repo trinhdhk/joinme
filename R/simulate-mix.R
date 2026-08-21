@@ -13,10 +13,16 @@
 #' [simulate_joinme()]. Only the distribution of the selected standardised
 #' latent coordinates is changed. This provides a direct simulation-to-fit
 #' workflow without maintaining a second longitudinal or survival simulator.
+#' Population parameters follow the same rule as [simulate_joinme()]: numeric
+#' declarations in `truth` are fixed exactly and `prior_*()` declarations are
+#' drawn once. The realised values are held fixed for the simulated data set
+#' and stored in `truth`. This includes shared or association-term-specific
+#' marker-weight locations. Class probabilities, regression coefficients,
+#' locations and scales are recorded under `truth$mixture`.
 #'
 #' @details
-#' Let \(C_j\in\{1,\ldots,G\}\) denote the latent class for allocation unit
-#' \(j\). Conditional on class \(g\), every selected coordinate \(r\) is drawn
+#' Let \eqn{C_j\in\{1,\ldots,G\}} denote the latent class for allocation unit
+#' \eqn{j}. Conditional on class \eqn{g}, every selected coordinate \eqn{r} is drawn
 #' independently as
 #'
 #' \deqn{
@@ -24,9 +30,20 @@
 #' D\{\mu_{gr},\sigma_{gr}\},
 #' }
 #'
-#' where \(D\) is Student-\(t_6\), Laplace or Normal according to `shrinkage`.
+#' where \eqn{D} is Student-\eqn{t_6}, Laplace or Normal according to `shrinkage`.
 #' Unselected subject, marker and covariance-regression coordinates remain
 #' standard Normal.
+#'
+#' Marker weights are not latent-class coordinates. When they are estimated,
+#' their common location is supplied by `truth$marker_weights$intercept`,
+#' and direct marker departures are drawn from the centred unit-scale
+#' `truth$marker_weights$family`. No further scale multiplies those
+#' departures because the association slope already scales the weighted
+#' marker feature. The family name `"student_t"` draws one set-specific
+#' value as `2 + Gamma(2, 0.1)`. The realised values are retained in `truth`. The departure
+#' coordinate retains location zero and ordinary scale one. A constant family
+#' bypasses both quantities, so the effective weights equal the offsets declared
+#' in `truth$marker_weights` exactly.
 #'
 #' Subject and covariance-regression coordinates share one subject-level
 #' allocation. Combining compatible types consequently retains exactly `n_classes`
@@ -42,18 +59,15 @@
 #' `class_parameters` is a named list with the following entries:
 #'
 #' - `probability`: a positive vector of length `n_classes`, normalised to sum
-#'   to one. The default is uniform, except under probability ordering where a
-#'   strictly increasing sequence is used.
-#' - `coefficient`: class-regression coefficients. Supply a named list with
-#'   `subject` and/or `marker` vectors. Named vectors are matched to the
-#'   columns recorded in `truth$mixture$class_design`; unnamed vectors must
-#'   have the exact required length.
+#'   to one. If omitted, positive values are drawn once and normalised; under
+#'   probability ordering the realised probabilities are sorted increasingly.
 #' - `location`: an `n_classes` by \(K\) matrix in the packed coordinate
 #'   order, or a named list containing matrices for selected class
-#'   types. The default places ordered, equally spaced component centres
-#'   between -1.25 and 1.25 on every selected coordinate.
+#'   types. Omitted locations are drawn once around separated class centres;
+#'   the ordered coordinate is sorted when intercept ordering is requested.
 #' - `scale`: a positive scalar, vector, matrix, or named level list matching
-#'   `location`. The default component scale is 0.65.
+#'   `location`. Omitted component scales are drawn once from `Uniform(0.45,
+#'   0.85)`.
 #'
 #' The returned `truth$mixture` record contains the realised class
 #' probabilities, allocations, component parameters, coordinate layout and
@@ -70,6 +84,17 @@
 #' the returned `dataEvent` and survival formula are `NULL`. Explicit
 #' association terms are not permitted in this mode.
 #'
+#' The `truth` argument is created with [jm_truth()] and follows the scientific
+#' component hierarchy used for fitting. It describes data-generating
+#' quantities rather than fitting distributions. In particular,
+#' class truths are declared together as
+#' `class = list(baseline_prob = ..., slope = ...)`: `baseline_prob` governs
+#' the Dirichlet prior and `slope` governs coefficients introduced by
+#' `formulaClass`. A numeric `class$slope` fixes the generating coefficient
+#' vector; a `prior_*()` declaration draws it once at the beginning of the
+#' simulation. Class probabilities, locations and scales are supplied through
+#' `class_parameters` when fixed generating values are required.
+#'
 #' @inheritParams simulate_joinme
 #' @param n_classes Number of latent classes \(G\); must be an integer of at
 #'   least two. This has the same meaning as in [joinme_mix()].
@@ -82,12 +107,17 @@
 #' @param class_ordering Class-label identification rule: `"intercept"`,
 #'   `"probability"` or `"none"`. The contextual default is identical to
 #'   [joinme_mix()].
-#' @param class_parameters Generative class probabilities, regression
-#'   coefficients, component locations and component scales. See Details.
+#' @param class_parameters Generative class probabilities, component locations
+#'   and component scales. See Details.
 #'
 #' @return A list with the same top-level components as [simulate_joinme()].
-#'   The `truth` and `true_params` entries additionally contain a `mixture`
-#'   record suitable for recovery studies and class-allocation assessment.
+#'   The `truth` entry additionally contains a `mixture` record suitable for
+#'   recovery studies and class-allocation assessment. It also records the
+#'   common marker-weight location as `marker_weight_mean`: one value named
+#'   `shared` when weight sets are shared, or one named value per active
+#'   association term otherwise. `marker_weight_mean_by_term` provides the
+#'   corresponding association-term representation; entries for inactive
+#'   weighted association forms are zero.
 #'   `truth$recovery$entry_point` is `"joinme_mix"`, and its `arguments`
 #'   preserve the formula-class, class-type, coordinate and ordering syntax
 #'   alongside every ordinary fitting argument.
@@ -104,12 +134,12 @@
 #'   n_classes = 3,
 #'   formulaClass = ~ x1,
 #'   class_type = c("subject", "vcov"),
+#'   truth = jm_truth(class = list(slope = c(
+#'     "class_1:x1" = -0.6,
+#'     "class_2:x1" = 0.4
+#'   ))),
 #'   class_parameters = list(
 #'     probability = c(0.25, 0.45, 0.30),
-#'     coefficient = list(subject = c(
-#'       "class_1:x1" = -0.6,
-#'       "class_2:x1" = 0.4
-#'     )),
 #'     location = matrix(
 #'       c(-1.5, -0.8, 0, 0, 1.5, 0.8),
 #'       nrow = 3,
@@ -142,7 +172,7 @@ simulate_joinme_mix <- function(
   formulaDist = NULL,
   formulaAssoc = NULL,
   transforms = NULL,
-  priors = joinme_priors(),
+  truth = joinme_truth(),
   n_id = 50,
   families = c("gaussian", "student_t", "binomial"),
   marker_levels = NULL,
@@ -151,32 +181,14 @@ simulate_joinme_mix <- function(
   censor_longitudinal_after_event = TRUE,
   left_truncation_max = 0,
   truncate_longitudinal_before_entry = TRUE,
-  ...,
   seed = .Random.seed[[1]],
   covariate_formulas = list(
     x1 ~ rnorm(n_id),
     x2 ~ rnorm(n_id)
   ),
-  marker_weights = NULL,
-  shared_marker_weights = TRUE,
-  fixed_marker_weights = FALSE,
   shrinkage = 0L,
   assoc = c("cv_total"),
-  assoc_coefs = c(cv_total = 0.6),
-  beta_long = NULL,
-  beta_event = NULL,
-  dist_coefs = list(),
-  re_params = list(
-    id = list(sd = NULL, corr = NULL),
-    marker = list(sd = NULL, corr = NULL),
-    id_marker_cov = list(
-      latent = list(sd = NULL, corr = NULL),
-      sd = list(alpha = NULL, beta = NULL, lambda = NULL),
-      corr = list(alpha = NULL, beta = NULL, lambda = NULL),
-      diag_link = "softplus"
-    ),
-    dist = list()
-  ),
+  vcov_diag_link = "softplus",
   family_params = list(
     gaussian = list(sigma = 1.0),
     student_t = list(sigma = 1.5, nu = 4),
@@ -190,10 +202,6 @@ simulate_joinme_mix <- function(
     beta = list(kappa = 10),
     cumulative_logit = list(cutpoints = c(-1, 1))
   ),
-  h0 = NULL,
-  baseline_hazard = list(type = "weibull", shape = 1.4, scale = 6.0),
-  formulaBasehaz = NULL,
-  beta_basehaz = NULL,
   time_cens = 8.0,
   eps_cs = 1e-3,
   integration_control = list(
@@ -229,9 +237,17 @@ simulate_joinme_mix <- function(
   supplied_call <- match.call(
     expand.dots = TRUE
   ) # original call retained to distinguish defaults from explicit requests
+  if (!inherits(truth, "joinme_truth")) {
+    cli::cli_abort(c(
+      x = "{.arg truth} must be created with {.fn jm_truth}.",
+      i = "Fixed generating values and their between-simulation distributions belong in that declaration."
+    ))
+  }
   selected_class_types <- .canonical_class_types(
     class_type
   ) # checked public class types before ordinary simulation work begins
+  simulation_truth_request <- unclass(truth) # fixed-or-random population declarations used once for this mixture simulation
+  checked_prior_specification <- attr(truth, "fitting_priors", exact = TRUE) # probability distributions retained for the optional recovery fit
   if (length(selected_class_types) == 0L) {
     cli::cli_abort(
       "{.arg class_type} must select at least one class type."
@@ -258,7 +274,7 @@ simulate_joinme_mix <- function(
     )
   }
 
-  # Step 1: retain the fitting entry point's mixture syntax in one small,
+  # Retain the fitting entry point's mixture syntax in one small,
   # unevaluated specification. The ordinary simulator will validate the
   # formula-derived dimensions after it has built the same random-effect
   # design matrices used for data generation.
@@ -268,10 +284,13 @@ simulate_joinme_mix <- function(
     class_type = selected_class_types, # random-effect blocks receiving mixture distributions
     class_dimensions = class_dimensions, # selected coordinates by block
     class_ordering = class_ordering, # label-identification convention
-    class_parameters = class_parameters # fixed generative mixture parameters
+    class_parameters = class_parameters, # fixed generative mixture probabilities, locations and scales
+    class_slope_declaration = simulation_truth_request$class$slope %||%
+      checked_prior_specification$class$slope, # fixed vector or generating distribution for formulaClass coefficients
+    class_prior = checked_prior_specification$class # recovery priors for baseline probabilities and class regression
   )
 
-  # Step 2: reconstruct the ordinary simulation call from the arguments that
+  # Reconstruct the ordinary simulation call from the arguments that
   # were actually supplied. Missing arguments remain missing, so their defaults
   # continue to be owned by `simulate_joinme()` rather than duplicated at
   # runtime. Removing only the six mixture arguments establishes a one-to-one
@@ -296,29 +315,7 @@ simulate_joinme_mix <- function(
   simulation_arguments$.mixture_specification <-
     mixture_specification # private, already checked mixture request
 
-  # A longitudinal-only request still needs subject covariates while the
-  # ordinary engine constructs model matrices. A zero-hazard internal
-  # survival formula provides that scaffold without censoring longitudinal
-  # observations or allowing the event process to affect any generated value.
-  if (longitudinal_only) {
-    simulation_arguments$formulaEvent <-
-      survival::Surv(time, event) ~ 1
-    simulation_arguments$formulaAssoc <- NULL
-    simulation_arguments$assoc <- "cv_total"
-    simulation_arguments$assoc_coefs <- c(cv_total = 0)
-    simulation_arguments$h0 <- function(t) {
-      rep(0, length(t))
-    }
-    simulation_arguments$censor_longitudinal_after_event <- FALSE
-    simulation_arguments$root_control <- list(
-      t_init = time_cens,
-      t_max = time_cens,
-      expand = 1.7,
-      max_expand = 1L
-    )
-  }
-
-  # Step 3: execute the common generator. The private specification changes
+  # Execute the common generator. The private specification changes
   # only standardised random-effect draws; all downstream trajectory, response
   # and event calculations remain those of `simulate_joinme()`.
   simulation <- do.call(
@@ -329,69 +326,12 @@ simulate_joinme_mix <- function(
   if (longitudinal_only) {
     simulation$dataEvent <- NULL
     simulation$truth$formulaEvent <- NULL
-    simulation$true_params$formulaEvent <- NULL
     simulation$truth$assoc <- character(0)
-    simulation$true_params$assoc <- character(0)
     simulation$truth$recovery$arguments$formulaEvent <- NULL
     simulation$truth$recovery$arguments$dataEvent <- NULL
     simulation$truth$recovery$arguments$assoc <- character(0)
-    simulation$true_params$recovery$arguments$formulaEvent <- NULL
-    simulation$true_params$recovery$arguments$dataEvent <- NULL
-    simulation$true_params$recovery$arguments$assoc <- character(0)
   }
   simulation
-}
-
-#' Resolve one domain's class-regression coefficients for simulation
-#'
-#' @param supplied User-supplied numeric vector, or `NULL`.
-#' @param design_record Allocation-domain design produced by
-#'   `.mixture_class_design()`.
-#' @param domain Plain-language allocation-domain name.
-#'
-#' @return A named numeric vector in the fitted concatenated-column order.
-#' @keywords internal
-#' @noRd
-.sim_mixture_class_coefficient <- function(supplied, design_record, domain) {
-  required_names <- design_record$columns %||% character(0) # fitted coefficient labels
-  required_count <- length(required_names) # number of coefficients for this domain
-  if (required_count == 0L) {
-    if (!is.null(supplied) && length(supplied) > 0L) {
-      cli::cli_abort(
-        "No class-regression coefficient is required for the {domain} domain."
-      )
-    }
-    return(stats::setNames(numeric(0), character(0)))
-  }
-  if (is.null(supplied)) {
-    return(stats::setNames(rep(0, required_count), required_names))
-  }
-
-  supplied_names <- names(supplied) # optional design-column labels
-  supplied <- as.numeric(supplied) # finite coefficient values to be aligned
-  if (any(!is.finite(supplied))) {
-    cli::cli_abort(
-      "{.arg class_parameters$coefficient} for {domain} must be finite."
-    )
-  }
-  if (!is.null(supplied_names) && all(nzchar(supplied_names))) {
-    unknown_names <- setdiff(supplied_names, required_names)
-    if (length(unknown_names) > 0L) {
-      cli::cli_abort(
-        "Unknown {domain} class coefficient{?s}: {paste(unknown_names, collapse = ', ')}."
-      )
-    }
-    coefficient <- stats::setNames(rep(0, required_count), required_names)
-    coefficient[supplied_names] <- supplied
-    return(coefficient)
-  }
-  if (length(supplied) != required_count) {
-    cli::cli_abort(c(
-      x = "{.arg class_parameters$coefficient} has the wrong length for {domain}.",
-      i = "Expected {required_count} value{?s}; received {length(supplied)}."
-    ))
-  }
-  stats::setNames(supplied, required_names)
 }
 
 #' Resolve packed mixture locations or scales
@@ -618,8 +558,10 @@ simulate_joinme_mix <- function(
       n_classes = n_classes,
       class_type = selected_types,
       class_dimensions = specification$class_dimensions,
-      class_probability_concentration = 1,
-      class_regression_prior = prior_normal(),
+      class_prior = list(
+        baseline_prob = specification$class_prior$baseline_prob,
+        slope = specification$class_prior$slope
+      ),
       class_design = class_design,
       class_ordering = ordering,
       include_survival = TRUE
@@ -646,8 +588,6 @@ simulate_joinme_mix <- function(
   allowed_parameter_names <- c(
     "probability",
     "probabilities",
-    "coefficient",
-    "coefficients",
     "location",
     "locations",
     "scale",
@@ -664,7 +604,6 @@ simulate_joinme_mix <- function(
   }
   alias_pairs <- list(
     c("probability", "probabilities"),
-    c("coefficient", "coefficients"),
     c("location", "locations"),
     c("scale", "scales")
   ) # singular and plural convenience aliases which must not be duplicated
@@ -680,11 +619,14 @@ simulate_joinme_mix <- function(
   probability_supplied <- !is.null(
     class_parameters$probability %||% class_parameters$probabilities
   ) # whether strict probability order must be checked against user input
-  probability <- as.numeric(
-    class_parameters$probability %||%
-      class_parameters$probabilities %||%
-      if (identical(ordering, "probability")) seq_len(n_classes) else rep(1, n_classes)
-  ) # unnormalised zero-covariate component probabilities
+  probability_input <- class_parameters$probability %||%
+    class_parameters$probabilities
+  probability <- if (is.null(probability_input)) {
+    drawn_probability <- stats::rgamma(n_classes, shape = 2, rate = 2)
+    if (identical(ordering, "probability")) sort(drawn_probability) else drawn_probability
+  } else {
+    as.numeric(probability_input)
+  } # unnormalised zero-covariate component probabilities, drawn once when omitted
   if (
     length(probability) != n_classes ||
       any(!is.finite(probability)) ||
@@ -710,55 +652,36 @@ simulate_joinme_mix <- function(
   # Step 5: align class-regression coefficients and calculate unit-specific
   # probabilities with the same stable multinomial-logit evaluator used for
   # posterior dynamic prediction.
-  coefficient_input <-
-    class_parameters$coefficient %||% class_parameters$coefficients
-  if (
-    is.list(coefficient_input) &&
-      (
-        is.null(names(coefficient_input)) ||
-          any(!nzchar(names(coefficient_input)))
-      )
-  ) {
-    cli::cli_abort(
-      "{.arg class_parameters$coefficient} must use subject and/or marker names."
+  subject_coefficient_names <- class_design$subject$columns %||% character(0) # formulaClass coefficients governing subject allocations
+  marker_coefficient_names <- class_design$marker$columns %||% character(0) # formulaClass coefficients governing marker allocations
+  active_coefficient_domains <- c(
+    subject = length(subject_coefficient_names) > 0L,
+    marker = length(marker_coefficient_names) > 0L
+  ) # domains contributing class-regression coefficients
+  complete_coefficient_names <- if (sum(active_coefficient_domains) > 1L) {
+    c(
+      paste0("subject::", subject_coefficient_names),
+      paste0("marker::", marker_coefficient_names)
     )
-  }
-  if (is.list(coefficient_input)) {
-    unknown_coefficient_domains <- setdiff(
-      names(coefficient_input),
-      c("subject", "marker")
-    )
-    if (length(unknown_coefficient_domains) > 0L) {
-      cli::cli_abort(
-        "Unknown class-coefficient domain{?s}: {paste(unknown_coefficient_domains, collapse = ', ')}."
-      )
-    }
-  }
-  if (
-    !is.null(coefficient_input) &&
-      !is.list(coefficient_input) &&
-      sum(c(
-        ncol(class_design$subject$matrix) > 0L,
-        ncol(class_design$marker$matrix) > 0L
-      )) > 1L
-  ) {
-    cli::cli_abort(c(
-      x = "{.arg class_parameters$coefficient} is ambiguous across two allocation domains.",
-      i = "Supply list(subject = ..., marker = ...)."
-    ))
-  }
+  } else {
+    c(subject_coefficient_names, marker_coefficient_names)
+  } # unambiguous coefficient order shared by simulation and fitting
+  complete_class_coefficient <- .sim_resolve_prior_or_fixed(
+    specification$class_slope_declaration,
+    complete_coefficient_names,
+    "class$slope"
+  ) # one population draw or one fixed vector for the complete formulaClass regression
+  number_subject_coefficients <- length(subject_coefficient_names) # split point between subject and marker domains
   coefficient_by_domain <- list(
-    subject = .sim_mixture_class_coefficient(
-      if (is.list(coefficient_input)) coefficient_input$subject else coefficient_input,
-      class_design$subject,
-      "subject"
+    subject = stats::setNames(
+      complete_class_coefficient[seq_len(number_subject_coefficients)],
+      subject_coefficient_names
     ),
-    marker = .sim_mixture_class_coefficient(
-      if (is.list(coefficient_input)) coefficient_input$marker else coefficient_input,
-      class_design$marker,
-      "marker"
+    marker = stats::setNames(
+      complete_class_coefficient[number_subject_coefficients + seq_along(marker_coefficient_names)],
+      marker_coefficient_names
     )
-  ) # concatenated regression coefficients in design-column order
+  ) # domain-specific views used by the multinomial-logit probability evaluator
   probability_by_domain <- lapply(c("subject", "marker"), function(domain) {
     probability_array <- .mixture_class_probability(
       baseline_probability = matrix(probability, nrow = 1L),
@@ -817,16 +740,24 @@ simulate_joinme_mix <- function(
     }
   ) # realised latent classes, never appended to the observed datasets
 
-  # Step 7: resolve complete packed location and scale matrices. Defaults are
-  # intentionally separated enough for simulation examples while remaining
-  # moderate on the standardised random-effect scale.
+  # Step 7: resolve complete packed location and scale matrices. Omitted
+  # population matrices are drawn once, then fixed for all allocation units.
+  # Their centres remain separated enough for useful recovery studies.
   total_dimension <- fit_layout$K_mix # packed selected-coordinate count
   default_centre <- seq(-1.25, 1.25, length.out = n_classes)
   default_location <- matrix(
     rep(default_centre, total_dimension),
     nrow = n_classes,
     ncol = total_dimension
-  ) # default ordered component centres on every selected coordinate
+  ) + matrix(
+    stats::rnorm(n_classes * total_dimension, mean = 0, sd = 0.15),
+    nrow = n_classes,
+    ncol = total_dimension
+  ) # population component locations drawn once around separated class centres
+  ordered_coordinate <- fit_layout$mix_ordered_location_coordinate
+  if (identical(ordering, "intercept") && ordered_coordinate > 0L) {
+    default_location[, ordered_coordinate] <- sort(default_location[, ordered_coordinate])
+  }
   location <- .sim_mixture_component_matrix(
     class_parameters$location %||% class_parameters$locations,
     default = default_location,
@@ -835,12 +766,15 @@ simulate_joinme_mix <- function(
   ) # complete component-location matrix
   scale <- .sim_mixture_component_matrix(
     class_parameters$scale %||% class_parameters$scales,
-    default = matrix(0.65, nrow = n_classes, ncol = total_dimension),
+    default = matrix(
+      stats::runif(n_classes * total_dimension, min = 0.45, max = 0.85),
+      nrow = n_classes,
+      ncol = total_dimension
+    ),
     layout = fit_layout,
     argument_name = "class_parameters$scale",
     require_positive = TRUE
   ) # complete positive component-scale matrix
-  ordered_coordinate <- fit_layout$mix_ordered_location_coordinate
   if (
     identical(ordering, "intercept") &&
       ordered_coordinate > 0L &&

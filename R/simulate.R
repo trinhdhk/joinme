@@ -28,11 +28,68 @@ softplus <- function(x) {
   ifelse(x > 0, x + log1p(exp(-x)), log1p(exp(x)))
 }
 
-#' Draw standardized shrinkage latents
+#' Separate tied event-interval endpoints after simulation
+#'
+#' @description
+#' Numerical root finding can return the lower boundary of an event-time
+#' interval when the underlying event occurs closer to zero than the solver's
+#' tolerance.  A counting-process likelihood requires a strictly positive
+#' interval length.  This helper moves an exactly tied stop time by a
+#' scientifically negligible distance that remains representable on the time
+#' scale.  Stops below their starts are deliberately left unchanged so that a
+#' genuinely invalid interval is still rejected by [joinme_standata()].
+#'
+#' @param interval_start Numeric vector of event-interval start times.
+#' @param interval_stop Numeric vector of event-interval stop times.
+#' @param absolute_offset Small positive separation used near time zero.
+#'
+#' @return Numeric stop times, with exact ties separated from their starts.
+#' @keywords internal
+#' @noRd
+.sim_separate_tied_event_endpoints <- function(
+  interval_start,
+  interval_stop,
+  absolute_offset = 1e-9
+) {
+  interval_start <- as.numeric(interval_start) # event-interval lower endpoints in the simulation time unit
+  interval_stop <- as.numeric(interval_stop) # event-interval upper endpoints before numerical tie correction
+  absolute_offset <- as.numeric(absolute_offset) # minimum separation used when the event time is at or near zero
+  if (length(interval_start) == 1L && length(interval_stop) != 1L) {
+    interval_start <- rep(interval_start, length(interval_stop))
+  }
+  if (length(interval_start) != length(interval_stop)) {
+    cli::cli_abort("Internal event-interval starts and stops must have the same length.")
+  }
+  if (
+    length(absolute_offset) != 1L ||
+      !is.finite(absolute_offset) ||
+      absolute_offset <= 0
+  ) {
+    cli::cli_abort("The internal event-interval offset must be one positive finite number.")
+  }
+  if (any(!is.finite(interval_start)) || any(!is.finite(interval_stop))) {
+    cli::cli_abort("Simulated event-interval endpoints must be finite.")
+  }
+
+  tied_endpoint <- interval_stop == interval_start # exact numerical ties requiring a strictly positive interval length
+  if (!any(tied_endpoint)) return(interval_stop)
+
+  time_magnitude <- pmax(1, abs(interval_start[tied_endpoint])) # local scale used to choose a representable floating-point increment
+  representable_offset <- 8 * .Machine$double.eps * time_magnitude # separation exceeding several floating-point units at the current time scale
+  endpoint_offset <- pmax(absolute_offset, representable_offset) # final negligible separation on both small and large time scales
+  separated_stop <- interval_start[tied_endpoint] + endpoint_offset # corrected stop values for the tied intervals only
+  if (any(!is.finite(separated_stop)) || any(separated_stop <= interval_start[tied_endpoint])) {
+    cli::cli_abort("Could not represent a stop time strictly greater than its simulated start time.")
+  }
+  interval_stop[tied_endpoint] <- separated_stop
+  interval_stop
+}
+
+#' Draw standardised shrinkage latents
 #'
 #' @param n Number of draws.
 #' @param shrinkage Integer family code: 0 Student-t(6), 1 Laplace, 2 Normal.
-#' @return Numeric vector of standardized draws.
+#' @return Numeric vector of standardised draws.
 #' @keywords internal
 #' @noRd
 .sim_draw_standard_shrinkage <- function(n, shrinkage) {
@@ -44,6 +101,306 @@ softplus <- function(x) {
   }
   if (shrinkage == 2L) return(stats::rnorm(n))
   stats::rt(n, df = 6)
+}
+
+#' Draw marker-weight departures from a declared prior family
+#'
+#' @description
+#' Generates the same centred, unit-scale marker-weight departure used by the
+#' fitting programme.  Ordinary Student-t, Normal and Laplace declarations are
+#' direct marginal draws.  A regularised horseshoe first draws its local,
+#' global and finite-slab scales, then applies the same transformation as the
+#' Stan prior module.  Returning the hierarchy alongside the departures makes
+#' a simulation study fully auditable without changing the effective weights.
+#'
+#' @param n Number of marker-specific departures.
+#' @param prior A checked `joinme_prior_spec` whose location and ordinary scale
+#'   have already been fixed at zero and one.
+#' @param n_sets Number of marker-weight sets. The family name `"student_t"`
+#'   gives every set `2 + Gamma(2, 0.1)` degrees of freedom, exactly as in
+#'   Stan.
+#'
+#' @return A named list containing `departure`, `raw`, and any horseshoe scales.
+#' @keywords internal
+#' @noRd
+.sim_draw_marker_weight_prior <- function(n, prior, n_sets = 1L) {
+  number_departures <- as.integer(n) # number of marker-by-weight-set deviations required by the simulation
+  number_sets <- as.integer(n_sets) # shared or term-specific weight sets governing contiguous marker groups in Stan
+  if (length(number_sets) != 1L || is.na(number_sets) || number_sets < 1L ||
+      number_departures %% number_sets != 0L) {
+    cli::cli_abort("{.arg n_sets} must be positive and divide the number of marker-weight departures exactly.")
+  }
+  if (number_departures <= 0L) {
+    return(list(
+      departure = numeric(0),
+      raw = numeric(0),
+      df = numeric(0),
+      df_was_fitted = logical(0),
+      local_scale = numeric(0),
+      global_scale = numeric(0),
+      slab_multiplier = numeric(0)
+    ))
+  }
+
+  if (identical(prior$family, "student_t")) {
+    markers_per_set <- number_departures %/% number_sets # marker count contributing information to each set-specific tail parameter
+    fitted_df <- 2 + stats::rgamma(number_sets, shape = 2, rate = 0.1) # shifted-Gamma law used for the fitted Stan distributional parameter
+    departure_matrix <- matrix(0, nrow = number_sets, ncol = markers_per_set) # set-by-marker departures aligned with effective-weight construction
+    for (set_index in seq_len(number_sets)) {
+      departure_matrix[set_index, ] <- stats::rt(markers_per_set, df = fitted_df[[set_index]])
+    }
+    departure <- as.numeric(t(departure_matrix)) # set-major order matching contiguous Stan segments for each marker-weight set
+    return(list(
+      departure = departure,
+      raw = departure,
+      df = fitted_df,
+      df_was_fitted = rep(TRUE, number_sets)
+    ))
+  }
+  if (identical(prior$family, "normal")) {
+    departure <- stats::rnorm(number_departures) # centred unit-scale Gaussian deviations
+    return(list(departure = departure, raw = departure))
+  }
+  if (identical(prior$family, "laplace")) {
+    departure <- sample(c(-1, 1), number_departures, replace = TRUE) *
+      stats::rexp(number_departures, rate = 1) # centred unit-scale-parameter Laplace deviations
+    return(list(departure = departure, raw = departure))
+  }
+
+  raw <- stats::rnorm(number_departures) # standard-Normal coefficient seeds in the regularised horseshoe
+  local_scale <- abs(stats::rt(number_departures, df = prior$df)) # coefficient-specific half-Student-t local scales
+  global_scale <- abs(stats::rt(1L, df = prior$global_df)) * prior$global_scale # shared half-Student-t global scale for this marker-weight block
+  slab_multiplier <- 1 / stats::rgamma(
+    1L,
+    shape = 0.5 * prior$slab_df,
+    rate = 0.5 * prior$slab_df
+  ) # inverse-gamma finite-slab variance multiplier used by Stan
+  squared_slab <- prior$slab_scale^2 * slab_multiplier # realised finite-slab variance
+  regularised_local_scale <- sqrt(
+    squared_slab * local_scale^2 /
+      (squared_slab + global_scale^2 * local_scale^2)
+  ) # local scales after the finite slab has regularised their upper tails
+  departure <- raw * global_scale * regularised_local_scale # effective centred marker-weight deviations
+
+  list(
+    departure = departure,
+    raw = raw,
+    local_scale = local_scale,
+    global_scale = global_scale,
+    slab_multiplier = slab_multiplier
+  )
+}
+
+#' Draw or fix a population coefficient vector from a simulation declaration
+#'
+#' @description
+#' A `prior_*()` object is interpreted as a population-generating distribution.
+#' A numeric declaration is interpreted as the population coefficient itself.
+#' This distinction is confined to simulation. A separate fitting-prior object
+#' supplies the fitting declaration retained in `truth$recovery`.
+#'
+#' @param declaration Numeric fixed values or a `joinme_prior_spec`.
+#' @param coefficient_names Names and order of the required coefficients.
+#' @param context Statistical component named in diagnostic messages.
+#'
+#' @return A named numeric vector in `coefficient_names` order.
+#' @keywords internal
+#' @noRd
+.sim_resolve_prior_or_fixed <- function(declaration, coefficient_names, context) {
+  coefficient_names <- as.character(coefficient_names) # fitted model-matrix order defining the population coefficient vector
+  number_coefficients <- length(coefficient_names) # dimension of the requested population regression component
+  if (number_coefficients == 0L) return(stats::setNames(numeric(0), coefficient_names))
+
+  if (is.numeric(declaration) && !inherits(declaration, "joinme_prior_spec")) {
+    if (!is.null(dim(declaration))) {
+      cli::cli_abort("Fixed {.arg {context}} coefficients must be supplied as a numeric vector.")
+    }
+    supplied_names <- names(declaration) # optional model-matrix labels supplied for exact alignment
+    fixed_values <- as.numeric(declaration) # population values held fixed throughout generation
+    if (!is.null(supplied_names)) {
+      unscoped_coefficient_names <- sub("^(all::|family=[^:]+::)", "", coefficient_names) # readable formula labels accepted for scoped distributional designs
+      if (setequal(supplied_names, unscoped_coefficient_names) && !anyDuplicated(unscoped_coefficient_names)) {
+        supplied_names <- coefficient_names[match(supplied_names, unscoped_coefficient_names)]
+      }
+      unknown_names <- setdiff(supplied_names, coefficient_names)
+      if (length(unknown_names) > 0L || anyDuplicated(supplied_names)) {
+        cli::cli_abort("Fixed {.arg {context}} coefficients have unknown or duplicated names.")
+      }
+      if (!setequal(supplied_names, coefficient_names)) {
+        cli::cli_abort("Named fixed {.arg {context}} coefficients must name every required coefficient exactly once.")
+      }
+      fixed_values <- fixed_values[match(coefficient_names, supplied_names)]
+    } else if (length(fixed_values) == 1L) {
+      fixed_values <- rep(fixed_values, number_coefficients)
+    } else if (length(fixed_values) != number_coefficients) {
+      cli::cli_abort("Fixed {.arg {context}} coefficients must have length one or {number_coefficients}.")
+    }
+    if (any(!is.finite(fixed_values))) cli::cli_abort("Fixed {.arg {context}} coefficients must be finite.")
+    return(stats::setNames(fixed_values, coefficient_names))
+  }
+
+  if (!inherits(declaration, "joinme_prior_spec")) {
+    cli::cli_abort("{.arg {context}} must be a numeric fixed value or a prior_*() declaration.")
+  }
+  expand_parameter <- function(value, name) {
+    value <- as.numeric(unlist(value, use.names = FALSE))
+    if (length(value) == 1L) value <- rep(value, number_coefficients)
+    if (length(value) != number_coefficients || any(!is.finite(value))) {
+      cli::cli_abort("The {.arg {context}} {name} must have length one or {number_coefficients}.")
+    }
+    value
+  }
+  location <- expand_parameter(declaration$mu %||% 0, "location") # population distribution location aligned with coefficient order
+  scale <- expand_parameter(declaration$scale %||% 1, "scale") # population distribution scale aligned with coefficient order
+  if (any(scale <= 0)) cli::cli_abort("The {.arg {context}} scale must be positive.")
+  family <- declaration$family # declared population-generating family
+  draws <- switch(
+    family,
+    normal = stats::rnorm(number_coefficients, location, scale),
+    student_t = location + scale * stats::rt(number_coefficients, df = declaration$df),
+    laplace = location + scale * sample(c(-1, 1), number_coefficients, replace = TRUE) * stats::rexp(number_coefficients),
+    horseshoe = {
+      local_scale <- abs(stats::rt(number_coefficients, df = declaration$df)) # coefficient-specific half-Student-t scales
+      global_scale <- abs(stats::rt(1L, df = declaration$global_df)) * declaration$global_scale # shared global population scale
+      slab_multiplier <- 1 / stats::rgamma(1L, 0.5 * declaration$slab_df, 0.5 * declaration$slab_df) # finite-slab variance multiplier
+      squared_slab <- declaration$slab_scale^2 * slab_multiplier # realised slab variance
+      regularised_local <- sqrt(squared_slab * local_scale^2 / (squared_slab + global_scale^2 * local_scale^2)) # regularised local scales
+      location + scale * stats::rnorm(number_coefficients) * global_scale * regularised_local
+    },
+    cli::cli_abort("Unsupported population-generating family {.val {family}} for {.arg {context}}.")
+  )
+  stats::setNames(as.numeric(draws), coefficient_names)
+}
+
+#' Resolve intercept and slope population declarations
+#'
+#' @param raw_component Unnormalised component retained by [jm_truth()].
+#' @param checked_component Normalised fitting-prior component.
+#' @param coefficient_names Model-matrix coefficient labels.
+#' @param context Statistical component used in messages.
+#'
+#' @return Named population coefficient vector.
+#' @keywords internal
+#' @noRd
+.sim_resolve_regression_component <- function(raw_component, checked_component, coefficient_names, context) {
+  raw_component <- raw_component %||% list() # analyst's prior-or-fixed simulation declarations
+  if (is.numeric(raw_component) && !inherits(raw_component, "joinme_prior_spec")) {
+    return(.sim_resolve_prior_or_fixed(raw_component, coefficient_names, context))
+  } # a bare numeric component fixes the complete model-matrix vector
+  if (inherits(raw_component, "joinme_prior_spec")) {
+    return(.sim_resolve_prior_or_fixed(raw_component, coefficient_names, context))
+  }
+  intercept_positions <- which(grepl("(^|::)\\(Intercept\\)$", coefficient_names)) # population intercept columns under the fitted design convention
+  slope_positions <- setdiff(seq_along(coefficient_names), intercept_positions) # all non-intercept population columns
+  output <- stats::setNames(numeric(length(coefficient_names)), coefficient_names) # complete population vector assembled role by role
+  if (length(intercept_positions) > 0L) {
+    output[intercept_positions] <- .sim_resolve_prior_or_fixed(
+      raw_component$intercept %||% checked_component$intercept,
+      coefficient_names[intercept_positions], paste0(context, "$intercept")
+    )
+  }
+  if (length(slope_positions) > 0L) {
+    output[slope_positions] <- .sim_resolve_prior_or_fixed(
+      raw_component$slope %||% checked_component$slope,
+      coefficient_names[slope_positions], paste0(context, "$slope")
+    )
+  }
+  output
+}
+
+#' Combine global and component population declarations for simulation
+#'
+#' @param simulation_request Unnormalised declaration retained by [jm_truth()].
+#' @param component_name Scientific component name.
+#' @param roles Regression roles required by the component.
+#'
+#' @return A named list containing the most specific declaration for each role.
+#' @keywords internal
+#' @noRd
+.sim_population_component <- function(simulation_request, component_name, roles = c("intercept", "slope")) {
+  component <- simulation_request[[component_name]] %||% list() # component-specific population declaration
+  if ((is.numeric(component) || inherits(component, "joinme_prior_spec")) && length(roles) > 1L) {
+    return(component)
+  } # a bare multi-role declaration governs the complete regression vector in model-matrix order
+  if (inherits(component, "joinme_prior_spec") || is.numeric(component)) {
+    component <- stats::setNames(rep(list(component), length(roles)), roles)
+  }
+  if (!is.list(component)) component <- list()
+  stats::setNames(lapply(roles, function(role_name) {
+    component[[role_name]] %||% simulation_request[[role_name]]
+  }), roles) # component declaration with the global population fallback filled role by role
+}
+
+#' Resolve formulaDist population coefficients, including scoped declarations
+#'
+#' @param simulation_request Unnormalised declaration retained by [jm_truth()].
+#' @param checked_parameter Normalised priors for one distributional parameter.
+#' @param parameter_name Canonical formulaDist left-hand-side name.
+#' @param coefficient_names Scoped model-matrix column names.
+#' @param marker_levels Longitudinal marker labels.
+#' @param family_names Family label for each marker.
+#'
+#' @return A named population coefficient vector in fitted design order.
+#' @keywords internal
+#' @noRd
+.sim_distributional_population <- function(
+  simulation_request,
+  checked_parameter,
+  parameter_name,
+  coefficient_names,
+  marker_levels,
+  family_names
+) {
+  raw_collection <- simulation_request$distributional %||% list() # all unnormalised formulaDist declarations
+  raw_default <- raw_collection[[parameter_name]] # parameter-wide fixed values or generating distributions
+  base_component <- .sim_population_component(
+    c(simulation_request[c("intercept", "slope")], stats::setNames(list(raw_default), parameter_name)),
+    parameter_name
+  )
+  output <- .sim_resolve_regression_component(
+    base_component, checked_parameter, coefficient_names, parameter_name
+  ) # parameter-wide coefficients before family or marker refinements
+
+  selector_names <- setdiff(names(raw_collection) %||% character(0), parameter_name)
+  for (selector_name in selector_names) {
+    selector <- tryCatch(.parse_dist_selector_text(selector_name, allow_marker = TRUE), error = function(error) NULL)
+    if (is.null(selector) || !identical(selector$param, parameter_name) || is.null(selector$scope_type)) next
+    scope_family <- if (identical(selector$scope_type, "family")) {
+      .canonical_family_name(selector$scope_value)
+    } else {
+      marker_position <- match(selector$scope_value, marker_levels)
+      if (is.na(marker_position)) next
+      family_names[[marker_position]]
+    } # fitted family block selected directly or through its marker label
+    positions <- which(grepl(paste0("^family=", scope_family, "::"), coefficient_names))
+    if (length(positions) == 0L) next
+    scoped_request <- raw_collection[[selector_name]] # population override for this fitted family block
+    stripped_names <- sub("^family=[^:]+::", "", coefficient_names[positions])
+    if (inherits(scoped_request, "joinme_prior_spec") || is.numeric(scoped_request)) {
+      output[positions] <- .sim_resolve_prior_or_fixed(
+        scoped_request, stripped_names, selector_name
+      ) # bare scoped declaration follows the selected family block's complete model-matrix order
+    } else {
+      scoped_request <- scoped_request %||% list()
+      intercept_positions <- which(grepl("(^|::)\\(Intercept\\)$", stripped_names)) # intercept columns within this selected family block
+      slope_positions <- setdiff(seq_along(stripped_names), intercept_positions) # non-intercept columns within this selected family block
+      if (!is.null(scoped_request$intercept) && length(intercept_positions) > 0L) {
+        output[positions[intercept_positions]] <- .sim_resolve_prior_or_fixed(
+          scoped_request$intercept,
+          stripped_names[intercept_positions],
+          paste0(selector_name, "$intercept")
+        )
+      }
+      if (!is.null(scoped_request$slope) && length(slope_positions) > 0L) {
+        output[positions[slope_positions]] <- .sim_resolve_prior_or_fixed(
+          scoped_request$slope,
+          stripped_names[slope_positions],
+          paste0(selector_name, "$slope")
+        )
+      }
+    }
+  }
+  output
 }
 
 #' Declare a time-varying simulation covariate generator
@@ -478,6 +835,12 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #' The implementation is model-matrix based end-to-end, so every simulated component
 #' is generated from the same formula machinery used during fitting.
 #'
+#' Population coefficients are declared through `truth`. A `prior_*()` object
+#' generates one population coefficient vector and a finite numeric vector
+#' fixes that vector exactly. Every realised coefficient is stored in `truth`.
+#' Random effects, marker-weight departures, observations and event times remain
+#' conditional random realisations.
+#'
 #' @param formulaLong Longitudinal formula (same role as in `joinme()`).
 #'   Grouping terms may use `weighted(group, weights = <column>)` to mirror
 #'   fitting syntax. The referenced weight column
@@ -485,7 +848,10 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   `covariate_formulas`). In nested marker terms, outer `( ... || marker )`
 #'   keeps marker-only and marker-by-id blocks independent, while inner
 #'   `( ... || id )` makes the marker-by-id covariance diagonal.
-#' @param formulaEvent Event/survival formula (same role as in `joinme()`).
+#' @param formulaEvent Event/survival formula (same role as in `joinme()`). Set
+#'   this to `NULL` to simulate only the nested longitudinal process. In that
+#'   case `dataEvent` is `NULL`, the complete scheduled longitudinal history is
+#'   retained, and `assoc` and `formulaAssoc` must be absent.
 #' @param formulaVCov Optional covariance-regression specification for the
 #'   id-specific marker-by-id covariance factor. A formula is shared by both
 #'   covariance components; `list(sd = ~ ..., corr = ~ ...)` supplies
@@ -496,8 +862,8 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'
 #'   The `sd` formula drives subject-specific standard deviations and the
 #'   `corr` formula drives Cholesky-correlation-factor rows used to build
-#'   `L_i = SD_i * K_i`; see
-#'   `re_params$id_marker_cov`.
+#'   `L_i = SD_i * K_i`; their population intercepts, slopes and latent
+#'   loadings are declared under `truth$vcov`.
 #'   The default `~ 1` gives intercept-only regressions for both components.
 #' @param formulaDist Optional distributional regression formulas (same role as in `joinme()`).
 #'   Supported LHS parameters are `sigma`, `nu`, `phi`, `alpha` (aliases:
@@ -561,31 +927,33 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'     bounded expit scale. This is useful
 #'     when the raw association feature has long tails or steep nonlinear effects.
 
-#' @param priors A [jm_prior()] declaration retained in `truth$priors` for the
-#'   corresponding recovery fit. Priors do not alter generated observations;
-#'   carrying the checked object prevents simulation and fitting scripts from
-#'   silently using different covariance-regression prior families.
-#' @param marker_weights Optional base marker weights used for association
-#'   aggregation. If `shared_marker_weights = TRUE`, supply one numeric vector to
-#'   be shared across all active weighted marker-based association terms. If
-#'   `shared_marker_weights = FALSE`, you may instead supply a named list with
-#'   entries `cv_total`, `cs_total`, `cv_marker`, and `cs_marker`.
-#' @param shared_marker_weights Logical. If `TRUE`, all active weighted
-#'   marker-based association terms share one marker-weight structure. If
-#'   `FALSE`, each active weighted marker-based association term uses its own
-#'   marker-weight structure.
-#' @param fixed_marker_weights Logical. This has the same meaning as in
-#'   `joinme()`. If `TRUE`, `marker_weights` are the effective weights and no
-#'   latent perturbation is drawn. If `FALSE` (the default), `marker_weights`
-#'   are base weights and the effective weights are
-#'   `marker_weights + z_marker_weights`. When base weights are omitted they
-#'   default to zero, exactly as they do in `joinme()` when marker weights are
-#'   estimated.
-#' @param shrinkage Integer selecting the distribution of each standardized
-#'   latent marker-weight perturbation when `fixed_marker_weights = FALSE`:
-#'   `0` draws Student-t with 6 degrees of freedom, `1` draws standard Laplace,
-#'   and `2` draws standard Normal. This is the same switch used by the Stan
-#'   priors. It does not change explicitly supplied fixed weights.
+#' @param truth A [jm_truth()] declaration for population generation. A numeric
+#'   intercept or slope fixes its
+#'   population coefficient vector; a `prior_*()` declaration draws that
+#'   vector once. This applies to `longitudinal`, `survival`, `baseline`,
+#'   `assoc_coef`, `vcov`, `functional`, and named `formulaDist` components. Its
+#'   `marker_weights$offset` component supplies the marker-specific
+#'   constant contribution and its `marker_weights$family` component generates centred
+#'   marker-specific weight departures, because those departures are otherwise
+#'   random simulation parameters. That field accepts a family name such as
+#'   `"student_t"`, `"normal"`, `"laplace"`, or `"horseshoe"`. The names
+#'   `"constant"` and `"none"` use the offset without a random departure. The
+#'   family name `"student_t"` draws one value per active set as
+#'   `2 + Gamma(2, 0.1)`, matching fitting. Departure location and ordinary scale remain zero and
+#'   one. All declarations and their realised population coefficients are
+#'   retained in the realised simulation truth.
+#'   Set `marker_weights$family` to `"constant"` or `"none"` when the
+#'   declared offset is the complete marker weight. No common location or
+#'   marker-specific departure is then drawn. Under a stochastic family, the
+#'   effective weight is `offset + marker_weight_mean + departure`, where the
+#'   departure is drawn directly from the declared centred unit-scale family.
+#'   No additional marker-weight scale is used: the survival association slope
+#'   already scales the weighted marker feature.
+#' @param shrinkage Integer selecting the random-effect component distribution:
+#'   `0` denotes Student-t with 6 degrees of freedom, `1` Laplace, and `2`
+#'   Normal. Marker-weight departures no longer use this switch; their family
+#'   is declared by `truth = jm_truth(marker_weights = list(family = "normal"))`
+#'   or another supported family name.
 #' @param n_id Number of subjects.
 #' @param families Marker-specific family names or `jm_family()` declarations.
 #'   Use `jm_family()` entries to supply custom `link`/`inv_link` expressions
@@ -606,9 +974,6 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   longitudinal observations are truncated at the subject event time. If FALSE,
 #'   the longitudinal schedule may continue after the event time up to
 #'   `time_cens`.
-#' @param ... Additional unused compatibility arguments. Legacy observation-count
-#'   inputs are ignored; the number of scheduled observations is inferred from
-#'   `times_obs`.
 #' @param seed RNG seed.
 #' @param covariate_formulas Named or LHS formulas used to generate event-level covariates,
 #'   e.g. `list(x1 ~ rnorm(n_id), x2 ~ rt(n_id, df = 5))`.
@@ -631,76 +996,9 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'
 #'   You can also provide `formulaAssoc = ~ ...` to select channels; when present,
 #'   it overrides `assoc`.
-#' @param assoc_coefs Association coefficients for hazard terms.
-#'   Non-`corr`/`vcov` terms accept scalar values. The `corr` term accepts a vector of
-#'   off-diagonal `K` coefficients ordered as `(2,1), (3,1), (3,2), ...` in
-#'   lower-triangular row-major order of the marker-by-id random-effect
-#'   covariance dimension. The `vcov` term accepts the same off-diagonal `K`
-#'   entries followed by the subject-specific standard deviations,
-#'   `(2,1), (3,1), (3,2), ..., sd_1, sd_2, ...`; when `||` is used in the
-#'   marker-by-id random-effects block, only the standard deviation entries are used.
-#'
-#'   Accepted input forms:
-#'   - named numeric vector, e.g. `c(cv_total = 0.4, cs_mean = -0.2)`,
-#'   - named list, e.g. `list(cv_total = 0.4, corr = c(0.2, -0.1), vcov = c(0.4, 0.1, 0.5))`.
-#'   Missing channels default to 0.
-#' @param beta_long Fixed-effect coefficients for `formulaLong` fixed part. If NULL,
-#'   coefficients are randomly generated and named by model-matrix columns.
-#' @param beta_event Survival baseline-covariate coefficients for non-intercept
-#'   terms in `formulaEvent` RHS.
-#'   If NULL, coefficients are randomly generated.
-#' @param dist_coefs Distributional fixed-effect coefficients for `formulaDist`
-#'   parameters (`sigma`, `nu`, `phi`, `alpha`, `kappa`, `tau`).
-#'
-#'   For each parameter, coefficients can be:
-#'   - an unnamed numeric vector (matched by column order),
-#'   - a named numeric vector (matched by model-matrix column names),
-#'   - for family-scoped formulas, a named list with per-scope entries.
-#'
-#'   Family-scoped list syntax examples:
-#'   - `dist_coefs = list(sigma = list(default = c("(Intercept)" = -0.3), gaussian = c(...), student_t = c(...)))`
-#'   - alias keys like `"sigma[family='student_t']"` are also recognised and
-#'     mapped to the matching family scope.
-#' @param re_params Random-effects simulation controls.
-#'
-#'   Structure:
-#'   - `id`: controls id-level random effects from `( ... | id)` in `formulaLong`.
-#'   - `marker`: controls marker-level random effects from marker-only terms.
-#'   - `id_marker_cov`: controls subject-specific covariance-regression for
-#'     marker-by-id latent effects.
-#'   - `dist`: controls random effects for distributional regressions in
-#'     `formulaDist`.
-#'
-#'   For `id` and `marker`, each block is a list:
-#'   - `sd`: scalar or length-K vector of random-effect standard deviations,
-#'   - `corr`: KxK correlation matrix.
-#'
-#'   `id_marker_cov` fields:
-#'   - `latent`: deprecated compatibility input. If supplied, its implied
-#'     lower-triangular factor is folded into the baseline `alpha` intercepts
-#'     before simulation. Marker-by-id latent seeds are still drawn as iid
-#'     standard normal values. Prefer setting `sd$alpha` and `corr$alpha`
-#'     directly in new code.
-#'   - `sd`: a named list with `alpha`, `beta`, and `lambda` for the standard-
-#'     deviation regression. It contains `Q_idm` intercepts, a
-#'     `Q_idm` by `K_cov_sd` slope matrix, and `Q_idm` residual loadings.
-#'   - `corr`: the corresponding list for the `Q_idm(Q_idm-1)/2`
-#'     row-major off-diagonal partial correlations. Its slope matrix uses the
-#'     independent `formulaVCov$corr` design.
-#'   - `lambda` within either component may be scalar or component-length. A scalar
-#'     is repeated over that component; a vector supplies one
-#'     loading \(\lambda_m\) for each coordinate in that component.
-#'     Each loading multiplies only its matching iid standard-normal subject
-#'     perturbation, so the collective operation is
-#'     `diag(lambda) %*% z_i`, not a full loading matrix. During fitting every
-#'     \(\lambda_m\) is constrained to be non-negative. If a negative value is
-#'     supplied for simulation, its sign is folded into the corresponding
-#'     latent draw, leaving the generated model unchanged whilst following the
-#'     identified fitting convention,
-#'   - `diag_link`: link for the subject-specific standard deviations (`"softplus"`
-#'     or `"exp"`).
-#'
-#'   Element-wise covariance-regression form is:
+#'   Covariance-regression population values belong to `truth$vcov`. Its `sd`
+#'   and `corr` components each accept `intercept`, `slope`, and `latent`
+#'   declarations. Their element-wise form is
 #'   `eta_{im} = alpha_m + x_i^T beta_m + lambda_m z_{im}`, with
 #'   `lambda_m >= 0` and `z_{im} ~ Normal(0, 1)`. Diagonal entries apply
 #'   `diag_link` to give positive subject-specific standard deviations. Off-diagonal
@@ -710,17 +1008,17 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   iid standard normal values and the final marker-by-id effects are obtained as
 #'   `b_id = L_i z_id`.
 #'
-#'   Therefore, in the ordinary non-mixture model, \(\lambda_m\) is the
+#'   In the ordinary non-mixture model, \eqn{\lambda_m} is the
 #'   conditional standard deviation of the unexplained subject heterogeneity
-#'   on covariance-predictor coordinate \(m\), before applying `diag_link` or
+#'   on covariance-predictor coordinate \eqn{m}, before applying `diag_link` or
 #'   `tanh`. It is not itself an entry of `L_i`, a covariance, or a correlation.
 #'   With `class_type = "corr"` or `"vcov"`, the selected `z_{im}` has a
-#'   class-specific location and scale. Conditional on class \(g\), its
+#'   class-specific location and scale. Conditional on class \eqn{g}, its
 #'   contribution to `eta_{im}` consequently has location
 #'   `lambda_m * mix_location[g, m]` and distributional scale
 #'   `lambda_m * mix_scale[g, m]`.
 #'
-#'   Dimension rules for `id_marker_cov` entries follow marker-by-id random-effect
+#'   The covariance-regression dimension follows the marker-by-id random-effect
 #'   dimension `Q_idm`:
 #'   - if covariance is full: `M = Q_idm * (Q_idm + 1) / 2` lower-tri entries,
 #'   - if covariance is forced diagonal (`||` in nested id-marker term): `M = Q_idm`.
@@ -730,6 +1028,8 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'     distributional parameter,
 #'   - `re_params$dist[[param]]$terms[[j]]` optionally sets term-specific
 #'     controls (same `sd`/`corr` fields as above).
+#' @param vcov_diag_link Link applied to covariance-regression scale predictors;
+#'   either `"softplus"` or `"exp"`.
 #' @param family_params Family-specific constants used when the corresponding
 #'   parameter has no distributional regression. In particular, specify the
 #'   Beta mean/sample-size model with \code{beta = list(kappa = ...)} and the
@@ -740,15 +1040,6 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   A marker-specific `tau` in `jm_family()` takes precedence over this shared
 #'   family constant and over a `tau` distributional regression for that
 #'   marker, matching the fitted likelihood.
-#' @param h0 Optional baseline hazard function `h0(t)`
-#'   If supplied, it takes precedence over `baseline_hazard`/`formulaBasehaz`.
-#' @param baseline_hazard Optional baseline hazard specification. Supported forms:
-#'   - character: one of `"constant"`, `"linear"`, `"piecewise"`, `"weibull"`, `"spline"`.
-#'   - named list: `list(type = ..., ...)` with mode-specific parameters.
-#' @param formulaBasehaz Optional formula-based baseline hazard model on time,
-#'   e.g. `~ 1 + time + I(time^2)`.
-#' @param beta_basehaz Optional coefficients for `formulaBasehaz` (aligned by
-#'   model-matrix column names). If NULL, coefficients are generated.
 #' @param time_cens Administrative censoring horizon.
 #' @param eps_cs Finite-difference step for slope-type associations (`cs_*`).
 #' @param integration_control Control list passed to `integrate()`.
@@ -771,9 +1062,9 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   is active (`left_truncation_max > 0`), longitudinal rows observed before the
 #'   sampled entry time are removed.
 #'
-#' @return A list containing `dataLong`, `dataEvent`, `truth` (also available as
-#'   `true_params`), `marker_info`, `helpers`, and `tmax`. Marker-weight truth
-#'   distinguishes base, latent, and effective values. Baseline-hazard truth is
+#' @return A list containing `dataLong`, `dataEvent`, `truth`, `marker_info`,
+#'   `helpers`, and `tmax`. Marker-weight truth
+#'   distinguishes base, common-location, departure, and effective values. Baseline-hazard truth is
 #'   stored in `truth$baseline_hazard`; when a log-linear representation exists,
 #'   its resolved coefficients are also in `truth$stan_fit$bs_gamma_c`.
 #'   Marker-specific fixed skew-Laplace quantiles are recorded in
@@ -834,7 +1125,7 @@ simulate_joinme <- function(
   formulaDist = NULL,
   formulaAssoc = NULL,
   transforms = NULL,
-  priors = joinme_priors(),
+  truth = joinme_truth(),
   n_id = 50,
   families = c("gaussian", "student_t", "binomial"),
   marker_levels = NULL,
@@ -843,32 +1134,14 @@ simulate_joinme <- function(
   censor_longitudinal_after_event = TRUE,
   left_truncation_max = 0,
   truncate_longitudinal_before_entry = TRUE,
-  ...,
   seed = .Random.seed[[1]],
   covariate_formulas = list(
     x1 ~ rnorm(n_id),
     x2 ~ rnorm(n_id)
   ),
-  marker_weights = NULL,
-  shared_marker_weights = TRUE,
-  fixed_marker_weights = FALSE,
   shrinkage = 0L,
   assoc = c("cv_total"),
-  assoc_coefs = c(cv_total = 0.6),
-  beta_long = NULL,
-  beta_event = NULL,
-  dist_coefs = list(),
-  re_params = list(
-    id = list(sd = NULL, corr = NULL),
-    marker = list(sd = NULL, corr = NULL),
-    id_marker_cov = list(
-      latent = list(sd = NULL, corr = NULL),
-      sd = list(alpha = NULL, beta = NULL, lambda = NULL),
-      corr = list(alpha = NULL, beta = NULL, lambda = NULL),
-      diag_link = "softplus"
-    ),
-    dist = list()
-  ),
+  vcov_diag_link = "softplus",
   family_params = list(
     gaussian = list(sigma = 1.0),
     student_t = list(sigma = 1.5, nu = 4),
@@ -882,10 +1155,6 @@ simulate_joinme <- function(
     beta = list(kappa = 10),
     cumulative_logit = list(cutpoints = c(-1, 1))
   ),
-  h0 = NULL,
-  baseline_hazard = list(type = "weibull", shape = 1.4, scale = 6.0),
-  formulaBasehaz = NULL,
-  beta_basehaz = NULL,
   time_cens = 8.0,
   eps_cs = 1e-3,
   integration_control = list(rel.tol = 1e-6, subdivisions = 2000L, stop.on.error = TRUE),
@@ -901,30 +1170,70 @@ simulate_joinme <- function(
   event_var = "event",
   .mixture_specification = NULL
 ) {
+  simulation_call <- match.call(expand.dots = TRUE) # supplied arguments used to distinguish the default association from an explicit survival request
+  if (!inherits(truth, "joinme_truth")) {
+    cli::cli_abort(c(
+      x = "{.arg truth} must be created with {.fn jm_truth}.",
+      i = "Fixed generating values and their between-simulation distributions belong in that declaration."
+    ))
+  }
+  simulation_truth_request <- unclass(truth) # exact fixed-or-random population declarations resolved after formula dimensions are known
+  prior_specification <- attr(truth, "fitting_priors", exact = TRUE) # probability distributions retained solely for the optional recovery fit
+  if (!inherits(prior_specification, "joinme_priors")) {
+    cli::cli_abort("The {.arg truth} declaration does not contain valid recovery priors.")
+  }
+  re_params <- simulation_truth_request$re_params # ordinary random-effect covariance truths drawn or fixed once per simulated data set
+  baseline_request <- simulation_truth_request$basehaz # baseline-hazard truth represented by one mutually exclusive public form
+  h0 <- if (is.function(baseline_request)) baseline_request else NULL # custom hazard function, when explicitly declared
+  formulaBasehaz <- if (inherits(baseline_request, "formula")) baseline_request else NULL # log-linear formula hazard, when declared
+  baseline_hazard <- if (is.null(h0) && is.null(formulaBasehaz)) baseline_request else NULL # named parametric or spline hazard declaration
+  longitudinal_only <- is.null(formulaEvent) # whether generation contains only the nested longitudinal process
+  if (longitudinal_only) {
+    if ("formulaAssoc" %in% names(simulation_call) && !is.null(formulaAssoc)) {
+      cli::cli_abort("{.arg formulaAssoc} requires a survival process in {.fn simulate_joinme}.")
+    }
+    if ("assoc" %in% names(simulation_call) && length(assoc) > 0L) {
+      cli::cli_abort("{.arg assoc} requires a survival process in {.fn simulate_joinme}.")
+    }
+    formulaEvent <- survival::Surv(time, event) ~ 1 # internal subject scaffold used only while common design matrices are constructed
+    formulaAssoc <- NULL # no association channel exists without an event process
+    assoc <- character(0) # empty fitted association specification returned in the recovery call
+    h0 <- function(t) rep(0, length(t)) # exactly zero internal hazard prevents event generation
+    censor_longitudinal_after_event <- FALSE # the complete scheduled longitudinal history is retained
+    root_control <- list(
+      t_init = time_cens,
+      t_max = time_cens,
+      expand = 1.7,
+      max_expand = 1L
+    ) # finite neutral bounds for the common inverse-event-time routine
+  }
+
   # Algorithm overview (statistical simulation workflow):
-  # Step 1. Parse formulas and design structures to mirror the fitted-model
+  # Parse formulas and design structures to mirror the fitted-model
   #         likelihood parameterisation exactly.
-  # Step 2. Simulate subject-level exogenous covariates, including optional
+  # Simulate subject-level exogenous covariates, including optional
   #         piecewise-constant time-varying processes.
-  # Step 3. Draw fixed/random effects and covariance-regression parameters,
+  # Draw fixed/random effects and covariance-regression parameters,
   #         then build latent longitudinal trajectories.
-  # Step 4. Construct the event hazard from baseline + covariate + association
+  # Construct the event hazard from baseline + covariate + association
   #         channels and sample event times by inverse-transform sampling.
-  # Step 5. Generate delayed-entry times (left truncation), construct event
+  # Generate delayed-entry times (left truncation), construct event
   #         interval rows automatically when required by the data-generating
   #         process, and sample longitudinal observations.
-  # Step 6. Draw marker responses from family-specific observation models,
+  # Draw marker responses from family-specific observation models,
   #         collect truth objects, and return simulation outputs.
   set.seed(seed)
-  prior_specification <- .joinme_priors_(
-    priors,
-    validate = TRUE
-  ) # fitting priors retained verbatim in truth so the recovery fit can reuse the same declaration
-  assoc_coefs_missing <- missing(assoc_coefs)
-  if (!is.logical(fixed_marker_weights) || length(fixed_marker_weights) != 1L || is.na(fixed_marker_weights)) {
+  marker_weight_offsets <- prior_specification$marker_weights$offset # declared constant contribution shared with the fitting interface
+  marker_weight_sets_shared <- prior_specification$marker_weights$shared # whether simulated weighted association terms share one marker-weight set
+  constant_marker_weights <- identical(prior_specification$marker_weights$family$family, "constant") # constant family suppresses all simulated and fitted marker-weight variation
+  if (!is.list(re_params) || is.null(names(re_params))) {
+    cli::cli_abort("{.arg re_params} must be a named list.")
+  }
+  unknown_random_effect_blocks <- setdiff(names(re_params), c("id", "marker", "dist")) # unsupported random-effect simulation controls
+  if (length(unknown_random_effect_blocks) > 0L) {
     cli::cli_abort(c(
-      x = "{.arg fixed_marker_weights} must be TRUE/FALSE.",
-      i = "Use FALSE to simulate Stan's latent marker-weight perturbations."
+      x = "Unknown {.arg re_params} component{?s}: {.field {unknown_random_effect_blocks}}.",
+      i = "Use {.field id}, {.field marker}, or {.field dist}; covariance-regression coefficients belong to {.arg truth$vcov}."
     ))
   }
   shrinkage <- as.integer(shrinkage)
@@ -932,14 +1241,6 @@ simulate_joinme <- function(
     cli::cli_abort(c(
       x = "{.arg shrinkage} must be one of 0, 1, or 2.",
       i = "The mappings are 0 = Student-t(6), 1 = Laplace, and 2 = Normal."
-    ))
-  }
-  compat_args <- list(...)
-  unknown_args <- setdiff(names(compat_args), c("n_obs_per_marker_per_id", "n_t", ""))
-  if (length(unknown_args) > 0L) {
-    cli::cli_abort(c(
-      x = "Unknown argument{?s}: {.field {unknown_args}}.",
-      i = "Only compatibility arguments {.field n_obs_per_marker_per_id} and {.field n_t} are accepted via {.arg ...}."
     ))
   }
   obs_time_noise_sd <- as.numeric(obs_time_noise_sd %||% 0)
@@ -973,7 +1274,7 @@ simulate_joinme <- function(
   if (length(times_obs) == 0L) {
     cli::cli_abort(c(
       x = "{.arg times_obs} must contain at least one finite scheduled observation time.",
-      i = "The number of longitudinal observations is now inferred directly from {.arg times_obs}."
+      i = "The number of longitudinal observations is inferred directly from {.arg times_obs}."
     ))
   }
   times_obs <- sort(times_obs)
@@ -1007,6 +1308,36 @@ simulate_joinme <- function(
   .sim_eval_bytecode_scalar <- eval_bytecode_scalar
   .sim_eval_bytecode_vector <- eval_bytecode_vector
 
+  # A mirai process begins with a clean R session.  The simulation functions
+  # below are closures and therefore carry the quantities defined inside
+  # simulate_joinme(), but they do not carry functions found by searching the
+  # package namespace.  Supply that small, explicit set of functions to every
+  # worker.  This keeps parallel simulation equivalent to serial simulation
+  # without asking the worker to load an installed copy of joinme, which may
+  # differ from the source tree being examined during package development.
+  #
+  # The bytecode functions form one self-contained statistical transformation
+  # module.  All members of that module are supplied because a functional
+  # association may use either the fast vector evaluation or the general stack
+  # evaluator.  The model-matrix functions preserve fitted spline bases and
+  # factor contrasts while the cumulative hazard is evaluated.  Finally,
+  # .find_bracket locates the event-time root itself.
+  .sim_mirai_helpers <- list(
+    "%||%" = `%||%`,
+    ".find_bracket" = .find_bracket,
+    ".is_model_matrix_template" = .is_model_matrix_template,
+    ".mm" = .mm,
+    ".mm_event" = .mm_event,
+    ".bytecode_opcodes" = .bytecode_opcodes,
+    ".bytecode_normal_ops" = .bytecode_normal_ops,
+    ".bytecode_unary_ops" = .bytecode_unary_ops,
+    "verify_bytecode" = verify_bytecode,
+    ".normalize_bytecode_program" = .normalize_bytecode_program,
+    ".eval_canonical_bytecode_vector" = .eval_canonical_bytecode_vector,
+    "eval_bytecode_scalar" = eval_bytecode_scalar,
+    "eval_bytecode_vector" = eval_bytecode_vector
+  )
+
   #' @param x Vector of inputs to process.
   #' @param fun Function to apply.
   #' @param ... Additional arguments passed to fun.
@@ -1019,57 +1350,36 @@ simulate_joinme <- function(
     jobs <- lapply(seq_along(x), function(idx) {
       xi <- x[[idx]]
       seed_i <- seed_base + as.integer(idx)
-      mirai::mirai({
-        set.seed(seed_i)
-        do.call(fun, c(list(xi), args))
-      }, fun = fun, xi = xi, args = args, seed_i = seed_i)
+      # Named values supplied through mirai's dots become bindings in the
+      # worker's global environment.  This detail is important: a serialised
+      # closure searches that environment after its own simulation bindings,
+      # whereas values supplied through mirai's local `.args` environment are
+      # not visible through the closure's lexical parent.  The fitted formulae
+      # and simulation state remain inside fun's closure; only package-level
+      # functions need to be added here.
+      worker_arguments <- c(
+        list(fun = fun, xi = xi, args = args, seed_i = seed_i),
+        .sim_mirai_helpers
+      )
+      do.call(
+        mirai::mirai,
+        c(
+          list(.expr = quote({
+            set.seed(seed_i)
+            do.call(fun, c(list(xi), args))
+          })),
+          worker_arguments
+        )
+      )
     })
     # lapply(jobs, mirai::collect_mirai)
     mirai::collect_mirai(jobs, options = c('.stop', '.progress'))
   }
 
-  .sim_align_coef <- function(col_names, user_coef = NULL, sd_default = 0.4, intercept_default = 0.0) {
-    if (length(col_names) == 0) return(numeric(0))
-    if (is.null(user_coef)) {
-      out <- stats::rnorm(length(col_names), 0, sd_default)
-      names(out) <- col_names
-      if ("(Intercept)" %in% col_names) out["(Intercept)"] <- intercept_default
-      return(out)
-    }
-    out <- rep(0, length(col_names))
-    names(out) <- col_names
-    if (!is.null(names(user_coef))) {
-      keep <- intersect(names(user_coef), col_names)
-      if (length(keep) > 0) {
-        out[keep] <- as.numeric(user_coef[keep])
-      }
-    } else {
-      out[seq_len(min(length(out), length(user_coef)))] <- as.numeric(user_coef)[seq_len(min(length(out), length(user_coef)))]
-    }
-    out
-  }
-
-  .sim_random_positive <- function(n, min_val = 0.25, max_val = 0.85) {
-    stats::runif(n, min = min_val, max = max_val)
-  }
-
   .sim_random_signed <- function(n, min_abs = 0.15, max_abs = 0.7) {
     signs <- sample(c(-1, 1), size = n, replace = TRUE)
-    mags <- stats::runif(n, min = min_abs, max = max_abs)
-    signs * mags
-  }
-
-  .sim_random_corr_matrix <- function(K, shrink_min = 0.15, shrink_max = 0.45) {
-    if (K <= 0) return(matrix(0.0, 0, 0))
-    if (K == 1) return(matrix(1.0, 1, 1))
-
-    A <- matrix(stats::rnorm(K * K), nrow = K, ncol = K)
-    C_rand <- stats::cov2cor(crossprod(A) + diag(K))
-    shrink <- stats::runif(1, min = shrink_min, max = shrink_max)
-    C <- (1 - shrink) * diag(K) + shrink * C_rand
-    C <- 0.5 * (C + t(C))
-    diag(C) <- 1.0
-    C
+    magnitudes <- stats::runif(n, min = min_abs, max = max_abs)
+    signs * magnitudes
   }
 
   .sim_resolve_re_block_cfg <- function(cfg, K, label) {
@@ -1079,7 +1389,7 @@ simulate_joinme <- function(
 
     sd_vec <- cfg$sd
     if (is.null(sd_vec)) {
-      sd_vec <- .sim_random_positive(K)
+      sd_vec <- stats::rexp(K, rate = 1) # one population SD per coefficient under the Stan model's exponential(1) prior
     } else {
       sd_vec <- as.numeric(sd_vec)
       if (length(sd_vec) == 1L) sd_vec <- rep(sd_vec, K)
@@ -1093,7 +1403,12 @@ simulate_joinme <- function(
 
     corr <- cfg$corr
     if (is.null(corr)) {
-      corr <- .sim_random_corr_matrix(K)
+      lkj_draw <- .sim_draw_lkj_correlation(
+        dimension = K,
+        eta = simulation_truth_request$lkj$eta
+      ) # one population correlation matrix under the same LKJ law as Stan
+      corr <- lkj_draw$corr
+      Lcorr <- lkj_draw$Lcorr
     } else {
       corr <- as.matrix(corr)
       if (!all(dim(corr) == c(K, K)) || any(!is.finite(corr))) {
@@ -1127,10 +1442,10 @@ simulate_joinme <- function(
           i = "Supply a valid correlation matrix."
         ))
       }
+      Lcorr <- t(chol(corr)) # lower Cholesky factor of the fixed correlation truth
     }
 
     cov_mat <- diag(as.numeric(sd_vec), K, K) %*% corr %*% diag(as.numeric(sd_vec), K, K)
-    Lcorr <- t(chol(corr))
 
     list(sd = sd_vec, corr = corr, cov = cov_mat, Lcorr = Lcorr)
   }
@@ -1141,82 +1456,6 @@ simulate_joinme <- function(
       return(log(x))
     }
     log(expm1(x))
-  }
-
-  .sim_strip_dist_prefix <- function(cols) {
-    sub("^(all::|family=[^:]+::)", "", cols)
-  }
-
-  .sim_align_dist_coef <- function(col_names,
-                                   user_coef = NULL,
-                                   dist_scope = NULL,
-                                   sd_default = 0.15,
-                                   intercept_default = 0.0) {
-    if (length(col_names) == 0) return(numeric(0))
-
-    if (!is.list(user_coef) || is.null(dist_scope) || !.is_dist_scope(dist_scope)) {
-      return(.sim_align_coef(col_names, user_coef, sd_default = sd_default, intercept_default = intercept_default))
-    }
-
-    out <- .sim_align_coef(col_names, NULL, sd_default = sd_default, intercept_default = intercept_default)
-    default_keys <- c("default", "all", "allFamilies", "all_families")
-    user_names <- names(user_coef) %||% character(0)
-
-    # Optional default coefficients for all-scoped columns.
-    key_default <- intersect(default_keys, user_names)
-    if (length(key_default) > 0) {
-      idx_all <- grepl("^all::", col_names)
-      if (any(idx_all)) {
-        cols_all <- .sim_strip_dist_prefix(col_names[idx_all])
-        out[idx_all] <- .sim_align_coef(
-          cols_all,
-          user_coef[[key_default[1]]],
-          sd_default = sd_default,
-          intercept_default = intercept_default
-        )
-      }
-    }
-
-    # Family-specific coefficients; keys accepted: gaussian, student_t, family=gaussian.
-    fam_keys <- setdiff(user_names, default_keys)
-    for (k in fam_keys) {
-      fam_raw <- sub("^family=", "", k)
-      fam_name <- tryCatch(.canonical_family_name(fam_raw), error = function(e) fam_raw)
-      idx_f <- grepl(paste0("^family=", fam_name, "::"), col_names)
-      if (!any(idx_f)) next
-      cols_f <- .sim_strip_dist_prefix(col_names[idx_f])
-      out[idx_f] <- .sim_align_coef(
-        cols_f,
-        user_coef[[k]],
-        sd_default = sd_default,
-        intercept_default = intercept_default
-      )
-    }
-
-    out
-  }
-
-  .sim_dist_coef_spec <- function(param_name, dist_coefs, dist_scope) {
-    spec <- dist_coefs[[param_name]]
-    if (is.null(dist_scope) || !.is_dist_scope(dist_scope)) return(spec)
-
-    if (!is.list(spec) || is.null(names(spec))) {
-      out <- if (is.null(spec)) list() else list(default = spec)
-    } else {
-      out <- spec
-    }
-
-    fam_names <- names(dist_scope$by_family %||% list())
-    if (length(fam_names) == 0) return(out)
-
-    for (fam in fam_names) {
-      pat <- paste0("^", param_name, "\\[family=['\"]?", fam, "['\"]?\\]$")
-      hit <- grep(pat, names(dist_coefs), perl = TRUE)
-      if (length(hit) > 0) {
-        out[[fam]] <- dist_coefs[[names(dist_coefs)[hit[1]]]]
-      }
-    }
-    out
   }
 
   .sim_eval_covariate_formulas <- function(n_subjects, formulas, base_df) {
@@ -1774,8 +2013,8 @@ simulate_joinme <- function(
       if (tf_type %in% c("ispline_penalised", "pmonospline", "pmono", "ispline_expit_penalised")) {
         if (is.null(spec$y)) {
           cli::cli_abort(c(
-            x = "Simulation currently requires both {.arg x} and {.arg y} for penalised spline transforms.",
-            i = "Use legacy plug-in mode in {.fn simulate_joinme} by supplying x/y pairs, or provide an explicit {.val ispline} transform instead.",
+            x = "Simulation requires both {.arg x} and {.arg y} for penalised spline transforms.",
+            i = "Use plug-in mode in {.fn simulate_joinme} by supplying x/y pairs, or provide an explicit {.val ispline} transform instead.",
             i = "Stan-estimated penalised splines without y are supported in {.fn JoiNMe}, not in simulation."
           ))
         }
@@ -1844,7 +2083,7 @@ simulate_joinme <- function(
     ))
   }
 
-  .sim_make_baseline_hazard <- function(spec, formula_basehaz = NULL, beta_basehaz = NULL) {
+  .sim_make_baseline_hazard <- function(spec, formula_basehaz = NULL) {
     tag_truth <- function(fun, type, parameters = list(), formula = NULL, coefficients = NULL) {
       attr(fun, "basehaz_truth") <- list(
         type = type,
@@ -1857,17 +2096,29 @@ simulate_joinme <- function(
     if (!is.null(formula_basehaz)) {
       f_bh <- stats::as.formula(formula_basehaz)
       t_ref <- unique(c(0, time_cens / 2, time_cens))
-      X_ref <- stats::model.matrix(f_bh, data = data.frame(time = t_ref))
-      coef_bh <- .sim_align_coef(
+      baseline_clock_variables <- unique(c(time_var, event_time_var)) # accepted names for the common original-time baseline clock
+      baseline_reference_data <- data.frame(.joinme_reference_time = t_ref)
+      for (baseline_clock_variable in baseline_clock_variables) {
+        baseline_reference_data[[baseline_clock_variable]] <- t_ref
+      }
+      baseline_template <- .make_model_matrix_template(
+        f_bh,
+        baseline_reference_data
+      ) # fitted formula transformation on original simulated time
+      X_ref <- .mm(baseline_template, baseline_reference_data)
+      coef_bh <- .sim_resolve_regression_component(
+        .sim_population_component(simulation_truth_request, "baseline"),
+        prior_specification$baseline,
         colnames(X_ref),
-        user_coef = beta_basehaz,
-        sd_default = 0.2,
-        intercept_default = -2.0
-      )
+        "baseline"
+      ) # formula-based baseline-hazard population coefficients
 
       fun <- function(t) {
-        df_t <- data.frame(time = as.numeric(t))
-        X_bh <- stats::model.matrix(f_bh, data = df_t)
+        df_t <- data.frame(.joinme_reference_time = as.numeric(t))
+        for (baseline_clock_variable in baseline_clock_variables) {
+          df_t[[baseline_clock_variable]] <- as.numeric(t)
+        }
+        X_bh <- .mm(baseline_template, df_t)
         lp <- as.numeric(X_bh %*% coef_bh)
         lp <- pmin(lp, log(.Machine$double.xmax) - 2)
         as.numeric(exp(lp))
@@ -1876,21 +2127,21 @@ simulate_joinme <- function(
     }
 
     if (is.null(spec)) {
-      spec <- list(type = "weibull", shape = 1.4, scale = 6.0)
+      spec <- list(type = "weibull")
     }
     if (is.character(spec)) {
       spec <- list(type = spec)
     }
     if (!is.list(spec) || is.null(spec$type)) {
       cli::cli_abort(c(
-        x = "{.arg baseline_hazard} must be a character mode or named list with {.arg type}.",
+        x = "{.arg truth$basehaz} must be a character mode or named list with {.arg type}.",
         i = "Supported types: constant, linear, piecewise, weibull, spline."
       ))
     }
 
     mode <- tolower(as.character(spec$type)[1])
     if (mode == "constant") {
-      rate <- as.numeric(spec$rate %||% spec$lambda %||% runif(1, min = 0.01, max = 0.5))
+      rate <- as.numeric(spec$rate %||% spec$lambda %||% stats::runif(1, min = 0.01, max = 0.5))
       if (isTRUE(spec$log)) {
         rate <- exp(rate)
       }
@@ -1905,8 +2156,8 @@ simulate_joinme <- function(
     }
 
     if (mode == "linear") {
-      intercept <- as.numeric(spec$intercept %||% -2.2)
-      slope <- as.numeric(spec$slope %||% 0.25)
+      intercept <- as.numeric(spec$intercept %||% stats::rnorm(1, mean = -2.2, sd = 0.3))
+      slope <- as.numeric(spec$slope %||% stats::rnorm(1, mean = 0.25, sd = 0.1))
       fun <- function(t) {
         t <- as.numeric(t)
         # softplus(intercept + slope * pmax(t, 0))
@@ -1923,7 +2174,7 @@ simulate_joinme <- function(
 
     if (mode %in% c("piecewise", "pwlin", "piecewise_linear")) {
       breaks <- sort(as.numeric(spec$breaks %||% c(2, 5)))
-      rates <- as.numeric(spec$rates %||% c(0.05, 0.12, 0.25))
+      rates <- as.numeric(spec$rates %||% sort(stats::runif(length(breaks) + 1L, min = 0.03, max = 0.3)))
       if (length(rates) != length(breaks) + 1L) {
         cli::cli_abort(c(
           x = "Piecewise baseline requires length(rates) = length(breaks) + 1.",
@@ -1939,8 +2190,8 @@ simulate_joinme <- function(
     }
 
     if (mode == "weibull") {
-      shape <- as.numeric(spec$shape %||% 1.4)
-      scale <- as.numeric(spec$scale %||% 6.0)
+      shape <- as.numeric(spec$shape %||% stats::runif(1, min = 0.8, max = 1.8))
+      scale <- as.numeric(spec$scale %||% stats::runif(1, min = 4, max = 8))
       return(tag_truth(
         weibull_h0(shape = shape, scale = scale),
         "weibull",
@@ -1952,7 +2203,6 @@ simulate_joinme <- function(
       basis_type <- tolower(as.character(spec$basis %||% if (mode == "ns") "ns" else "bs")[1])
       knots <- as.numeric(spec$knots %||% stats::quantile(seq(0, time_cens, length.out = 100), probs = c(0.25, 0.5, 0.75)))
       degree <- as.integer(spec$degree %||% 3L)
-      coef <- spec$coef %||% beta_basehaz
       intercept <- as.logical(spec$intercept %||% TRUE)
 
       build_basis <- function(t) {
@@ -1967,12 +2217,22 @@ simulate_joinme <- function(
       # repeated evaluations during integration/root-finding.
       t_ref <- unique(c(0, time_cens / 2, time_cens))
       B_ref <- as.matrix(build_basis(t_ref))
-      coef_vec <- .sim_align_coef(
-        colnames(B_ref),
-        user_coef = coef,
-        sd_default = 0.25,
-        intercept_default = -2.2
-      )
+      basis_coefficient_names <- paste0("basis_", seq_len(ncol(B_ref))) # stable scientific labels independent of spline library column labels
+      baseline_population_request <- if (
+        is.null(simulation_truth_request$baseline) &&
+          is.null(simulation_truth_request$intercept) &&
+          is.null(simulation_truth_request$slope)
+      ) {
+        prior_normal(mu = c(-2.2, rep(0, max(0L, ncol(B_ref) - 1L))), scale = 0.25)
+      } else {
+        .sim_population_component(simulation_truth_request, "baseline")
+      } # conservative default spline log-hazard centred on a low baseline rate
+      coef_vec <- .sim_resolve_regression_component(
+        baseline_population_request,
+        prior_specification$baseline,
+        basis_coefficient_names,
+        "baseline"
+      ) # spline log-hazard coefficients generated from the common baseline declaration
 
       fun <- function(t) {
         t <- pmax(as.numeric(t), 0)
@@ -2108,32 +2368,40 @@ simulate_joinme <- function(
   K_cov_corr <- vcov_design$K_cov_corr # off-diagonal correlation predictor count shared with fitting
   Xcov_corr <- vcov_design$Xcov_corr # correlation design in fitted subject order
 
-  # ---- Step 2a: Build prototype matrices for deterministic coefficient alignment
-  # Time-dependent model matrices are defined on the scaled [0, 1] domain so
-  # spline bases follow the same construction path as joinme_standata().
+  # ---- Build prototype matrices for deterministic coefficient alignment
+  # Longitudinal formulae are evaluated on the original observation-time grid.
+  # Explicit spline knots and boundaries therefore have their declared study-
+  # time meaning, while implicit spline attributes are learnt from the same
+  # scheduled time support that supplies the simulated longitudinal records.
   time_scale_internal <- max(c(time_cens, times_obs), na.rm = TRUE)
   if (!is.finite(time_scale_internal) || time_scale_internal <= 0) {
     time_scale_internal <- 1.0
   }
 
-  prototype <- dataEvent[rep(1, D), , drop = FALSE]
-  prototype[[marker_var]] <- factor(marker_levels, levels = marker_levels)
-  prototype[[time_var]] <- rep(0.5, D)
+  longitudinal_reference_times <- sort(unique(as.numeric(times_obs)))
+  prototype <- dataEvent[
+    rep(1L, D * length(longitudinal_reference_times)),
+    ,
+    drop = FALSE
+  ]
+  prototype[[marker_var]] <- factor(
+    rep(marker_levels, each = length(longitudinal_reference_times)),
+    levels = marker_levels
+  )
+  prototype[[time_var]] <- rep(longitudinal_reference_times, times = D)
 
   fixed_template <- .make_model_matrix_template(
     fixed_rhs,
-    prototype,
-    boundary_var = time_var,
-    boundary_values = c(0, 1)
+    prototype
   )
   id_templates <- lapply(id_rhs_list, function(rhs) {
-    .make_model_matrix_template(rhs, prototype, boundary_var = time_var, boundary_values = c(0, 1))
+    .make_model_matrix_template(rhs, prototype)
   })
   mk_templates <- lapply(mk_rhs_list, function(rhs) {
-    .make_model_matrix_template(rhs, prototype, boundary_var = time_var, boundary_values = c(0, 1))
+    .make_model_matrix_template(rhs, prototype)
   })
   idm_templates <- lapply(idm_rhs_list, function(rhs) {
-    .make_model_matrix_template(rhs, prototype, boundary_var = time_var, boundary_values = c(0, 1))
+    .make_model_matrix_template(rhs, prototype)
   })
 
   X_proto <- .mm(fixed_template, prototype)
@@ -2141,23 +2409,13 @@ simulate_joinme <- function(
   Z_mk_proto <- .sim_rhs_matrix(mk_templates, prototype)
   Z_idm_proto <- .sim_rhs_matrix(idm_templates, prototype)
 
-  time_meta <- .make_time_index_metadata(
-    time_var = time_var,
-    fixed_design = fixed_template,
-    id_design = id_templates,
-    marker_design = mk_templates,
-    idm_design = idm_templates
-  )
-  idx_time_beta <- time_meta$idx_time_beta
-  idx_time_uid <- time_meta$idx_time_uid
-  idx_time_vmk <- time_meta$idx_time_vmk
-  idx_time_idm <- time_meta$idx_time_idm
-
-  beta_long <- .sim_align_coef(colnames(X_proto), beta_long, sd_default = 0.35, intercept_default = 1.0)
+  beta_long <- .sim_resolve_regression_component(
+    .sim_population_component(simulation_truth_request, "longitudinal"),
+    prior_specification$longitudinal,
+    colnames(X_proto),
+    "longitudinal"
+  ) # population longitudinal coefficients drawn from prior_*() declarations or fixed by numeric role declarations
   beta_long_internal <- beta_long
-  if (length(idx_time_beta) > 0L) {
-    beta_long_internal[idx_time_beta] <- beta_long_internal[idx_time_beta] * time_scale_internal
-  }
 
   assoc_from_formula <- .sim_assoc_from_formula(formulaAssoc)
   assoc_effective <- if (!is.null(assoc_from_formula)) assoc_from_formula else assoc
@@ -2165,42 +2423,80 @@ simulate_joinme <- function(
   if (length(assoc_effective) == 0) assoc_effective <- "cv_total"
 
   marker_weight_spec <- .get_marker_weight_structure(
-    marker_weights = marker_weights,
+    marker_weight_offsets = marker_weight_offsets,
     marker_levels = marker_levels,
     active_terms = .active_weighted_assoc_terms(assoc_effective),
-    shared_marker_weights = shared_marker_weights,
-    estimate_marker_weights = !isTRUE(fixed_marker_weights),
+    marker_weight_sets_shared = marker_weight_sets_shared,
+    estimate_marker_weights = !isTRUE(constant_marker_weights),
     context = "simulate_joinme()"
   )
-  marker_weights_base_by_term <- marker_weight_spec$base_by_term
+  marker_weights_offset_by_term <- marker_weight_spec$offset_by_term
+  marker_mean_names <- if (isTRUE(marker_weight_spec$marker_weight_sets_shared)) "shared" else marker_weight_spec$active_terms # population location labels in compact fitted-set order
+  marker_weight_means <- if (isTRUE(constant_marker_weights) || length(marker_weight_spec$active_terms) == 0L) {
+    rep(0, marker_weight_spec$n_sets)
+  } else {
+    raw_marker_weight_request <- simulation_truth_request$marker_weights %||% list() # unnormalised marker-weight declarations
+    .sim_resolve_prior_or_fixed(
+      raw_marker_weight_request$intercept %||% simulation_truth_request$intercept %||% prior_specification$marker_weights$intercept,
+      marker_mean_names,
+      "marker_weights$intercept"
+    )
+  } # population marker-weight locations generated by the intercept declaration; family remains reserved for departures
+  names(marker_weight_means) <- if (isTRUE(marker_weight_spec$marker_weight_sets_shared)) {
+    "shared"
+  } else {
+    marker_weight_spec$active_terms
+  }
   z_marker_weight_sets <- matrix(
     0,
     nrow = marker_weight_spec$n_sets,
     ncol = D,
-    dimnames = dimnames(marker_weight_spec$base_matrix)
-  )
-  if (!isTRUE(fixed_marker_weights) && length(marker_weight_spec$active_terms) > 0L) {
-    z_marker_weight_sets[] <- .sim_draw_standard_shrinkage(
+    dimnames = dimnames(marker_weight_spec$offset_matrix)
+  ) # realised direct departures z_sd used in effective weights
+  standardised_departure_sets <- z_marker_weight_sets # family-transformed unit-scale departures retained for direct comparison with Stan's prior effect
+  marker_weight_prior_draw <- list(
+    departure = numeric(0),
+    raw = numeric(0),
+    df = numeric(0),
+    df_was_fitted = logical(0),
+    local_scale = numeric(0),
+    global_scale = numeric(0),
+    slab_multiplier = numeric(0)
+  ) # realised departure hierarchy, empty when marker weights are fixed or inactive
+  if (!isTRUE(constant_marker_weights) && length(marker_weight_spec$active_terms) > 0L) {
+    marker_weight_prior_draw <- .sim_draw_marker_weight_prior(
       marker_weight_spec$n_sets * D,
-      shrinkage = shrinkage
+      prior = prior_specification$marker_weights$family,
+      n_sets = marker_weight_spec$n_sets
     )
+    standardised_departure_sets[] <- matrix(
+      marker_weight_prior_draw$departure,
+      nrow = marker_weight_spec$n_sets,
+      ncol = D,
+      byrow = TRUE
+    ) # compact set-by-marker direct departures matching contiguous Stan set segments
+    z_marker_weight_sets[] <- standardised_departure_sets
   }
-  marker_weights_eff <- marker_weights_base_by_term
-  marker_weights_latent_by_term <- marker_weights_base_by_term
+  marker_weights_eff <- marker_weights_offset_by_term
+  marker_weights_latent_by_term <- marker_weights_offset_by_term
+  marker_weight_mean_by_term <- stats::setNames(vector("list", length(marker_weights_offset_by_term)), names(marker_weights_offset_by_term)) # term-indexed view of common locations retained in truth
   for (term_key in names(marker_weights_latent_by_term)) {
     marker_weights_latent_by_term[[term_key]][] <- 0
+    marker_weight_mean_by_term[[term_key]] <- 0
     set_pos <- marker_weight_spec$set_index[[term_key]]
     if (set_pos > 0L) {
+      marker_weight_mean_by_term[[term_key]] <- marker_weight_means[[set_pos]]
       marker_weights_latent_by_term[[term_key]] <- as.numeric(z_marker_weight_sets[set_pos, ])
       marker_weights_eff[[term_key]] <-
-        as.numeric(marker_weights_base_by_term[[term_key]]) +
+        as.numeric(marker_weights_offset_by_term[[term_key]]) +
+        marker_weight_means[[set_pos]] +
         marker_weights_latent_by_term[[term_key]]
     }
     names(marker_weights_latent_by_term[[term_key]]) <- marker_levels
     names(marker_weights_eff[[term_key]]) <- marker_levels
   }
   .sim_public_marker_weights <- function(by_term) {
-    if (isTRUE(marker_weight_spec$shared_marker_weights)) {
+    if (isTRUE(marker_weight_spec$marker_weight_sets_shared)) {
       term_key <- if (length(marker_weight_spec$active_terms) > 0L) {
         marker_weight_spec$active_terms[[1L]]
       } else {
@@ -2210,7 +2506,7 @@ simulate_joinme <- function(
     }
     by_term[marker_weight_spec$active_terms]
   }
-  marker_weights_base <- .sim_public_marker_weights(marker_weights_base_by_term)
+  marker_weights_offset <- .sim_public_marker_weights(marker_weights_offset_by_term)
   marker_weights_latent <- .sim_public_marker_weights(marker_weights_latent_by_term)
   marker_weights_effective <- .sim_public_marker_weights(marker_weights_eff)
 
@@ -2233,24 +2529,36 @@ simulate_joinme <- function(
     row
   }
 
-  event_template <- do.call(rbind, lapply(seq_len(n_id), function(i) .sim_event_row_at(i, 0)))
-  W_event <- .mm_event(formulaEvent, event_template)
+  event_reference_times <- sort(unique(c(0, as.numeric(times_obs), as.numeric(time_cens)))) # original-time support defining spline knots and boundaries
+  event_clock_variables <- unique(c(time_var, event_time_var)) # formula variables representing the common original-time event clock
+  event_formula_training_data <- do.call(rbind, lapply(seq_len(n_id), function(i) {
+    do.call(rbind, lapply(event_reference_times, function(reference_time) {
+      row <- .sim_event_row_at(i, reference_time)
+      for (event_clock_variable in event_clock_variables) {
+        row[[event_clock_variable]] <- reference_time
+      }
+      row # spline attributes are learnt once from the complete original-time support
+    }))
+  }))
+  event_design_template <- .make_event_model_matrix_template(
+    formulaEvent,
+    event_formula_training_data
+  )
+  event_template <- do.call(rbind, lapply(seq_len(n_id), function(i) {
+    row <- .sim_event_row_at(i, 0)
+    for (event_clock_variable in event_clock_variables) {
+      row[[event_clock_variable]] <- 0
+    }
+    row
+  }))
+  W_event <- .mm_event(event_design_template, event_template)
 
-  if (is.null(beta_event)) {
-    beta_event <- .sim_align_coef(
-      colnames(W_event),
-      user_coef = NULL,
-      sd_default = 0.25,
-      intercept_default = 0.0
-    )
-  } else {
-    beta_event <- .sim_align_coef(
-      colnames(W_event),
-      beta_event,
-      sd_default = 0.25,
-      intercept_default = 0.0
-    )
-  }
+  raw_survival_request <- .sim_population_component(simulation_truth_request, "survival", "slope") # population event-regression declaration with global fallback
+  beta_event <- .sim_resolve_prior_or_fixed(
+    raw_survival_request$slope %||% prior_specification$survival$slope,
+    colnames(W_event),
+    "survival$slope"
+  ) # event-regression population coefficients in formulaEvent model-matrix order
 
   # ---- Step 3: Draw hierarchical random effects and covariance-regression factors
   K_id <- ncol(Z_id_proto)
@@ -2264,8 +2572,16 @@ simulate_joinme <- function(
     context = "simulate_joinme()"
   )
 
-  re_id_effective <- .sim_resolve_re_block_cfg(re_params$id %||% list(), K_id, "id")
-  re_marker_effective <- .sim_resolve_re_block_cfg(re_params$marker %||% list(), K_mk, "marker")
+  re_id_effective <- .sim_resolve_re_block_cfg(
+    re_params[["id", exact = TRUE]] %||% list(),
+    K_id,
+    "id"
+  )
+  re_marker_effective <- .sim_resolve_re_block_cfg(
+    re_params[["marker", exact = TRUE]] %||% list(),
+    K_mk,
+    "marker"
+  )
   if (K_id > 1L && as.integer(indep_flags$indep_id_re %||% 0L) == 1L) {
     id_corr_offdiag <- re_id_effective$corr
     diag(id_corr_offdiag) <- 0
@@ -2280,19 +2596,7 @@ simulate_joinme <- function(
     re_id_effective$Lcorr <- diag(K_id)
   }
   re_id_effective_internal <- re_id_effective
-  if (length(idx_time_uid) > 0L) {
-    re_id_effective_internal$sd[idx_time_uid] <- re_id_effective_internal$sd[idx_time_uid] * time_scale_internal
-    re_id_effective_internal$cov <- diag(as.numeric(re_id_effective_internal$sd), K_id, K_id) %*%
-      re_id_effective_internal$corr %*%
-      diag(as.numeric(re_id_effective_internal$sd), K_id, K_id)
-  }
   re_marker_effective_internal <- re_marker_effective
-  if (length(idx_time_vmk) > 0L) {
-    re_marker_effective_internal$sd[idx_time_vmk] <- re_marker_effective_internal$sd[idx_time_vmk] * time_scale_internal
-    re_marker_effective_internal$cov <- diag(as.numeric(re_marker_effective_internal$sd), K_mk, K_mk) %*%
-      re_marker_effective_internal$corr %*%
-      diag(as.numeric(re_marker_effective_internal$sd), K_mk, K_mk)
-  }
   # ---- Step 3a: prepare the optional latent-progress distribution
   # The mixture builder is invoked only after the random-effect formulae have
   # determined every available dimension. This is the earliest point at which
@@ -2341,11 +2645,11 @@ simulate_joinme <- function(
     z_id %*% chol(re_id_effective_internal$cov)
   } else {
     matrix(0, nrow = n_id, ncol = 0L)
-  } # realised individual effects on the internally scaled time basis
+  } # realised subject effects on the original study-time basis
 
-  # Repeat the same construction for marker-level standardised effects. A
-  # combined marker and marker-weight mixture uses the already drawn common
-  # marker allocation rather than sampling a second label.
+  # Repeat the same construction for marker-level standardised effects. Marker
+  # weights remain population association quantities and do not introduce a
+  # second allocation label.
   z_marker <- if (K_mk > 0L) {
     matrix(stats::rnorm(D * K_mk), nrow = D, ncol = K_mk)
   } else {
@@ -2362,22 +2666,29 @@ simulate_joinme <- function(
     z_marker %*% chol(re_marker_effective_internal$cov)
   } else {
     matrix(0, nrow = D, ncol = 0L)
-  } # realised marker effects on the internally scaled time basis
+  } # realised marker effects on the original study-time basis
 
-  re_cov_cfg <- re_params[["id_marker_cov", exact = TRUE]] %||% list()
-  re_idm_cfg <- re_cov_cfg[["latent", exact = TRUE]]
-  re_idm_legacy <- NULL
-  latent_compat_factor <- if (K_idm > 0) diag(K_idm) else matrix(0.0, 0, 0)
-  if (!is.null(re_idm_cfg) && K_idm > 0) {
-    re_idm_legacy <- .sim_resolve_re_block_cfg(re_idm_cfg, K_idm, "id_marker_cov$latent")
-    latent_sigma <- diag(re_idm_legacy$sd, K_idm, K_idm) %*% re_idm_legacy$corr %*% diag(re_idm_legacy$sd, K_idm, K_idm)
-    latent_compat_factor <- t(chol(latent_sigma))
+  raw_vcov_request <- simulation_truth_request$vcov %||% list() # fixed values or generating distributions for covariance-regression parameters
+  if (inherits(raw_vcov_request, "joinme_prior_spec") || is.numeric(raw_vcov_request) ||
+      any(names(raw_vcov_request) %||% character(0) %in% c("intercept", "slope", "latent"))) {
+    raw_vcov_request <- list(sd = raw_vcov_request, corr = raw_vcov_request)
+  } # a shared declaration applies to both marginal-scale and correlation regressions
+  raw_vcov_component <- function(part_name) {
+    component <- raw_vcov_request[[part_name]] %||% list() # declarations specific to the selected covariance part
+    if (inherits(component, "joinme_prior_spec") || is.numeric(component)) {
+      component <- list(intercept = component, slope = component, latent = component)
+    }
+    if (!is.list(component)) component <- list()
+    list(
+      intercept = component$intercept %||% simulation_truth_request$intercept %||% prior_specification$vcov[[part_name]]$intercept,
+      slope = component$slope %||% simulation_truth_request$slope %||% prior_specification$vcov[[part_name]]$slope,
+      latent = component$latent %||% simulation_truth_request$slope %||% prior_specification$vcov[[part_name]]$latent
+    ) # complete population declarations with global and checked defaults
   }
   re_idm_effective <- list(
     mode = "iid_standard_normal",
     sd = if (K_idm > 0) rep(1, K_idm) else numeric(0),
-    corr = if (K_idm > 0) diag(K_idm) else matrix(0.0, 0, 0),
-    legacy_input = re_idm_legacy
+    corr = if (K_idm > 0) diag(K_idm) else matrix(0.0, 0, 0)
   )
   re_idm_flat <- if (K_idm > 0) {
     .sim_draw_mvn(n_id * D, diag(K_idm))
@@ -2425,44 +2736,6 @@ simulate_joinme <- function(
     )
   }
 
-  .sim_cov_matrix_to_alpha <- function(mat, idx_row, idx_col, diag_link) {
-    .cov_chol_to_lp(
-      L_i = mat,
-      idx_row = idx_row,
-      idx_col = idx_col,
-      diag_link = diag_link
-    )
-  }
-
-  .sim_align_len <- function(x, n, default, arg_name = "parameter") {
-    if (n <= 0) return(numeric(0))
-    if (is.null(x)) {
-      default <- as.numeric(default)
-      if (length(default) == 1L) return(rep(default, n))
-      if (length(default) == n) return(default)
-      cli::cli_abort(c(
-        x = "Internal covariance-regression default has incompatible length.",
-        i = "Expected length {n}, got {length(default)}."
-      ))
-    }
-    x <- as.numeric(x)
-    if (length(x) == 1L) return(rep(x, n))
-    if (length(x) < n) {
-      cli::cli_abort(c(
-        x = "Length mismatch in covariance-regression parameter specification.",
-        i = "Expected length {n}, got {length(x)}."
-      ))
-    }
-    if (length(x) > n) {
-      cli::cli_warn(c(
-        x = "Ignoring extra covariance-regression values in {.arg {arg_name}}.",
-        i = "The current marker-by-id covariance structure uses {n} component{?s}, but {length(x)} value{?s} were supplied."
-      ))
-      return(x[seq_len(n)])
-    }
-    x
-  }
-
   .sim_canonicalize_cov_latent <- function(lambda, z) {
     lambda <- as.numeric(lambda)
     if (length(lambda) == 0L) {
@@ -2481,59 +2754,10 @@ simulate_joinme <- function(
     list(lambda = lambda_out, z = z_out, sign = sign_vec)
   }
 
-  .sim_align_cov_beta <- function(beta_cfg, m_cov, k_cov, arg_name) {
-    if (m_cov <= 0) return(matrix(0.0, 0, k_cov))
-    if (k_cov <= 0) return(matrix(0.0, m_cov, 0))
-    if (is.null(beta_cfg)) {
-      return(matrix(stats::rnorm(m_cov * k_cov, mean = 0, sd = 0.12), nrow = m_cov, ncol = k_cov))
-    }
-    if (is.matrix(beta_cfg)) {
-      if (!all(dim(beta_cfg) == c(m_cov, k_cov))) {
-        cli::cli_abort(c(
-          x = "{.arg {arg_name}} matrix has incompatible dimensions.",
-          i = "Expected {m_cov}x{k_cov}, got {nrow(beta_cfg)}x{ncol(beta_cfg)}."
-        ))
-      }
-      beta_mat <- matrix(as.numeric(beta_cfg), nrow = m_cov, ncol = k_cov)
-      if (any(!is.finite(beta_mat))) {
-        cli::cli_abort(c(
-          x = "{.arg {arg_name}} must contain only finite values.",
-          i = "Check the supplied covariance-regression coefficient matrix."
-        ))
-      }
-      return(beta_mat)
-    }
-    beta_vec <- as.numeric(beta_cfg)
-    if (length(beta_vec) == k_cov) {
-      beta_mat <- matrix(rep(beta_vec, each = m_cov), nrow = m_cov, ncol = k_cov, byrow = FALSE)
-      if (any(!is.finite(beta_mat))) {
-        cli::cli_abort(c(
-          x = "{.arg {arg_name}} must contain only finite values.",
-          i = "Check the supplied covariance-regression coefficients."
-        ))
-      }
-      return(beta_mat)
-    }
-    if (length(beta_vec) == m_cov * k_cov) {
-      beta_mat <- matrix(beta_vec, nrow = m_cov, ncol = k_cov, byrow = TRUE)
-      if (any(!is.finite(beta_mat))) {
-        cli::cli_abort(c(
-          x = "{.arg {arg_name}} must contain only finite values.",
-          i = "Check the supplied covariance-regression coefficients."
-        ))
-      }
-      return(beta_mat)
-    }
-    cli::cli_abort(c(
-      x = "{.arg {arg_name}} has incompatible length.",
-      i = "Provide length {k_cov}, or {m_cov * k_cov}, or an explicit {m_cov}x{k_cov} matrix."
-    ))
-  }
-
-  diag_link_cov <- tolower(as.character(re_cov_cfg$diag_link %||% "softplus")[1])
+  diag_link_cov <- tolower(as.character(vcov_diag_link)[1])
   if (!diag_link_cov %in% c("softplus", "exp")) {
     cli::cli_abort(c(
-      x = "{.arg re_params$id_marker_cov$diag_link} must be 'softplus' or 'exp'.",
+      x = "{.arg vcov_diag_link} must be 'softplus' or 'exp'.",
       i = "Use 'softplus' (default) or 'exp'."
     ))
   }
@@ -2543,8 +2767,8 @@ simulate_joinme <- function(
   # A full lower triangle is still retained internally because class selection
   # and association code use that stable coordinate order. The public
   # generative syntax, however, mirrors formulaVCov directly: `sd` has Q rows
-  # and `corr` has Q(Q-1)/2 rows. Legacy packed values are unpacked silently so
-  # existing reproducibility scripts retain their numerical behaviour.
+  # and `corr` has Q(Q-1)/2 rows. Superseded packed inputs are rejected because
+  # they cannot express distinct standard-deviation and correlation formulae.
   M_corr_cov <- if (K_idm >= 2L && as.integer(indep_flags$indep_idmarker_cov %||% 0L) == 0L) {
     as.integer(K_idm * (K_idm - 1L) / 2L)
   } else {
@@ -2552,96 +2776,47 @@ simulate_joinme <- function(
   } # number of off-diagonal partial-correlation coordinates actually fitted
   diagonal_positions <- which(idx_row_cov == idx_col_cov) # packed locations governed by formulaVCov$sd
   correlation_positions <- which(idx_row_cov != idx_col_cov) # packed locations governed by formulaVCov$corr
-  re_cov_sd_cfg <- re_cov_cfg$sd %||% list() # user-supplied SD intercepts, slopes and latent loadings
-  re_cov_corr_cfg <- re_cov_cfg$corr %||% list() # user-supplied off-diagonal correlation parameters
+  re_cov_sd_cfg <- raw_vcov_component("sd") # marginal-scale generating declarations
+  re_cov_corr_cfg <- raw_vcov_component("corr") # off-diagonal correlation generating declarations
+  sd_coordinate_names <- if (K_idm > 0L) {
+    paste0("sd[", seq_len(K_idm), "]")
+  } else {
+    character(0)
+  } # names of the fitted marginal-scale coordinates; explicitly empty when no marker-by-subject effect is present
+  correlation_coordinate_names <- if (M_corr_cov > 0L) {
+    paste0("corr[", seq_len(M_corr_cov), "]")
+  } else {
+    character(0)
+  } # names of the fitted off-diagonal coordinates; avoids paste0() turning a zero-length index into the spurious label "corr[]"
 
-  if (!is.list(re_cov_sd_cfg) || !is.list(re_cov_corr_cfg)) {
-    cli::cli_abort(
-      "{.arg re_params$id_marker_cov$sd} and {.arg re_params$id_marker_cov$corr} must be named lists."
-    )
-  }
-
-  legacy_alpha <- re_cov_cfg$alpha # former packed lower-triangular intercept vector, retained as an exact compatibility input
-  legacy_lambda <- re_cov_cfg$lambda # former packed lower-triangular loading vector, retained as an exact compatibility input
-  legacy_beta <- re_cov_cfg$beta # former common-design slope matrix, usable only when the two designs coincide
-  if (!is.null(legacy_alpha)) {
-    legacy_alpha <- .sim_align_len(
-      legacy_alpha, M_cov, default = 0,
-      arg_name = "re_params$id_marker_cov$alpha"
-    )
-    re_cov_sd_cfg$alpha <- re_cov_sd_cfg$alpha %||% legacy_alpha[diagonal_positions]
-    re_cov_corr_cfg$alpha <- re_cov_corr_cfg$alpha %||% legacy_alpha[correlation_positions]
-  }
-  if (!is.null(legacy_lambda)) {
-    legacy_lambda <- .sim_align_len(
-      legacy_lambda, M_cov, default = 0,
-      arg_name = "re_params$id_marker_cov$lambda"
-    )
-    re_cov_sd_cfg$lambda <- re_cov_sd_cfg$lambda %||% legacy_lambda[diagonal_positions]
-    re_cov_corr_cfg$lambda <- re_cov_corr_cfg$lambda %||% legacy_lambda[correlation_positions]
-  }
-  if (!is.null(legacy_beta)) {
-    shared_design <- identical(colnames(Xcov_sd), colnames(Xcov_corr)) && K_cov_sd == K_cov_corr
-    if (!shared_design) {
-      cli::cli_abort(c(
-        x = "Packed {.arg re_params$id_marker_cov$beta} cannot represent different SD and correlation formulae.",
-        i = "Supply {.arg re_params$id_marker_cov$sd$beta} and {.arg re_params$id_marker_cov$corr$beta} separately."
-      ))
-    }
-    legacy_beta <- .sim_align_cov_beta(
-      legacy_beta, M_cov, K_cov_sd,
-      "re_params$id_marker_cov$beta"
-    )
-    re_cov_sd_cfg$beta <- re_cov_sd_cfg$beta %||% legacy_beta[diagonal_positions, , drop = FALSE]
-    re_cov_corr_cfg$beta <- re_cov_corr_cfg$beta %||% legacy_beta[correlation_positions, , drop = FALSE]
-  }
-
-  default_alpha_sd <- if (K_idm > 0L) {
-    vapply(seq_len(K_idm), function(coordinate) {
-      target_sd <- stats::runif(1, min = 0.45, max = 1.15) # plausible marginal SD before any subject covariate shift
-      if (diag_link_cov == "exp") log(target_sd) else log(expm1(target_sd))
-    }, numeric(1))
-  } else numeric(0)
-  default_alpha_corr <- if (M_corr_cov > 0L) {
-    stats::rnorm(M_corr_cov, mean = 0, sd = 0.2)
-  } else numeric(0)
-  default_lambda_sd <- if (K_idm > 0L) {
-    .sim_random_signed(K_idm, min_abs = 0.15, max_abs = 0.75)
-  } else numeric(0)
-  default_lambda_corr <- if (M_corr_cov > 0L) {
-    .sim_random_signed(M_corr_cov, min_abs = 0.15, max_abs = 0.75)
-  } else numeric(0)
-
-  alpha_cov_sd <- .sim_align_len(
-    re_cov_sd_cfg$alpha, K_idm, default_alpha_sd,
-    "re_params$id_marker_cov$sd$alpha"
+  alpha_cov_sd <- .sim_resolve_prior_or_fixed(
+    re_cov_sd_cfg$intercept, sd_coordinate_names, "vcov$sd$intercept"
   ) # SD-regression intercept for every marker-by-subject basis coordinate
-  alpha_cov_corr <- .sim_align_len(
-    re_cov_corr_cfg$alpha, M_corr_cov, default_alpha_corr,
-    "re_params$id_marker_cov$corr$alpha"
+  alpha_cov_corr <- .sim_resolve_prior_or_fixed(
+    re_cov_corr_cfg$intercept, correlation_coordinate_names, "vcov$corr$intercept"
   ) # correlation-regression intercept for every row-major off-diagonal coordinate
-  lambda_cov_sd <- .sim_align_len(
-    re_cov_sd_cfg$lambda, K_idm, default_lambda_sd,
-    "re_params$id_marker_cov$sd$lambda"
-  ) # unexplained subject heterogeneity on each unlinked SD predictor
-  lambda_cov_corr <- .sim_align_len(
-    re_cov_corr_cfg$lambda, M_corr_cov, default_lambda_corr,
-    "re_params$id_marker_cov$corr$lambda"
-  ) # unexplained subject heterogeneity on each Fisher-like tanh predictor
+  lambda_cov_sd <- .sim_resolve_prior_or_fixed(
+    re_cov_sd_cfg$latent, sd_coordinate_names, "vcov$sd$latent"
+  ) # unexplained subject heterogeneity loading on each unlinked SD predictor
+  lambda_cov_corr <- .sim_resolve_prior_or_fixed(
+    re_cov_corr_cfg$latent, correlation_coordinate_names, "vcov$corr$latent"
+  ) # unexplained subject heterogeneity loading on each Fisher-like tanh predictor
 
   for (value_name in c("alpha_cov_sd", "alpha_cov_corr", "lambda_cov_sd", "lambda_cov_corr")) {
     if (any(!is.finite(get(value_name)))) {
       cli::cli_abort("Every covariance-regression intercept and loading must be finite.")
     }
   }
-  beta_cov_sd <- .sim_align_cov_beta(
-    re_cov_sd_cfg$beta, K_idm, K_cov_sd,
-    "re_params$id_marker_cov$sd$beta"
-  ) # Q by K_cov_sd systematic SD effects
-  beta_cov_corr <- .sim_align_cov_beta(
-    re_cov_corr_cfg$beta, M_corr_cov, K_cov_corr,
-    "re_params$id_marker_cov$corr$beta"
-  ) # M_corr by K_cov_corr systematic correlation effects
+  beta_cov_sd <- matrix(.sim_resolve_prior_or_fixed(
+    re_cov_sd_cfg$slope,
+    as.vector(outer(sd_coordinate_names, colnames(Xcov_sd), paste, sep = ":")),
+    "vcov$sd$slope"
+  ), nrow = K_idm, ncol = K_cov_sd) # Q by K_cov_sd systematic SD effects
+  beta_cov_corr <- matrix(.sim_resolve_prior_or_fixed(
+    re_cov_corr_cfg$slope,
+    as.vector(outer(correlation_coordinate_names, colnames(Xcov_corr), paste, sep = ":")),
+    "vcov$corr$slope"
+  ), nrow = M_corr_cov, ncol = K_cov_corr) # M_corr by K_cov_corr systematic correlation effects
 
   alpha_cov <- numeric(M_cov) # compatibility/reporting vector in packed lower-triangular order
   lambda_cov <- numeric(M_cov) # compatibility/reporting loading vector in the same packed order
@@ -2649,24 +2824,7 @@ simulate_joinme <- function(
   alpha_cov[correlation_positions] <- alpha_cov_corr
   lambda_cov[diagonal_positions] <- lambda_cov_sd
   lambda_cov[correlation_positions] <- lambda_cov_corr
-  if (!is.null(re_cov_cfg$sd_u) || !is.null(re_cov_cfg$tau_u)) {
-    cli::cli_abort(c(
-      x = "{.arg re_params$id_marker_cov$sd_u} is no longer supported.",
-      i = "Covariance regression now uses {.arg lambda} on an iid standard-normal latent directly.",
-      i = "Remove {.arg sd_u} or {.arg tau_u} and rescale {.arg lambda} instead."
-    ))
-  }
-  if (!is.null(re_idm_legacy) && M_cov > 0 && K_idm > 0) {
-    base_li <- .sim_cov_lp_to_matrix(alpha_cov, K_idm, idx_row_cov, idx_col_cov, diag_link_cov)
-    alpha_cov <- .sim_cov_matrix_to_alpha(base_li %*% latent_compat_factor, idx_row_cov, idx_col_cov, diag_link_cov)
-    alpha_cov_sd <- alpha_cov[diagonal_positions]
-    alpha_cov_corr <- alpha_cov[correlation_positions]
-  }
   L_i <- array(0.0, dim = c(n_id, K_idm, K_idm))
-  marker_id_row_scale_internal <- rep(1.0, K_idm)
-  if (length(idx_time_idm) > 0L) {
-    marker_id_row_scale_internal[idx_time_idm] <- time_scale_internal
-  }
   z_cov <- matrix(0.0, nrow = n_id, ncol = max(1L, M_cov))
   lambda_cov_sign <- rep(1, M_cov)
   if (M_cov > 0 && K_idm > 0) {
@@ -2679,7 +2837,7 @@ simulate_joinme <- function(
     lambda_cov_corr <- lambda_cov[correlation_positions]
 
     # The covariance-regression mixture acts on Stan's canonical `z_L`
-    # coordinates, after any sign absorbed from a legacy negative loading.
+    # coordinates, after any sign absorbed from a supplied negative loading.
     # Individual and covariance-regression classes share the same subject
     # allocation held in `mixture_configuration$allocation$subject`.
     covariance_class_type <- intersect(
@@ -2724,11 +2882,6 @@ simulate_joinme <- function(
   }
 
   L_i_eff <- L_i
-  if (K_idm > 0L && any(marker_id_row_scale_internal != 1)) {
-    for (i in seq_len(n_id)) {
-      L_i_eff[i, , ] <- sweep(L_i_eff[i, , ], 1L, marker_id_row_scale_internal, `*`)
-    }
-  }
 
   re_idm_scaled <- array(0.0, dim = c(n_id, D, K_idm))
   if (K_idm > 0) {
@@ -2736,28 +2889,6 @@ simulate_joinme <- function(
       Li <- matrix(L_i_eff[i, , ], K_idm, K_idm)
       re_idm_scaled[i, , ] <- re_idm[i, , ] %*% t(Li)
     }
-  }
-
-  rescale_re_matrix_to_public <- function(mat, idx, scale_factor) {
-    if (!is.matrix(mat) || ncol(mat) == 0L) return(mat)
-    idx <- as.integer(idx %||% integer(0))
-    idx <- idx[is.finite(idx) & idx >= 1L & idx <= ncol(mat)]
-    if (!length(idx) || !is.finite(scale_factor) || scale_factor <= 0 || abs(scale_factor - 1) < 1e-12) {
-      return(mat)
-    }
-    mat[, idx] <- mat[, idx, drop = FALSE] / scale_factor
-    mat
-  }
-
-  rescale_re_array_to_public <- function(arr, idx, scale_factor) {
-    if (is.null(arr) || length(dim(arr)) != 3L || dim(arr)[3] == 0L) return(arr)
-    idx <- as.integer(idx %||% integer(0))
-    idx <- idx[is.finite(idx) & idx >= 1L & idx <= dim(arr)[3]]
-    if (!length(idx) || !is.finite(scale_factor) || scale_factor <= 0 || abs(scale_factor - 1) < 1e-12) {
-      return(arr)
-    }
-    arr[, , idx] <- arr[, , idx, drop = FALSE] / scale_factor
-    arr
   }
 
   label_re_matrix <- function(mat, row_labels, col_labels) {
@@ -2803,9 +2934,9 @@ simulate_joinme <- function(
     arr
   }
 
-  re_id_public <- rescale_re_matrix_to_public(re_id, idx_time_uid, time_scale_internal)
-  re_marker_public <- rescale_re_matrix_to_public(re_marker, idx_time_vmk, time_scale_internal)
-  re_idm_public <- rescale_re_array_to_public(re_idm_scaled, idx_time_idm, time_scale_internal)
+  re_id_public <- re_id
+  re_marker_public <- re_marker
+  re_idm_public <- re_idm_scaled
 
   id_labels_public <- as.character(dataEvent[[id_var]] %||% seq_len(n_id))
   id_term_labels <- colnames(Z_id_proto) %||% paste0("id_re_", seq_len(ncol(re_id_public)))
@@ -2844,114 +2975,21 @@ simulate_joinme <- function(
   assoc_coef_corr <- rep(0.0, M_corr)
   assoc_coef_vcov <- rep(0.0, M_vcov)
 
-  .sim_extract_named_assoc_vector <- function(x, prefix) {
-    if (length(x) == 0) return(numeric(0))
-    nms <- names(x)
-    if (is.null(nms)) return(numeric(0))
-    idx <- grepl(paste0("^", prefix, "($|\\[[0-9]+\\]$|[._]?[0-9]+$)"), nms)
-    if (!any(idx)) return(numeric(0))
-    vals <- as.numeric(x[idx])
-    nms_sel <- nms[idx]
-    ord_key <- rep(NA_integer_, length(nms_sel))
-    ord_key[nms_sel == prefix] <- 1L
-    idx_num <- nms_sel != prefix
-    if (any(idx_num)) {
-      ord_key[idx_num] <- suppressWarnings(as.integer(gsub("[^0-9]", "", nms_sel[idx_num])))
-      ord_key[is.na(ord_key)] <- seq_len(sum(is.na(ord_key))) + 1L
-    }
-    vals[order(ord_key)]
-  }
-
-  .sim_fill_assoc_coefs <- function(assoc, assoc_coefs, M_corr, M_vcov) {
-    scalar <- assoc_coef_scalar
-    corr <- rep(0.0, M_corr)
-    vcov <- rep(0.0, M_vcov)
-
-    .assign_assoc_vector <- function(target, supplied, expected, channel, source = NULL) {
-      vals <- as.numeric(supplied)
-      if (expected <= 0L || length(vals) == 0L) {
-        return(target)
-      }
-      take <- min(expected, length(vals))
-      if (take > 0L) {
-        target[seq_len(take)] <- vals[seq_len(take)]
-      }
-      if (length(vals) > expected) {
-        cli::cli_warn(c(
-          x = "Ignoring extra {.arg {channel}} association coefficients in {.fn simulate_joinme}.",
-          i = "Model defines {expected} {.val {channel}} component{?s}, but {length(vals)} value{?s} were supplied{if (!is.null(source)) paste0(' via ', source) else ''}."
-        ))
-      }
-      target
-    }
-
-    if (is.list(assoc_coefs) && !is.null(assoc_coefs$corr) && M_corr > 0) {
-      corr <- .assign_assoc_vector(corr, assoc_coefs$corr, M_corr, "corr", source = "assoc_coefs$corr")
-    }
-    if (is.list(assoc_coefs) && !is.null(assoc_coefs$vcov) && M_vcov > 0) {
-      vcov <- .assign_assoc_vector(vcov, assoc_coefs$vcov, M_vcov, "vcov", source = "assoc_coefs$vcov")
-    }
-
-    if (!is.null(names(assoc_coefs))) {
-      named_terms <- intersect(names(scalar), names(assoc_coefs))
-      named_terms <- intersect(named_terms, assoc)
-      if (length(named_terms) > 0) {
-        scalar[named_terms] <- as.numeric(assoc_coefs[named_terms])
-      }
-
-      if (M_corr > 0 && !is.list(assoc_coefs)) {
-        vc_named <- .sim_extract_named_assoc_vector(assoc_coefs, "corr")
-        if (length(vc_named) > 0) {
-          corr <- .assign_assoc_vector(corr, vc_named, M_corr, "corr", source = "named assoc_coefs")
-        }
-      }
-      if (M_vcov > 0 && !is.list(assoc_coefs)) {
-        vc_named <- .sim_extract_named_assoc_vector(assoc_coefs, "vcov")
-        if (length(vc_named) > 0) {
-          vcov <- .assign_assoc_vector(vcov, vc_named, M_vcov, "vcov", source = "named assoc_coefs")
-        }
-      }
-    } else if (length(assoc_coefs) > 0) {
-      vals <- as.numeric(assoc_coefs)
-      cursor <- 1L
-      for (term in assoc) {
-        if (cursor > length(vals)) break
-        if (identical(term, "corr")) {
-          if (M_corr > 0) {
-            remaining <- vals[cursor:length(vals)]
-            take <- min(M_corr, length(remaining))
-            if (take > 0) {
-              corr <- .assign_assoc_vector(corr, remaining, M_corr, "corr", source = "positional assoc_coefs")
-              cursor <- cursor + take
-            }
-          }
-        } else if (identical(term, "vcov")) {
-          if (M_vcov > 0) {
-            remaining <- vals[cursor:length(vals)]
-            take <- min(M_vcov, length(remaining))
-            if (take > 0) {
-              vcov <- .assign_assoc_vector(vcov, remaining, M_vcov, "vcov", source = "positional assoc_coefs")
-              cursor <- cursor + take
-            }
-          }
-        } else if (term %in% names(scalar)) {
-          scalar[[term]] <- vals[cursor]
-          cursor <- cursor + 1L
-        }
-      }
-    }
-
-    list(scalar = scalar, corr = corr, vcov = vcov)
-  }
-
-  assoc_coef_parts <- if (assoc_coefs_missing || is.null(assoc_coefs) || length(assoc_coefs) == 0) {
-    .sim_random_assoc_parts(assoc, M_corr, M_vcov)
-  } else {
-    .sim_fill_assoc_coefs(assoc, assoc_coefs, M_corr, M_vcov)
-  }
-  assoc_coef_scalar <- assoc_coef_parts$scalar
-  assoc_coef_corr <- assoc_coef_parts$corr
-  assoc_coef_vcov <- assoc_coef_parts$vcov
+  scalar_assoc_names <- intersect(names(assoc_coef_scalar), assoc) # active scalar association coefficients in documented formula order
+  complete_assoc_names <- c(
+    scalar_assoc_names,
+    if ("corr" %in% assoc) paste0("corr[", seq_len(M_corr), "]") else character(0),
+    if ("vcov" %in% assoc) paste0("vcov[", seq_len(M_vcov), "]") else character(0)
+  ) # complete population association vector including covariance components
+  raw_assoc_request <- .sim_population_component(simulation_truth_request, "assoc_coef", "slope") # association population declaration with global fallback
+  resolved_assoc <- .sim_resolve_prior_or_fixed(
+    raw_assoc_request$slope %||% prior_specification$assoc$slope,
+    complete_assoc_names,
+    "assoc$slope"
+  )
+  if (length(scalar_assoc_names) > 0L) assoc_coef_scalar[scalar_assoc_names] <- resolved_assoc[scalar_assoc_names]
+  if (M_corr > 0L && "corr" %in% assoc) assoc_coef_corr <- unname(resolved_assoc[paste0("corr[", seq_len(M_corr), "]")])
+  if (M_vcov > 0L && "vcov" %in% assoc) assoc_coef_vcov <- unname(resolved_assoc[paste0("vcov[", seq_len(M_vcov), "]")])
 
   weighted_terms <- intersect(c("cv_total", "cs_total", "cv_marker", "cs_marker"), assoc)
   if (length(weighted_terms) > 0) {
@@ -3008,7 +3046,7 @@ simulate_joinme <- function(
 
   eta_components_all_markers <- function(i, t) {
     row_df <- assoc_row_template[[i]]
-    row_df[[time_var]] <- t / time_scale_internal
+    row_df[[time_var]] <- t
 
     x_fix <- .mm(fixed_template, row_df)
     z_id <- .sim_rhs_matrix(id_templates, row_df)
@@ -3150,8 +3188,7 @@ simulate_joinme <- function(
   } else {
     .sim_make_baseline_hazard(
       spec = baseline_hazard,
-      formula_basehaz = formulaBasehaz,
-      beta_basehaz = beta_basehaz
+      formula_basehaz = formulaBasehaz
     )
   }
   baseline_hazard_truth <- attr(h0_fn, "basehaz_truth", exact = TRUE)
@@ -3166,7 +3203,10 @@ simulate_joinme <- function(
 
   .eta_event_it <- function(i, t) {
     row <- .sim_event_row_at(i, t)
-    W_row <- .mm_event(formulaEvent, row)
+    for (event_clock_variable in event_clock_variables) {
+      row[[event_clock_variable]] <- as.numeric(t)
+    }
+    W_row <- .mm_event(event_design_template, row)
     w <- rep(0, length(beta_event))
     names(w) <- names(beta_event)
     common <- intersect(colnames(W_row), names(beta_event))
@@ -3328,7 +3368,16 @@ simulate_joinme <- function(
     }
   }
 
-  dataEvent[[event_time_var]] <- vapply(event_draws, function(x) as.numeric(x$time), numeric(1))
+  simulated_event_stop <- vapply(
+    event_draws,
+    function(x) as.numeric(x$time),
+    numeric(1)
+  ) # observed event or administrative-censoring time returned by numerical inversion
+  simulated_event_stop <- .sim_separate_tied_event_endpoints(
+    interval_start = 0,
+    interval_stop = simulated_event_stop
+  ) # positive event-process endpoints used consistently by observation scheduling, returned data and fitting
+  dataEvent[[event_time_var]] <- simulated_event_stop
   dataEvent[[event_var]] <- vapply(event_draws, function(x) as.integer(x$event), integer(1))
 
   # ---- Step 5a: Sample delayed-entry times once per subject.
@@ -3413,12 +3462,10 @@ simulate_joinme <- function(
   rownames(dataLong) <- NULL
 
   # ---- Mean structure from model matrices and sampled random effects
-  dataLong_scaled <- dataLong
-  dataLong_scaled[[time_var]] <- dataLong_scaled[[time_var]] / time_scale_internal
-  X_long <- .mm(fixed_template, dataLong_scaled)
-  Z_id_long <- .sim_rhs_matrix(id_templates, dataLong_scaled)
-  Z_mk_long <- .sim_rhs_matrix(mk_templates, dataLong_scaled)
-  Z_idm_long <- .sim_rhs_matrix(idm_templates, dataLong_scaled)
+  X_long <- .mm(fixed_template, dataLong)
+  Z_id_long <- .sim_rhs_matrix(id_templates, dataLong)
+  Z_mk_long <- .sim_rhs_matrix(mk_templates, dataLong)
+  Z_idm_long <- .sim_rhs_matrix(idm_templates, dataLong)
 
   id_index <- match(as.character(dataLong[[id_var]]), as.character(dataEvent[[id_var]]))
   marker_index <- match(as.character(dataLong[[marker_var]]), marker_levels)
@@ -3461,14 +3508,14 @@ simulate_joinme <- function(
   dist_design_cols <- list()
   for (param_name in names(dist_formulas)) {
     X_param <- .build_dist_matrix(dist_formulas[[param_name]], dataLong, family_by_row = family_by_row)$X
-    coef_spec <- .sim_dist_coef_spec(param_name, dist_coefs, dist_formulas[[param_name]])
-    beta_param <- .sim_align_dist_coef(
-      col_names = colnames(X_param),
-      user_coef = coef_spec,
-      dist_scope = dist_formulas[[param_name]],
-      sd_default = 0.15,
-      intercept_default = 0.0
-    )
+    beta_param <- .sim_distributional_population(
+      simulation_truth_request,
+      prior_specification$distributional[[param_name]],
+      param_name,
+      colnames(X_param),
+      marker_levels,
+      family_names
+    ) # distributional population coefficients drawn or fixed in model-matrix order
     eta_param <- as.numeric(X_param %*% beta_param)
 
     re_terms_param <- .build_dist_re_terms(dist_formulas[[param_name]], dataLong)
@@ -3598,26 +3645,6 @@ simulate_joinme <- function(
   tmax <- max(dataEvent[[event_time_var]])
   time_scale_generation <- as.numeric(time_scale_internal %||% tmax)
 
-  beta_scaled <- beta_long
-  if (length(idx_time_beta) > 0L) {
-    beta_scaled[idx_time_beta] <- beta_scaled[idx_time_beta] * time_scale_generation
-  }
-
-  tau_u_eff <- re_id_effective$sd
-  if (length(idx_time_uid) > 0L) {
-    tau_u_eff[idx_time_uid] <- tau_u_eff[idx_time_uid] * time_scale_generation
-  }
-
-  tau_v_eff <- re_marker_effective$sd
-  if (length(idx_time_vmk) > 0L) {
-    tau_v_eff[idx_time_vmk] <- tau_v_eff[idx_time_vmk] * time_scale_generation
-  }
-
-  marker_id_row_scale_eff <- rep(1.0, K_idm)
-  if (length(idx_time_idm) > 0L) {
-    marker_id_row_scale_eff[idx_time_idm] <- time_scale_generation
-  }
-
   family_codes_present <- sort(unique(family_codes))
   family_names_present <- vapply(family_codes_present, .family_code_to_name, character(1))
 
@@ -3671,31 +3698,31 @@ simulate_joinme <- function(
 
   stan_fit_truth <- list(
     beta = beta_long,
-    beta_scaled = beta_scaled,
     time_scale_generation = as.numeric(time_scale_generation),
     time_scale_observed_max = as.numeric(tmax),
-    idx_time_beta = as.integer(idx_time_beta),
-    idx_time_uid = as.integer(idx_time_uid),
-    idx_time_vmk = as.integer(idx_time_vmk),
-    idx_time_idm = as.integer(idx_time_idm),
     gamma_w = beta_event,
     bs_gamma_c = baseline_hazard_truth$coefficients,
     shrinkage = shrinkage,
-    fixed_marker_weights = as.integer(isTRUE(fixed_marker_weights)),
-    marker_weights_base = marker_weights_base,
-    z_marker_weights = as.numeric(t(z_marker_weight_sets)),
+    marker_weights_offset = marker_weights_offset,
+    marker_weight_mean = marker_weight_means,
+    z_marker_weights = marker_weight_prior_draw$raw,
+    marker_weight_standardised = as.numeric(t(standardised_departure_sets)),
+    marker_weight_prior_family = prior_specification$marker_weights$family$family,
+    marker_weight_df = marker_weight_prior_draw$df %||% numeric(0),
+    marker_weight_df_was_fitted = marker_weight_prior_draw$df_was_fitted %||% logical(0),
+    marker_weight_prior_raw = marker_weight_prior_draw$raw,
+    marker_weight_horseshoe_local = marker_weight_prior_draw$local_scale,
+    marker_weight_horseshoe_global = marker_weight_prior_draw$global_scale,
+    marker_weight_horseshoe_slab = marker_weight_prior_draw$slab_multiplier,
     marker_weights_eff = marker_weights_effective,
     tau_u = re_id_effective$sd,
-    tau_u_eff = tau_u_eff,
     Lcorr_u = re_id_effective$Lcorr,
     Corr_u = re_id_effective$corr,
     Sigma_u = re_id_effective$cov,
     tau_v = re_marker_effective$sd,
-    tau_v_eff = tau_v_eff,
     Lcorr_v = re_marker_effective$Lcorr,
     Corr_v = re_marker_effective$corr,
     Sigma_v = re_marker_effective$cov,
-    marker_id_row_scale_eff = marker_id_row_scale_eff,
     alpha_L = alpha_cov, # fitted packed covariance-regression intercepts
     beta_L_sd = beta_cov_sd, # fitted Q_idm by K_cov_sd standard-deviation slopes
     beta_L_corr = beta_cov_corr, # fitted M_corr by K_cov_corr partial-correlation slopes
@@ -3791,7 +3818,7 @@ simulate_joinme <- function(
     defaults = family_params
   )
 
-  true_params <- list(
+  truth <- list(
     beta_long = beta_long,
     beta_event = beta_event,
     alpha_cv_total = if ("cv_total" %in% names(assoc_coef_vec)) assoc_coef_vec[["cv_total"]] else NA_real_,
@@ -3806,28 +3833,36 @@ simulate_joinme <- function(
     # the effective weights that actually generated the event process.
     marker_weights = marker_weights_effective,
     marker_weights_raw = marker_weights_effective,
-    marker_weights_base = marker_weights_base,
+    marker_weights_offset = marker_weights_offset,
+    marker_weight_mean = marker_weight_means,
+    marker_weight_mean_by_term = marker_weight_mean_by_term,
     marker_weights_latent = marker_weights_latent,
     marker_weights_eff = marker_weights_eff,
     marker_weights_by_term = marker_weights_eff,
-    marker_weights_base_by_term = marker_weights_base_by_term,
+    marker_weights_offset_by_term = marker_weights_offset_by_term,
     marker_weights_latent_by_term = marker_weights_latent_by_term,
     z_marker_weight_sets = z_marker_weight_sets,
-    fixed_marker_weights = isTRUE(fixed_marker_weights),
+    marker_weight_standardised_sets = standardised_departure_sets,
+    marker_weight_prior_family = prior_specification$marker_weights$family$family,
+    marker_weight_df = marker_weight_prior_draw$df %||% numeric(0),
+    marker_weight_df_was_fitted = marker_weight_prior_draw$df_was_fitted %||% logical(0),
+    marker_weight_prior_raw = marker_weight_prior_draw$raw,
+    marker_weight_horseshoe_local = marker_weight_prior_draw$local_scale,
+    marker_weight_horseshoe_global = marker_weight_prior_draw$global_scale,
+    marker_weight_horseshoe_slab = marker_weight_prior_draw$slab_multiplier,
     shrinkage = shrinkage,
     shrinkage_distribution = c(
       `0` = "student_t(6, 0, 1)",
       `1` = "double_exponential(0, 1)",
       `2` = "normal(0, 1)"
     )[[as.character(shrinkage)]],
-    shared_marker_weights = isTRUE(marker_weight_spec$shared_marker_weights),
     link_names = link_names,
     quadrature_nodes = as.integer(gk_spec$n_gk),
     gk_nodes = gk_spec$nodes,
     gk_weights = gk_spec$weights,
     gk_rule = gk_spec$rule,
     transforms = transforms,
-    priors = prior_specification,
+    declaration = simulation_truth_request,
     basehaz = h0_fn,
     baseline_hazard = baseline_hazard_truth,
     formulaVCov = formulaVCov,
@@ -3836,7 +3871,6 @@ simulate_joinme <- function(
     family = family_truth,
     distributional_params = distributional_truth,
     stan_fit = stan_fit_truth,
-    dist_coefs = dist_coefs,
     dist_re_params = re_params$dist %||% list(),
     dist_re = dist_re_effective %||% list(),
     re_params = re_params,
@@ -3844,7 +3878,7 @@ simulate_joinme <- function(
       id = re_id_effective,
       marker = re_marker_effective,
       id_marker_cov = list(
-        latent = re_idm_effective,
+        standardised = re_idm_effective,
         sd = list(
           alpha = alpha_cov_sd,
           beta = beta_cov_sd,
@@ -3871,7 +3905,7 @@ simulate_joinme <- function(
       id = re_id_public,
       marker = re_marker_public,
       id_marker_cov = re_idm_public,
-      id_marker_cov_latent = re_idm,
+      id_marker_cov_standardised = re_idm,
       id_marker_cov_scaled = re_idm_scaled
     ),
     re_draws_likelihood = list(
@@ -3881,12 +3915,7 @@ simulate_joinme <- function(
     ),
     L_i = L_i,
     id_marker_cov_effective = list(
-      latent = re_idm_effective,
-      legacy_latent_translation = list(
-        input = re_idm_legacy,
-        factor = latent_compat_factor,
-        applied_to = if (!is.null(re_idm_legacy)) "alpha" else NULL
-      ),
+      standardised = re_idm_effective,
       sd = list(
         alpha = alpha_cov_sd,
         beta = beta_cov_sd,
@@ -3978,9 +4007,12 @@ simulate_joinme <- function(
         }
       }
       out$time_start <- as.numeric(int_start)
-      # Ensure that time_stop is always strictly greater than time_start to avoid zero-length intervals
-      out$time_stop <- pmax(as.numeric(int_stop), out$time_start + 1e-9)
-      out[[event_time_var]] <- pmax(as.numeric(int_stop), out$time_start + 1e-9)
+      separated_interval_stop <- .sim_separate_tied_event_endpoints(
+        interval_start = out$time_start,
+        interval_stop = as.numeric(int_stop)
+      ) # exact numerical ties are separated without concealing a stop lying genuinely below its start
+      out$time_stop <- separated_interval_stop
+      out[[event_time_var]] <- separated_interval_stop
       out[[event_var]] <- as.integer(int_status)
       out
     })
@@ -3995,25 +4027,21 @@ simulate_joinme <- function(
       }
     }
     dataEvent_public$time_start <- as.numeric(entry_time_by_id)
-    # Ensure that time_stop is always strictly greater than time_start to avoid zero-length intervals
-    dataEvent_public$time_stop <- 
-      pmax(
-        as.numeric(dataEvent_public[[event_time_var]]), 
-        dataEvent_public$time_start + 1e-9)
+    separated_subject_stop <- .sim_separate_tied_event_endpoints(
+      interval_start = dataEvent_public$time_start,
+      interval_stop = dataEvent_public[[event_time_var]]
+    ) # subject-level endpoint used by both the public event formula and its auxiliary interval columns
+    dataEvent_public[[event_time_var]] <- separated_subject_stop
+    dataEvent_public$time_stop <- separated_subject_stop
   }
 
-  # ---- Step 6a: retain a directly reusable fitting specification.
+# ---- Retain a directly reusable fitting specification.
   #
   # This record is assembled only after the public event data have reached
   # their final subject-level or counting-process layout. Every name below is
   # therefore an argument understood by the corresponding fitting entry
   # point. Generating quantities such as beta_long and the covariance
   # coefficients remain in `truth`; they are estimands, not fitting inputs.
-  recovery_marker_weights <- if (isTRUE(shared_marker_weights)) {
-    as.numeric(marker_weights_base)
-  } else {
-    marker_weights_base_by_term
-  } # base marker weights use precisely the fitting interface's shared/list convention
   recovery_arguments <- list(
     formulaLong = formulaLong,
     dataLong = dataLong,
@@ -4024,14 +4052,11 @@ simulate_joinme <- function(
     families = families,
     transforms = transforms,
     priors = prior_specification,
-    fixed_marker_weights = isTRUE(fixed_marker_weights),
-    shared_marker_weights = isTRUE(shared_marker_weights),
     control = list(
       quadrature_nodes = as.integer(gk_spec$n_gk),
       vcov_diag_link = diag_link_cov
     ),
     assoc = assoc,
-    marker_weights = recovery_marker_weights,
     shrinkage = shrinkage,
     eps_fd = eps_cs,
     id_var = id_var,
@@ -4047,16 +4072,24 @@ simulate_joinme <- function(
     recovery_arguments$class_dimensions <- .mixture_specification$class_dimensions
     recovery_arguments$class_ordering <- .mixture_specification$class_ordering
   }
-  true_params$recovery <- list(
+  truth$recovery <- list(
     entry_point = recovery_entry_point,
     arguments = recovery_arguments
   ) # call with do.call(get(entry_point), arguments) to rebuild the fitted specification exactly
 
+  if (longitudinal_only) {
+    dataEvent_public <- NULL # no event data belong to the public longitudinal-only simulation
+    truth$formulaEvent <- NULL # scientific truth records the absence of a survival submodel
+    truth$assoc <- character(0) # association parameters are absent rather than fixed at zero
+    truth$recovery$arguments$formulaEvent <- NULL # recovery invokes the longitudinal-only fitting route
+    truth$recovery$arguments$dataEvent <- NULL # no neutral scaffold is exposed to fitting
+    truth$recovery$arguments$assoc <- character(0) # fitted association design has zero columns
+  }
+
   list(
     dataLong = dataLong,
     dataEvent = dataEvent_public,
-    truth = true_params,
-    true_params = true_params,
+    truth = truth,
     marker_info = marker_info,
     helpers = helpers,
     tmax = tmax

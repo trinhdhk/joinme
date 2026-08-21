@@ -10,7 +10,7 @@
 \method{predict}{JoiNMeFit}(
   object,
   newdataLong,
-  newdataEvent,
+  newdataEvent = NULL,
   process = c("longitudinal", "event"),
   pred_type = c("per_marker_id", "marginal_marker", "marginal_id", "marker_subject",
     "subject_marker"),
@@ -21,15 +21,16 @@
   tmax = NULL,
   ci_levels = c(0.5, 0.95),
   control = list(),
+  reuse_fitted_re = FALSE,
   seed = .Random.seed[[1]],
   ...
 )
 
-\method{posterior_linpred}{JoiNMeFit}(object, ...)
+\method{posterior_linpred}{JoiNMeFit}(object, reuse_fitted_re = FALSE, ...)
 
-\method{posterior_epred}{JoiNMeFit}(object, ...)
+\method{posterior_epred}{JoiNMeFit}(object, reuse_fitted_re = FALSE, ...)
 
-\method{posterior_predict}{JoiNMeFit}(object, ...)
+\method{posterior_predict}{JoiNMeFit}(object, reuse_fitted_re = FALSE, ...)
 }
 \arguments{
 \item{object}{A fitted object of class \code{JoiNMeFit}.}
@@ -42,7 +43,8 @@ in the survival model. It may contain one row per subject or interval-split
 rows (\code{Surv(start, stop, status)} layout). Left- and interval-censored
 survival encodings (\code{type = "left"}, \code{type = "interval2"}) are accepted.
 When interval rows are supplied, dynamic prediction uses the latest row per
-subject for event-side covariates.}
+subject for event-side covariates. This argument may be omitted for a
+longitudinal-only fit; neutral event rows are then constructed internally.}
 
 \item{process}{Character vector specifying which predictions to compute.
 Options: "longitudinal" (future trajectory), "event" (conditional survival probability). Default: both.}
@@ -121,6 +123,12 @@ chain fails to initialise, prediction automatically retries that subject
 with a narrower random init range (\code{init = 0.1}).
 }}
 
+\item{reuse_fitted_re}{Logical. If \code{TRUE}, every identifier in the supplied
+data must have occurred during fitting. Prediction reuses that subject's
+paired posterior random effects and covariance draws, without estimating a
+second set of random effects. The default, \code{FALSE}, conditions newly sampled
+effects on the supplied longitudinal history for dynamic prediction.}
+
 \item{seed}{Integer. Random seed for reproducibility of random effect sampling.}
 
 \item{...}{Additional arguments passed to \link{predict}.}
@@ -131,7 +139,12 @@ A list with two components:
 \item{longitudinal_fitted}{A data.frame containing fitted values for observed history on the linpred and epred scales. Includes a \code{scale} column.}
 \item{survival}{A data.frame containing survival probabilities (S(t|time_start)) for each time point in \code{times}. Columns: id, time, Survival, Median, Est.Error, L95, U95.}
 \item{cumhaz}{A data.frame containing conditional cumulative hazards H(t|time_start). Columns: id, time, Cumhaz, Median, Est.Error, L95, U95.}
-\item{draws}{A list containing raw posterior draws (\code{longitudinal}, \code{longitudinal_fitted}, \code{survival}, \code{cumhaz}) and reconstructed subject-level random effects (\code{random_effects_id}, \code{random_effects_marker_id}, including marker-by-id covariance draws when id-dependent covariance is active).}
+\item{draws}{A list containing raw posterior draws (\code{longitudinal},
+\code{longitudinal_fitted}, \code{survival}, \code{cumhaz}) and reconstructed subject-level
+random effects (\code{random_effects_id}, \code{random_effects_marker_id}, including
+marker-by-id covariance draws when id-dependent covariance is active).
+Predictions from \code{\link[=joinme_mix]{joinme_mix()}} additionally retain conditional allocation
+draws in \code{posterior_class}.}
 
 A \code{JoiNMeDynPred} object with \code{metadata$scale = "linpred"} and
 \code{metadata$scales = "linpred"}.
@@ -176,7 +189,7 @@ allowing independent control of prediction Monte Carlo size.
 
 Dynamic prediction passes the fitted, draw-specific transform ordinates to
 Stan. Ordered piecewise-linear associations therefore use the same posterior
-curve as the fitted event model and never reconstruct a curve from legacy
+curve as the fitted event model and never reconstruct a curve from earlier
 user-supplied \code{y} values.
 
 The baseline-hazard basis is likewise inherited from fitting.  Prediction

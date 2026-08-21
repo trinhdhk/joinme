@@ -1038,6 +1038,14 @@ print.summary_JoiNMeFit <- function(x, ...) {
   if (!is.null(x$metadata$tmax)) {
     meta_lines <- c(meta_lines, paste0("tmax: ", x$metadata$tmax))
   }
+  marker_weight_offsets <- x$metadata$marker_weight_offsets %||% list() # declared marker-specific constants displayed before posterior tables
+  if (length(marker_weight_offsets) > 0L) {
+    for (set_name in names(marker_weight_offsets)) {
+      offset_values <- marker_weight_offsets[[set_name]] # named marker offsets for one shared or term-specific fitted weight set
+      offset_text <- paste0(names(offset_values), "=", format(signif(as.numeric(offset_values), 6), trim = TRUE), collapse = ", ") # compact marker-by-offset declaration
+      meta_lines <- c(meta_lines, paste0("Marker-weight offsets [", set_name, "]: ", offset_text))
+    }
+  }
   .cli_print_bullets(meta_lines)
   diag_tbl <- x$tables$diagnostics
   if (is.null(diag_tbl) && !is.null(x$diagnostics)) {
@@ -1049,6 +1057,7 @@ print.summary_JoiNMeFit <- function(x, ...) {
   .cli_print_table_section("Baseline hazard coefficients", x$tables$baseline_hazard, level = 2L)
   .cli_print_table_section("Survival process (non-association covariates)", x$tables$survival_process, level = 2L)
   .cli_print_table_section("Association parameters", x$tables$assoc, level = 2L)
+  .cli_print_table_section("Marker-weight distribution", x$tables$marker_weights, level = 2L)
   .cli_print_table_section("Transform parameters", x$tables$transform_parameters, level = 2L)
   .cli_print_table_section("Piecewise-linear relative log-hazard ordinates", x$tables$piecewise_ordinates, level = 2L)
   .cli_print_table_section("Distributional parameters", x$tables$distributional, level = 2L)
@@ -1177,7 +1186,7 @@ print.JoiNMeDynPred <- function(x, ...) {
 
 #' Convert renamed draws into a chains-aware array
 #'
-#' @param x Posterior draws returned by [extract()] or [draws()].
+#' @param x Posterior draws returned by [extract()] or [posterior_draws()].
 #'
 #' @return A three-dimensional array with dimensions iteration x chain x term.
 #' @keywords internal
@@ -1220,10 +1229,10 @@ print.JoiNMeDynPred <- function(x, ...) {
     extract.JoiNMeFit(object, what = what, term = term, draws = draws, seed = seed, keep_chains = TRUE),
     error = function(e) NULL
   )
-  if (is.null(ext) || is.null(ext$draws)) {
+  if (is.null(ext) || is.null(ext$posterior_draws)) {
     return(NULL)
   }
-  .summarise_named_draws(ext$draws, digits = digits)
+  .summarise_named_draws(ext$posterior_draws, digits = digits)
 }
 
 #' Convert integer covariance indices into model-term labels

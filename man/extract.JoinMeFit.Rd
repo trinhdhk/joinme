@@ -6,7 +6,8 @@
 \usage{
 \method{extract}{JoiNMeFit}(
   object,
-  what = c("fixef", "gamma_w", "basehaz", "baseline_hazard", "assoc", "association_plot",
+  what = c("fixed_effects", "random_effects", "coefficients", "marker_weights", "fixef",
+    "gamma_w", "basehaz", "baseline_hazard", "assoc", "association_plot",
     "distributional", "distributional_regression", "likelihood_scale", "raw"),
   term = NULL,
   variable = NULL,
@@ -20,7 +21,9 @@
 \item{object}{A \code{JoiNMeFit} object.}
 
 \item{what}{Character component selector. One of
-\code{"fixef"}, \code{"gamma_w"}, \code{"basehaz"},
+\code{"fixed_effects"}, \code{"random_effects"}, \code{"coefficients"},
+\code{"marker_weights"}, \code{"fixef"},
+\code{"gamma_w"}, \code{"basehaz"},
 \code{"baseline_hazard"}, \code{"assoc"}, \code{"association_plot"},
 \code{"distributional"}, \code{"distributional_regression"}, \code{"likelihood_scale"},
 or \code{"raw"}.}
@@ -42,7 +45,7 @@ draws-by-term matrix.}
 \value{
 A list with fields:
 \itemize{
-\item \code{draws}: numeric array when \code{keep_chains = TRUE} (iteration x chain x term),
+\item \code{posterior_draws}: numeric array when \code{keep_chains = TRUE} (iteration x chain x term),
 otherwise a numeric matrix (rows = draws, cols = requested terms). For
 \code{what = "association_plot"}, this is a named list of compact draw
 matrices keyed by association term.
@@ -58,20 +61,20 @@ including one matrix per covariance component when applicable.
 Extracts one fitted-model component at a time and returns both the draw-level
 values and the mapping that produced them.
 
-This differs from \code{\link[=draws]{draws()}} in two important ways:
+This differs from \code{\link[=posterior_draws]{posterior_draws()}} in two important ways:
 \itemize{
 \item \code{extract()} keeps the request scoped to one semantic component such as
 fixed effects, survival coefficients, association terms, distributional
 terms, or likelihood-scale parameters.
-\item \code{extract()} returns a structured list with \code{draws} plus \code{term_map}
+\item \code{extract()} returns a structured list with \code{posterior_draws} plus \code{term_map}
 (and for \code{what = "association_plot"}, additional plotting support data)
 instead of a single \code{posterior} draws object.
 }
 
 In short, use \code{extract()} when you need component-aware extraction and use
-\code{\link[=draws]{draws()}} when you need one renamed posterior object for general downstream
+\code{\link[=posterior_draws]{posterior_draws()}} when you need one renamed posterior object for general downstream
 analysis.
 }
 \seealso{
-\code{\link[=draws]{draws()}} for a higher-level interface that returns a single \code{posterior}
+\code{\link[=posterior_draws]{posterior_draws()}} for a higher-level interface that returns a single \code{posterior}
 }
