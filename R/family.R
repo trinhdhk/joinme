@@ -108,7 +108,6 @@ joinme_family <- function(name, link = NULL, inv_link = NULL, tau = NULL) {
 #' @export
 jm_family <- joinme_family
 
-
 #' Method for printing a `JoiNMe_family_spec` object
 #' 
 #' @description Print out the spec details of a `JoiNMe_family_spec` object.
