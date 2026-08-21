@@ -28,8 +28,10 @@ articles:
 - title: Modelling
   contents:
   - joinme-workflow
+  - joinme-interpretation
   - joinme-discrimination
   - joinme-associations
+  - joinme-marker-weight-means
   - joinme-covariance-regression
   - joinme-model
   - joinme-theory

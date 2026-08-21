@@ -16,6 +16,13 @@ Current implementation experiments with flexible association structures, covaria
 4. summarise and plot fitted effects,
 5. generate dynamic predictions and plot future trajectories or survival.
 
+Simulation uses `jm_truth()`: numeric coefficients are held fixed for one
+simulated data set, whereas `prior_*()` declarations are sampled once and then
+held fixed. Fitting uses `jm_prior()`, which accepts probability distributions
+for coefficients and rejects fixed coefficient values. Baseline-hazard truth,
+association coefficients, and ordinary random-effect covariance truths are
+declared through `basehaz`, `assoc_coef`, and `re_params` inside `jm_truth()`.
+
 ## Marker distributional parameters
 
 By default, `joinme` uses **family-shared** distributional parameters where possible, i.e.,
@@ -113,7 +120,7 @@ skew-Laplace distributions.
 
 Posterior draws are available through a dedicated renamed-draw interface:
 
-- `draws(fit, ...)` and `draws(pred, ...)` return `posterior`-compatible draws
+- `posterior_draws(fit, ...)` and `posterior_draws(pred, ...)` return `posterior`-compatible draws
 - `as.array(fit)` and `as.array(pred)` return the same renamed posterior arrays
 - `mcmc_plot()` forwards those draws to `bayesplot`, imitating the behaviour of `brms`
 - `longitudinal_plot()`, `survival_plot()`, `cumhaz_plot()`,
@@ -182,8 +189,10 @@ mixture_fit <- joinme_mix(
   class_type = c("subject", "vcov"),
   formulaClass = ~ x1 + x2,
   priors = jm_prior(
-    class_probability = rep(2, 3),
-    class_regression = 1
+    class = list(
+      baseline_prob = rep(2, 3),
+      slope = prior_normal(scale = 1)
+    )
   ),
   assoc = c("cv_mean", "vcov")
 )
@@ -242,12 +251,11 @@ sim <- simulate_joinme(
     jm_family("student_t"),
     jm_family("student_t", inv_link = ~ inv_logit(x / 2))
   ),
-  n_obs_per_marker_per_id = 4,
   times_obs = seq(0, 5, length.out = 8),
   quadrature_nodes = 31,
   seed = 2026,
   assoc = c("cv_total"),
-  assoc_coefs = c(cv_total = 0.6)
+  truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.6)))
 )
 
 # Note: when estimating marker weights, compare to sim$truth$marker_weights
@@ -289,7 +297,7 @@ fixef(fit)
 coef(fit)
 
 # Renamed posterior draws
-draws(fit, variables = c("time", "alpha_cv_total"), format = "draws_df")
+posterior_draws(fit, variables = c("time", "alpha_cv_total"), format = "draws_df")
 
 # Bayesplot-backed posterior display with renamed variables
 mcmc_plot(fit, variable = c("time", "alpha_cv_total"), type = "trace")
@@ -313,6 +321,23 @@ ce_average_marker <- conditional_effects(
   longitudinal_estimand = "marginal_marker",
   plot = FALSE
 )
+
+# Paired posterior contrast between two covariate profiles
+contrast_profiles <- data.frame(
+  time = seq(0, 5, length.out = 40),
+  x2 = 0,
+  cond__ = paste0("time=", round(seq(0, 5, length.out = 40), 2))
+)
+cc <- conditional_contrast(
+  fit,
+  groupA = c(x1 = 1),
+  groupB = c(x1 = -1),
+  conditions = contrast_profiles,
+  process = c("longitudinal", "event"),
+  longitudinal_estimand = "marginal_marker",
+  plot = FALSE
+)
+plot(cc, condition_variable = "time", ask = FALSE)
 
 # Random effects / covariance / combined coefficients (nested by formula block)
 re_fit <- ranef(fit)
@@ -365,10 +390,16 @@ plot(
 
 # Posterior summary/extraction helpers
 posterior_summary(fit)
-posterior_fixef(fit)
-posterior_ranef(fit)
-posterior_coef(fit)
 posterior_assoc(fit, summary = TRUE)
+
+# Conventional coefficient interfaces use posterior_summary() for reporting
+# and extract() for their draw-level inputs.
+fixef(fit)
+ranef(fit)
+coef(fit)
+extract(fit, what = "fixed_effects")
+extract(fit, what = "random_effects")
+extract(fit, what = "coefficients")
 
 # Explicit fitted-object plot helpers
 association_plot(fit)

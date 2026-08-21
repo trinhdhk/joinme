@@ -8,6 +8,7 @@
 .Ruserdata
 .Rproj.user/
 *.Rproj
+.Rprofile
 
 # R package build artifacts
 /*.tar.gz
@@ -61,15 +62,13 @@ docs
 *.csv
 *.txt
 
-# Internal notes remain private by default, except for the two design documents
-# which form part of the maintained latent-progress model specification.
+# Internal notes
+notes/
 notes/*
-!notes/docs/
 notes/docs/*
-!notes/docs/architecture.md
-!notes/joinme-whitepaper.qmd
+tests/*
+tests/local/*
 
 # rstan crap
 src/
 sim/
-tests/local/*.png

@@ -14,46 +14,75 @@
  */
 
 functions {
-  #include helper/functions/eta_fd.stanfunctions
-  #include helper/functions/eta_chol_corr.stanfunctions
-  #include helper/functions/eta_vcov_weighted_const.stanfunctions
-  #include helper/functions/cumhaz.stanfunctions
-  #include helper/bytecode/interpreter.stanfunctions
-  #include helper/functions/link_functions.stanfunctions
-  #include helper/functions/basis_functions.stanfunctions
-  #include helper/functions/composite_transform.stanfunctions
+  #include include/etc/functions/eta_fd.stanfunctions
+  #include include/etc/functions/eta_chol_corr.stanfunctions
+  #include include/etc/functions/eta_vcov_weighted_const.stanfunctions
+  #include include/etc/functions/cumhaz.stanfunctions
+  #include include/etc/bytecode/interpreter.stanfunctions
+  #include include/etc/functions/link_functions.stanfunctions
+  #include include/etc/functions/basis_functions.stanfunctions
+  #include include/etc/functions/composite_transform.stanfunctions
 
-  #include helper/functions/joinme_dynpred_partial.stanfunctions
+  #include include/etc/functions/joinme_dynpred_partial.stanfunctions
 }
 
 data {
-  #include helper/data/dynpred_data.stan
-  int<lower=1> grainsize; // number of fitted draws assigned to each reduce-sum slice
-
-  int flag_indep_id_re; // whether shared-individual effects are mutually independent
-  int flag_indep_marker_re; // whether shared-marker effects are mutually independent
-  int flag_indep_idmarker_cov; // whether marker-by-individual covariance is diagonal
-  int flag_allow_marker_crosscorr; // whether marker-specific effects may correlate across markers
-
-  array[num_unique_cov_entries] int idx_row_cov; // row index for each unique covariance entry
-  array[num_unique_cov_entries] int idx_col_cov; // column index for each unique covariance entry
+  // The retained-draw axis is common; scientific inputs remain submodel-owned.
+  #include include/etc/data/dynamic_prediction_draw_data.stan
+  #include include/submodels/longitudinal/data/dynamic_prediction.stan
+  #include include/etc/data/fitted_random_effect_draw_data.stan
+  #include include/submodels/marker_weight/data/dynamic_prediction.stan
+  #include include/submodels/survival/data/dynamic_prediction.stan
+  #include include/submodels/assoc/data/dynamic_prediction.stan
+  #include include/submodels/functional/data/dynamic_prediction.stan
 }
 
 transformed data {
-  array[n_draws] int draw_ids; // consecutive retained-fit draw indices passed to reduce_sum
-  for (i in 1 : n_draws) draw_ids[i] = i;
+  #include include/submodels/longitudinal/transformed_data/dynamic_prediction.stan
+  #include include/submodels/marker_weight/transformed_data/dynamic_prediction.stan
+  #include include/submodels/survival/transformed_data/dynamic_prediction.stan
+  #include include/submodels/assoc/transformed_data/dynamic_prediction.stan
+  #include include/submodels/functional/transformed_data/dynamic_prediction.stan
+  #include include/etc/transformed_data/dynamic_prediction_draw_indices.stan
 }
 
 parameters {
-  #include helper/parameters/joinme_dynpred_common.stan
+  #include include/submodels/longitudinal/parameters/dynamic_prediction.stan
+  #include include/submodels/marker_weight/parameters/dynamic_prediction.stan
+  #include include/submodels/survival/parameters/dynamic_prediction.stan
+  #include include/submodels/assoc/parameters/dynamic_prediction.stan
+  #include include/submodels/functional/parameters/dynamic_prediction.stan
+  #include include/etc/parameters/dynamic_prediction_subject_effects.stan
+}
+
+transformed parameters {
+  #include include/submodels/longitudinal/transformed_parameters/dynamic_prediction.stan
+  #include include/submodels/marker_weight/transformed_parameters/dynamic_prediction.stan
+  #include include/submodels/survival/transformed_parameters/dynamic_prediction.stan
+  #include include/submodels/assoc/transformed_parameters/dynamic_prediction.stan
+  #include include/submodels/functional/transformed_parameters/dynamic_prediction.stan
 }
 
 model {
-  #include helper/model/dynpred_threaded_likelihood.stan
-
+  #include include/submodels/longitudinal/model/dynamic_prediction.stan
+  #include include/submodels/marker_weight/model/dynamic_prediction.stan
+  #include include/submodels/survival/model/dynamic_prediction.stan
+  #include include/submodels/assoc/model/dynamic_prediction.stan
+  #include include/submodels/functional/model/dynamic_prediction.stan
+  #include include/etc/model/dynpred_threaded_likelihood.stan
 }
 
 generated quantities {
-  #include helper/generated_quantities/dynpred_output_declarations.stan
-  #include helper/generated_quantities/dynpred_output_calculations.stan
+  #include include/submodels/longitudinal/generated_quantities/dynamic_prediction_declarations.stan
+  #include include/submodels/survival/generated_quantities/dynamic_prediction_declarations.stan
+  #include include/submodels/assoc/generated_quantities/dynamic_prediction_declarations.stan
+  #include include/submodels/marker_weight/generated_quantities/dynamic_prediction_declarations.stan
+  #include include/submodels/functional/generated_quantities/dynamic_prediction_declarations.stan
+
+  #include include/submodels/longitudinal/generated_quantities/dynamic_prediction_calculations.stan
+  #include include/submodels/survival/generated_quantities/dynamic_prediction_calculations.stan
+  #include include/submodels/assoc/generated_quantities/dynamic_prediction_calculations.stan
+  #include include/submodels/marker_weight/generated_quantities/dynamic_prediction_calculations.stan
+  #include include/submodels/functional/generated_quantities/dynamic_prediction_calculations.stan
+  #include include/etc/generated_quantities/dynpred_output_calculations.stan
 }
