@@ -18,6 +18,6 @@
 #' @useDynLib joinme, .registration = TRUE
 #'
 #' @references
-#' Stan Development Team (NA). RStan: the R interface to Stan. R package version 2.36.0.9000. https://mc-stan.org
+#' Stan Development Team (2026). RStan: the R interface to Stan. R package version 2.36.0.9000. https://mc-stan.org
 #'
-"_PACKAGE"  # roxygen entry point for package-level docs
+"_PACKAGE"  
