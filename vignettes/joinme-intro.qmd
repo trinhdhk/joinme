@@ -33,59 +33,39 @@ For Stan backends:
 
 ## Conceptual overview
 
-The `JoiNMe` model links two components:
+The `joinme` model links two components:
 
 1. A multivariate longitudinal model for repeated biomarker measurements.
 2. A survival model whose hazard depends on summaries of the longitudinal
    process at time $t$.
 
 For the longitudinal part, each marker can follow its own distribution
-(Gaussian, Student-$t$, Poisson, negative binomial, Bernoulli, beta,
-skew families, or ordinal). The linear predictor is decomposed into fixed
-effects, subject-level random effects, marker-level random effects, and
-optional marker-by-subject random effects. The survival part uses a
-proportional hazards model with a flexible spline baseline hazard and
-time-dependent association terms.
+(Gaussian, Student-$t$, Poisson, negative binomial, Bernoulli, beta, skew families, or ordinal). The linear predictor is decomposed into fixed effects, subject-level random effects, marker-level random effects, and optional marker-by-subject random effects. The survival part uses a proportional hazards model with a flexible spline baseline hazard and time-dependent association terms.
 
 The association terms implemented in `joinme` package are:
 
 - Current value (CV) of the latent linear predictor.
 - Current slope (CS) of the latent linear predictor.
-- Correlation association (CORR) derived from off-diagonal marker-by-subject
-  correlations.
-- Variance-covariance association (VCOV) derived from lower-triangular
-  marker-by-subject Cholesky-factor entries taken directly from `L`.
+- Correlation association (CORR) derived from off-diagonal marker-by-subject correlations.
+- Variance-covariance association (VCOV) derived from lower-triangular marker-by-subject Cholesky-factor entries taken directly from `L`.
 
-Each association term can be left on its original scale or transformed
-using a functional expression, a monotone I-spline, or an ordered piecewise-linear
-mapping.
+Each association term can be left on its original scale or transformed using a functional expression, a monotone I-spline, or an ordered piecewise-linear mapping.
 
 ## Family-shared distributional semantics
 
-For mixed longitudinal families, `JoiNMe` treats distributional parameters as
-**shared by family** when no distributional regression is supplied.
+For mixed longitudinal families, `joinme` treats distributional parameters as **shared by family** when no distributional regression is supplied. In brief,
 
-Concretely:
-
-- Markers with the same family share one latent baseline process for each
-  applicable distributional parameter.
+- Markers with the same family share one latent baseline process for each applicable distributional parameter.
 - Markers from different families do not share those baselines.
-- Parameters are instantiated only when a family uses them
-  (for example `nu` for Student-`t`, `phi` for negative-binomial).
+- Parameters are instantiated only when a family uses them (for example `nu` for Student-`t`, `phi` for negative-binomial).
 
 Example interpretation:
 
-- If markers `A` and `B` are both Student-`t` and marker `C` is Gaussian,
-  then `A` and `B` share the same baseline `sigma` and `nu` processes,
-  while `C` has its own `sigma` process and no `nu`.
+- If markers `A` and `B` are both Student-`t` and marker `C` is Gaussian, then `A` and `B` share the same baseline `sigma` and `nu` processes, while `C` has its own `sigma` process and no `nu`.
 
 ### What changes when `formulaDist` is provided?
 
-Supplying a distributional regression (for example `sigma ~ 1 + time`) switches
-that parameter from a family-level constant baseline to a regression-driven
-process. In that mode, summaries report distributional regression coefficients
-(`(Intercept)`, covariate effects, and random-effect SD terms when present)
-rather than only baseline family constants.
+Supplying a distributional regression (for example `sigma ~ 1 + time`) regresses the parameter from a family-level constant baseline to a regression-driven process. Summaries report distributional regression coefficients (`(Intercept)`, covariate effects, and random-effect SD terms when present) rather than only baseline family constants.
 
 Illustrative `formulaDist` specification:
 
@@ -100,24 +80,24 @@ This means:
 
 - `sigma` is modelled through regression (fixed/random effects if included),
 - `nu` is regression-driven with an intercept-only structure,
-- other distributional parameters without formulas continue using family-shared
-  baselines when applicable.
+- other distributional parameters without formulas continue using family-shared baselines when applicable.
 
-## Data requirements (minimal)
+## Data
 
 You need two data frames:
 
-- `dataLong`: long-format longitudinal data with columns for subject id,
-  marker id, time, outcome, and covariates.
-- `dataEvent`: one row per subject with event/censoring time, event
-  indicator, and baseline covariates.
+- `dataLong`: long-format longitudinal data with columns for subject id, marker id, time, outcome, and covariates.
+- `dataEvent`: one row per subject for an ordinary right-, left- or interval-censored outcome, or ordered risk intervals for a counting-process outcome, together with the event covariates.
 
-Time is internally scaled to $[0, 1]$ for numerical stability. The model
-returns coefficients on the original time scale.
+The event formula accepts `Surv(time, status)`,
+`Surv(start, stop, status)`, `Surv(time, status, type = "left")`, and `Surv(lower, upper, type = "interval2")`. An interval-censored event in \((L,R]\) contributes \(S(L)-S(R)\) to the full event likelihood. Its lower inspection limit is not interpreted as delayed entry. See
+[Interpreting a fitted JoiNMe model](joinme-interpretation.html) for the censoring equations and worked interpretation of conditional effects and contrasts.
 
-### Step 1: Load packages and set a reproducible seed
+Formulae and reported coefficients use the original study-time scale.
 
 ```{r setup}
+#| include: false
+repo_root <- normalizePath(if (dir.exists("R")) "." else "..", mustWork = FALSE)
 if (!require('joinme', quietly = TRUE)) {
   if (requireNamespace("devtools", quietly = TRUE) && file.exists(file.path(repo_root, "DESCRIPTION"))) {
     devtools::load_all(repo_root, quiet = TRUE)
@@ -127,13 +107,12 @@ if (!require('joinme', quietly = TRUE)) {
 }
 library(survival)
 
-set.seed(2026)
+set.seed(1)
 ```
 
-### Step 2: Simulate a small dataset
+### Simulation example
 
-We generate a modest dataset so the workflow runs quickly while still
-containing both longitudinal and survival information.
+We generate a modest dataset so the workflow runs quickly while still containing both longitudinal and survival information.
 
 ```{r intro-simulate}
 sim <- simulate_joinme(
@@ -142,29 +121,23 @@ sim <- simulate_joinme(
     jm_family("student_t"),
     jm_family("student_t")
   ),
-  n_obs_per_marker_per_id = 4,
   times_obs = seq(0, 5, length.out = 8),
-  baseline_hazard = list(type='weibull', shape = 2, scale = 20),
   quadrature_nodes = 31,
-  seed = 2026,
+  seed = 1,
   assoc = c("cv_total"),
-  assoc_coefs = c(cv_total = 0.6)
+  truth = jm_truth(
+    assoc_coef = list(slope = c(cv_total = 0.6)),
+    basehaz = list(type = "weibull", shape = 2, scale = 8)
+  )
 )
-
-# Gauss-Kronrod nodes/weights are fixed in Stan; `quadrature_nodes` selects
-# the node count used to build the design matrices in R.
 
 head(sim$dataLong)
 head(sim$dataEvent)
 ```
 
-### Step 3: Specify longitudinal and survival models
+The longitudinal formula defines fixed effects and random effects. The survival formula defines baseline covariates in the hazard model.
 
-The longitudinal formula defines fixed effects and random effects. The survival
-formula defines baseline covariates in the hazard model.
-
-Formula-scoped weighting can be declared directly in grouping terms via
-`weighted(group, weights = <column>)`, including marker-level grouping declarations.
+Formula-scoped weighting can be declared directly in grouping terms via `weighted(group, weights = <column>)`, including marker-level grouping declarations.
 
 ```{r intro-formulas}
 formulaLong <- y ~ 1 + time + x1 +
@@ -180,10 +153,7 @@ formulaLong_weighted <- y ~ 1 + time + x1 +
   (0 + x1 + (1 + time | weighted(id, weights = id_w)) | weighted(marker, weights = marker_w))
 ```
 
-### Step 4: Fit the joint model
-
-We link the survival hazard to the current value (CV) of the longitudinal
-process using an identity transformation.
+We link the survival hazard to the current value (CV) of the longitudinal process using an identity transformation.
 
 ```{r intro-fit}
 fit <- joinme(
@@ -201,34 +171,43 @@ fit <- joinme(
     parallel_chains = 1,
     iter_warmup = 500,
     iter_sampling = 500,
-    seed = 2026,
+    seed = 1,
     refresh = 0,
     adapt_delta = 0.85
   )
 )
 ```
 
-### Step 5: Summarise fixed effects and associations
+To fit only the multivariate nested longitudinal process, omit both event arguments. The formula continues to define population, subject, marker, and subject-by-marker effects, but no survival likelihood or association coefficient is introduced.
+
+```{r intro-longitudinal-only, eval=FALSE}
+longitudinal_fit <- joinme(
+  formulaLong = formulaLong,
+  dataLong = sim$dataLong,
+  families = "student_t",
+  control = list(engine = "cmdstanr")
+)
+```
+
+Longitudinal summaries, posterior predictions and trajectory plots retain their ordinary interpretation. Event prediction, survival plots, concordance, and time-dependent ROC/AUC are deliberately unavailable because no event outcome contributed to the likelihood.
+
 
 ```{r intro-summaries}
-summary(fit) # or posterior_summary(fit)fixef(fit)
+summary(fit) # or posterior_summary(fit)
+fixef(fit)
 coef(fit)
 posterior_assoc(fit, summary = TRUE)
 ```
 
-`posterior_summary()` is an alias for `summary()`. `posterior_assoc()` returns
-association-specific posterior output in a format that stays close to the main
-summary tables. For covariance-style channels (`corr`, `vcov`), the printed and
-tabular output now uses readable matrix labels instead of raw numeric indices.
-`coef()` returns coefficients on the model-matrix scale after adding the
-population-level contribution and the matching group-level deviation. As with
-`fixef()` and `ranef()`, use `summary = FALSE` to retrieve posterior draws
-instead of posterior summaries.
+`posterior_summary(what = "model")` returns the same model summary as `summary()`. Its `fixef`, `ranef`, and `coef` views form the common summary layer used by those three conventional methods. `posterior_assoc()` returns association-specific posterior output in a format that stays close to the main
+summary tables. 
 
-### Step 6: Dynamic prediction for one subject
+For covariance-style channels (`corr`, `vcov`), the printed and
+tabular output uses readable matrix labels instead of raw numeric indices. `coef()` returns coefficients on the model-matrix scale after adding the population-level contribution and the matching group-level deviation. Use `summary = FALSE` to retrieve posterior draws instead of posterior summaries.
 
-We condition on the observed history up to the last measurement for subject 1
-and obtain predictive summaries beyond that time.
+## Dynamic prediction
+
+We condition on the observed history up to the last measurement for subject 1 and obtain predictive summaries beyond that time.
 
 ```{r intro-predict}
 ndL <- sim$dataLong[sim$dataLong$id == 1, ]
@@ -257,19 +236,12 @@ pred <- posterior_predict(
 # to return multiple longitudinal scales in one call (default = all scales)
 ```
 
-### Step 7: Plot longitudinal and survival predictions
-
 ```{r intro-plot}
 plot(pred, type = c("longitudinal", "survival"), combined = TRUE)
 ```
 
-If `patchwork`/`cowplot` is unavailable, `combined = TRUE` falls back to the
-standard per-subject structured return (grouped by subject and outcome) instead
-of any flattened helper list.
 
-The heatmap is an alternative to the usual separated marker curves. It orders
-markers by the magnitude of posterior mean change and makes tiles transparent
-when the posterior sign certainty does not exceed `1 - threshold`.
+The heatmap is an alternative to the usual separated marker curves. It orders markers by the magnitude of posterior mean change and makes tiles transparent when the posterior sign certainty does not exceed `1 - threshold`.
 
 `plot(fit, ...)` uses fitted posterior samples directly and has no conditioning
 argument. Conditional covariate profiles are evaluated with
@@ -291,11 +263,37 @@ effects_data <- conditional_effects(
 plot(effects_data, ask = FALSE)
 ```
 
-For the longitudinal process, set `longitudinal_estimand = "marker"` to add
-the fitted marker-level deviation, or use `"marginal_marker"` to average
-marker-specific predictions within each posterior draw. This latter estimand
-applies each marker's inverse link before averaging, so it represents the
-average expected marker response rather than the response of an average marker.
+For the longitudinal process, set `longitudinal_estimand = "marker"` to add the fitted marker-level deviation, or use `"marginal_marker"` to average marker-specific predictions within each posterior draw. This latter estimand applies each marker's inverse link before averaging, so it represents the average expected marker response rather than the response of an average marker.
+
+`conditional_contrast()` compares two complete or partial covariate profiles.
+The two predictions are evaluated against the same posterior draw and are contrasted before the posterior centre and interval are calculated. Hence the reported uncertainty retains posterior dependence between the profiles. 
+The longitudinal result is group A minus group B on the chosen response or linear-predictor scale. The event result is the hazard ratio of A relative to B, or its logarithm when `event_scale = "log_hazard_ratio"`.
+
+```{r intro-conditional-contrast, eval=FALSE}
+contrast_conditions <- data.frame(
+  time = seq(0, max(sim$dataLong$time), length.out = 50),
+  x2 = 0,
+  cond__ = paste0("time=", round(seq(0, max(sim$dataLong$time), length.out = 50), 2))
+)
+
+contrast_data <- conditional_contrast(
+  fit,
+  groupA = c(x1 = 1),
+  groupB = c(x1 = -1),
+  conditions = contrast_conditions,
+  process = c("longitudinal", "event"),
+  method = "posterior_epred",
+  longitudinal_estimand = "marginal_marker",
+  event_scale = "hazard_ratio",
+  plot = FALSE
+)
+
+plot(contrast_data, condition_variable = "time", ask = FALSE)
+```
+
+Each row of `conditions` supplies covariates common to the two groups. 
+Undeclared predictors are represented by their mean in the fitting data for a numeric predictor and by their first fitted level for a categorical predictor.
+For the event process, the contrast concerns the direct covariate component of `formulaEvent`; the baseline hazard and longitudinal association contribution are common to the two profiles.
 
 ### Step 8: Diagnostics and extraction helpers
 
@@ -305,14 +303,5 @@ diagnosis(pred)
 ```
 
 `ranef(fit)`, `coef(fit)`, and `vcov(fit)` are nested by `formulaLong` and
-`formulaDist`. The posterior aliases `posterior_fixef()`,
-`posterior_ranef()`, and `posterior_coef()` are short forms for requesting the
-draw-level output of those extractors. For prediction objects, `ranef(pred)`
-and `vcov(pred)` are available only when marker covariance is configured to
-depend on id.
-
-## Next steps
-
-- See the modelling workflow in `JoiNMe-workflow`.
-- Explore association structures in `JoiNMe-associations`.
-- Review the statistical details in `JoiNMe-model` and `JoiNMe-theory`.
+`formulaDist`. Set `summary = FALSE` in `fixef()`, `ranef()`, or `coef()` for draw-level output. The same views are available one layer lower through `posterior_summary(what = ..., summary = FALSE)` and through the corresponding structured selectors in `extract()`. For prediction objects, `ranef(pred)`
+and `vcov(pred)` are available only when marker covariance  depends on id.

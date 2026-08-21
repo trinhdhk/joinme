@@ -1078,6 +1078,141 @@ plot.JoiNMeDynPred <- function(
 }
 
 # ============================================================================
+# Helpers: arrange conditional-effect and conditional-contrast displays
+# ============================================================================
+
+#' Validate layout arguments for separately drawn conditional plots
+#'
+#' @param ncol,nrow Requested grid dimensions.
+#' @param design Requested patchwork design.
+#' @param widths,heights Requested relative panel dimensions.
+#'
+#' @return `NULL`, invisibly, when no arrangement-only argument was supplied.
+#' @keywords internal
+#' @noRd
+.validate_separate_conditional_layout <- function(ncol, nrow, design, widths, heights) {
+    supplied <- c(
+        ncol = !is.null(ncol),
+        nrow = !is.null(nrow),
+        design = !is.null(design),
+        widths = !is.null(widths),
+        heights = !is.null(heights)
+    ) # indicators for arguments which only alter a joint display
+    if (any(supplied)) {
+        cli::cli_abort(c(
+            x = "Layout arguments require an arranged conditional display.",
+            i = "Set {.arg arrange} to {.val grid}, {.val row}, {.val column}, or {.val design}."
+        ))
+    }
+    invisible(NULL)
+}
+
+#' Arrange plots produced by a conditional estimand
+#'
+#' @param plots A possibly nested list of `ggplot` objects.
+#' @param arrange Requested layout name.
+#' @param ncol,nrow Optional grid dimensions.
+#' @param design Optional patchwork design.
+#' @param widths,heights Optional relative panel dimensions.
+#' @param guides Patchwork legend treatment.
+#'
+#' @return A `patchwork` object containing every plot.
+#' @keywords internal
+#' @noRd
+.arrange_conditional_plots <- function(
+    plots,
+    arrange,
+    ncol = NULL,
+    nrow = NULL,
+    design = NULL,
+    widths = NULL,
+    heights = NULL,
+    guides = "keep") {
+    # Flatten process-and-effect nesting in its original order. That order is
+    # the reference for row, column, grid, and positional design arrangements.
+    plot_list <- .flatten_plot_list(plots) # ordered collection of non-empty graphical panels
+    if (!length(plot_list)) {
+        cli::cli_abort("No conditional plots are available to arrange.")
+    }
+
+    # Patchwork is optional because users who retain separate figures do not
+    # need it. An explicit arranged request, however, should either be honoured
+    # exactly or fail with a clear remedy rather than quietly changing form.
+    if (!requireNamespace("patchwork", quietly = TRUE)) {
+        cli::cli_abort(c(
+            x = "Package {.pkg patchwork} is required to arrange conditional plots.",
+            i = "Install {.pkg patchwork}, or use {.code arrange = 'separate'}."
+        ))
+    }
+
+    # Grid dimensions are counts rather than continuous graphical quantities.
+    # Validate them before passing the request onwards so errors identify the
+    # scientific display argument that needs correction.
+    validate_dimension <- function(value, argument) {
+        if (is.null(value)) return(NULL)
+        if (!is.numeric(value) || length(value) != 1L || is.na(value) ||
+            !is.finite(value) || value < 1 || value != as.integer(value)) {
+            cli::cli_abort("{.arg {argument}} must be a positive whole number or NULL.")
+        }
+        as.integer(value)
+    }
+    ncol <- validate_dimension(ncol, "ncol") # requested number of grid columns
+    nrow <- validate_dimension(nrow, "nrow") # requested number of grid rows
+
+    # Relative dimensions must be positive. Patchwork recycles a scalar and
+    # accepts vectors when unequal space is scientifically useful, for example
+    # a wide longitudinal trajectory beside a narrower event contrast.
+    validate_relative_sizes <- function(value, argument) {
+        if (is.null(value)) return(NULL)
+        if (!is.numeric(value) || !length(value) || anyNA(value) ||
+            any(!is.finite(value)) || any(value <= 0)) {
+            cli::cli_abort("{.arg {argument}} must be NULL or a positive numeric vector.")
+        }
+        value
+    }
+    widths <- validate_relative_sizes(widths, "widths") # relative widths of arranged columns
+    heights <- validate_relative_sizes(heights, "heights") # relative heights of arranged rows
+
+    # Each named arrangement has one unambiguous interpretation. Explicit
+    # design arrangements use patchwork's textual or area-based description;
+    # ordinary grids instead use optional row and column counts.
+    if (identical(arrange, "row")) {
+        if (!is.null(ncol) || !is.null(nrow) || !is.null(design)) {
+            cli::cli_abort("{.code arrange = 'row'} determines the dimensions; do not also supply {.arg ncol}, {.arg nrow}, or {.arg design}.")
+        }
+        nrow <- 1L
+    } else if (identical(arrange, "column")) {
+        if (!is.null(ncol) || !is.null(nrow) || !is.null(design)) {
+            cli::cli_abort("{.code arrange = 'column'} determines the dimensions; do not also supply {.arg ncol}, {.arg nrow}, or {.arg design}.")
+        }
+        ncol <- 1L
+    } else if (identical(arrange, "design")) {
+        if (is.null(design)) {
+            cli::cli_abort("{.code arrange = 'design'} requires {.arg design}.")
+        }
+        if (!is.null(ncol) || !is.null(nrow)) {
+            cli::cli_abort("A bespoke {.arg design} cannot be combined with {.arg ncol} or {.arg nrow}.")
+        }
+    } else if (identical(arrange, "grid")) {
+        if (!is.null(design)) {
+            cli::cli_abort("Use {.code arrange = 'design'} when supplying {.arg design}.")
+        }
+    } else {
+        cli::cli_abort("Unknown conditional plot arrangement {.val {arrange}}.")
+    }
+
+    patchwork::wrap_plots(
+        unname(plot_list),
+        ncol = ncol,
+        nrow = nrow,
+        widths = widths,
+        heights = heights,
+        guides = guides,
+        design = design
+    )
+}
+
+# ============================================================================
 # Helper: Combine longitudinal and survival plots
 # ============================================================================
 .combine_long_surv_plots <- function(p_long, p_surv) {
@@ -1311,6 +1446,19 @@ plot.JoiNMeFit <- function(x,
             i = "Use one or more of: {paste(c(diagnostic_types, fitted_types, 'mcmc'), collapse = ', ')}."
         ))
     })
+    survival_specific_types <- intersect(
+        type,
+        c("survival", "cumhaz", "association")
+    ) # fitted displays that require an observed event process
+    if (
+        length(survival_specific_types) > 0L &&
+            !.fit_includes_survival(x)
+    ) {
+        cli::cli_abort(c(
+            x = "Event-process plots are unavailable for a longitudinal-only fit.",
+            i = "Available fitted-data displays include {.val longitudinal} and {.val longitudinal_heatmap}."
+        ))
+    }
     association_dots <- dots[intersect(names(dots), association_dot_arguments)]
     if (length(association_dots) > 0L && !any(type == "association")) {
         cli::cli_abort(
@@ -1372,7 +1520,7 @@ plot.JoiNMeFit <- function(x,
         ))
     }
 
-    marker_var <- .JoiNMefit_call_arg_chr(x$call, "marker_var", "marker")
+    marker_var <- .get_call_args(x$call, "marker_var", "marker")
     marker_levels <- if (!is.null(x$dataLong) && marker_var %in% names(x$dataLong)) {
         unique(as.character(stats::na.omit(x$dataLong[[marker_var]])))
     } else {
@@ -1561,7 +1709,7 @@ plot.JoiNMeFit <- function(x,
 #'   or `NULL` when the requested scale is unavailable.
 #' @keywords internal
 #' @noRd
-.JoiNMefit_longitudinal_draw_scale <- function(subject_draws, prediction_scale) {
+.longitudinal_draw_scale <- function(subject_draws, prediction_scale) {
     if (is.null(subject_draws)) {
         return(NULL)
     }
@@ -1589,7 +1737,7 @@ plot.JoiNMeFit <- function(x,
 #'   probability, and display opacity for each marker-time combination.
 #' @keywords internal
 #' @noRd
-.JoiNMefit_longitudinal_heatmap_data <- function(posterior_prediction,
+.longitudinal_heatmap_data <- function(posterior_prediction,
                                                  prediction_scale,
                                                  sign_threshold,
                                                  marker_levels = NULL,
@@ -1636,7 +1784,7 @@ plot.JoiNMeFit <- function(x,
     time_by_marker <- list()
 
     for (id in names(draws_long)) {
-        draw_scale <- .JoiNMefit_longitudinal_draw_scale(draws_long[[id]], prediction_scale)
+        draw_scale <- .longitudinal_draw_scale(draws_long[[id]], prediction_scale)
         if (is.null(draw_scale) || is.null(draw_scale$matrix)) {
             next
         }
@@ -1787,7 +1935,7 @@ plot.JoiNMeFit <- function(x,
 
     # Step 3: Average trajectories across selected subjects within each MCMC
     # draw and calculate marker-specific change from the first evaluation time.
-    plot_data <- .JoiNMefit_longitudinal_heatmap_data(
+    plot_data <- .longitudinal_heatmap_data(
         posterior_prediction = pred,
         prediction_scale = scale_use,
         sign_threshold = sign_threshold,
@@ -1954,7 +2102,7 @@ plot.JoiNMeFit <- function(x,
         return(p)
     }
 
-    vars <- posterior::variables(draws(x, format = "draws_array"))
+    vars <- posterior::variables(posterior_draws(x, format = "draws_array"))
     vars <- .filter_diag_vars(vars, pars, regex_pars)
     if (length(vars) == 0) {
         cli::cli_abort("No parameters found for running diagnostics.")
@@ -1964,7 +2112,7 @@ plot.JoiNMeFit <- function(x,
         cli::cli_warn("Limiting running diagnostics to the first {max_vars} parameters.")
     }
 
-    arr <- draws(x, variables = vars, draws = draws, seed = seed, format = "draws_array")
+    arr <- posterior_draws(x, variables = vars, draws = draws, seed = seed, format = "draws_array")
     if (type == "running_mean") {
         df <- .running_mean_df(arr)
         p <- ggplot2::ggplot(df, ggplot2::aes(x = .data$iteration, y = .data$value, color = factor(.data$chain))) +
@@ -2085,7 +2233,7 @@ plot.JoiNMeFit <- function(x,
 #'   `times`, the common ordered time design.
 #' @keywords internal
 #' @noRd
-.JoiNMefit_longitudinal_evaluation_grid <- function(observed_longitudinal_data,
+.longitudinal_evaluation_grid <- function(observed_longitudinal_data,
                                                     subject_variable,
                                                     time_variable,
                                                     marker_variable,
@@ -2158,26 +2306,17 @@ plot.JoiNMeFit <- function(x,
 #' @param marker_variable Name of the marker column.
 #'
 #' @return A named list containing fixed, subject, marker, and subject-by-marker
-#'   design matrices evaluated on the fitted model's scaled time axis.
+#'   design matrices evaluated on the original study-time axis.
 #' @keywords internal
 #' @noRd
-.JoiNMefit_longitudinal_design_matrices <- function(fitted_model,
+..longitudinal_design_matrices <- function(fitted_model,
                                                     longitudinal_evaluation_data,
                                                     time_variable,
                                                     marker_variable) {
     stan_data <- fitted_model$stan_data
 
-    # Step 1: Reproduce the fitted time transformation before evaluating model
-    # matrices, thereby retaining the parameterisation used by the MCMC draws.
-    time_scale <- as.numeric(fitted_model$tmax %||% fitted_model$config$tmax %||% stan_data$tmax %||% 1)
-    if (length(time_scale) != 1L || !is.finite(time_scale) || time_scale <= 0) {
-        cli::cli_abort("The fitted longitudinal time scale is unavailable or invalid.")
-    }
-    scaled_data <- longitudinal_evaluation_data
-    scaled_data[[time_variable]] <- as.numeric(scaled_data[[time_variable]]) / time_scale
-
-    # Step 2: Recover the stored model-matrix templates. For older fitted
-    # objects, reconstruct the same fixed and random-effect formula components.
+    # Recover the stored original-time model-matrix templates. The stored terms
+    # carry spline knots, boundaries and contrasts learnt from the fitting data.
     templates <- stan_data$design_templates %||% list()
     if (.is_model_matrix_template(templates$fixed)) {
         fixed_design <- templates$fixed
@@ -2191,32 +2330,32 @@ plot.JoiNMeFit <- function(x,
         fixed_design <- stats::update(fixed_formula, . ~ .)
         fixed_design[[2L]] <- NULL
         grouping_names <- vapply(random_terms, function(term) .group_name_from_expr(term[[3L]]), character(1))
-        subject_designs <- .bar_terms_to_rhs_list(random_terms[which(grouping_names == .JoiNMefit_call_arg_chr(fitted_model$call, "id_var", "id"))])
+        subject_designs <- .bar_terms_to_rhs_list(random_terms[which(grouping_names == .get_call_args(fitted_model$call, "id_var", "id"))])
         nested_terms <- .extract_nested_marker_terms(
             fitted_model$formulaLong,
             marker_variable,
-            .JoiNMefit_call_arg_chr(fitted_model$call, "id_var", "id")
+            .get_call_args(fitted_model$call, "id_var", "id")
         )
         marker_designs <- nested_terms$mk_rhs_list
         subject_marker_designs <- nested_terms$idm_rhs_list
     }
 
-    # Step 3: Evaluate each design block at the common trajectory times.
-    fixed_matrix <- .mm(fixed_design, scaled_data)
+    # Evaluate each design block at the common original-time trajectory values.
+    fixed_matrix <- .mm(fixed_design, longitudinal_evaluation_data)
     subject_matrix <- if (length(subject_designs)) {
-        do.call(cbind, lapply(subject_designs, function(design) .mm(design, scaled_data)))
+        do.call(cbind, lapply(subject_designs, function(design) .mm(design, longitudinal_evaluation_data)))
     } else {
-        matrix(0, nrow(scaled_data), as.integer(stan_data$R_id %||% 0L))
+        matrix(0, nrow(longitudinal_evaluation_data), as.integer(stan_data$R_id %||% 0L))
     }
     marker_matrix <- if (length(marker_designs)) {
-        do.call(cbind, lapply(marker_designs, function(design) .mm(design, scaled_data)))
+        do.call(cbind, lapply(marker_designs, function(design) .mm(design, longitudinal_evaluation_data)))
     } else {
-        matrix(0, nrow(scaled_data), as.integer(stan_data$R_mk %||% 0L))
+        matrix(0, nrow(longitudinal_evaluation_data), as.integer(stan_data$R_mk %||% 0L))
     }
     subject_marker_matrix <- if (length(subject_marker_designs)) {
-        do.call(cbind, lapply(subject_marker_designs, function(design) .mm(design, scaled_data)))
+        do.call(cbind, lapply(subject_marker_designs, function(design) .mm(design, longitudinal_evaluation_data)))
     } else {
-        matrix(0, nrow(scaled_data), as.integer(stan_data$Q_idm %||% 0L))
+        matrix(0, nrow(longitudinal_evaluation_data), as.integer(stan_data$Q_idm %||% 0L))
     }
 
     # Step 4: Verify that each design block conforms to the fitted coefficient
@@ -2267,9 +2406,9 @@ plot.JoiNMeFit <- function(x,
                                                  longitudinal_markers = NULL) {
         sd <- x$stan_data
         fit <- x$fit
-        id_var <- .JoiNMefit_call_arg_chr(x$call, "id_var", "id")
-        time_var <- .JoiNMefit_call_arg_chr(x$call, "time_var", "time")
-        marker_var <- .JoiNMefit_call_arg_chr(x$call, "marker_var", "marker")
+        id_var <- .get_call_args(x$call, "id_var", "id")
+        time_var <- .get_call_args(x$call, "time_var", "time")
+        marker_var <- .get_call_args(x$call, "marker_var", "marker")
         y_var <- tryCatch(all.vars(x$formulaLong)[1], error = function(e) "y")
         n_id <- as.integer(sd$n_id %||% 0L)
         n_draws <- as.integer(draws %||% x$config$draws_default %||% 100L)
@@ -2332,7 +2471,7 @@ plot.JoiNMeFit <- function(x,
         # Step 2: Construct a common smooth time design for every observed
         # subject-marker combination. This removes dependence on irregular
         # measurement schedules when estimating posterior trajectories.
-        longitudinal_grid <- .JoiNMefit_longitudinal_evaluation_grid(
+        longitudinal_grid <- .longitudinal_evaluation_grid(
             observed_longitudinal_data = dL_fit,
             subject_variable = id_var,
             time_variable = time_var,
@@ -2345,7 +2484,7 @@ plot.JoiNMeFit <- function(x,
 
         # Step 3: Evaluate the fitted fixed- and random-effect design matrices at
         # the smooth trajectory times on the model's original parameterisation.
-        trajectory_design <- .JoiNMefit_longitudinal_design_matrices(
+        trajectory_design <- ..longitudinal_design_matrices(
             fitted_model = x,
             longitudinal_evaluation_data = dL_trajectory,
             time_variable = time_var,
@@ -2368,23 +2507,10 @@ plot.JoiNMeFit <- function(x,
             .get_draws_matrix(fit, variables = vars, draws = n_draws, seed = seed)
         }
 
-        # Step 4: Prefer the effective fixed effects used with the scaled-time
-        # design matrices. Older fits may lack stored transformed parameters, in
-        # which case reconstruct the same time scaling from the sampled effects.
-        beta_scaled_vars <- paste0("beta_scaled[", seq_len(sd$P %||% 0L), "]")
+        # Extract coefficients on the original study-time basis used to build
+        # every trajectory design matrix.
         beta_vars <- paste0("beta[", seq_len(sd$P %||% 0L), "]")
-        beta_draw <- get_mat(beta_scaled_vars)
-        if (ncol(beta_draw) != as.integer(sd$P %||% 0L)) {
-            beta_draw <- get_mat(beta_vars)
-            time_coefficient_indices <- as.integer(sd$idx_time_beta %||% integer(0))
-            time_coefficient_indices <- time_coefficient_indices[
-                time_coefficient_indices >= 1L & time_coefficient_indices <= ncol(beta_draw)
-            ]
-            if (length(time_coefficient_indices)) {
-                fitted_time_scale <- as.numeric(x$tmax %||% x$config$tmax %||% sd$tmax %||% 1)
-                beta_draw[, time_coefficient_indices] <- beta_draw[, time_coefficient_indices, drop = FALSE] * fitted_time_scale
-            }
-        }
+        beta_draw <- get_mat(beta_vars)
         n_draw_eff <- nrow(beta_draw)
         if (n_draw_eff == 0L) cli::cli_abort("Could not extract fitted posterior draws for longitudinal plotting.")
 
@@ -2503,7 +2629,7 @@ plot.JoiNMeFit <- function(x,
         # Step 8: Retain the existing fitted event-time summaries for combined
         # longitudinal, survival, and cumulative-hazard displays.
         if (isTRUE(include_event_process)) {
-            event_vars <- .resolve_event_model_vars(x$formulaEvent, x$dataEvent, context = "plot.JoiNMeFit()")
+            event_vars <- .get_event_model_vars(x$formulaEvent, x$dataEvent, context = "plot.JoiNMeFit()")
             event_id_all <- as.character(x$dataEvent[[id_var]])
             t_end_by_id <- tapply(as.numeric(event_vars$event_stop), event_id_all, max, na.rm = TRUE)
             surv_draw <- get_mat(paste0("surv_prob_event[", seq_len(n_id), "]"))
@@ -2614,7 +2740,7 @@ plot.JoiNMeFit <- function(x,
         )
 }
 
-.JoiNMefit_call_arg_chr <- function(call_obj, arg, default = NULL) {
+.get_call_args <- function(call_obj, arg, default = NULL) {
     expr <- call_obj[[arg]]
     if (is.null(expr)) return(default)
     if (is.character(expr)) return(expr[[1]])
@@ -2928,7 +3054,7 @@ plot.JoiNMeFit <- function(x,
 
     # For marker-resolved channels, discover the available marker levels from
     # the fitted longitudinal data so the plot mirrors the original fit input.
-    marker_var <- .JoiNMefit_call_arg_chr(x$call, "marker_var", "marker")
+    marker_var <- .get_call_args(x$call, "marker_var", "marker")
     available_markers <- if (!is.null(x$dataLong) && marker_var %in% names(x$dataLong)) {
         unique(as.character(stats::na.omit(x$dataLong[[marker_var]])))
     } else {
@@ -3055,7 +3181,7 @@ plot.JoiNMeFit <- function(x,
     # If there is no cached support, fall back to heuristics based on observed
     # data, starting from the relevant marker subset when applicable.
     response_var <- all.vars(x$formulaLong)[1] %||% "y"
-    marker_var <- .JoiNMefit_call_arg_chr(x$call, "marker_var", "marker")
+    marker_var <- .get_call_args(x$call, "marker_var", "marker")
     data_long <- x$dataLong
     if (!is.null(marker) && marker_var %in% names(data_long)) {
         data_long <- data_long[as.character(data_long[[marker_var]]) %in% as.character(marker), , drop = FALSE]
@@ -3065,8 +3191,8 @@ plot.JoiNMeFit <- function(x,
     # Slope channels derive their natural raw support from observed finite-
     # difference slopes within each (id, marker) trajectory.
     if (term_key %in% c("cs_total", "cs_mean", "cs_marker")) {
-        id_var <- .JoiNMefit_call_arg_chr(x$call, "id_var", "id")
-        time_var <- .JoiNMefit_call_arg_chr(x$call, "time_var", "time")
+        id_var <- .get_call_args(x$call, "id_var", "id")
+        time_var <- .get_call_args(x$call, "time_var", "time")
         dat <- data_long[, c(id_var, time_var, marker_var, response_var), drop = FALSE]
         names(dat) <- c("id", "time", "marker", "y")
         dat <- dat[order(dat$id, dat$marker, dat$time), , drop = FALSE]
@@ -3213,12 +3339,12 @@ plot.JoiNMeFit <- function(x,
     }
 
     # If no posterior draws are available, degrade gracefully to the standata
-    # base weights so plotting still works in lightweight or partial objects.
-    base_weights <- as.numeric((sd$marker_weights_by_term %||% list())[[term_key]] %||% sd$marker_weights %||% rep(1, n_markers))
-    if (length(base_weights) < n_markers) {
-        base_weights <- c(base_weights, rep(1, n_markers - length(base_weights)))
+    # declared offsets so plotting still works in lightweight or partial objects.
+    weight_offsets <- as.numeric((sd$marker_weight_offsets_by_term %||% list())[[term_key]] %||% sd$marker_weight_offsets %||% rep(1, n_markers))
+    if (length(weight_offsets) < n_markers) {
+        weight_offsets <- c(weight_offsets, rep(1, n_markers - length(weight_offsets)))
     }
-    matrix(rep(base_weights[seq_len(n_markers)], each = n_draws), nrow = n_draws, byrow = FALSE)
+    matrix(rep(weight_offsets[seq_len(n_markers)], each = n_draws), nrow = n_draws, byrow = FALSE)
 }
 
 .assoc_channel_map <- function(term_key) {
@@ -3563,7 +3689,7 @@ plot.JoiNMeFit <- function(x,
     }
 
     out <- coeff_draws %*% t(basis)
-    if (.resolve_monotone_direction(tf_spec$direction %||% tf_spec$spline_direction %||% 1L, default = 1L) < 0L) {
+    if (.get_monotone_direction(tf_spec$direction %||% tf_spec$spline_direction %||% 1L, default = 1L) < 0L) {
         out <- matrix(rowSums(coeff_draws), nrow = nrow(coeff_draws), ncol = ncol(out)) - out
     }
     out
@@ -3710,7 +3836,7 @@ plot.JoiNMeFit <- function(x,
         return(as.numeric(vals))
     }
 
-    assoc_draws <- extract.JoiNMeFit(x, what = "assoc", term = term, keep_chains = FALSE)$draws
+    assoc_draws <- extract.JoiNMeFit(x, what = "assoc", term = term, keep_chains = FALSE)$posterior_draws
     as.numeric(assoc_draws[, 1])
 }
 
@@ -3910,7 +4036,7 @@ plot.JoiNMeFit <- function(x,
         n_markers <- as.integer(stan_data$D %||% length(stan_data$marker_levels %||% numeric(0)))
         if (n_markers > 0L) {
             weight_terms <- intersect(active_terms, .weighted_assoc_term_keys())
-            if (isTRUE(as.integer(stan_data$shared_marker_weights %||% 1L) == 1L) && length(weight_terms) > 1L) {
+            if (isTRUE(as.integer(stan_data$marker_weight_sets_shared %||% 1L) == 1L) && length(weight_terms) > 1L) {
                 weight_terms <- weight_terms[1L]
             }
             for (term_key in weight_terms) {
@@ -3944,9 +4070,6 @@ plot.JoiNMeFit <- function(x,
 
     P <- as.integer(stan_data$P %||% ncol(stan_data$X_obs))
     beta_vars <- paste0("beta[", seq_len(P), "]")
-    if (!all(beta_vars %in% var_names)) {
-        beta_vars <- paste0("beta_scaled[", seq_len(P), "]")
-    }
     beta_mean <- mean_of_vars(beta_vars, default = 0)
 
     n_id <- as.integer(stan_data$n_id %||% max(stan_data$id))
@@ -4083,27 +4206,56 @@ plot.JoiNMeFit <- function(x,
         } else {
             matrix(0, nrow = n_id, ncol = 0L)
         }
-        k_cov <- as.integer(stan_data$K_cov %||% 0L)
-        beta_mean <- if (k_cov > 0L && nrow(vcov_map) > 0L) {
-            beta_flat <- mean_of_vars(as.vector(outer(seq_len(nrow(vcov_map)), seq_len(k_cov), function(m, k) paste0("beta_L[", m, ",", k, "]"))), default = 0)
-            matrix(beta_flat, nrow = nrow(vcov_map), byrow = TRUE)
-        } else {
-            matrix(0, nrow = nrow(vcov_map), ncol = 0L)
+        q_idm <- as.integer(stan_data$Q_idm)
+        n_corr <- as.integer(q_idm * (q_idm - 1L) / 2L)
+        covariance_design <- .stored_vcov_design(stan_data) # current split or earlier shared covariance design
+        k_cov_sd <- covariance_design$k_sd
+        k_cov_corr <- covariance_design$k_corr
+        beta_sd_mean <- matrix(0, nrow = q_idm, ncol = k_cov_sd)
+        if (!isTRUE(covariance_design$shared_format) && q_idm > 0L && k_cov_sd > 0L) {
+            for (r in seq_len(q_idm)) for (k in seq_len(k_cov_sd)) {
+                beta_sd_mean[r, k] <- mean_of_vars(paste0("beta_L_sd[", r, ",", k, "]"), default = 0)
+            }
         }
-        xcov <- as.matrix(stan_data$Xcov %||% matrix(0, nrow = n_id, ncol = k_cov))
-        marker_id_row_scale <- rep(1, as.integer(stan_data$Q_idm %||% 0L))
-        idx_time_idm <- as.integer(stan_data$idx_time_idm %||% integer(0))
-        idx_time_idm <- idx_time_idm[is.finite(idx_time_idm) & idx_time_idm >= 1L & idx_time_idm <= length(marker_id_row_scale)]
-        if (length(idx_time_idm) > 0L) {
-            marker_id_row_scale[idx_time_idm] <- as.numeric(stan_data$tmax %||% 1)
+        beta_corr_mean <- matrix(0, nrow = n_corr, ncol = k_cov_corr)
+        if (!isTRUE(covariance_design$shared_format) && n_corr > 0L && k_cov_corr > 0L) {
+            for (m in seq_len(n_corr)) for (k in seq_len(k_cov_corr)) {
+                beta_corr_mean[m, k] <- mean_of_vars(paste0("beta_L_corr[", m, ",", k, "]"), default = 0)
+            }
         }
+        if (isTRUE(covariance_design$shared_format) && k_cov_sd > 0L) {
+            correlation_coordinate <- 1L
+            for (packed_coordinate in seq_len(nrow(vcov_map))) {
+                row_coordinate <- vcov_map[packed_coordinate, 1L]
+                column_coordinate <- vcov_map[packed_coordinate, 2L]
+                earlier_slope <- vapply(seq_len(k_cov_sd), function(k) {
+                    mean_of_vars(paste0("beta_L[", packed_coordinate, ",", k, "]"), default = 0)
+                }, numeric(1))
+                if (row_coordinate == column_coordinate) {
+                    beta_sd_mean[row_coordinate, ] <- earlier_slope
+                } else {
+                    beta_corr_mean[correlation_coordinate, ] <- earlier_slope
+                    correlation_coordinate <- correlation_coordinate + 1L
+                }
+            }
+        }
+        xcov_sd <- covariance_design$x_sd
+        xcov_corr <- covariance_design$x_corr
         li_terms <- lapply(seq_len(n_id), function(i) {
             if (nrow(vcov_map) == 0L) {
                 return(numeric(0))
             }
+            correlation_coordinate <- 0L
             lp_vec <- vapply(seq_len(nrow(vcov_map)), function(m) {
-                alpha_mean[m] +
-                    if (k_cov > 0L) sum(beta_mean[m, ] * xcov[i, ]) else 0 +
+                row_coordinate <- vcov_map[m, 1]
+                column_coordinate <- vcov_map[m, 2]
+                observed_contribution <- if (row_coordinate == column_coordinate) {
+                    if (k_cov_sd > 0L) sum(beta_sd_mean[row_coordinate, ] * xcov_sd[i, ]) else 0
+                } else {
+                    correlation_coordinate <<- correlation_coordinate + 1L
+                    if (k_cov_corr > 0L) sum(beta_corr_mean[correlation_coordinate, ] * xcov_corr[i, ]) else 0
+                }
+                alpha_mean[m] + observed_contribution +
                     lambda_mean[m] * z_l_mean[min(i, nrow(z_l_mean)), m]
             }, numeric(1))
             li <- .cov_lp_to_chol(
@@ -4113,7 +4265,6 @@ plot.JoiNMeFit <- function(x,
                 idx_col = vcov_map[, 2],
                 diag_link = stan_data$vcov_diag_link
             )
-            li <- sweep(li, 1L, marker_id_row_scale, `*`)
             .assoc_vcov_features_from_chol(
                 li,
                 diagonal_only = as.integer(stan_data$indep_idmarker_cov %||% 0L) == 1L
@@ -4193,7 +4344,7 @@ plot.JoiNMeFit <- function(x,
             coef_len <- ncol(basis)
             coeff_use <- if (length(coeff) < coef_len) c(coeff, rep(0, coef_len - length(coeff))) else coeff[seq_len(coef_len)]
             vals <- as.numeric(basis %*% coeff_use)
-            if (.resolve_monotone_direction(spec$direction %||% spec$spline_direction %||% 1L, default = 1L) < 0L) {
+            if (.get_monotone_direction(spec$direction %||% spec$spline_direction %||% 1L, default = 1L) < 0L) {
                 vals <- sum(coeff_use) - vals
             }
             vals

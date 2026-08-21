@@ -1,0 +1,45 @@
+/**
+ * @file include/submodels/latent_class/functions/class_probability.stanfunctions
+ * @brief Covariate-dependent class probabilities for mixture fitting.
+ *
+ * @details
+ * Baseline class probabilities are combined with the non-intercept predictors
+ * declared through `formulaClass`. This definition is needed by mixture
+ * fitting, where class probabilities are reconstructed for each allocation
+ * unit. Dynamic prediction receives retained class-probability draws and does
+ * not import this function.
+ */
+
+/**
+ * @brief Evaluate multinomial-logit class probabilities for one allocation unit.
+ *
+ * @param baseline_probability Simplex giving probabilities at zero covariates.
+ * @param class_design Non-intercept class-regression row for this unit.
+ * @param class_coefficient Concatenated coefficients requested by all classes.
+ * @param class_term_start First coefficient position belonging to each class.
+ * @param class_term_count Number of coefficients belonging to each class.
+ *
+ * @return Probability vector over all latent classes, evaluated with a stable
+ * softmax transformation.
+ */
+vector latent_progress_probability(
+  vector baseline_probability,
+  row_vector class_design,
+  vector class_coefficient,
+  array[] int class_term_start,
+  array[] int class_term_count
+) {
+  int number_classes = num_elements(baseline_probability); // number of latent classes over which allocation is marginalised
+  vector[number_classes] class_logit = log(baseline_probability); // zero-covariate class log probabilities before regression contributions
+  for (class_index in 1 : number_classes) {
+    int term_count = class_term_count[class_index]; // number of concatenated regression coefficients used by this class formula
+    if (term_count > 0) {
+      int term_start = class_term_start[class_index]; // first concatenated regression coefficient belonging to this class
+      class_logit[class_index] += dot_product(
+        to_vector(segment(class_design, term_start, term_count)),
+        segment(class_coefficient, term_start, term_count)
+      );
+    }
+  }
+  return softmax(class_logit);
+}

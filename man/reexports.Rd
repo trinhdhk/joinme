@@ -6,6 +6,7 @@
 \alias{posterior_linpred}
 \alias{posterior_epred}
 \alias{posterior_predict}
+\alias{posterior_interval}
 \alias{posterior_summary}
 \alias{log_lik}
 \alias{pp_check}
@@ -31,6 +32,6 @@ below to see their documentation.
 
   \item{loo}{\code{\link[loo:elpd]{elpd()}}, \code{\link[loo:loo]{loo()}}, \code{\link[loo:waic]{waic()}}}
 
-  \item{rstantools}{\code{\link[rstantools:log_lik]{log_lik()}}, \code{\link[rstantools:posterior_epred]{posterior_epred()}}, \code{\link[rstantools:posterior_linpred]{posterior_linpred()}}, \code{\link[rstantools:posterior_predict]{posterior_predict()}}}
+  \item{rstantools}{\code{\link[rstantools:log_lik]{log_lik()}}, \code{\link[rstantools:posterior_epred]{posterior_epred()}}, \code{\link[rstantools:posterior_interval]{posterior_interval()}}, \code{\link[rstantools:posterior_linpred]{posterior_linpred()}}, \code{\link[rstantools:posterior_predict]{posterior_predict()}}}
 }}
 

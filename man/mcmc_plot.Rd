@@ -45,5 +45,5 @@ A \code{ggplot} object.
 \description{
 Provides a JoiNMe-friendly wrapper around \verb{bayesplot::mcmc_*} functions. The
 posterior draws are first relabelled with user-facing parameter names via
-\code{\link[=draws]{draws()}}, after which the selected bayesplot geometry is applied.
+\code{\link[=posterior_draws]{posterior_draws()}}, after which the selected bayesplot geometry is applied.
 }

@@ -1,10 +1,10 @@
 ---
-title: "Technical Specification and Implementation Details"
+title: "Joint model formulation"
 output-dir: ../docs/articles
 format:
   html:
     toc: true
-    number-sections: true
+    number-sections: false
     code-fold: true
     embed-resources: true
     theme: cosmo
@@ -37,7 +37,7 @@ library(dplyr)
 
 # Overview
 
-This document provides the formal technical specification for the `joinme` package model structure. It details the precise matrix formulations, transformation logic, and the exact algorithms used by the underlying Stan engine. Ideally, this document serves as a reference for advanced methodologists or developers seeking to understand or extend the package internals.
+This document states the joint model in mathematical form. It is intended for readers who want to understand the model assumptions and the meaning of its parameters before fitting or using the model.
 
 # Mathematical formulation
 
@@ -48,8 +48,8 @@ The joint model consists of two linked submodels: a multivariate longitudinal mi
 -   $N$: Number of subjects ($i = 1, \dots, N$).
 -   $D$: Number of longitudinal markers ($d = 1, \dots, D$).
 -   $n_{id}$: Number of observations for subject $i$ marker $d$.
--   $T_i$: Observed event or censoring time for subject $i$.
--   $\delta_i$: Event indicator (1 if event, 0 if censored).
+-   $(L_i,R_i]$: Event-time observation interval for subject $i$. Right-censored observations are retained as special cases.
+-   $c_i$: Censoring statement: right, exact, left or interval.
 -   $y_{ijk}$: The $k$-th observation of marker $d$ for subject $i$ at time $t_{ijk}$.
 
 ## Longitudinal Submodel
@@ -59,6 +59,8 @@ We assume the observed outcomes $y_{ijk}$ follow a distribution from the exponen
 $$
 y_{ijk} \sim \mathcal{D}(\eta_{id}(t_{ijk}), \sigma_y, \nu)
 $$
+
+For a skew-Laplace marker, the ancillary quantile parameter satisfies $0<\tau_d<1$. It may be estimated, modelled by a distributional regression, or fixed in that marker's family declaration with `jm_family("skew_laplace", tau = value)`. The fixed value is indexed by marker throughout fitting, pointwise log-likelihood evaluation, and dynamic prediction; $\tau_d=0.5$ denotes the symmetric Laplace case.
 
 The linear predictor $\eta_{id}(t)$ is decomposed into fixed effects and random effects components. A key feature of `JoiNMe` is the flexible random effects structure:
 
@@ -73,7 +75,7 @@ where:
 -   $\mathbf{u}_d \sim N(\mathbf{0}, \Sigma_u)$: Marker-specific random effects (e.g., marker-specific average intercept).
 -   $\mathbf{w}_{id} \sim N(\mathbf{0}, \Sigma_w)$: Subject-marker-specific random effects (the interaction level).
 
-**Optional marker-by-id block.** If the marker block omits the inner `( ... | id )` term, then $\mathbf{w}_{id}$ is removed and the marker-by-id block has dimension $Q_{idm} = 0$. In this case, covariance-style associations (`corr`, `vcov`) are not available, because there is no subject-specific marker covariance to model.
+**Marker-by-id block.** If the marker block omits the inner `( ... | id )` term, then $\mathbf{w}_{id}$ is removed and the marker-by-id block has dimension $Q_{idm} = 0$. In this case, covariance-style associations (`corr`, `vcov`) are not available, because there is no subject-specific marker covariance to model.
 
 This decomposition allows capturing correlations within subjects across markers, within markers across subjects, and the specific deviation of a subject's trajectory for a specific marker.
 
@@ -87,163 +89,65 @@ $$
 
 where:
 
--   $h_0(t)$: Baseline hazard function modelled via spline basis or a user-specified
-  baseline hazard formula.
+-   $h_0(t)$: Baseline hazard function modelled via spline basis or a user-specifie baseline hazard formula.
 -   $\mathbf{w}_i$: Baseline covariates (baseline age, sex, treatment).
 -   $\mathcal{M}_i(t) = \{ \eta_{i1}(t), \dots, \eta_{iD}(t), \eta'_{i1}(t), \dots \}$: The collection of longitudinal trajectories and their derivatives (slopes) at time $t$.
 -   $g_k(\cdot)$: A functional transformation linking the longitudinal history to the hazard (the "association structure").
 
-Common forms for $g_k(\cdot)$ in `JoiNMe` are constructed from the following
-association summaries, each optionally transformed:
+This is a full event-time model with $H_i(t)=\int_0^t h_i(u)\,du$ and $S_i(t)=\exp\{-H_i(t)\}$. It does not use the Cox partial likelihood. The event contribution is $S_i(L_i)$ for right censoring at $L_i$, $h_i(t_i)S_i(t_i)$ for an exact event, $1-S_i(R_i)$ for left censoring, and $S_i(L_i)-S_i(R_i)$ for interval censoring in $(L_i,R_i]$.
+
+For the last case, the common interval-row calculation writes
+
+$$
+\log\{S_i(L_i)-S_i(R_i)\}
+=-H_i(L_i)+
+\log\left[1-\exp\{-[H_i(R_i)-H_i(L_i)]\}\right].
+$$
+
+The first term represents known survival to the lower inspection limit. It is kept separate so that an inspection time is not mistaken for delayed entry.
+
+The `interval2` form requires one event row per subject and presently supports one event type because the cause is not observed within the interval.
+
+Common forms for $g_k(\cdot)$ in `JoiNMe` are constructed from the following association summaries, each optionally transformed:
 
 - **Current value (CV)**: the value of the longitudinal linear predictor at time $t$.
 - **Current slope (CS)**: the derivative of the linear predictor at time $t$.
-- **Correlation association (CORR)**: a subject-specific, time-constant summary
-  of off-diagonal marker-by-id correlations.
-- **Variance-covariance association (VCOV)**: a subject-specific,
-  time-constant summary of lower-triangular marker-by-id Cholesky-factor
-  features, taken directly from `L`.
+- **Correlation association (CORR)**: a subject-specific, time-constant summary of off-diagonal marker-by-id correlations.
+- **Variance-covariance association (VCOV)**: a subject-specific, time-constant summary of lower-triangular marker-by-id Cholesky-factor features, taken directly from `L`.
 
-In implementation, CV and CS are evaluated at a default set of 15 Gauss-Kronrod
-nodes on the scaled time interval (configurable via `quadrature_nodes`), and CS
-is approximated by a forward finite difference with step size $\varepsilon$.
+CV is evaluated from the latent trajectory at time $t$, while CS is its derivative per unit of original study time.
 
-When multiple markers are present, `JoiNMe` forms marker-average CV and CS components
-using weights $\omega_d$ (one per marker). These weights apply to marker summaries
-after transformation and before association scaling.
-When marker-weight estimation is enabled, latent perturbations are added to base
-weights and the resulting weights are used directly before aggregation.
-Marker weights and association coefficients are regularized with standard
-Student-$t_6$, Laplace, or Normal priors for `shrinkage = 0, 1, 2`, respectively,
-using a positive non-centred
-parameterisation $\alpha = z_{\alpha} \cdot sd_{\alpha}$.
+When multiple markers are present, `joinme` forms marker-average CV and CS components using weights $\omega_d$ (one per marker). These weights apply to marker summaries after transformation and before association scaling.
+When marker-weight estimation is enabled, a common fitted location and marker-specific departures are added to base weights and the resulting weights are used directly before aggregation.
 
-For covariance-style channels (`corr`, `vcov`), the fitted association
-coefficients use the same positive-scale parameterisation: a global scale
-(`s_corr` or `s_vcov`) multiplies a latent coefficient vector, and summaries
-report the resulting effective coefficients on the hazard scale.
+The common marker-weight location uses `marker_weights$intercept` in `jm_prior()`; association coefficients use `assoc$slope`, and marker-specific departures use the family named by `marker_weights$family`. Normal, Student-$t$, Laplace, and regularised horseshoe families are available. The family name `"student_t"` fits a single degrees-of-freedom value shared by all marker-weight sets under $\nu-2\sim\operatorname{Gamma}(2,0.1)$; `prior_student_t()` fixes its degrees of freedom when used for an ordinary prior. The declared association location and scale apply directly on the log-hazard scale, while the common weight mean is on the weight scale. There is no additional unidentified association-scale parameter. Sign constraints required by estimated marker weights are applied after the prior transformation. Covariance-style (`corr`, `vcov`) coefficients follow the same rule.
 
-For covariance regression, each lower-triangular entry has its own latent
-perturbation $z_{im}$ and a non-negative loading $\lambda_m$, so the identified
-form is $\eta_{im} = \alpha_m + x_i^\top \beta_m + \lambda_m z_{im}$ with
-$\lambda_m \ge 0$ and $z_{im} \sim \mathcal{N}(0, 1)$.
+The standardised marker-weight departures and standardised marker random effects retain location zero and scale one by construction. Marker-weight heterogeneity comes directly from the chosen unit-scale departure family. A second marker-weight scale is not fitted because it would compete with the association coefficient multiplying the completed weighted summary.
 
-# Implementation
-
-The model is implemented in Stan, utilising Hamiltonian Monte Carlo (HMC) for efficient posterior sampling.
-
-## Time Scaling
-
-To check numerical stability and ensure spline bases are well-defined, all internal time calculations are performed on a scaled domain $t' \in [0, 1]$:
+For covariance regression, standard deviations and off-diagonal partial correlations have independent observed-covariate regressions:
 
 $$
-t' = \frac{t}{t_{max}}, \quad t_{max} = \max_i(T_i)
+\eta^{sd}_{ir}=\alpha^{sd}_r+x_{sd,i}^\top\beta^{sd}_r+
+\lambda_{m(r)}z_{i,m(r)},
+\qquad
+\eta^{corr}_{ih}=\alpha^{corr}_h+x_{corr,i}^\top\beta^{corr}_h+
+\lambda_{m(h)}z_{i,m(h)}.
 $$
 
-Coefficients reported to the user are automatically rescaled to the original time scale.
+They are declared with `formulaVCov = list(sd = ~ ..., corr = ~ ...)`; one formula is the shared- design shorthand. The SD predictor passes through `softplus` or `exp`. The correlation predictor passes through `tanh` to a row-wise partial correlation. Sequential square-root products form the lower-triangular Cholesky correlation factor $K_i$, with every row having unit norm.
+The covariance is then $\Sigma_i=\operatorname{diag}(\boldsymbol\sigma_i)K_iK_i^\top\operatorname{diag}(\boldsymbol\sigma_i)$.
 
-## Integration Strategy (Gauss-Kronrod)
-
-The survival likelihood requires evaluating the cumulative hazard $H_i(T_i) = \int_0^{T_i} h_i(s) ds$. Since the hazard contains time-varying random effects $\eta_{id}(s)$, this integral has no closed form.
-
-`JoiNMe` employs **Gauss-Kronrod quadrature** (default 15-point, configurable)
-to approximate this integral numerically within the Stan `log_prob` block.
-The Stan program uses hardcoded nodes and weights for the supported node counts,
-so only the node count is passed in the data.
-
-$$
-\int_0^{T_i} h_i(s) ds \approx \frac{T_i}{2} \sum_{j=1}^{K} w_j h_i \left( \frac{T_i}{2}(x_j + 1) \right)
-$$
-
-This method provides high accuracy with relatively few function evaluations compared to Simpson's rule or trapezoidal integration.
-
-## Arbitrary Transformation
-
-`joinme` supports association transforms in several families:
-
-- **Identity**: no transformation.
-- **Functional bytecode**: a small translation program supporting basic
-  arithmetic and standard mathematical functions, compiled from a
-  user-supplied expression: `+`, `-`, `*`, `/`, `log`, `exp`, `sqrt`,
-  trigonometric and hyperbolic functions, power functions, the standard normal
-  CDF (`Phi`, `pnorm`), and the standard normal quantile (`inv_Phi`, `qnorm`,
-  `probit`).
-- **Monotone I-spline**: smooth monotone mapping with user-supplied knots and coefficients.
-- **Ordered piecewise linear**: fixed knots with posterior monotone ordinates
-  reconstructed from cumulative simplex increments.
-
-<!-- 
-The functional bytecode evaluator implements the following operations:
-
-- 0: PUSH_X
-- 1: PUSH_CONST
-- 2: ADD
-- 3: SUB
-- 4: MUL
-- 5: DIV
-- 6: LOG
-- 7: EXP
-- 8: SQRT
-- 9: INV_LOGIT
-- 10: LOGIT
-- 11: RECIPROCAL
-- 12: POW
-- 13: SIN
-- 14: COS
-- 15: TAN
-- 16: ABS
-- 17: SQUARE
-- 18: SINH
-- 19: COSH
-- 20: TANH
-- 21: ASINH
-- 22: ACOSH
-- 23: ATANH
-- 24: SOFTPLUS
-- 25: CBRT
-- 26: PHI, the standard normal CDF
-- 27: INV_PHI 
--->
-
-## Parallelisation
-
-The model supports `reduce_sum` for within-chain parallelisation. The likelihood evaluation is sharded by subject $i$.
-
--   **Longitudinal Likelihood**: Calculated independently for each block of subjects.
--   **Survival Likelihood**: Calculated independently for each block of subjects.
-
-The user controls the `grainsize` to balance overhead vs. parallelism.
-
-# Stan Data Block Specification
-
-The generated Stan data block organizes the inputs efficiently:
-
-| Variable | Description |
-|:---|:---|
-| `n_id` | number of subjects |
-| `N` | total longitudinal observations |
-| `id`, `marker` | subject and marker indices for each observation |
-| `y_real`, `y_int`, `trials` | continuous and discrete outcomes plus binomial trials |
-| `X_obs`, `Z_id_obs`, `Z_mk_obs`, `Z_idm_obs` | fixed and random-effect design matrices |
-| `S_event`, `d_event`, `event_type` | scaled event times, event indicator, cause type |
-| `Bs_event_c`, `Bs_gk_c` | spline bases at event times and GK nodes |
-| `X_gk_*`, `Z_*_gk_*` | design matrices at GK nodes (now/fwd for slopes) |
-| `tf_mode_*`, `functional_ops_*`, `const_data_*` | association transform configuration, including increasing/decreasing piecewise mode |
-| `knots_*`, `coeff_*`, `spline_degree_*` | spline-based transform configuration |
+Each $\lambda_m$ is one scalar loading for one packed lower-triangular coordinate. Collectively they form a length-$M_{\mathrm{cov}}$ vector, whose matrix representation is diagonal:
+$\operatorname{diag}(\boldsymbol\lambda)\boldsymbol z_i$. They are not a dense loading matrix and do not mix latent coordinate $m$ into any other coordinate. In the ordinary model, $\lambda_m$ is the conditional residual standard deviation of covariance predictor $\eta_{im}$, before the diagonal link or off-diagonal `tanh` transformation. It is therefore not itself an entry of the final Cholesky factor, covariance matrix or correlation matrix.
 
 # Prediction
 
-Dynamic predictions $\pi_i(u|t)$ are efficiently computed using the same Stan code structure (via `generated quantities` or a separate `standalone generated quantities` run) to ensure consistency.
+For a subject alive and under observation at time $t$, dynamic survival at a later time $u$ is
 
 $$
 S_i(u|t) = \frac{\exp(-\Lambda_i(u))}{\exp(-\Lambda_i(t))}
 $$
 
-where $\Lambda_i(t)$ uses the same Gauss-Kronrod integrator and association bytecode as the likelihood.
+where $\Lambda_i(t)$ is the cumulative hazard implied by the fitted event and association models.
 
-For an ordered piecewise-linear association with \(K\) knots, fitting and
-dynamic prediction use the same posterior coefficient vector. The fit samples a
-\(K-1\) simplex, cumulatively sums its positive elements, applies the requested
-sign, and anchors the first ordinate at zero. Dynamic prediction receives the
-resulting draw-specific ordinates directly; it never reconstructs the curve
-from a user-supplied response vector.
+For an ordered piecewise-linear association, prediction preserves the fitted monotone association curve and its posterior uncertainty.

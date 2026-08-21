@@ -81,7 +81,9 @@ NULL
 
 #' Resolve packaged/local Stan source file
 #'
-#' @param program One of "joinme_fit" or "joinme_dynpred".
+#' @param program One of `"joinme_fit"`, `"joinme_mix_fit"`,
+#'   `"joinme_dynpred"`, `"joinme_mix_dynpred"`, `"joinme_fitpred"`, or
+#'   `"joinme_mix_fitpred"`.
 #' @param threaded Logical retained for compatibility. joinme now always uses
 #'   the threaded Stan program and runs it serially when
 #'   `threads_per_chain = 1`.
@@ -89,7 +91,17 @@ NULL
 #' @return Absolute or relative path to an existing Stan source file.
 #' @keywords internal
 #' @noRd
-.get_stan_file <- function(program = c("joinme_fit", "joinme_dynpred"), threaded = TRUE) {
+.get_stan_file <- function(
+  program = c(
+    "joinme_fit",
+    "joinme_mix_fit",
+    "joinme_dynpred",
+    "joinme_mix_dynpred",
+    "joinme_fitpred",
+    "joinme_mix_fitpred"
+  ),
+  threaded = TRUE
+) {
   program <- match.arg(program)
   if (!isTRUE(threaded)) {
     cli::cli_warn("Non-threaded Stan paths are deprecated; using the threaded Stan program instead.")
@@ -111,6 +123,74 @@ NULL
     ))
   }
   stan_file
+}
+
+#' Select a Stan fitting programme
+#'
+#' @description
+#' Keeps model-family routing in one deliberately small function.  The
+#' ordinary entry point is selected unless the prepared data explicitly
+#' requests a latent-progress mixture.  This makes the choice testable without
+#' compiling Stan and prevents ordinary fits from receiving the larger mixture
+#' data contract.
+#'
+#' @param stan_data Prepared fitting data.
+#'
+#' @return A character scalar accepted by `.get_stan_file()`.
+#' @keywords internal
+#' @noRd
+.stan_fit_program <- function(stan_data) {
+  if (identical(as.integer(stan_data$use_mixture %||% 0L), 1L)) {
+    return("joinme_mix_fit")
+  }
+  "joinme_fit"
+}
+
+#' Select a Stan dynamic-prediction programme
+#'
+#' @description
+#' Uses the latent-class programme only when the parent fit carries an active
+#' mixture.  Class inheritance is considered as a safeguard for older saved
+#' fits whose stored Stan data predate `use_mixture`.
+#'
+#' @param object A fitted JoiNMe model.
+#'
+#' @return A character scalar accepted by `.get_stan_file()`.
+#' @keywords internal
+#' @noRd
+.stan_dynpred_program <- function(object) {
+  has_mixture_data <- identical(
+    as.integer(object$stan_data$use_mixture %||% 0L),
+    1L
+  )
+  if (has_mixture_data || inherits(object, "JoiNMeMixFit")) {
+    return("joinme_mix_dynpred")
+  }
+  "joinme_dynpred"
+}
+
+#' Select a fitted-effect prediction programme
+#'
+#' @description
+#' Fitted-effect prediction has separate ordinary and latent-class entry
+#' points. Both are parameter-free because the realised random effects arrive
+#' as paired fitted draws. The mixture route additionally records that fitted
+#' allocation probabilities must remain paired with those same draws in R.
+#'
+#' @param object A fitted JoiNMe model.
+#'
+#' @return A character scalar accepted by `.get_stan_file()`.
+#' @keywords internal
+#' @noRd
+.stan_fitpred_program <- function(object) {
+  has_mixture_data <- identical(
+    as.integer(object$stan_data$use_mixture %||% 0L),
+    1L
+  ) # fitted Stan-data flag retained by a latent-class model
+  if (has_mixture_data || inherits(object, "JoiNMeMixFit")) {
+    return("joinme_mix_fitpred")
+  }
+  "joinme_fitpred"
 }
 
 #' Resolve cached CmdStan executable path for a Stan source file
@@ -227,7 +307,7 @@ NULL
     cpp_sig <- paste(cpp_parts, collapse = ";")
   }
 
-  payload <- c(
+  signature_lines <- c(
     "JoiNMe-stan-cache-v2",
     paste(dep_ids, unname(dep_md5), sep = "="),
     paste0("cpp:", cpp_sig)
@@ -235,7 +315,7 @@ NULL
 
   tmp <- tempfile(fileext = ".txt")
   on.exit(unlink(tmp), add = TRUE)
-  writeLines(payload, con = tmp, useBytes = TRUE)
+  writeLines(signature_lines, con = tmp, useBytes = TRUE)
   substr(unname(tools::md5sum(tmp)), 1, 16)
 }
 
@@ -410,8 +490,24 @@ precompile_cmdstanr_models <- function(force_recompile = TRUE, cleanup = TRUE) {
       "stan/joinme_fit_threading.stan",
       package = "joinme"
     ),
+    joinme_mix_fit_threading = system.file(
+      "stan/joinme_mix_fit_threading.stan",
+      package = "joinme"
+    ),
     joinme_dynpred_threading = system.file(
       "stan/joinme_dynpred_threading.stan",
+      package = "joinme"
+    ),
+    joinme_mix_dynpred_threading = system.file(
+      "stan/joinme_mix_dynpred_threading.stan",
+      package = "joinme"
+    ),
+    joinme_fitpred_threading = system.file(
+      "stan/joinme_fitpred_threading.stan",
+      package = "joinme"
+    ),
+    joinme_mix_fitpred_threading = system.file(
+      "stan/joinme_mix_fitpred_threading.stan",
       package = "joinme"
     )
   )
@@ -426,16 +522,28 @@ precompile_cmdstanr_models <- function(force_recompile = TRUE, cleanup = TRUE) {
   # Clean-up old cached executables that match the naming pattern to prevent stale models. We can be aggressive here since the cache key includes file hashes, so old executables won't be reused anyway. This ensures that if the source files change, we won't accidentally use an old cached executable that doesn't match the new source.
   cache_dir <- .stan_cache_dir()
   if (cleanup) {
-    old_exes <- list.files(cache_dir, pattern = "^JoiNMe_.*\\.(exe)?$", full.names = TRUE)
+    old_exes <- list.files(
+      cache_dir,
+      pattern = "^joinme_.*(\\.exe)?$",
+      full.names = TRUE
+    )
     if (length(old_exes) > 0) {
       unlink(old_exes, force = TRUE)
     }
   }
   
   # Compile all models, enabling threading if requested.
-  models <- lapply(stan_files, function(sf) {
-    cat(sf, '')
-    cpp_opts <- list(stan_threads = TRUE)
+  models <- lapply(names(stan_files), function(model_name) {
+    sf <- stan_files[[model_name]] # source belonging to this independently cached prediction or fitting programme
+    cat(basename(sf), ': ')
+    cpp_opts <- if (model_name %in% c(
+      "joinme_fitpred_threading",
+      "joinme_mix_fitpred_threading"
+    )) {
+      NULL
+    } else {
+      list(stan_threads = TRUE)
+    } # omit the macro for the parameter-free programme because defining STAN_THREADS as FALSE still activates it in CmdStan
     .get_cmdstan_model(
       stan_file = sf,
       cpp_options = cpp_opts,

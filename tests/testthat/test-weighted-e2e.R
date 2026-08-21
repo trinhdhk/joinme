@@ -21,7 +21,6 @@ test_that("weighted grouping works end-to-end (simulate fit predict plot)", {
     formulaEvent = formulaEvent,
     n_id = 5,
     families = rep("student_t", 2),
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 2, length.out = 6),
     seed = 2601,
     covariate_formulas = list(
@@ -31,7 +30,7 @@ test_that("weighted grouping works end-to-end (simulate fit predict plot)", {
       marker_w ~ runif(n_id, 0.8, 1.6)
     ),
     assoc = c("cv_total"),
-    assoc_coefs = c(cv_total = 0.2)
+    truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.2))),
   )
 
   fit <- joinme(

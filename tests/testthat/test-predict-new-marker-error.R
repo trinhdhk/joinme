@@ -6,11 +6,10 @@ test_that("predict errors on marker levels not seen during fitting", {
   sim <- simulate_joinme(
     n_id = 4,
     families = rep("student_t", 2),
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 4, length.out = 8),
     seed = 551,
     assoc = c("cv_total"),
-    assoc_coefs = c(cv_total = 0.6)
+    truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.6))),
   )
 
   formulaLong <- y ~ 1 + time + x1 +

@@ -8,6 +8,7 @@
 .Ruserdata
 .Rproj.user/
 *.Rproj
+.Rprofile
 
 # R package build artifacts
 /*.tar.gz
@@ -61,10 +62,13 @@ docs
 *.csv
 *.txt
 
-# internal notes
+# Internal notes
 notes/
+notes/*
+notes/docs/*
+tests/local/
 
 # rstan crap
 src/
 sim/
-tests/local/*.png
+

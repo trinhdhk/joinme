@@ -83,7 +83,7 @@ through \code{plogis(x)} and the spline basis is then evaluated on that
 bounded expit-scale input. User-supplied training \code{x} values and
 explicit \code{knots} for these transform types must therefore already be
 specified on the expit scale in \verb{[0, 1]}.
-\item pwlin: knots (or cutpoints/x) and direction; legacy y is accepted but
+\item pwlin: knots (or cutpoints/x) and direction; the earlier y field is accepted but
 does not determine the fitted ordinates
 }
 }

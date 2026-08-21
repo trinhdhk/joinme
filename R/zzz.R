@@ -50,4 +50,17 @@ utils::globalVariables(c(
       )
     }
   }
+  if (sample(c(TRUE, FALSE), size = 1, prob = c(0.001, 0.999)) | .devmode()) {
+      .oucru_logo_ascii()
+  }
+}
+
+.devmode <- function() {
+  Sys.getenv("JOINME_DEVMODE", unset = "0") == "1"
+}
+
+.oucru_logo_ascii <- function(){
+  readLines(system.file('etc/oucru', package = 'joinme')) |>
+    paste(collapse = "\n") |>
+    cat()
 }

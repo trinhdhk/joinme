@@ -77,5 +77,5 @@ transforms <- joinme_tf(
   cs_total = spec_cs,
   corr = spec_corr
 )
-standata_tf <- joinme:::build_standata_transforms(transforms)
+standata_tf <- build_standata_transforms(transforms)
 }

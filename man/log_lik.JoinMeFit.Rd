@@ -26,8 +26,8 @@ Log-likelihood summary
 \details{
 The stored pointwise likelihood is evaluated by Stan with the full
 fitted association contribution. This includes the posterior ordinates of
-every ordered piecewise-linear transform; legacy \code{y} values are not used.
+every ordered piecewise-linear transform; earlier \code{y} values are not used.
 }
 \seealso{
-\code{\link[=log_lik]{log_lik()}}
+\code{\link[rstantools:log_lik]{log_lik()}}
 }

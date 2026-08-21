@@ -1,0 +1,55 @@
+/**
+ * @file eta_chol_corr.stanfunctions
+ * @brief Off-diagonal Cholesky-correlation extractor from subject-specific covariance factors.
+ *
+ * @details
+ * Given a lower-triangular covariance Cholesky factor L_i = SD_i * K_i, this
+ * helper reconstructs the off-diagonal entries of the subject-specific
+ * Cholesky-correlation factor K_i.
+ *
+ * IMPORTANT semantic choice:
+ * - This function returns RAW off-diagonal correlations only.
+ * - It does NOT apply association coefficients (a_corr).
+ * - It does NOT apply nonlinear transforms.
+ *
+ * That ordering is handled by callers as:
+ *   corr_terms_raw -> transform(corr_terms_raw) -> dot(a_corr, transformed_terms)
+ *
+ * This guarantees the model uses a_corr * transform(K_raw), not
+ * transform(a_corr * corr_raw).
+ *
+ * @param L_i Subject-specific Cholesky factor (Q_idm x Q_idm).
+ * @return Vector of length Q_idm*(Q_idm-1)/2 in lower-triangular row-major order:
+ *   (2,1), (3,1), (3,2), ..., (Q,Q-1).
+ */
+vector eta_chol_corr(matrix L_i) {
+  int Q = rows(L_i); // Role: marker-by-individual dimension.
+  int M = (Q * (Q - 1)) %/% 2; // Role: derived dimension.
+  int m = 1; // Role: element loop position.
+  vector[M] corr_terms; // Role: correlation terms.
+  vector[Q] sd_terms; // Role: sd terms.
+
+  if (Q < 2)
+    return corr_terms;
+
+  // Recover subject-specific SDs from the row norms of L_i.
+  for (r in 1 : Q) {
+    real sd_r = 0; // Role: sd r.
+    for (k in 1 : r)
+      sd_r += square(L_i[r, k]);
+    sd_terms[r] = sqrt(sd_r);
+  }
+
+  // Enumerate off-diagonal entries of K_i = diag(1 / sd_i) * L_i.
+  for (r in 2 : Q) {
+    for (c in 1 : (r - 1)) {
+      real k_rc = 0; // Role: k rc.
+      if (sd_terms[r] > 1e-12)
+        k_rc = L_i[r, c] / sd_terms[r];
+      corr_terms[m] = fmax(-0.999999, fmin(0.999999, k_rc));
+      m += 1;
+    }
+  }
+
+  return corr_terms;
+}

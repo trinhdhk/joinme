@@ -2,8 +2,18 @@
 % Please edit documentation in R/posterior.R
 \name{fixef.JoiNMeFit}
 \alias{fixef.JoiNMeFit}
+\alias{.summarise_fixed_effect_posterior}
 \title{Extract fixed effects}
 \usage{
+.summarise_fixed_effect_posterior(
+  object,
+  draws = NULL,
+  seed = 1,
+  digits = 3,
+  summary = TRUE,
+  ...
+)
+
 \method{fixef}{JoiNMeFit}(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...)
 }
 \arguments{
@@ -22,9 +32,15 @@ posterior draw matrix.}
 \item{...}{Unused.}
 }
 \value{
-When \code{summary = TRUE}, a data.frame of posterior summaries. When
-\code{summary = FALSE}, a draws-by-term matrix.
+When \code{summary = TRUE}, a data frame containing longitudinal
+population coefficients, event-process coefficients, and fitted common
+marker-weight locations. The \code{component}, \code{event}, and \code{assoc_term}
+columns identify their statistical roles; \code{assoc_term} is particularly
+important when marker-weight sets are not shared. When \code{summary = FALSE},
+a draws-by-term matrix is returned, with event and term-specific
+marker-weight identities included in the column labels.
 }
 \description{
 Extract fixed effects
 }
+\keyword{internal}

@@ -52,7 +52,7 @@ A list suitable for \code{build_standata_transforms()}.
 Fits a monotone I-spline transformation with a smoothness penalty and
 returns a transform specification compatible with \code{build_standata_transforms()}.
 
-This helper is the legacy plug-in constructor for \code{type = "ispline_penalised"}.
+This helper is the plug-in constructor for \code{type = "ispline_penalised"}.
 Its defaults are \code{n_knots = 6}, \code{degree = 3}, \code{lambda = 1.0},
 \code{weights = NULL} (equal weights), and \code{diff_order = 2}.
 Returned coefficients follow the same anchored convention as the Stan-

@@ -15,13 +15,16 @@ test_that("fit supports end-to-end split marker-weight structures", {
     formulaEvent = survival::Surv(time, event) ~ x1 + x2,
     n_id = 50,
     families = rep("gaussian", 2),
-    n_obs_per_marker_per_id = 5,
     times_obs = seq(0, 7, length.out = 10),
-    marker_weights = term_weights,
-    shared_marker_weights = FALSE,
-    fixed_marker_weights = TRUE,
+    truth = jm_truth(
+      assoc_coef = list(slope = assoc_truth),
+      marker_weights = list(
+        offset = term_weights,
+        family = "constant",
+        shared = FALSE
+      )
+    ),
     assoc = c("cv_total", "cv_marker"),
-    assoc_coefs = assoc_truth,
     transforms = list(
       cv_total = list(type = "identity"),
       cv_marker = list(type = "identity")
@@ -38,9 +41,11 @@ test_that("fit supports end-to-end split marker-weight structures", {
     dataEvent = sim$dataEvent,
     assoc = c("cv_total", "cv_marker"),
     families = rep("gaussian", 2),
-    marker_weights = term_weights,
-    shared_marker_weights = FALSE,
-    fixed_marker_weights = TRUE,
+    priors = jm_prior(marker_weights = list(
+      offset = term_weights,
+      family = "constant",
+      shared = FALSE
+    )),
     transforms = list(
       cv_total = list(type = "identity"),
       cv_marker = list(type = "identity")
@@ -73,6 +78,8 @@ test_that("fit supports end-to-end split marker-weight structures", {
   expect_true(is.matrix(assoc_draws$cv_marker))
 
   assoc_map <- extract(fit, what = "assoc", keep_chains = FALSE)$term_map
-  expect_true(any(grepl("^weight\\[cv_total\\]:", assoc_map$term)))
-  expect_true(any(grepl("^weight\\[cv_marker\\]:", assoc_map$term)))
+  expect_false(any(grepl("^weight", assoc_map$term)))
+  weight_table <- marker_weights(fit)
+  expect_true(all(c("cv_total", "cv_marker") %in% weight_table$set))
+  expect_equal(nrow(weight_table), 2L * fit$stan_data$D)
 })

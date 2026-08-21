@@ -1,0 +1,253 @@
+---
+title: "Independent standard-deviation and correlation regression"
+output-dir: ../docs/articles
+format:
+  html:
+    toc: true
+    number-sections: false
+    code-fold: true
+    embed-resources: true
+    theme: cosmo
+execute:
+  eval: false
+  echo: true
+  warning: false
+  message: false
+---
+
+# Scientific purpose
+
+Marker-by-subject random effects describe departures specific to one subject
+and one longitudinal marker. Their covariance need not be constant across
+subjects. A treatment may alter the variability of these departures without
+altering their dependence, whilst a baseline physiological measurement may
+alter dependence without changing marginal variability. A single covariance
+formula cannot express these hypotheses independently.
+
+`joinme` therefore separates covariance regression into:
+
+1. a standard-deviation regression, declared by `formulaVCov$sd`; and
+2. an off-diagonal unit-lower-triangular factor regression, declared by `formulaVCov$corr`.
+
+# Formula interface
+
+The explicit form is:
+
+```{r}
+covariance_formula <- list(
+  sd = ~ treatment + age,
+  corr = ~ baseline_score
+)
+```
+
+A single formula is an exact shorthand for two identical formulae:
+
+```{r}
+formulaVCov = ~ treatment + age
+
+# exactly equivalent to
+formulaVCov = list(
+  sd = ~ treatment + age,
+  corr = ~ treatment + age
+)
+```
+
+Both named components must be present when a list is used. Random-effect and the longitudinal time variable are excluded because covariance predictors are evaluated once per subject. 
+
+# Statistical model
+
+Let $Q$ be the dimension of the marker-by-subject random-effect basis. For
+subject $i$, `joinme` reconstructs
+
+$$
+L_i=\operatorname{diag}(\boldsymbol\sigma_i)K_i,
+$$
+
+where $\boldsymbol{\sigma}_i=(\sigma_{i1},\ldots,\sigma_{iQ})^\top$ contains marginal standard deviations and $K_i$ is a Cholesky correlation factor. The marker-by-subject effect for marker $d$ is
+
+$$
+\boldsymbol w_{id}=L_i\boldsymbol z_{w,id},
+\qquad
+\boldsymbol z_{w,id}\sim N_Q(\boldsymbol0,I_Q).
+$$
+
+## Standard deviations
+
+Let $\boldsymbol x_{sd,i}$ be the design row produced from `formulaVCov$sd`.
+For coordinate $r=1,\ldots,Q$,
+
+$$
+\eta^{sd}_{ir} =
+\alpha^{sd}_r
++\boldsymbol x_{sd,i}^{\top}\boldsymbol\beta^{sd}_r
++\lambda_{m(r)}z_{L,i,m(r)}.
+$$
+
+The marginal standard deviation is
+
+$$
+\sigma_{ir}=g_{sd}(\eta^{sd}_{ir}),
+$$
+
+where $g_{sd}$ is softplus by default and may be changed to the exponential
+link with `control = list(vcov_diag_link = "exp")`.
+
+## Off-diagonal dependence
+
+Let $\boldsymbol x_{corr,i}$ be the independent design row produced from
+`formulaVCov$corr`. For row-major off-diagonal coordinate $h=(r,c)$, $c<r$,
+
+$$
+\eta^{K}_{ih}
+=
+\alpha^{K}_h
++\boldsymbol x_{corr,i}^{\top}\boldsymbol\beta^{K}_h
++\lambda_{m(h)}z_{L,i,m(h)},
+\qquad
+p_{i,rc}=\tanh(\eta^{K}_{ih}),\ c<r.
+$$
+
+These partial correlations form one row of the Cholesky correlation factor by
+
+$$
+K_{i,rc}=p_{i,rc}\prod_{h<c}\sqrt{1-p_{i,rh}^2},\quad c<r,
+\qquad
+K_{i,rr}=\prod_{h<r}\sqrt{1-p_{i,rh}^2}.
+$$
+
+The upper triangle is zero and every row has norm one.
+
+The covariance matrix is then
+
+$$
+\Sigma_i=L_iL_i^{\top}
+=\operatorname{diag}(\boldsymbol\sigma_i)K_iK_i^{\top}\operatorname{diag}(\boldsymbol\sigma_i).
+$$
+
+This is the independent regression design: the SD model sets
+$\boldsymbol\sigma_i$, and the dependence model sets row-wise partial
+correlations. The off-diagonal regression is absent when the nested
+marker-by-subject term uses `||`, signalling an iid random effect structure.
+
+## Meaning of the latent loading
+
+There is one non-negative scalar $\lambda_m$ for each covariance
+coordinate. Collectively, $\boldsymbol\lambda_L$ is a vector, not a dense
+matrix. Its action is
+
+$$
+\operatorname{diag}(\boldsymbol\lambda_L)\boldsymbol z_{L,i},
+$$
+
+so latent coordinate $m$ affects only predictor coordinate $m$. In an
+ordinary model, $\lambda_m^2$ is the conditional residual variance of that
+untransformed predictor. It is not itself a final standard deviation,
+correlation, or covariance.
+
+# Priors
+
+Standard-deviation and correlation regressions can have independent priors:
+
+```{r}
+covariance_priors <- jm_prior(
+  vcov = list(
+    sd = list(
+      intercept = prior_normal(mu = 0, scale = 1),
+      slope = prior_normal(mu = 0, scale = 0.5)
+    ),
+    corr = list(slope = prior_horseshoe(
+      global_scale = 0.25,
+      slab_df = 4,
+      slab_scale = 1
+    ))
+  )
+)
+```
+
+Normal, fixed-degrees-of-freedom Student-$t$, Laplace, and regularised
+horseshoe families are available. A scalar location or scale applies across
+its coefficient block; a vector must match that block exactly. The positive
+`lambda_L` loadings retain a half-Student-$t_6$ prior
+because they describe unexplained heterogeneity rather than observed-
+covariate regression coefficients.
+
+# Fitting
+
+```{r}
+fitted <- joinme(
+  formulaLong = y ~ treatment * time +
+    (1 + time | id) +
+    (1 + time + (1 + time | id) | marker),
+  dataLong = data_long,
+  formulaEvent = survival::Surv(event_time, event) ~ treatment,
+  dataEvent = data_event,
+  formulaVCov = covariance_formula,
+  priors = covariance_priors,
+  families = marker_families,
+  assoc = "vcov"
+)
+```
+
+`summary(fitted)` labels SD and correlation slopes separately using their own
+model-matrix column names. Dynamic prediction evaluates both formulae for the
+new subject and applies the same unit-lower-triangular factor reconstruction.
+
+The latent-progress entry point uses precisely the same covariance syntax:
+
+```{r}
+mixture_fit <- joinme_mix(
+  formulaLong = y ~ treatment * time +
+    (1 + time | id) +
+    (1 + time + (1 + time | id) | marker),
+  dataLong = data_long,
+  formulaEvent = survival::Surv(event_time, event) ~ treatment,
+  dataEvent = data_event,
+  formulaVCov = covariance_formula,
+  priors = covariance_priors,
+  n_classes = 3,
+  formulaClass = ~ treatment,
+  class_type = "vcov"
+)
+```
+
+The mixture acts on selected standardised covariance coordinates before the SD or
+correlation link. It does not form a Cartesian product of class allocations
+for the two regressions. `class_type = "corr"` selects off-diagonal
+coordinates; `class_type = "vcov"` may select diagonal and off-diagonal
+coordinates.
+
+# Exact simulation-to-fit translation
+
+The simulator uses the same formula object and component names:
+
+```{r}
+simulation <- simulate_joinme(
+  formulaLong = y ~ treatment * time +
+    (1 + time | id) +
+    (1 + time + (1 + time | id) | marker),
+  formulaEvent = survival::Surv(event_time, event) ~ treatment,
+  formulaVCov = covariance_formula,
+  truth = jm_truth(
+    vcov = list(
+      sd = list(
+        intercept = c(-0.2, -0.4),
+        slope = c(0.35, 0.20, -0.10, 0.05),
+        latent = c(0.25, 0.20)
+      ),
+      corr = list(intercept = 0.15, slope = -0.30, latent = 0.20)
+    ),
+    re_params = list(
+      id = list(sd = c(0.6, 0.2), corr = diag(2)),
+      marker = list(sd = c(0.4, 0.15), corr = diag(2))
+    )
+  ),
+  vcov_diag_link = "exp"
+)
+
+# Every fitting argument, including data, formulae and fitting priors, is retained.
+recovery_fit <- do.call(
+  joinme,
+  c(simulation$truth$recovery$arguments, list(seed = 401))
+)
+```
+

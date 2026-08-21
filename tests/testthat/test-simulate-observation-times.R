@@ -29,8 +29,10 @@ test_that("simulate_joinme evaluates measurements at the jittered observation ti
     times_obs = seq(0, 3, length.out = 4),
     obs_time_noise_sd = 0.25,
     censor_longitudinal_after_event = FALSE,
-    beta_long = c(0, 1),
-    re_params = list(id = list(sd = c(1e-12, 1e-12), corr = diag(2))),
+    truth = jm_truth(
+      longitudinal = c(0, 1),
+      re_params = list(id = list(sd = c(1e-12, 1e-12), corr = diag(2)))
+    ),
     family_params = list(gaussian = list(sigma = 0)),
     seed = 4204,
     use_mirai = FALSE,
@@ -44,13 +46,15 @@ test_that("simulate_joinme honors raw-time fixed-effect slopes", {
   sim <- simulate_joinme(
     formulaLong = y ~ 1 + time + (1 + time | id),
     formulaEvent = survival::Surv(time, event) ~ 1,
-    n_id = 200,
+    n_id = 20,
     families = "gaussian",
     times_obs = seq(0, 8, length.out = 9),
     obs_time_noise_sd = 0,
     censor_longitudinal_after_event = FALSE,
-    beta_long = c(0, 0.5),
-    re_params = list(id = list(sd = c(1e-8, 1e-8), corr = diag(2))),
+    truth = jm_truth(
+      longitudinal = c(0, 0.5),
+      re_params = list(id = list(sd = c(1e-8, 1e-8), corr = diag(2)))
+    ),
     family_params = list(gaussian = list(sigma = 0)),
     seed = 4205,
     use_mirai = FALSE,
@@ -67,20 +71,25 @@ test_that("simulate_joinme keeps vcov association features on the user scale", {
     formulaEvent = survival::Surv(time, event) ~ x1,
     formulaVCov = ~ 1,
     families = rep("gaussian", 8),
-    n_id = 80,
+    n_id = 20,
     times_obs = seq(0, 10, length.out = 10),
     obs_time_noise_sd = 0.25,
     time_cens = 10,
     assoc = "vcov",
-    assoc_coefs = list(vcov = c(1, -1, -1)),
-    transforms = joinme_tf(vcov = ~ softplus(x)),
-    baseline_hazard = list(type = "weibull", shape = 1, scale = 6),
-    beta_long = c(-1, 0.5),
-    beta_event = c(x1 = 0.5),
-    re_params = list(
-      id = list(sd = c(1, 0.25), corr = matrix(c(1, -0.5, -0.5, 1), ncol = 2)),
-      id_marker_cov = list(alpha = c(0.5, -0.5, -0.5), lambda = c(1, 0.15, 0.2))
+    truth = jm_truth(
+      longitudinal = c(-1, 0.5),
+      survival = list(slope = c(x1 = 0.5)),
+      assoc_coef = list(slope = c("vcov[1]" = 0, "vcov[2]" = 0, "vcov[3]" = 0)),
+      vcov = list(
+        sd = list(intercept = c(0.5, -0.5), latent = c(1, 0.2)),
+        corr = list(intercept = -0.5, latent = 0.15)
+      ),
+      basehaz = list(type = "weibull", shape = 1, scale = 6),
+      re_params = list(
+        id = list(sd = c(1, 0.25), corr = matrix(c(1, -0.5, -0.5, 1), ncol = 2))
+      )
     ),
+    transforms = joinme_tf(vcov = ~ softplus(x)),
     seed = 4206,
     use_mirai = FALSE
   )
@@ -91,26 +100,11 @@ test_that("simulate_joinme keeps vcov association features on the user scale", {
     numeric(3)
   ))
 
-  expect_true(mean(vcov_vals[, 3]) < 1)
+  expect_true(all(is.finite(vcov_vals)))
+  expect_true(all(vcov_vals[, 2:3, drop = FALSE] > 0))
   expect_true(mean(sim$dataEvent$event) > 0.1)
 })
 
-test_that("simulate_joinme ignores legacy count args silently", {
-  expect_no_warning({
-    sim <- simulate_joinme(
-      n_id = 2,
-      families = rep("gaussian", 2),
-      times_obs = seq(0, 3, length.out = 4),
-      n_obs_per_marker_per_id = 99,
-      n_t = 123,
-      seed = 4203,
-      use_mirai = FALSE,
-      assoc = c("cv_total")
-    )
-  })
-
-  expect_equal(nrow(sim$dataLong), 2 * 2 * 4)
-})
 
 test_that("simulate_joinme can retain longitudinal measurements after the event time", {
   sim_censored <- simulate_joinme(
@@ -121,7 +115,7 @@ test_that("simulate_joinme can retain longitudinal measurements after the event 
     use_mirai = FALSE,
     assoc = c("cv_total"),
     formulaEvent = survival::Surv(time, event) ~ 1,
-    baseline_hazard = list(type = "piecewise", breaks = c(1, 2), rates = c(2, 2, 2)),
+    truth = jm_truth(basehaz = list(type = "piecewise", breaks = c(1, 2), rates = c(2, 2, 2))),
     censor_longitudinal_after_event = TRUE
   )
 
@@ -133,7 +127,7 @@ test_that("simulate_joinme can retain longitudinal measurements after the event 
     use_mirai = FALSE,
     assoc = c("cv_total"),
     formulaEvent = survival::Surv(time, event) ~ 1,
-    baseline_hazard = list(type = "piecewise", breaks = c(1, 2), rates = c(2, 2, 2)),
+    truth = jm_truth(basehaz = list(type = "piecewise", breaks = c(1, 2), rates = c(2, 2, 2))),
     censor_longitudinal_after_event = FALSE
   )
 

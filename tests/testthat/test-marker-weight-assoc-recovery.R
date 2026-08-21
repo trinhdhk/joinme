@@ -9,12 +9,10 @@ test_that("fit recovers signed marker weights and alpha without passing marker_w
     formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
     n_id = 120,
     families = rep("gaussian", 3),
-    n_obs_per_marker_per_id = 8,
     times_obs = seq(0, 8, length.out = 12),
-    fixed_marker_weights = FALSE,
     shrinkage = 0L,
     assoc = c("cv_total"),
-    assoc_coefs = c(cv_total = 0.6),
+    truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.6))),
     transforms = list(cv_total = list(type = "identity")),
     seed = 4102
   )
@@ -29,7 +27,6 @@ test_that("fit recovers signed marker weights and alpha without passing marker_w
     assoc = c("cv_total"),
     families = rep("gaussian", 3),
     transforms = list(cv_total = list(type = "identity")),
-    fixed_marker_weights = FALSE,
     shrinkage = 0L,
     control = list(
       engine = "cmdstanr",
@@ -45,18 +42,18 @@ test_that("fit recovers signed marker weights and alpha without passing marker_w
     )
   )
 
-  expect_true(all(abs(fit$stan_data$marker_weights) < 1e-12))
+  expect_true(all(abs(fit$stan_data$marker_weight_offsets) < 1e-12))
 
   assoc_tbl <- summary(fit)$tables$assoc
 
   alpha_hat <- assoc_tbl$Estimate[assoc_tbl$term == "cv_total (+)"]
   expect_true(is.finite(alpha_hat) && alpha_hat > 0)
 
-  w_rows <- assoc_tbl[grepl("^weight:", assoc_tbl$term), , drop = FALSE]
+  w_rows <- marker_weights(fit)
   truth_w <- sim$truth$marker_weights
   marker_names <- sim$marker_info$names
   if (is.null(names(truth_w))) names(truth_w) <- marker_names
-  w_terms <- sub("^weight:\\s*", "", w_rows$term)
+  w_terms <- as.character(w_rows$marker)
   expect_equal(length(w_terms), length(truth_w))
   for (i in seq_along(w_terms)) {
     w_true <- truth_w[[w_terms[i]]]

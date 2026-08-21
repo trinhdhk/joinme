@@ -4,13 +4,16 @@
 #' Helper functions for specifying mixed families per marker and transformation compositions.
 #'
 #' @name family_utils
+#' @noRd
 NULL
 
 #' JoiNMe longitudinal family specification
 #'
 #' @description
-#' Creates a family specification object for `joinme(..., families = ...)` with an
-#' optional custom longitudinal link (or inverse-link) per marker family.
+#' Creates a marker-specific family specification for
+#' `joinme(..., families = ...)`. A specification may define a custom
+#' longitudinal link (or inverse link) and, for the skew-Laplace family, a
+#' fixed quantile parameter.
 #'
 #' Character values supplied through `link` name the *forward* link
 #' \eqn{g(\mu)}.  Formula values supplied through `link` are inverted
@@ -39,9 +42,13 @@ NULL
 #'   algebraically by [invert_transform_expr()].
 #' @param inv_link Optional one-sided formula `~ ...` or expression string
 #'   using `x` (e.g. `~ exp(x)`, `~ inv_logit(x)`, or `~ Phi(x)`).
-#'   `Phi` is the standard normal CDF and is the inverse link for a probit
-#'   model. In contrast, `inv_Phi`, `qnorm`, and `probit` denote the standard
-#'   normal quantile function.
+#' @param tau Optional fixed quantile/asymmetry parameter for
+#'   `"skew_laplace"` or `"skew_double_exponential"`. It must be a finite
+#'   scalar strictly between zero and one. Under Stan's quantile
+#'   parameterisation, `tau = 0.5` is the symmetric Laplace distribution.
+#'   Values zero and one are excluded because they yield a degenerate,
+#'   non-normalisable limiting distribution. When omitted, `tau` is estimated
+#'   from a distributional regression or as a family-level parameter.
 #'
 #' @return Object of class `"JoiNMe_family_spec"`.
 #' @examples
@@ -50,11 +57,17 @@ NULL
 #' jm_family("bernoulli", inv_link = ~ inv_logit(x))
 #' jm_family("bernoulli", link = ~ inv_Phi(x))
 #' jm_family("bernoulli", inv_link = ~ Phi(x))
+#' jm_family("skew_laplace", tau = 0.8)
 #' @aliases jm_family
 #' @export
-joinme_family <- function(name, link = NULL, inv_link = NULL) {
+joinme_family <- function(name, link = NULL, inv_link = NULL, tau = NULL) {
   fam_code <- .parse_family(name)
   fam_name <- .family_code_to_name(fam_code)
+  tau_fixed <- .validate_family_tau(
+    tau = tau,
+    family_code = fam_code,
+    context = "jm_family()"
+  )
 
   if (!is.null(link) && !is.null(inv_link)) {
     cli::cli_abort(c(
@@ -84,7 +97,8 @@ joinme_family <- function(name, link = NULL, inv_link = NULL) {
     list(
       family = fam_name,
       link = link_name,
-      inv_link = inv_link_bc
+      inv_link = inv_link_bc,
+      tau = tau_fixed
     ),
     class = "JoiNMe_family_spec"
   )
@@ -108,6 +122,147 @@ print.JoiNMe_family_spec <- function(x, ...){
   cat('  Link: ', x$link, '\n', sep = '')
   cat('  Inverse Link: ', x$inv_link, '\n', sep = '')
   invisible(x)
+}
+
+#' Validate a fixed skew-Laplace quantile parameter
+#'
+#' @description
+#' Validates the marker-specific constant used as the quantile/asymmetry
+#' parameter of Stan's skew double exponential distribution. The validation is
+#' centralised so formal `JoiNMe_family_spec` objects and compatible list-style
+#' declarations obey identical statistical constraints.
+#'
+#' @param tau Optional numeric value supplied in a family declaration.
+#' @param family_code Integer longitudinal-family code.
+#' @param context Character description of the calling family declaration,
+#'   used to produce a precise diagnostic.
+#'
+#' @return `NA_real_` when `tau` is absent; otherwise the validated numeric
+#'   scalar.
+#' @keywords internal
+#' @noRd
+.validate_family_tau <- function(tau, family_code, context = "family specification") {
+  if (
+    is.null(tau) ||
+      (is.numeric(tau) && length(tau) == 1L && is.na(tau))
+  ) {
+    return(NA_real_)
+  }
+
+  if (!identical(as.integer(family_code), 9L)) {
+    cli::cli_abort(c(
+      x = "{.arg tau} is only defined for the skew-Laplace family in {context}.",
+      i = "Use {.code jm_family('skew_laplace', tau = 0.5)}, or remove {.arg tau}."
+    ))
+  }
+
+  if (!is.numeric(tau) || length(tau) != 1L || !is.finite(tau)) {
+    cli::cli_abort(c(
+      x = "{.arg tau} in {context} must be one finite numeric value.",
+      i = "Provide a quantile strictly between zero and one."
+    ))
+  }
+
+  tau <- as.numeric(tau)
+  if (tau <= 0 || tau >= 1) {
+    cli::cli_abort(c(
+      x = "{.arg tau} in {context} must lie strictly between zero and one.",
+      i = "{.code tau = 1} is not a valid skew-Laplace distribution; {.code tau = 0.5} is symmetric."
+    ))
+  }
+
+  tau
+}
+
+#' Normalise fixed skew-Laplace metadata by marker
+#'
+#' @description
+#' Produces the marker-aligned fixed-`tau` vectors required by fitting and
+#' dynamic prediction. Scalar values from older fitted objects are recycled so
+#' that saved models remain usable after the family API became marker-specific.
+#' Flags are cleared for non-skew-Laplace markers because `tau` has no
+#' likelihood interpretation for those response families.
+#'
+#' @param use_tau_fixed Integer or logical flag, either scalar or one value per
+#'   marker.
+#' @param tau_fixed Numeric fixed value, either scalar or one value per marker.
+#' @param family_codes Integer family code for each marker.
+#'
+#' @return A list with integer `use_tau_fixed` and numeric `tau_fixed`, each
+#'   having one element per marker.
+#' @keywords internal
+#' @noRd
+.normalise_fixed_tau_by_marker <- function(
+  use_tau_fixed,
+  tau_fixed,
+  family_codes
+) {
+  family_codes <- as.integer(family_codes)
+  n_markers <- length(family_codes)
+  if (n_markers == 0L) {
+    return(list(use_tau_fixed = integer(0), tau_fixed = numeric(0)))
+  }
+
+  use_tau_fixed <- as.integer(use_tau_fixed %||% 0L)
+  tau_fixed <- as.numeric(tau_fixed %||% 0.5)
+  if (length(use_tau_fixed) == 1L) {
+    use_tau_fixed <- rep.int(use_tau_fixed, n_markers)
+  }
+  if (length(tau_fixed) == 1L) {
+    tau_fixed <- rep.int(tau_fixed, n_markers)
+  }
+  if (length(use_tau_fixed) != n_markers || length(tau_fixed) != n_markers) {
+    cli::cli_abort(c(
+      x = "Fixed skew-Laplace metadata is not aligned with the fitted markers.",
+      i = "Refit the model or supply one fixed-tau flag and value per marker."
+    ))
+  }
+  if (anyNA(use_tau_fixed) || any(!use_tau_fixed %in% c(0L, 1L))) {
+    cli::cli_abort("Fixed skew-Laplace flags must be zero or one.")
+  }
+
+  not_skew_laplace <- is.na(family_codes) | family_codes != 9L
+  use_tau_fixed[not_skew_laplace] <- 0L
+  fixed_index <- which(use_tau_fixed == 1L)
+  if (
+    length(fixed_index) > 0L &&
+      (
+        any(!is.finite(tau_fixed[fixed_index])) ||
+          any(tau_fixed[fixed_index] <= 0) ||
+          any(tau_fixed[fixed_index] >= 1)
+      )
+  ) {
+    cli::cli_abort(
+      "Every fixed skew-Laplace tau must lie strictly between zero and one."
+    )
+  }
+
+  # Stan requires a valid bounded value even where the flag is zero. The
+  # symmetric value is a neutral placeholder and is never read by the
+  # likelihood for an estimated marker.
+  tau_fixed[use_tau_fixed == 0L] <- 0.5
+  list(
+    use_tau_fixed = as.integer(use_tau_fixed),
+    tau_fixed = as.numeric(tau_fixed)
+  )
+}
+
+#' Identify a scalar family specification
+#'
+#' @description
+#' Distinguishes one structured family declaration from a list containing
+#' several marker-specific declarations. This distinction is required because
+#' a `JoiNMe_family_spec` is itself represented as a list.
+#'
+#' @param x An object supplied through a `families` argument.
+#'
+#' @return `TRUE` when `x` is one formal or compatible list-style family
+#'   specification; otherwise `FALSE`.
+#' @keywords internal
+#' @noRd
+.is_single_family_spec <- function(x) {
+  inherits(x, "JoiNMe_family_spec") ||
+    (is.list(x) && !is.null(x$family))
 }
 
 #' Normalise a named forward link
@@ -206,7 +361,7 @@ print.JoiNMe_family_spec <- function(x, ...){
 #' @description
 #' Character links are translated through the canonical link table.  A formula
 #' is treated as a forward link \eqn{g(x)}, inverted symbolically, and compiled
-#' to functional bytecode.  
+#' to functional bytecode.
 #'
 #' @param link A supported character link name or an invertible one-sided
 #'   formula in `x`.
@@ -317,7 +472,7 @@ print.JoiNMe_family_spec <- function(x, ...){
 #' @param bc A functional-bytecode specification.
 #' @param context Character description of the family declaration used in the
 #'   warning.
-#' @param mode Character scalar `"warning"` or `"error"` 
+#' @param mode Character scalar `"warning"` or `"error"`.
 #'
 #' @return `NULL`, invisibly.  A warning is issued when canonical recognition
 #'   and numerical monotonicity checks do not support a one-to-one map.
@@ -480,7 +635,8 @@ print.JoiNMe_family_spec <- function(x, ...){
 #' @param x One marker-specific family declaration.
 #'
 #' @return A list containing integer `family_code`, canonical or missing
-#'   `link_name`, and compiled `inv_link_bc`.
+#'   `link_name`, compiled `inv_link_bc`, and `tau_fixed`, where the latter is
+#'   `NA_real_` unless a fixed skew-Laplace quantile was requested.
 #' @keywords internal
 #' @noRd
 .extract_family_and_link <- function(x) {
@@ -493,10 +649,16 @@ print.JoiNMe_family_spec <- function(x, ...){
       )
     }
     link_name <- .canonical_link_from_inv_link_bc(inv_link_bc)
+    tau_fixed <- .validate_family_tau(
+      tau = x$tau,
+      family_code = fam_code,
+      context = "JoiNMe family specification"
+    )
     return(list(
       family_code = as.integer(fam_code),
       link_name = link_name,
-      inv_link_bc = inv_link_bc
+      inv_link_bc = inv_link_bc,
+      tau_fixed = tau_fixed
     ))
   }
 
@@ -522,10 +684,16 @@ print.JoiNMe_family_spec <- function(x, ...){
       )
     }
     link_name <- .canonical_link_from_inv_link_bc(inv_link_bc)
+    tau_fixed <- .validate_family_tau(
+      tau = x$tau,
+      family_code = fam_code,
+      context = "list-style family specification"
+    )
     return(list(
       family_code = as.integer(fam_code),
       link_name = link_name,
-      inv_link_bc = inv_link_bc
+      inv_link_bc = inv_link_bc,
+      tau_fixed = tau_fixed
     ))
   }
 
@@ -534,7 +702,8 @@ print.JoiNMe_family_spec <- function(x, ...){
   list(
     family_code = as.integer(fam_code),
     link_name = .canonical_link_from_inv_link_bc(inv_link_bc),
-    inv_link_bc = inv_link_bc
+    inv_link_bc = inv_link_bc,
+    tau_fixed = NA_real_
   )
 }
 
@@ -708,13 +877,18 @@ print.JoiNMe_family_spec <- function(x, ...){
 #' @param marker_var Name of marker column
 #' @param y_var Name of outcome column
 #'
-#' @return Integer vector of family codes (length D)
+#' @return A list containing marker-aligned family and inverse-link metadata,
+#'   together with `use_tau_fixed` and `tau_fixed` vectors. The fixed-`tau`
+#'   flag is one only for skew-Laplace markers whose family declaration
+#'   supplies a constant quantile.
 #' @keywords internal
 #' @noRd
 .validate_family_list <- function(families, D, dataLong, marker_var, y_var) {
   # Validate per-marker families against observed data
-  # Convert to list if single value
-  if (length(families) == 1 && !is.list(families)) {
+  # Convert a scalar character or structured declaration to a marker list.
+  if (.is_single_family_spec(families)) {
+    families <- rep(list(families), D)
+  } else if (length(families) == 1 && !is.list(families)) {
     families <- rep(list(families), D)
   } else if (!is.list(families)) {
     families <- as.list(families)
@@ -734,6 +908,8 @@ print.JoiNMe_family_spec <- function(x, ...){
   link_names <- rep(NA_character_, D)
   link_codes <- integer(D)
   inv_link_specs <- vector("list", D)
+  tau_fixed <- rep.int(0.5, D)
+  use_tau_fixed <- integer(D)
   for (d in seq_along(families)) {
     spec_d <- .extract_family_and_link(families[[d]])
     family_codes[d] <- as.integer(spec_d$family_code)
@@ -743,6 +919,10 @@ print.JoiNMe_family_spec <- function(x, ...){
       0L
     } else {
       .link_code_from_name(spec_d$link_name)
+    }
+    if (!is.na(spec_d$tau_fixed)) {
+      use_tau_fixed[d] <- 1L
+      tau_fixed[d] <- as.numeric(spec_d$tau_fixed)
     }
   }
 
@@ -805,7 +985,9 @@ print.JoiNMe_family_spec <- function(x, ...){
     inv_link_n_ops = inv_link_n_ops,
     inv_link_ops = inv_link_ops,
     inv_link_n_const = inv_link_n_const,
-    inv_link_const = inv_link_const
+    inv_link_const = inv_link_const,
+    use_tau_fixed = as.integer(use_tau_fixed),
+    tau_fixed = as.numeric(tau_fixed)
   )
 }
 
@@ -830,6 +1012,67 @@ print.JoiNMe_family_spec <- function(x, ...){
     "10" = c("kappa"), # beta (precision)
     "11" = c(), # cumulative_logit (cutpoints)
     stop("Unknown family code: ", family)
+  )
+}
+
+#' Build marker-to-family indexing for a distributional parameter
+#'
+#' @description
+#' Identifies the distinct response families that require one distributional
+#' parameter and maps each eligible marker to the corresponding family-level
+#' parameter. A marker receives index zero when its family does not use the
+#' parameter or when a marker-specific fixed value replaces estimation.
+#'
+#' @param family_codes Integer family code for every longitudinal marker.
+#' @param parameter Character scalar naming a supported distributional
+#'   parameter.
+#' @param eligible Optional logical vector aligned with `family_codes`. `FALSE`
+#'   excludes a marker from family-level estimation even when its family
+#'   ordinarily requires the parameter.
+#'
+#' @return A list containing the number of estimated family-level parameters,
+#'   the marker-to-parameter index, and the corresponding family codes and
+#'   names.
+#' @keywords internal
+#' @noRd
+.build_family_parameter_index <- function(family_codes, parameter, eligible = NULL) {
+  family_codes <- as.integer(family_codes)
+  n_markers <- length(family_codes)
+  if (is.null(eligible)) {
+    eligible <- rep.int(TRUE, n_markers)
+  }
+  if (!is.logical(eligible) || length(eligible) != n_markers || anyNA(eligible)) {
+    cli::cli_abort(c(
+      x = "{.arg eligible} must contain one non-missing logical value per marker.",
+      i = "Align eligibility with the marker-specific family vector."
+    ))
+  }
+
+  requires_parameter <- vapply(
+    family_codes,
+    function(family_code) parameter %in% .family_distrib_params(family_code),
+    logical(1)
+  )
+  estimate_parameter <- requires_parameter & eligible
+  parameter_families <- sort(unique(family_codes[estimate_parameter]))
+
+  marker_to_family <- integer(n_markers)
+  if (length(parameter_families) > 0L) {
+    marker_to_family[estimate_parameter] <- match(
+      family_codes[estimate_parameter],
+      parameter_families
+    )
+  }
+
+  list(
+    n = as.integer(length(parameter_families)),
+    marker_to = as.integer(marker_to_family),
+    family_codes = as.integer(parameter_families),
+    family_names = if (length(parameter_families) > 0L) {
+      vapply(parameter_families, .family_code_to_name, character(1))
+    } else {
+      character(0)
+    }
   )
 }
 
@@ -924,77 +1167,380 @@ print.JoiNMe_family_spec <- function(x, ...){
   }
 }
 
-#' Build prior specification for JoiNMe model
+#' Encode one validated prior declaration for Stan data
 #'
-#' @description
-#' Create prior specifications for fixed effects (beta), baseline hazard coefficients (alpha),
-#' and correlation structure (LKJ prior).
+#' @param prior A normalised `joinme_prior_spec` object.
 #'
-#' @param beta_prior Named list or vector. If vector: uniform scale for all beta.
-#'   If list with 'scale' or 'sd': uses normal(0, sd) for all.
-#'   Example: list(scale = 2) or list(scale = c(2, 1, 1))
-#' @param alpha_prior Scale for baseline hazard coefficients. Default: normal(0, 2)
-#' @param iota_prior Scale for fit-only affine-shift intercept and slope
-#'   parameters in functional association transforms. Default: normal(0, 1)
-#' @param lkj_prior Concentration parameter for LKJ correlation prior. Default: 1 (uniform)
-#'
-#' @return List with prior specifications compatible with Stan
+#' @return A list containing the integer family code and fixed
+#'   hyperparameters used by the reusable Stan prior module.
 #' @keywords internal
 #' @noRd
-.build_priors <- function(
-  beta_prior = NULL,
-  alpha_prior = NULL,
-  iota_prior = NULL,
-  lkj_prior = NULL
+.encode_joinme_prior <- function(prior) {
+  family_codes <- c(
+    student_t = 1L,
+    normal = 2L,
+    laplace = 3L,
+    horseshoe = 4L
+  ) # stable R-to-Stan family-code dictionary
+  list(
+    family = unname(family_codes[[prior$family]]),
+    mu = as.numeric(prior$mu),
+    scale = as.numeric(prior$scale),
+    df = if (is.finite(prior$df)) prior$df else 1,
+    global_df = if (is.finite(prior$global_df)) prior$global_df else 1,
+    global_scale = if (is.finite(prior$global_scale)) prior$global_scale else 1,
+    slab_df = if (is.finite(prior$slab_df)) prior$slab_df else 4,
+    slab_scale = if (is.finite(prior$slab_scale)) prior$slab_scale else 2
+  )
+}
+
+#' Coefficient-prior declarations at fitted block dimensions
+#'
+#' @description
+#' Scalar locations and scales are recycled only after formula parsing reveals
+#' the exact number and order of coefficients. Non-scalar declarations must
+#' match that number exactly, preventing silent partial recycling across
+#' scientifically different parameters.
+#'
+#' @param priors Named list of encoded prior declarations, such as the
+#'   family-only marker blocks or the class-membership regression block.
+#' @param dimensions Named integer vector giving the fitted dimension of every
+#'   prior block to assemble.
+#'
+#' @return Named Stan-data fields for every requested prior block.
+#' @keywords internal
+#' @noRd
+.assemble_joinme_prior_data <- function(priors, dimensions) {
+  expand_values <- function(values, number_parameters, component, field) {
+    values <- as.numeric(values)
+    if (number_parameters == 0L) return(numeric(0))
+    if (length(values) == 1L) return(rep.int(values, number_parameters))
+    if (length(values) != number_parameters) {
+      cli::cli_abort(c(
+        x = "Prior {.arg {component}} provides {length(values)} {field} values for {number_parameters} parameters.",
+        i = "Supply one value or exactly one value per parameter in the fitted block."
+      ))
+    }
+    values
+  }
+
+  output <- list()
+  for (component in names(dimensions)) {
+    specification <- priors[[component]]
+    number_parameters <- as.integer(dimensions[[component]])
+    prefix <- paste0("prior_", component, "_")
+    output[[paste0(prefix, "family")]] <- as.integer(specification$family)
+    output[[paste0(prefix, "mu")]] <- expand_values(
+      specification$mu,
+      number_parameters,
+      component,
+      "location"
+    )
+    output[[paste0(prefix, "scale")]] <- expand_values(
+      specification$scale,
+      number_parameters,
+      component,
+      "scale"
+    )
+    output[[paste0(prefix, "df")]] <- as.numeric(specification$df)
+    output[[paste0(prefix, "global_df")]] <- as.numeric(specification$global_df)
+    output[[paste0(prefix, "global_scale")]] <- as.numeric(specification$global_scale)
+    output[[paste0(prefix, "slab_df")]] <- as.numeric(specification$slab_df)
+    output[[paste0(prefix, "slab_scale")]] <- as.numeric(specification$slab_scale)
+  }
+  output
+}
+
+#' Resolve scoped priors for one distributional regression
+#'
+#' @description
+#' Converts parameter-wide, family-scoped and marker-scoped declarations into
+#' disjoint coefficient assignments. Family scope is read from the prefixes
+#' created by `.build_dist_matrix()`. A marker selector is permitted only when
+#' that marker is the sole marker using its family block; otherwise the fitted
+#' coefficient is shared and a marker-specific prior would misstate the model.
+#'
+#' @param parameter Distributional parameter name.
+#' @param columns Distributional model-matrix column labels.
+#' @param roles Intercept or slope role for every column.
+#' @param specification Normalised prior specification for `parameter`.
+#' @param marker_levels Longitudinal marker labels in fitted order.
+#' @param family_codes Response-family code for every marker.
+#'
+#' @return A block accepted by `.pack_regression_priors()`.
+#' @keywords internal
+#' @noRd
+.distributional_prior_block <- function(
+  parameter,
+  columns,
+  roles,
+  specification,
+  marker_levels,
+  family_codes
 ) {
-  # Create full prior spec list consumed by joinme_standata()
-  priors <- list()
+  columns <- as.character(columns) # fitted distributional coefficient labels
+  roles <- as.character(roles) # intercept or slope role aligned with columns
+  marker_levels <- as.character(marker_levels) # exact response-marker labels
+  family_codes <- as.integer(family_codes) # marker-aligned response-family codes
+  if (length(columns) != length(roles)) {
+    cli::cli_abort("Internal distributional prior columns and roles have different lengths for {.field {parameter}}.")
+  }
+  if (length(columns) == 0L) {
+    if (length(specification$by_family) > 0L || length(specification$by_marker) > 0L) {
+      cli::cli_abort(c(
+        x = "Scoped prior declarations were supplied for {.field {parameter}}, but its {.arg formulaDist} regression has no coefficients.",
+        i = "Add the corresponding family-scoped distributional formula or remove the bracket selector."
+      ))
+    }
+    return(list(roles = roles, priors = specification))
+  }
 
-  # Beta priors (fixed effects)
-  if (!is.null(beta_prior)) {
-    if (is.numeric(beta_prior)) {
-      if (length(beta_prior) == 1) {
-        priors$beta_scale <- rep(beta_prior, 100) # Will be truncated to P
+  coefficient_source_type <- rep.int("default", length(columns)) # default, family, or marker selector governing each coefficient
+  coefficient_source_value <- rep.int(NA_character_, length(columns)) # canonical family or exact marker label for scoped coefficients
+  family_prefix <- ifelse(
+    grepl("^family=[^:]+::", columns),
+    sub("^family=([^:]+)::.*$", "\\1", columns),
+    NA_character_
+  ) # canonical family scope encoded in each coefficient label
+
+  for (family_name in names(specification$by_family)) {
+    positions <- which(family_prefix == family_name) # coefficients fitted only for this response family
+    if (length(positions) == 0L) {
+      cli::cli_abort(c(
+        x = "Prior selector {.code {parameter}[family='{family_name}']} does not match a fitted distributional coefficient block.",
+        i = "Use the same family scope on the left-hand side of {.arg formulaDist}."
+      ))
+    }
+    coefficient_source_type[positions] <- "family"
+    coefficient_source_value[positions] <- family_name
+  }
+
+  family_names_by_marker <- vapply(family_codes, .family_code_to_name, character(1)) # canonical family for every marker
+  for (marker_name in names(specification$by_marker)) {
+    marker_position <- match(marker_name, marker_levels) # selected response marker in fitted marker order
+    if (is.na(marker_position)) {
+      cli::cli_abort(c(
+        x = "Unknown marker in prior selector {.code {parameter}[marker='{marker_name}']}.",
+        i = "Available markers are: {.val {paste(marker_levels, collapse = ', ')}}."
+      ))
+    }
+    family_name <- family_names_by_marker[[marker_position]] # family block used by the selected marker
+    markers_sharing_family <- marker_levels[family_names_by_marker == family_name] # markers governed by the same coefficients
+    if (length(markers_sharing_family) != 1L) {
+      cli::cli_abort(c(
+        x = "Prior selector {.code {parameter}[marker='{marker_name}']} cannot isolate one fitted coefficient block.",
+        i = "Markers {.val {paste(markers_sharing_family, collapse = ', ')}} share the {.val {family_name}} distributional coefficients.",
+        i = "Use {.code {parameter}[family='{family_name}']} or define a distributional design with distinct coefficients."
+      ))
+    }
+    positions <- which(family_prefix == family_name) # uniquely marker-associated family-scoped coefficients
+    if (length(positions) == 0L) {
+      cli::cli_abort(c(
+        x = "Prior selector {.code {parameter}[marker='{marker_name}']} does not match a fitted distributional coefficient block.",
+        i = "The marker prior can be resolved only when {.arg formulaDist} contains {.code {parameter}[family={family_name}] ~ ...}."
+      ))
+    }
+    coefficient_source_type[positions] <- "marker"
+    coefficient_source_value[positions] <- marker_name
+  }
+
+  assignment_table <- unique(data.frame(
+    source_type = coefficient_source_type,
+    source_value = ifelse(is.na(coefficient_source_value), "", coefficient_source_value),
+    role = roles,
+    stringsAsFactors = FALSE
+  )) # distinct selector-role groups without encoding user labels into a delimiter-separated string
+  assignments <- lapply(seq_len(nrow(assignment_table)), function(assignment_index) {
+    assignment_row <- assignment_table[assignment_index, , drop = FALSE] # one selector-role group
+    positions <- which(
+      (coefficient_source_type == assignment_row$source_type) &
+        (if (nzchar(assignment_row$source_value)) {
+          coefficient_source_value == assignment_row$source_value
+        } else {
+          is.na(coefficient_source_value)
+        }) &
+        (roles == assignment_row$role)
+    ) # coefficient positions governed by this selector and role
+    source_type <- assignment_row$source_type # default, family, or marker
+    source_value <- assignment_row$source_value # canonical family or exact marker label
+    role <- assignment_row$role # intercept or slope shared by this assignment
+    source_specification <- switch(
+      source_type,
+      default = specification,
+      family = specification$by_family[[source_value]],
+      marker = specification$by_marker[[source_value]]
+    ) # normalised role declarations for the selected scope
+    list(
+      label = if (identical(source_type, "default")) {
+        paste0(parameter, "$", role)
       } else {
-        priors$beta_scale <- as.numeric(beta_prior)
+        paste0(parameter, "[", source_type, "=", source_value, "]$", role)
+      },
+      positions = positions,
+      prior = source_specification[[role]],
+      role = role
+    )
+  }) # complete non-overlapping prior assignments in fitted coefficient order
+
+  list(roles = roles, priors = specification, assignments = assignments)
+}
+
+#' Pack role-specific regression priors into one reusable coefficient layout
+#'
+#' @description
+#' The fitting programme uses one common representation for every ordinary
+#' regression coefficient. Each coefficient retains its scientific component
+#' and intercept/slope role through the declaration chosen in R. Packing the
+#' coefficients once avoids repeating a separate Stan prior implementation for
+#' longitudinal, event, covariance, association, functional and
+#' distributional regressions.
+#'
+#' @param blocks Named list. Each element contains `roles`, one role label per
+#'   coefficient, and `priors`, a named list of normalised prior declarations
+#'   for those roles.
+#'
+#' @return Stan data for coefficient-wise prior transformation and a named
+#'   vector giving the first packed position of every block.
+#' @keywords internal
+#' @noRd
+.pack_regression_priors <- function(blocks) {
+  family_code <- c(student_t = 1L, normal = 2L, laplace = 3L, horseshoe = 4L) # common distribution-family codes used by the Stan prior interpreter
+  coefficient_family <- integer(0) # family code for every packed regression coefficient
+  coefficient_mu <- numeric(0) # prior location for every packed regression coefficient
+  coefficient_scale <- numeric(0) # ordinary scale for every packed regression coefficient
+  coefficient_df <- numeric(0) # Student-t degrees of freedom, or horseshoe local-scale degrees of freedom
+  horseshoe_local_index <- integer(0) # positive local-scale index for horseshoe coefficients and zero otherwise
+  horseshoe_group_index <- integer(0) # positive shared global-scale group for horseshoe coefficients and zero otherwise
+  horseshoe_local_df <- numeric(0) # local half-Student-t degrees of freedom in packed horseshoe order
+  horseshoe_global_df <- numeric(0) # global half-Student-t degrees of freedom by scientific prior group
+  horseshoe_global_scale <- numeric(0) # fixed global scale by scientific prior group
+  horseshoe_slab_df <- numeric(0) # finite-slab degrees of freedom by scientific prior group
+  horseshoe_slab_scale <- numeric(0) # finite-slab scale by scientific prior group
+  block_start <- integer(length(blocks)) # one-based first coefficient position for every block, or zero for an empty block
+  names(block_start) <- names(blocks)
+  next_position <- 1L # next unused coefficient position in the common packed layout
+
+  expand_role_values <- function(values, number_coefficients, component, role, field) {
+    values <- as.numeric(values) # scalar or coefficient-specific values declared for this role
+    if (number_coefficients == 0L) return(numeric(0))
+    if (length(values) == 1L) return(rep.int(values, number_coefficients))
+    if (length(values) != number_coefficients) {
+      cli::cli_abort(c(
+        x = "Prior {.arg {component}${role}} provides {length(values)} {field} values for {number_coefficients} coefficients.",
+        i = "Supply one value or exactly one value for each {role} coefficient in this component."
+      ))
+    }
+    values
+  }
+
+  for (component in names(blocks)) {
+    block <- blocks[[component]] # coefficient roles and role-specific prior declarations for one scientific component
+    roles <- as.character(block$roles %||% character(0)) # intercept/slope role in the actual fitted coefficient order
+    number_coefficients <- length(roles) # dimension of this component in the fitted model
+    block_start[[component]] <- if (number_coefficients > 0L) next_position else 0L
+    if (number_coefficients == 0L) next
+    if (any(!roles %in% c("intercept", "slope"))) {
+      cli::cli_abort("Internal prior layout for {.field {component}} contains an unknown coefficient role.")
+    }
+
+    block_family <- integer(number_coefficients) # family codes restored to the component's fitted coefficient order
+    block_mu <- numeric(number_coefficients) # locations restored to fitted coefficient order
+    block_scale <- numeric(number_coefficients) # scales restored to fitted coefficient order
+    block_df <- numeric(number_coefficients) # fixed degrees of freedom restored to fitted coefficient order
+    block_local_index <- integer(number_coefficients) # horseshoe local-scale map in fitted coefficient order
+    block_group_index <- integer(number_coefficients) # horseshoe global-group map in fitted coefficient order
+
+    assignments <- block$assignments %||% lapply(unique(roles), function(role) {
+      list(
+        label = paste0(component, "$", role),
+        positions = which(roles == role),
+        prior = block$priors[[role]],
+        role = role
+      )
+    }) # disjoint selector-role assignments, or ordinary intercept/slope assignments
+    assigned_positions <- unlist(lapply(assignments, `[[`, "positions"), use.names = FALSE) # all coefficient positions covered by declarations
+    if (!identical(sort(as.integer(assigned_positions)), seq_len(number_coefficients))) {
+      cli::cli_abort("Internal prior assignments for {.field {component}} must cover every coefficient exactly once.")
+    }
+
+    complete_prior_positions <- function(declaration) {
+      complete_prior_id <- attr(declaration, "complete_prior_id", exact = TRUE) # identifier of a bare prior spanning several coefficient roles
+      if (is.null(complete_prior_id)) return(NULL)
+      sort(unique(unlist(lapply(assignments, function(candidate) {
+        candidate_id <- attr(candidate$prior, "complete_prior_id", exact = TRUE) # group identifier attached during prior normalisation
+        if (identical(candidate_id, complete_prior_id)) candidate$positions else integer(0)
+      }), use.names = FALSE)))
+    }
+    complete_horseshoe_groups <- list() # shared global-scale index for every bare horseshoe declaration spanning several roles
+
+    for (assignment in assignments) {
+      role <- assignment$role # scientific intercept or slope role
+      role_positions <- as.integer(assignment$positions) # component positions governed by this scoped declaration
+      declaration <- assignment$prior # checked Normal, Student-t, Laplace or horseshoe prior for this selector-role group
+      if (is.null(declaration)) {
+        cli::cli_abort("Internal prior layout for {.field {component}} is missing declaration {.field {assignment$label}}.")
       }
-    } else if (is.list(beta_prior)) {
-      priors$beta_scale <- beta_prior$scale %||% beta_prior$sd %||% 2
-      if (length(priors$beta_scale) == 1) {
-        priors$beta_scale <- rep(priors$beta_scale, 100)
+      block_family[role_positions] <- family_code[[declaration$family]]
+      complete_positions <- complete_prior_positions(declaration) # full fitted positions governed by one bare component declaration
+      expand_assignment_values <- function(values, field) {
+        values <- as.numeric(values) # scalar, role-specific, or complete-component hyperparameters
+        if (is.null(complete_positions) || length(values) == 1L) {
+          return(expand_role_values(values, length(role_positions), component, assignment$label, field))
+        }
+        if (length(values) != length(complete_positions)) {
+          cli::cli_abort(c(
+            x = "Prior {.arg {component}} provides {length(values)} {field} values for {length(complete_positions)} coefficients.",
+            i = "A bare component prior supplies one value or exactly one value per fitted coefficient; use intercept/slope lists for role-specific vectors."
+          ))
+        }
+        values[match(role_positions, complete_positions)]
+      }
+      block_mu[role_positions] <- expand_assignment_values(declaration$mu, "location")
+      block_scale[role_positions] <- expand_assignment_values(declaration$scale, "scale")
+      block_df[role_positions] <- if (is.finite(declaration$df)) declaration$df else 1
+
+      if (identical(declaration$family, "horseshoe")) {
+        complete_prior_id <- attr(declaration, "complete_prior_id", exact = TRUE) # bare component horseshoe shares one global scale across its roles
+        stored_group_index <- if (is.null(complete_prior_id)) NULL else complete_horseshoe_groups[[complete_prior_id]]
+        group_index <- stored_group_index %||% (length(horseshoe_global_df) + 1L) # one shared global shrinkage scale for this declared prior group
+        local_indices <- seq.int(length(horseshoe_local_df) + 1L, length.out = length(role_positions)) # coefficient-specific local scales
+        block_local_index[role_positions] <- local_indices
+        block_group_index[role_positions] <- group_index
+        horseshoe_local_df <- c(horseshoe_local_df, rep(declaration$df, length(role_positions)))
+        if (is.null(stored_group_index)) {
+          horseshoe_global_df <- c(horseshoe_global_df, declaration$global_df)
+          horseshoe_global_scale <- c(horseshoe_global_scale, declaration$global_scale)
+          horseshoe_slab_df <- c(horseshoe_slab_df, declaration$slab_df)
+          horseshoe_slab_scale <- c(horseshoe_slab_scale, declaration$slab_scale)
+          if (!is.null(complete_prior_id)) complete_horseshoe_groups[[complete_prior_id]] <- group_index
+        }
       }
     }
-  } else {
-    priors$beta_scale <- rep(2.0, 100) # Default: normal(0, 2)
+
+    coefficient_family <- c(coefficient_family, block_family)
+    coefficient_mu <- c(coefficient_mu, block_mu)
+    coefficient_scale <- c(coefficient_scale, block_scale)
+    coefficient_df <- c(coefficient_df, block_df)
+    horseshoe_local_index <- c(horseshoe_local_index, block_local_index)
+    horseshoe_group_index <- c(horseshoe_group_index, block_group_index)
+    next_position <- next_position + number_coefficients
   }
 
-  # Alpha priors (baseline hazard)
-  if (!is.null(alpha_prior)) {
-    if (is.numeric(alpha_prior)) {
-      priors$alpha_scale <- alpha_prior[1]
-    } else if (is.list(alpha_prior)) {
-      priors$alpha_scale <- alpha_prior$scale %||% alpha_prior$sd %||% 2
-    }
-  } else {
-    priors$alpha_scale <- 2.0 # Default
-  }
-
-  # Iota priors (fit-only functional transform intercept/slope shifts)
-  if (!is.null(iota_prior)) {
-    if (is.numeric(iota_prior)) {
-      priors$iota_scale <- iota_prior[1]
-    } else if (is.list(iota_prior)) {
-      priors$iota_scale <- iota_prior$scale %||% iota_prior$sd %||% 1
-    }
-  } else {
-    priors$iota_scale <- 1.0
-  }
-  # LKJ prior (correlation)
-  if (!is.null(lkj_prior)) {
-    priors$lkj_eta <- as.numeric(lkj_prior)
-  } else {
-    priors$lkj_eta <- 1.0 # Default: uniform
-  }
-
-  priors
+  list(
+    n_regression_prior = as.integer(length(coefficient_family)),
+    prior_regression_family = as.array(as.integer(coefficient_family)),
+    prior_regression_mu = coefficient_mu,
+    prior_regression_scale = coefficient_scale,
+    prior_regression_df = coefficient_df,
+    prior_regression_horseshoe_local_index = as.array(as.integer(horseshoe_local_index)),
+    prior_regression_horseshoe_group_index = as.array(as.integer(horseshoe_group_index)),
+    n_regression_horseshoe_local = as.integer(length(horseshoe_local_df)),
+    prior_regression_horseshoe_local_df = horseshoe_local_df,
+    n_regression_horseshoe_group = as.integer(length(horseshoe_global_df)),
+    prior_regression_horseshoe_global_df = horseshoe_global_df,
+    prior_regression_horseshoe_global_scale = horseshoe_global_scale,
+    prior_regression_horseshoe_slab_df = horseshoe_slab_df,
+    prior_regression_horseshoe_slab_scale = horseshoe_slab_scale,
+    prior_regression_block_start = block_start
+  )
 }

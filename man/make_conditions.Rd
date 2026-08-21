@@ -19,11 +19,11 @@ column containing the profile labels used in conditional-effects facets.
 \description{
 \code{make_conditions()} is a thin wrapper around \code{\link[brms:make_conditions]{brms::make_conditions()}} so the
 resulting labelled condition tables can be passed directly to
-\code{\link[=conditional_effects.JoiNMeFit]{conditional_effects.JoiNMeFit()}}. Conditioning belongs to the conditional-
-effects estimand; neither \code{\link[=predict.JoiNMeFit]{predict.JoiNMeFit()}} nor \code{plot.JoiNMeFit()} accepts
-a \code{condition} argument.
+\code{\link[=conditional_effects.JoiNMeFit]{conditional_effects.JoiNMeFit()}} or \code{\link[=conditional_contrast]{conditional_contrast()}}. Conditioning
+belongs to the conditional-effects or conditional-contrast estimand; neither
+\code{\link[=predict.JoiNMeFit]{predict.JoiNMeFit()}} nor \code{plot.JoiNMeFit()} accepts a \code{condition} argument.
 }
 \seealso{
-\code{\link[=conditional_effects.JoiNMeFit]{conditional_effects.JoiNMeFit()}},
+\code{\link[=conditional_effects.JoiNMeFit]{conditional_effects.JoiNMeFit()}}, \code{\link[=conditional_contrast]{conditional_contrast()}},
 \code{\link[brms:make_conditions]{brms::make_conditions()}}
 }

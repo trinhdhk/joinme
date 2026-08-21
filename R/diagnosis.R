@@ -97,7 +97,10 @@ diagnosis <- function(object, ...) {
 .diagnosis_parameter_table_from_tables <- function(tables) {
 	metric_cols <- c(
 		"Estimate",
+		"Mean",
+		"Median",
 		"Est.Error",
+		"SD",
 		"Q2.5",
 		"Q97.5",
 		"Rhat",
@@ -116,22 +119,24 @@ diagnosis <- function(object, ...) {
 			}
 			id_cols <- setdiff(names(x), drop_cols)
 			out <- x[, c(id_cols, intersect(metric_cols, names(x))), drop = FALSE]
-			out$section <- if (length(path) >= 1L) path[[1L]] else NA_character_
-			out$subsection <- if (length(path) > 1L) {
-				paste(path[-1L], collapse = " / ")
-			} else {
-				NA_character_
-			}
-			out$parameter_label <- .diagnosis_parameter_label(out)
+			out$family <- if (length(path) >= 1L) path[[1L]] else NA_character_
+			# out$subsection <- if (length(path) > 1L) {
+			# 	paste(path[-1L], collapse = " / ")
+			# } else {
+			# 	NA_character_
+			# }
+			out$parameter <- .diagnosis_parameter_label(out)
 			keep_id_cols <- setdiff(
 				id_cols,
-				c("section", "subsection", "parameter_label")
+				c("family", 
+				# "subsection", 
+				"parameter")
 			)
 			out <- out[,
 				c(
-					"section",
-					"subsection",
-					"parameter_label",
+					"family",
+					# "subsection",
+					"parameter",
 					keep_id_cols,
 					intersect(metric_cols, names(out))
 				),
@@ -190,6 +195,8 @@ diagnosis.JoiNMeFit <- function(
 	cache_key <- paste0(
 		"diagnosis_",
 		draws %||% "default",
+		"_seed=",
+		seed,
 		"_",
 		digits,
 		"_",
@@ -220,6 +227,428 @@ diagnosis.JoiNMeFit <- function(
 		),
 		class = "JoiNMe_diagnosis"
 	)
+	object$cache_set(cache_key, result)
+	result
+}
+
+#' Build posterior features used to interpret Hamiltonian energy movement
+#'
+#' @description
+#' Reduces large random-effect and scale blocks to one value per iteration and
+#' chain.  Correlation with energy is an exploratory diagnostic: it identifies
+#' posterior directions along which energy changes, but it does not establish
+#' that any one parameter caused a low E-BFMI value.
+#'
+#' @param object A fitted latent-progress mixture.
+#'
+#' @return A named list of iteration-by-chain matrices.
+#' @keywords internal
+#' @noRd
+.mixture_energy_features <- function(object) {
+	all_variables <- tryCatch(
+		posterior::variables(.get_draws_obj(object$fit)),
+		error = function(error) character(0)
+	) # complete fitted parameter names used to locate each interpretable block
+	if (length(all_variables) == 0L) {
+		return(list())
+	}
+
+	feature_from_pattern <- function(pattern, summary_function) {
+		selected_variables <- grep(
+			pattern,
+			all_variables,
+			value = TRUE
+		) # fitted variables belonging to one scale or latent-effect block
+		if (length(selected_variables) == 0L) {
+			return(NULL)
+		}
+		draw_array <- as.array(.get_draws_array(
+			object$fit,
+			variables = selected_variables
+		)) # iteration-by-chain draws for the selected posterior block
+		summary_function(draw_array)
+	}
+
+	rms_summary <- function(draw_array) {
+		sqrt(apply(draw_array^2, c(1L, 2L), mean, na.rm = TRUE))
+	}
+	minimum_summary <- function(draw_array) {
+		apply(draw_array, c(1L, 2L), min, na.rm = TRUE)
+	}
+	geometric_mean_summary <- function(draw_array) {
+		exp(apply(
+			log(pmax(abs(draw_array), sqrt(.Machine$double.eps))),
+			c(1L, 2L),
+			mean,
+			na.rm = TRUE
+		))
+	}
+
+	features <- list(
+		"within-class scale RMS" = feature_from_pattern(
+			"^mix_scale\\[",
+			rms_summary
+		),
+		"smallest within-class scale" = feature_from_pattern(
+			"^mix_scale\\[",
+			minimum_summary
+		),
+		"class-location RMS" = feature_from_pattern(
+			"^mix_location\\[",
+			rms_summary
+		),
+		"subject scale geometric mean" = feature_from_pattern(
+			"^tau_u\\[",
+			geometric_mean_summary
+		),
+		"marker scale geometric mean" = feature_from_pattern(
+			"^tau_v\\[",
+			geometric_mean_summary
+		),
+		"covariance loading geometric mean" = feature_from_pattern(
+			"^lambda_L\\[",
+			geometric_mean_summary
+		),
+		"subject standardised-effect RMS" = feature_from_pattern(
+			"^z_u\\[",
+			rms_summary
+		),
+		"marker standardised-effect RMS" = feature_from_pattern(
+			"^z_v\\[",
+			rms_summary
+		),
+		"covariance standardised-effect RMS" = feature_from_pattern(
+			"^z_L\\[",
+			rms_summary
+		),
+		"class-regression coefficient RMS" = feature_from_pattern(
+			"^mix_class_coefficient_",
+			rms_summary
+		)
+	) # scientifically named low-dimensional summaries of the main mixture geometry
+	Filter(Negate(is.null), features)
+}
+
+#' Relate posterior block summaries to Hamiltonian energy
+#'
+#' @param object A fitted latent-progress mixture.
+#'
+#' @return A long data frame with one feature-by-chain correlation per row.
+#' @keywords internal
+#' @noRd
+.mixture_energy_association <- function(object) {
+	sampler_draws <- .sampler_diagnostic_draws(
+		object$fit
+	) # sampler states in the same iteration and chain order as posterior draws
+	if (is.null(sampler_draws)) {
+		return(data.frame())
+	}
+	sampler_array <- as.array(
+		sampler_draws
+	) # numeric sampler-state array used to retrieve chain-wise energy
+	if (!"energy__" %in% (dimnames(sampler_array)[[3L]] %||% character(0))) {
+		return(data.frame())
+	}
+	features <- .mixture_energy_features(
+		object
+	) # posterior block summaries to compare with the sampled energy sequence
+	if (length(features) == 0L) {
+		return(data.frame())
+	}
+
+	rows <- list() # feature-by-chain diagnostic rows accumulated below
+	row_position <- 1L # next free position in the diagnostic row list
+	for (feature_name in names(features)) {
+		feature_values <- features[[feature_name]] # iteration-by-chain feature matrix
+		number_chains <- min(
+			ncol(feature_values),
+			dim(sampler_array)[2L]
+		) # chains jointly available in model and sampler-state draws
+		for (chain_index in seq_len(number_chains)) {
+			number_iterations <- min(
+				nrow(feature_values),
+				dim(sampler_array)[1L]
+			) # aligned retained iterations for this feature and energy
+			feature_chain <- as.numeric(
+				feature_values[seq_len(number_iterations), chain_index]
+			) # posterior feature sequence for one chain
+			energy_chain <- as.numeric(
+				sampler_array[
+					seq_len(number_iterations),
+					chain_index,
+					"energy__"
+				]
+			) # Hamiltonian energy sequence for the same chain and iterations
+			finite_values <- is.finite(feature_chain) &
+				is.finite(energy_chain) # paired iterations eligible for correlation
+			correlation <- if (
+				sum(finite_values) > 2L &&
+					stats::sd(feature_chain[finite_values]) > 0 &&
+					stats::sd(energy_chain[finite_values]) > 0
+			) {
+				stats::cor(
+					feature_chain[finite_values],
+					energy_chain[finite_values]
+				)
+			} else {
+				NA_real_
+			} # within-chain linear association, used only as an exploratory clue
+			rows[[row_position]] <- data.frame(
+				feature = feature_name,
+				chain = chain_index,
+				correlation_with_energy = correlation,
+				# absolute_correlation = abs(correlation),
+				stringsAsFactors = FALSE
+			) # one interpretable energy association for this feature and chain
+			row_position <- row_position + 1L
+		}
+	}
+	output <- do.call(
+		rbind,
+		rows
+	) # complete long-form energy association table
+	# output[order(-output$correlation_with_energy), , drop = FALSE]
+	dplyr::arrange(output, feature, chain)
+}
+
+#' Diagnose the likelihood scale trade-off in a mixture block
+#'
+#' @description
+#' The selected standardised component scale is subsequently multiplied by an
+#' ordinary random-effect scale.  This helper reports the within-chain
+#' correlation between their logarithmic geometric means.  A strong negative
+#' value is direct posterior evidence of the scale ridge discussed in the Stan
+#' parameter declaration; it is not evidence of a coordinate-indexing error.
+#'
+#' @param object A fitted latent-progress mixture.
+#'
+#' @return A data frame with one row per active class type and chain.
+#' @keywords internal
+#' @noRd
+.mixture_scale_tradeoff <- function(object) {
+	stan_data <- object$stan_data # exact selected coordinates supplied to Stan
+	number_classes <- as.integer(
+		stan_data$n_classes %||% 0L
+	) # shared number of mixture components
+	if (number_classes < 2L) {
+		return(data.frame())
+	}
+
+	block_specifications <- list(
+		subject = list(
+			dimension = as.integer(stan_data$mix_dim_subject %||% 0L),
+			start = as.integer(stan_data$mix_start_subject %||% 0L),
+			indices = as.integer(stan_data$mix_idx_subject %||% integer(0)),
+			ordinary_prefix = "tau_u",
+			likelihood_combination = "subject Cholesky scale x class coordinate"
+		),
+		marker = list(
+			dimension = as.integer(stan_data$mix_dim_marker %||% 0L),
+			start = as.integer(stan_data$mix_start_marker %||% 0L),
+			indices = as.integer(stan_data$mix_idx_marker %||% integer(0)),
+			ordinary_prefix = "tau_v",
+			likelihood_combination = "marker Cholesky scale x class coordinate"
+		),
+		covariance = list(
+			dimension = as.integer(stan_data$mix_dim_covariance %||% 0L),
+			start = as.integer(stan_data$mix_start_covariance %||% 0L),
+			indices = as.integer(stan_data$mix_idx_covariance %||% integer(0)),
+			ordinary_prefix = "lambda_L",
+			likelihood_combination = "covariance loading x class coordinate"
+		)
+	) # mapping from each active class block to its ordinary posterior scale
+
+	rows <- list() # block-by-chain scale correlations accumulated below
+	row_position <- 1L # next free position in the result list
+	for (block_name in names(block_specifications)) {
+		block <- block_specifications[[block_name]] # selected coordinate contract for one block
+		if (
+			block$dimension < 1L ||
+				block$start < 1L ||
+				length(block$indices) != block$dimension
+		) {
+			next
+		}
+		ordinary_variables <- paste0(
+			block$ordinary_prefix,
+			"[",
+			block$indices,
+			"]"
+		) # ordinary scale variables paired with the selected latent coordinates
+		packed_coordinates <- block$start +
+			seq_len(block$dimension) - 1L # packed mixture columns belonging to this block
+		component_variables <- as.vector(outer(
+			seq_len(number_classes),
+			packed_coordinates,
+			function(class_index, coordinate_index) {
+				paste0(
+					"mix_scale[",
+					class_index,
+					",",
+					coordinate_index,
+					"]"
+				)
+			}
+		)) # within-class scale variables for all classes in the current block
+		ordinary_draws <- tryCatch(
+			as.array(.get_draws_array(
+				object$fit,
+				variables = ordinary_variables
+			)),
+			error = function(error) NULL
+		) # posterior draws of the ordinary scale factor
+		component_draws <- tryCatch(
+			as.array(.get_draws_array(
+				object$fit,
+				variables = component_variables
+			)),
+			error = function(error) NULL
+		) # posterior draws of the class-conditional standardised scales
+		if (is.null(ordinary_draws) || is.null(component_draws)) {
+			next
+		}
+		log_ordinary_scale <- apply(
+			log(pmax(ordinary_draws, sqrt(.Machine$double.eps))),
+			c(1L, 2L),
+			mean
+		) # logarithmic geometric mean of ordinary scales per draw and chain
+		log_component_scale <- apply(
+			log(pmax(component_draws, sqrt(.Machine$double.eps))),
+			c(1L, 2L),
+			mean
+		) # logarithmic geometric mean of component scales per draw and chain
+		number_chains <- min(
+			ncol(log_ordinary_scale),
+			ncol(log_component_scale)
+		) # jointly represented Markov chains
+		for (chain_index in seq_len(number_chains)) {
+			correlation <- stats::cor(
+				log_ordinary_scale[, chain_index],
+				log_component_scale[, chain_index],
+				use = "complete.obs"
+			) # posterior correlation revealing compensation between scale factors
+			rows[[row_position]] <- data.frame(
+				class_type = if (identical(block_name, "covariance")) {
+					.mixture_covariance_class_type(
+						object$mixture %||% object$config$mixture
+					) %||% "covariance"
+				} else {
+					block_name
+				},
+				chain = chain_index,
+				ordinary_scale = block$ordinary_prefix,
+				likelihood_combination = block$likelihood_combination,
+				correlation = correlation,
+				# absolute_correlation = abs(correlation),
+				# interpretation = if (
+				# 	is.finite(correlation) && correlation <= -0.3
+				# ) {
+				# 	"material compensating scale movement"
+				# } else {
+				# 	"no strong negative linear trade-off detected"
+				# },
+				stringsAsFactors = FALSE
+			) # transparent class-block scale assessment for one chain
+			row_position <- row_position + 1L
+		}
+	}
+	if (length(rows) == 0L) {
+		return(data.frame())
+	}
+	do.call(rbind, rows)
+}
+
+#' Diagnostic summary for a latent-progress mixture
+#'
+#' @description
+#' Extends the inherited diagnostics with chain-specific Hamiltonian energy
+#' behaviour, exploratory associations between energy and model blocks, and a
+#' direct assessment of the ordinary-scale/component-scale trade-off.
+#'
+#' @inheritParams diagnosis
+#'
+#' @return A `JoiNMeMix_diagnosis` object inheriting from
+#'   `JoiNMe_diagnosis`.
+#' @export
+diagnosis.JoiNMeMixFit <- function(
+	object,
+	draws = NULL,
+	seed = 1,
+	digits = 3,
+	include_corr = TRUE,
+	...
+) {
+	cache_key <- paste0(
+		"mixture_diagnosis_",
+		draws %||% "default",
+		"_seed=",
+		seed,
+		"_digits=",
+		digits,
+		"_corr=",
+		as.integer(include_corr)
+	) # cache identity for the expanded mixture diagnostic report
+	cached <- object$cache_get(
+		cache_key
+	) # previously computed report for the same posterior subset and presentation
+	if (!is.null(cached)) {
+		return(cached)
+	}
+
+	result <- diagnosis.JoiNMeFit(
+		object,
+		draws = draws,
+		seed = seed,
+		digits = digits,
+		include_corr = include_corr,
+		...
+	) # inherited sampler and parameter-level diagnostics
+	backend_diagnostics <- result$sampler %||%
+		list() # backend-wide values already collected by the inherited summary
+	if (
+		!is.data.frame(backend_diagnostics$energy_by_chain) ||
+			nrow(backend_diagnostics$energy_by_chain) == 0L
+	) {
+		backend_diagnostics <- .joinme_sampler_diagnostics(
+			object$fit
+		) # fresh sampler states for an object whose earlier cache predates this schema
+	}
+	backend_table <- .diagnostics_table_from_sampler(
+		backend_diagnostics
+	) # common metric-value layout used by every JoiNMe summary
+	if (is.data.frame(result$summary) && nrow(result$summary) > 0L) {
+		for (metric_name in intersect(
+			result$summary$metric,
+			backend_table$metric
+		)) {
+			backend_value <- backend_table$value[
+				match(metric_name, backend_table$metric)
+			] # current backend-wide value for this established metric
+			if (is.finite(backend_value)) {
+				result$summary$value[
+					match(metric_name, result$summary$metric)
+				] <- backend_value
+			}
+		}
+	}
+	result$sampler <- backend_diagnostics
+	result$energy_by_chain <- backend_diagnostics$energy_by_chain %||%
+		data.frame()
+	result$energy_association <- .mixture_energy_association(
+		object
+	) # ranked exploratory clues about which posterior blocks move with energy
+	result$scale_tradeoff <- .mixture_scale_tradeoff(
+		object
+	) # direct posterior evidence for or against compensating scale movement
+	result$metadata$mixture_geometry <- paste(
+		"Class scales act before the ordinary random-effect transformation;",
+		"the likelihood can therefore identify their combination more readily",
+		"than its separate factors."
+	) # concise interpretation retained with the diagnostic object
+	class(result) <- c(
+		"JoiNMeMix_diagnosis",
+		"JoiNMe_diagnosis"
+	) # specialised class which retains all inherited diagnosis behaviour
 	object$cache_set(cache_key, result)
 	result
 }
@@ -258,6 +687,49 @@ print.JoiNMe_diagnosis <- function(x, max_rows = 20, ...) {
 			)
 		}
 	}
+	if (
+		is.data.frame(x$energy_by_chain) &&
+			nrow(x$energy_by_chain) > 0L
+	) {
+		.cli_print_table_section(
+			"Hamiltonian energy by chain",
+			x$energy_by_chain,
+			level = 2L
+		)
+		if (any(x$energy_by_chain$E_BFMI < 0.3, na.rm = TRUE)) {
+			.cli_print_bullets(c(
+				"E-BFMI below 0.3 indicates that at least one chain did not move efficiently through the posterior energy distribution.",
+				"High energy persistence, long trajectories or a small step size support a posterior-geometry explanation; they do not by themselves identify a coding error."
+			))
+		}
+	}
+	if (
+		is.data.frame(x$scale_tradeoff) &&
+			nrow(x$scale_tradeoff) > 0L
+	) {
+		.cli_print_table_section(
+			"Ordinary-scale and within-class-scale trade-off",
+			x$scale_tradeoff,
+			level = 2L
+		)
+	}
+	if (
+		is.data.frame(x$energy_association) &&
+			nrow(x$energy_association) > 0L
+	) {
+		energy_table <- utils::head(
+			x$energy_association,
+			max_rows
+		) # strongest absolute within-chain energy associations for concise printing
+		# .cli_print_bullets(
+		# 	"These correlations are exploratory indicators of posterior geometry, not causal tests or model-selection statistics."
+		# )
+		.cli_print_table_section(
+			"Posterior features associated with energy",
+			energy_table,
+			level = 2L
+		)
+	}
 	invisible(x)
 }
 
@@ -274,7 +746,7 @@ print.JoiNMe_diagnosis <- function(x, max_rows = 20, ...) {
 #'
 #' @details The stored pointwise likelihood is evaluated by Stan with the full
 #'   fitted association contribution. This includes the posterior ordinates of
-#'   every ordered piecewise-linear transform; legacy `y` values are not used.
+#'   every ordered piecewise-linear transform; earlier `y` values are not used.
 #'
 #' @return A matrix
 #' @seealso [log_lik()]
@@ -556,7 +1028,7 @@ pp_check.JoiNMeFit <- function(
 	marker_var <- pred$metadata$marker_var %||%
 		(eval(object$call$marker_var) %||% "marker")
 	y_var <- pred$metadata$response_var %||%
-		.resolve_response_var(
+		.get_response_var(
 			formulaLong = object$formulaLong,
 			dataLong = newdataLong,
 			context = "joinme_diagnosis()"
@@ -606,7 +1078,7 @@ pp_check.JoiNMeFit <- function(
 
 #' @keywords internal
 #' @noRd
-.resolve_train_data <- function(
+.get_train_data <- function(
 	object,
 	newdataLong,
 	newdataEvent,
@@ -689,7 +1161,7 @@ pp_check.JoiNMeFit <- function(
 	) {
 		return(as.numeric(horizon))
 	}
-	event_vars <- .resolve_event_model_vars(
+	event_vars <- .get_event_model_vars(
 		formulaEvent = object$formulaEvent,
 		dataEvent = data_event,
 		context = "dynamic discrimination"
@@ -731,7 +1203,8 @@ pp_check.JoiNMeFit <- function(
 #' methods into a finite numeric vector indexed by subject identifier.  A
 #' scalar is repeated across subjects, a named vector is matched by subject,
 #' and a character value identifies a column in the event data.  Keeping this
-#' conversion in one helper ensures that concordance and AUC apply identical
+#' conversion in one helper ensures that concordance and time-dependent ROC
+#' analysis apply identical
 #' subject alignment rules.
 #'
 #' @param value Numeric time specification or the name of a column in
@@ -841,7 +1314,7 @@ pp_check.JoiNMeFit <- function(
 			"{context}: {.arg newdataEvent} must contain a non-missing subject identifier in {.field {id_var}}."
 		)
 	}
-	event_vars <- .resolve_event_model_vars(
+	event_vars <- .get_event_model_vars(
 		formulaEvent = formula_event,
 		dataEvent = data_event,
 		context = context
@@ -946,7 +1419,8 @@ pp_check.JoiNMeFit <- function(
 #' Antolini L, Boracchi P, Biganzoli E (2005). A time-dependent discrimination
 #' index for survival data. *Statistics in Medicine*, 24, 3927--3944.
 #' \doi{10.1002/sim.2427}.
-#' @seealso [auc.JoiNMeFit()], [predict.JoiNMeFit()], [survival::concordance()]
+#' @seealso [tvROC.JoiNMeFit()], [tvAUC.JoiNMeFit()],
+#'   [predict.JoiNMeFit()], [survival::concordance()]
 #' @importFrom survival Surv concordance
 #' @export
 concordance.JoiNMeFit <- function(
@@ -960,8 +1434,23 @@ concordance.JoiNMeFit <- function(
 	type_weights = "none",
 	...
 ) {
+	.require_fitted_survival_process(
+		object,
+		"Concordance assessment"
+	)
   
   .warn_experimental("concordance")
+
+	# Concordance is evaluated over all observable event--comparator pairs and
+	# consequently has no fixed prediction horizon.  Detect the former AUC
+	# arguments here so that they cannot silently alter dynamic prediction.
+	dot_names <- names(list(...))
+	if (any(c("time_horizon", "Dt") %in% dot_names)) {
+		cli::cli_abort(c(
+			x = "{.fn concordance} does not use a prediction horizon.",
+			i = "Use {.code tvROC(object, ...)} or {.code tvAUC(object, ...)} for landmark--horizon discrimination."
+		))
+	}
   
 	if (
 		!is.numeric(cause) ||
@@ -974,7 +1463,7 @@ concordance.JoiNMeFit <- function(
 	}
 	.concordance_time_weight(type_weights)
 
-	data_in <- .resolve_train_data(
+	data_in <- .get_train_data(
 		object,
 		newdataLong,
 		newdataEvent,
@@ -1440,12 +1929,74 @@ concordance.JoiNMeFit <- function(
 	)
 }
 
+#' Extract horizon-specific survival draws for discrimination
+#'
+#' @description
+#' Aligns the raw conditional-survival draws retained by
+#' [predict.JoiNMeFit()] with one requested horizon for each analysed subject.
+#'
+#' @param prediction A `JoiNMeDynPred` object containing raw survival draws.
+#' @param ids Subject identifiers in the required row order.
+#' @param horizons Named numeric horizon vector indexed by subject identifier.
+#'
+#' @return A numeric subject-by-draw matrix of conditional event risks. Returns
+#'   a zero-column matrix when raw survival draws are unavailable; the ROC
+#'   calculation then uses posterior mean risks only.
+#' @keywords internal
+#' @noRd
+.discrimination_horizon_risk_draws <- function(prediction, ids, horizons) {
+	id_keys <- as.character(ids)
+	draw_lists <- prediction$draws$survival %||% list()
+	n_draws_by_subject <- integer(length(id_keys))
+	for (subject_index in seq_along(id_keys)) {
+		entry <- draw_lists[[id_keys[[subject_index]]]]
+		if (!is.null(entry$matrix) && is.matrix(entry$matrix)) {
+			n_draws_by_subject[[subject_index]] <- nrow(entry$matrix)
+		}
+	}
+	available <- n_draws_by_subject > 0L
+	if (!any(available)) {
+		return(matrix(numeric(0), nrow = length(ids), ncol = 0L))
+	}
+
+	# Prediction ordinarily retains the same number of draws for every subject.
+	# Taking the common minimum gives a rectangular matrix if an older object
+	# contains unequal draw counts, without recycling or inventing draws.
+	n_draws <- min(n_draws_by_subject[available])
+	out <- matrix(
+		NA_real_,
+		nrow = length(ids),
+		ncol = n_draws,
+		dimnames = list(id_keys, paste0("draw_", seq_len(n_draws)))
+	)
+	for (subject_index in seq_along(id_keys)) {
+		entry <- draw_lists[[id_keys[[subject_index]]]]
+		if (is.null(entry$matrix) || !is.matrix(entry$matrix) || nrow(entry$matrix) < n_draws) {
+			next
+		}
+		time_grid <- as.numeric(entry$time)
+		horizon <- as.numeric(horizons[[id_keys[[subject_index]]]])
+		tolerance <- sqrt(.Machine$double.eps) * max(1, abs(horizon))
+		horizon_column <- which(
+			is.finite(time_grid) & abs(time_grid - horizon) <= tolerance
+		)[1L]
+		if (is.na(horizon_column)) {
+			next
+		}
+		out[subject_index, ] <- 1 - as.numeric(
+			entry$matrix[seq_len(n_draws), horizon_column]
+		)
+	}
+	out
+}
+
 #' Build a landmark-specific dynamic discrimination risk set
 #'
 #' @description
 #' Obtain posterior mean conditional survival probabilities from the fitted
 #' joint model and align them with one terminal event outcome per subject.  The
-#' resulting data are the statistical input for cumulative/dynamic AUC.
+#' resulting data are the statistical input for cumulative/dynamic ROC and AUC
+#' estimation.
 #'
 #' @param object A fitted `JoiNMeFit` object.
 #' @param newdataLong Longitudinal histories used for dynamic prediction.
@@ -1459,7 +2010,8 @@ concordance.JoiNMeFit <- function(
 #'
 #' @return A subject-level data frame containing conditional event risk,
 #'   follow-up from the landmark, the cause-specific event indicator, and the
-#'   observed event or censoring outcome.
+#'   observed event or censoring outcome. Attribute `"risk_draws"` contains the
+#'   aligned subject-by-draw event-risk matrix used for posterior ROC curves.
 #' @keywords internal
 #' @noRd
 .dynamic_discrimination_risk_set <- function(
@@ -1479,7 +2031,7 @@ concordance.JoiNMeFit <- function(
 		formula_event = object$formulaEvent,
 		data_event = newdataEvent,
 		id_var = id_var,
-		context = "auc.JoiNMeFit()"
+		context = "tvROC.JoiNMeFit()"
 	)
 	ids <- event_df[[id_var]]
 	id_keys <- as.character(ids)
@@ -1578,173 +2130,141 @@ concordance.JoiNMeFit <- function(
 		risk_set$time_start
 	# Dynamic prediction is conditional on survival beyond the landmark.  Remove
 	# subjects whose outcome was already known at or before that time.
-	risk_set <- risk_set[
-		is.finite(risk_set$event_time) & risk_set$event_time > risk_set$time_start,
-		,
-		drop = FALSE
-	]
+	keep_subject <- is.finite(risk_set$event_time) &
+		risk_set$event_time > risk_set$time_start
+	risk_draws <- .discrimination_horizon_risk_draws(
+		prediction = pred,
+		ids = ids,
+		horizons = time_horizon_map
+	)
+	risk_set <- risk_set[keep_subject, , drop = FALSE]
+	if (ncol(risk_draws) > 0L) {
+		risk_draws <- risk_draws[keep_subject, , drop = FALSE]
+	}
 	rownames(risk_set) <- NULL
+	attr(risk_set, "risk_draws") <- risk_draws
 	risk_set
 }
 
-# ---- Time-dependent AUC --------------------------------------------------
+# ---- Time-dependent ROC and AUC ------------------------------------------
 
-#' Time-dependent area under the ROC curve
+#' Time-dependent ROC curves and areas
 #'
 #' @description
-#' Estimate the cumulative/dynamic area under the receiver operating
-#' characteristic curve for the survival process at one or more landmark
-#' times.  Cases experience the requested cause after the landmark and by the
-#' horizon; controls remain event-free beyond the horizon.  Subjects censored
-#' before the horizon are excluded because their case/control state is unknown.
+#' Re-exports the `JMbayes2` generics [JMbayes2::tvROC()] and
+#' [JMbayes2::tvAUC()]. JoiNMe supplies methods for fitted `JoiNMeFit` objects,
+#' while ROC objects retain class `"tvROC"` and can therefore use the plotting,
+#' printing, and AUC methods supplied by `JMbayes2`.
 #'
-#' Posterior mean dynamic risks are obtained through `predict.JoiNMeFit()`, so
-#' the calculation automatically uses the complete fitted hazard: baseline
-#' hazard, event covariates, marker weights, and any identity, functional,
-#' monotone-spline, or ordered piecewise-linear association transform.
+#' `tvROC.JoiNMeFit()` estimates a cumulative/dynamic ROC curve using
+#' longitudinal information available through a landmark time. Cases
+#' experience the requested cause in the interval from the landmark to the
+#' horizon; controls remain event-free beyond the horizon. Censoring is handled
+#' by model-based expected status or Kaplan--Meier inverse-probability weights.
 #'
-#' @param object A fitted object.  Methods are currently provided for
-#'   `JoiNMeFit`.
-#' @param ... Arguments passed to a class-specific method.
+#' Dynamic risks are calculated by [predict.JoiNMeFit()]. They therefore include
+#' the fitted baseline hazard, survival covariates, longitudinal trajectories,
+#' marker weights, and every identity, functional, monotone-spline, or ordered
+#' piecewise-linear association.
 #'
-#' @return For a `JoiNMeFit`, a data frame with landmark and horizon times,
-#'   cumulative/dynamic AUC, and the numbers of cases, controls, and comparable
-#'   case-control pairs.
-#' @export
-auc <- function(object, ...) {
-	UseMethod("auc")
-}
-
-#' Calculate cumulative/dynamic AUC from an aligned risk set
-#'
-#' @description
-#' Compare posterior mean risks for cases observed by the horizon with risks
-#' for controls known to remain event-free beyond the horizon.  The
-#' Mann--Whitney rank identity gives half credit to tied risks and avoids
-#' allocating the full case-by-control comparison matrix.
-#'
-#' @param risk_set Subject-level output from
-#'   `.dynamic_discrimination_risk_set()`.
-#' @param time_start Numeric landmark used to label the result.
-#' @param time_horizon Numeric horizon used to label the result.
-#'
-#' @return A one-row data frame containing AUC and its case, control, and pair
-#'   counts.
-#' @keywords internal
-#' @noRd
-.auc_from_risk_set <- function(risk_set, time_start, time_horizon) {
-	required <- c("risk", "event_window", "event_time", "time_horizon")
-	if (!all(required %in% names(risk_set))) {
-		return(data.frame(
-			time_start = time_start,
-			time_horizon = time_horizon,
-			auc = NA_real_,
-			n_cases = 0L,
-			n_controls = 0L,
-			n_pairs = 0L
-		))
-	}
-
-	case_risk <- as.numeric(risk_set$risk[risk_set$event_window == 1L])
-	control_risk <- as.numeric(risk_set$risk[
-		risk_set$event_window == 0L & risk_set$event_time > risk_set$time_horizon
-	])
-	case_risk <- case_risk[is.finite(case_risk)]
-	control_risk <- control_risk[is.finite(control_risk)]
-	n_cases <- length(case_risk)
-	n_controls <- length(control_risk)
-	n_pairs <- n_cases * n_controls
-	auc_value <- NA_real_
-	if (n_pairs > 0L) {
-		# The first n_cases ranks belong to cases.  Subtracting their minimum
-		# possible rank sum leaves the number of control risks below a case risk,
-		# with average ranks contributing one half for a tied case-control pair.
-		combined_risk <- c(case_risk, control_risk)
-		case_rank_sum <- sum(
-			rank(combined_risk, ties.method = "average")[seq_len(n_cases)]
-		)
-		auc_value <- (case_rank_sum - n_cases * (n_cases + 1) / 2) / n_pairs
-	}
-	data.frame(
-		time_start = time_start,
-		time_horizon = time_horizon,
-		auc = auc_value,
-		n_cases = n_cases,
-		n_controls = n_controls,
-		n_pairs = n_pairs
-	)
-}
-
-#' @rdname auc
+#' @param object A fitted `JoiNMeFit` object.
 #' @param newdataLong Longitudinal evaluation data; defaults to the fitted data.
-#' @param newdataEvent Event evaluation data; defaults to the fitted data.
-#' @param time_start Numeric landmark time or vector of landmark times.  The
+#' @param newdataEvent Event-process evaluation data; defaults to the fitted
+#'   data.
+#' @param time_start Numeric landmark time or vector of landmark times. The
 #'   default is zero.
-#' @param time_horizon Numeric horizon time.  It may be scalar or have the same
-#'   length as `time_start`.  When both `time_horizon` and `Dt` are omitted,
-#'   the fitted maximum time is used.
-#' @param Dt Positive horizon width used when `time_horizon` is omitted.
-#' @param cause Integer competing-risk cause, with one denoting the primary
-#'   event type.
-#' @param n_samples Number of posterior draws used for dynamic prediction.
+#' @param time_horizon Numeric horizon. It may be scalar or aligned with
+#'   `time_start`. When this and `Dt` are omitted, the fitted maximum follow-up
+#'   time is used.
+#' @param Dt Positive prediction-window width used when `time_horizon` is
+#'   omitted.
+#' @param cause Positive integer identifying the event cause of interest.
+#'   Other causes are treated as censoring for cause-specific discrimination.
+#' @param n_samples Positive integer number of posterior draws used for dynamic
+#'   prediction.
 #' @param seed Integer seed used when posterior draws are subsampled.
+#' @param type_weights Censoring treatment: `"model-based"` imputes the
+#'   expected case/control status of subjects censored before the horizon;
+#'   `"IPCW"` applies inverse Kaplan--Meier censoring weights to observable
+#'   cases and controls.
+#' @param ... Additional arguments passed to [predict.JoiNMeFit()].
 #'
 #' @details
-#' For case risks \eqn{r_i} and control risks \eqn{r_j}, the estimator is the
-#' proportion of comparable pairs satisfying \eqn{r_i > r_j}, with half credit
-#' for ties.  This is the empirical cumulative/dynamic AUC.  It does not apply
-#' inverse-probability-of-censoring weights; early-censored subjects are omitted
-#' explicitly and the returned counts make the resulting comparison set clear.
+#' For a threshold \eqn{c}, a subject is classified as a case when their
+#' predicted conditional survival probability is below \eqn{c}. Sensitivity
+#' and one minus specificity are evaluated at 101 thresholds from zero to one,
+#' following `JMbayes2::tvROC()`. Posterior-draw curves are retained in `tp` and
+#' `fp`; `TP` and `FP` are calculated from posterior mean risks.
 #'
+#' With model-based weighting, an observed case has case weight one, a subject
+#' known to be event-free beyond the horizon has case weight zero, and a
+#' subject censored within the prediction window contributes their model-based
+#' conditional event probability. IPCW uses the Kaplan--Meier estimator of the
+#' censoring survival distribution conditional on remaining under observation
+#' at the landmark.
+#'
+#' A scalar landmark returns a standard `"tvROC"` object compatible with
+#' `JMbayes2::tvAUC()` and `plot()`. Multiple landmarks return a
+#' `"tvROC_JoiNMeFit_list"` containing one compatible curve per
+#' landmark--horizon pair.
+#'
+#' @return `tvROC.JoiNMeFit()` returns a `"tvROC"` object, or a
+#'   `"tvROC_JoiNMeFit_list"` for multiple landmarks. `tvAUC.JoiNMeFit()`
+#'   returns the standard `"tvAUC"` object for one landmark and a data frame of
+#'   areas for multiple landmarks.
+#' @references
+#' Heagerty PJ, Zheng Y (2005). Survival model predictive accuracy and ROC
+#' curves. *Biometrics*, 61, 92--105.
+#'
+#' Rizopoulos D (2011). Dynamic predictions and prospective accuracy in joint
+#' models. *Biometrics*, 67, 819--829.
+#' @seealso [JMbayes2::tvROC()], [JMbayes2::tvAUC()],
+#'   [predict.JoiNMeFit()], [concordance.JoiNMeFit()]
+#' @name tvROC
+#' @importFrom JMbayes2 tvROC tvAUC
 #' @export
-auc.JoiNMeFit <- function(
+JMbayes2::tvROC
+
+#' @rdname tvROC
+#' @export
+JMbayes2::tvAUC
+
+#' Landmark and horizon vectors for time-dependent ROC analysis
+#'
+#' @param object A fitted `JoiNMeFit` object.
+#' @param data_event Event-process evaluation data.
+#' @param time_start Finite numeric landmark vector.
+#' @param time_horizon Optional finite numeric horizon vector.
+#' @param Dt Optional positive prediction-window width.
+#'
+#' @return A list containing aligned numeric `time_start` and `time_horizon`
+#'   vectors.
+#' @keywords internal
+#' @noRd
+.get_tvroc_times <- function(
 	object,
-	newdataLong = NULL,
-	newdataEvent = NULL,
-	time_start = 0,
-	time_horizon = NULL,
-	Dt = NULL,
-	cause = 1,
-	n_samples = 200,
-	seed = 123,
-	...
+	data_event,
+	time_start,
+	time_horizon,
+	Dt
 ) {
-	.warn_experimental("auc")
-	if (
-		!is.numeric(time_start) ||
-			!length(time_start) ||
-			any(!is.finite(time_start))
-	) {
+	if (!is.numeric(time_start) || !length(time_start) || any(!is.finite(time_start))) {
 		cli::cli_abort(
 			"{.arg time_start} must be a finite numeric value or vector."
 		)
 	}
-	if (
-		!is.numeric(cause) ||
-			length(cause) != 1L ||
-			!is.finite(cause) ||
-			cause < 1 ||
-			cause != as.integer(cause)
-	) {
-		cli::cli_abort("{.arg cause} must be a single positive integer.")
-	}
-	data_in <- .resolve_train_data(
-		object,
-		newdataLong,
-		newdataEvent,
-		purpose = "time-dependent AUC"
-	)
+	time_start <- as.numeric(time_start)
 	if (is.null(time_horizon)) {
 		if (is.null(Dt)) {
 			time_horizon <- rep(
-				.default_discrimination_horizon(object, data_in$newdataEvent),
+				.default_discrimination_horizon(object, data_event),
 				length(time_start)
 			)
 		} else {
 			if (!is.numeric(Dt) || length(Dt) != 1L || !is.finite(Dt) || Dt <= 0) {
 				cli::cli_abort("{.arg Dt} must be a positive finite scalar.")
 			}
-			time_horizon <- time_start + Dt
+			time_horizon <- time_start + as.numeric(Dt)
 		}
 	} else {
 		if (
@@ -1756,35 +2276,398 @@ auc.JoiNMeFit <- function(
 				"{.arg time_horizon} must be finite and have length one or length(time_start)."
 			)
 		}
-		if (length(time_horizon) == 1L) {
-			time_horizon <- rep(time_horizon, length(time_start))
-		}
+		time_horizon <- rep(as.numeric(time_horizon), length.out = length(time_start))
 	}
 	if (any(time_horizon <= time_start)) {
 		cli::cli_abort(
 			"Every {.arg time_horizon} must be greater than its landmark time."
 		)
 	}
+	list(time_start = time_start, time_horizon = time_horizon)
+}
 
-	rows <- lapply(seq_along(time_start), function(i) {
+#' Kaplan-Meier curve
+#'
+#' @param fit A `survfit` object for the censoring distribution.
+#' @param times Finite numeric evaluation times.
+#' @param before Logical; evaluate immediately before each requested time.
+#'
+#' @return Numeric censoring-survival probabilities aligned with `times`.
+#' @keywords internal
+#' @noRd
+.censoring_survival_at <- function(fit, times, before = FALSE) {
+	times <- as.numeric(times)
+	if (isTRUE(before)) {
+		times <- times - sqrt(.Machine$double.eps) * pmax(1, abs(times))
+	}
+	index <- findInterval(times, as.numeric(fit$time))
+	curve <- c(1, as.numeric(fit$surv))
+	probability <- curve[index + 1L]
+	probability[!is.finite(probability) | probability <= 0] <- NA_real_
+	probability
+}
+
+#' Construct case and control weights for a dynamic ROC curve
+#'
+#' @param risk_set Subject-level dynamic risk set.
+#' @param type_weights Character censoring method.
+#' @param cause Positive integer identifying the event cause of interest.
+#'
+#' @return A list containing non-negative `case` and `control` weights.
+#' @keywords internal
+#' @noRd
+.tvroc_status_weights <- function(risk_set, type_weights, cause) {
+	type_weights <- match.arg(type_weights, c("model-based", "IPCW"))
+	n_subjects <- nrow(risk_set)
+	case_weight <- numeric(n_subjects)
+	control_weight <- numeric(n_subjects)
+	observed_case <- risk_set$event_window == 1L
+	beyond_horizon <- risk_set$event_time > risk_set$time_horizon
+
+	if (identical(type_weights, "model-based")) {
+		unknown_status <- !observed_case & !beyond_horizon
+		case_weight[observed_case] <- 1
+		case_weight[unknown_status] <- pmin(
+			pmax(as.numeric(risk_set$risk[unknown_status]), 0),
+			1
+		)
+		control_weight <- 1 - case_weight
+	} else {
+		# For cause-specific ROC analysis, administrative censoring and competing
+		# events terminate observation of the requested cause.  Requested-cause
+		# events after the horizon remain failures, rather than censoring events,
+		# when estimating the censoring distribution.
+		cause_failure <- risk_set$event_status == 1L &
+			risk_set$event_type == cause
+		censoring_event <- as.integer(!cause_failure)
+		censoring_fit <- survival::survfit(
+			survival::Surv(risk_set$event_time, censoring_event) ~ 1
+		)
+		if (any(observed_case)) {
+			g_case <- .censoring_survival_at(
+				censoring_fit,
+				risk_set$event_time[observed_case],
+				before = TRUE
+			)
+			case_weight[observed_case] <- ifelse(
+				is.finite(g_case),
+				1 / g_case,
+				0
+			)
+		}
+		if (any(beyond_horizon)) {
+			g_control <- .censoring_survival_at(
+				censoring_fit,
+				risk_set$time_horizon[beyond_horizon]
+			)
+			control_weight[beyond_horizon] <- ifelse(
+				is.finite(g_control),
+				1 / g_control,
+				0
+			)
+		}
+	}
+	list(case = case_weight, control = control_weight)
+}
+
+#' Select the central optimal ROC threshold
+#'
+#' @description
+#' Identifies all thresholds attaining the largest finite criterion value and
+#' returns their median. This reproduces the threshold convention used by
+#' `JMbayes2::tvROC()` while remaining defined when the first threshold has an
+#' indeterminate criterion, as occurs for the F1 score with no positive
+#' classifications.
+#'
+#' @param thresholds Numeric vector of candidate survival-probability
+#'   thresholds.
+#' @param criterion Numeric criterion evaluated at the candidate thresholds.
+#'
+#' @return A numeric scalar, or `NA_real_` when no criterion value is finite.
+#' @keywords internal
+#' @noRd
+.central_optimal_threshold <- function(thresholds, criterion) {
+	finite <- is.finite(criterion)
+	if (!any(finite)) {
+		return(NA_real_)
+	}
+	best <- max(criterion[finite])
+	stats::median(thresholds[finite & criterion == best])
+}
+
+#' Calculate one JMbayes2-compatible dynamic ROC curve
+#'
+#' @param risk_set Subject-level output from
+#'   `.dynamic_discrimination_risk_set()`.
+#' @param time_start Scalar landmark.
+#' @param time_horizon Scalar prediction horizon.
+#' @param type_weights Character censoring method.
+#' @param cause Positive integer event cause.
+#' @param object_name Character expression used to identify the fitted object.
+#'
+#' @return An object of class `"tvROC"` compatible with
+#'   `JMbayes2::tvAUC()` and the JMbayes2 plotting method.
+#' @keywords internal
+#' @noRd
+.tvroc_from_risk_set <- function(
+	risk_set,
+	time_start,
+	time_horizon,
+	type_weights,
+	cause,
+	object_name
+) {
+	required <- c(
+		"risk", "event_window", "event_time", "event_status", "event_type",
+		"time_horizon"
+	)
+	if (!all(required %in% names(risk_set)) || nrow(risk_set) == 0L) {
+		cli::cli_abort("The dynamic ROC risk set contains no analysable subjects.")
+	}
+
+	# A missing posterior mean risk cannot define a threshold classification.
+	# Remove such subjects once, before forming the case and control weights,
+	# and retain the corresponding posterior-draw rows when they are available.
+	risk_draws <- attr(risk_set, "risk_draws", exact = TRUE)
+	complete_subject <- is.finite(risk_set$risk) &
+		is.finite(risk_set$event_time) &
+		is.finite(risk_set$time_horizon)
+	if (!all(complete_subject)) {
+		risk_set <- risk_set[complete_subject, , drop = FALSE]
+		if (!is.null(risk_draws) && nrow(risk_draws) == length(complete_subject)) {
+			risk_draws <- risk_draws[complete_subject, , drop = FALSE]
+		}
+	}
+	if (nrow(risk_set) == 0L) {
+		cli::cli_abort("The dynamic ROC risk set contains no finite predicted risks.")
+	}
+	if (!any(risk_set$event_window == 1L)) {
+		cli::cli_abort(
+			"No requested-cause event occurred between the landmark and horizon."
+		)
+	}
+
+	thresholds <- seq(0, 1, length.out = 101L)
+	weights <- .tvroc_status_weights(risk_set, type_weights, cause)
+	case_total <- sum(weights$case)
+	control_total <- sum(weights$control)
+	if (case_total <= 0 || control_total <= 0) {
+		cli::cli_abort(
+			"Time-dependent ROC estimation requires positive case and control weight."
+		)
+	}
+
+	# JMbayes2 formulates the threshold comparison on conditional survival:
+	# smaller survival indicates greater event risk. Matrix multiplication
+	# evaluates every threshold without constructing case-control pairs.
+	mean_survival <- 1 - as.numeric(risk_set$risk)
+	mean_positive <- outer(mean_survival, thresholds, "<")
+	nTP <- as.numeric(crossprod(weights$case, mean_positive))
+	nFP <- as.numeric(crossprod(weights$control, mean_positive))
+	nFN <- case_total - nTP
+	nTN <- control_total - nFP
+	TP <- nTP / case_total
+	FP <- nFP / control_total
+
+	if (is.null(risk_draws) || ncol(risk_draws) == 0L) {
+		risk_draws <- matrix(as.numeric(risk_set$risk), ncol = 1L)
+	} else {
+		# A draw containing a missing risk would make its complete ROC curve
+		# undefined. Discard only those columns and retain the posterior mean
+		# curve as a deterministic fallback if none remain.
+		finite_draw <- colSums(!is.finite(risk_draws)) == 0L
+		risk_draws <- risk_draws[, finite_draw, drop = FALSE]
+		if (ncol(risk_draws) == 0L) {
+			risk_draws <- matrix(as.numeric(risk_set$risk), ncol = 1L)
+		}
+	}
+	tp <- matrix(NA_real_, nrow = length(thresholds), ncol = ncol(risk_draws))
+	fp <- matrix(NA_real_, nrow = length(thresholds), ncol = ncol(risk_draws))
+	for (draw_index in seq_len(ncol(risk_draws))) {
+		draw_positive <- outer(1 - risk_draws[, draw_index], thresholds, "<")
+		tp[, draw_index] <- as.numeric(crossprod(weights$case, draw_positive)) /
+			case_total
+		fp[, draw_index] <- as.numeric(crossprod(weights$control, draw_positive)) /
+			control_total
+	}
+
+	f1 <- 2 * nTP / (2 * nTP + nFN + nFP)
+	youden <- TP - FP
+	f1_cutoff <- .central_optimal_threshold(thresholds, f1)
+	youden_cutoff <- .central_optimal_threshold(thresholds, youden)
+	out <- list(
+		TP = TP,
+		FP = FP,
+		nTP = nTP,
+		nFN = nFN,
+		nFP = nFP,
+		nTN = nTN,
+		tp = tp,
+		fp = fp,
+		thrs = thresholds,
+		thr = thresholds,
+		F1score = f1_cutoff,
+		Youden = youden_cutoff,
+		Tstart = as.numeric(time_start),
+		Thoriz = as.numeric(time_horizon),
+		nr = nrow(risk_set),
+		classObject = "JoiNMeFit",
+		type_weights = type_weights,
+		nameObject = object_name,
+		cause = as.integer(cause)
+	)
+	class(out) <- "tvROC"
+	out
+}
+
+#' @rdname tvROC
+#' @export
+tvROC.JoiNMeFit <- function(
+	object,
+	newdataLong = NULL,
+	newdataEvent = NULL,
+	time_start = 0,
+	time_horizon = NULL,
+	Dt = NULL,
+	cause = 1,
+	n_samples = 200,
+	seed = 123,
+	type_weights = c("model-based", "IPCW"),
+	...
+) {
+	.require_fitted_survival_process(
+		object,
+		"Time-dependent ROC assessment"
+	)
+	.warn_experimental("tvROC")
+	if (
+		!is.numeric(cause) ||
+			length(cause) != 1L ||
+			!is.finite(cause) ||
+			cause < 1 ||
+			cause != as.integer(cause)
+	) {
+		cli::cli_abort("{.arg cause} must be a single positive integer.")
+	}
+	if (
+		!is.numeric(n_samples) ||
+			length(n_samples) != 1L ||
+			!is.finite(n_samples) ||
+			n_samples < 1 ||
+			n_samples != as.integer(n_samples)
+	) {
+		cli::cli_abort("{.arg n_samples} must be a positive integer.")
+	}
+	type_weights <- match.arg(type_weights)
+	data_in <- .get_train_data(
+		object,
+		newdataLong,
+		newdataEvent,
+		purpose = "time-dependent ROC"
+	)
+	times <- .get_tvroc_times(
+		object = object,
+		data_event = data_in$newdataEvent,
+		time_start = time_start,
+		time_horizon = time_horizon,
+		Dt = Dt
+	)
+
+	curves <- vector("list", length(times$time_start))
+	for (time_index in seq_along(curves)) {
 		risk_set <- .dynamic_discrimination_risk_set(
 			object = object,
 			newdataLong = data_in$newdataLong,
 			newdataEvent = data_in$newdataEvent,
-			time_start = time_start[i],
-			time_horizon = time_horizon[i],
+			time_start = times$time_start[[time_index]],
+			time_horizon = times$time_horizon[[time_index]],
 			cause = as.integer(cause),
-			n_samples = n_samples,
+			n_samples = as.integer(n_samples),
 			seed = seed,
 			...
 		)
-		.auc_from_risk_set(
+		curves[[time_index]] <- .tvroc_from_risk_set(
 			risk_set = risk_set,
-			time_start = time_start[i],
-			time_horizon = time_horizon[i]
+			time_start = times$time_start[[time_index]],
+			time_horizon = times$time_horizon[[time_index]],
+			type_weights = type_weights,
+			cause = as.integer(cause),
+			object_name = deparse(substitute(object))
 		)
-	})
-	out <- do.call(rbind, rows)
+	}
+	if (length(curves) == 1L) {
+		return(curves[[1L]])
+	}
+	names(curves) <- paste0(
+		"t", format(times$time_start, trim = TRUE),
+		"_h", format(times$time_horizon, trim = TRUE)
+	)
+	structure(
+		list(
+			curves = curves,
+			Tstart = times$time_start,
+			Thoriz = times$time_horizon,
+			type_weights = type_weights,
+			cause = as.integer(cause)
+		),
+		class = "tvROC_JoiNMeFit_list"
+	)
+}
+
+#' @rdname tvROC
+#' @export
+tvAUC.JoiNMeFit <- function(
+	object,
+	newdataLong = NULL,
+	newdataEvent = NULL,
+	time_start = 0,
+	time_horizon = NULL,
+	Dt = NULL,
+	cause = 1,
+	n_samples = 200,
+	seed = 123,
+	type_weights = c("model-based", "IPCW"),
+	...
+) {
+	roc <- tvROC(
+		object = object,
+		newdataLong = newdataLong,
+		newdataEvent = newdataEvent,
+		time_start = time_start,
+		time_horizon = time_horizon,
+		Dt = Dt,
+		cause = cause,
+		n_samples = n_samples,
+		seed = seed,
+		type_weights = type_weights,
+		...
+	)
+	if (inherits(roc, "tvROC")) {
+		return(JMbayes2::tvAUC(roc))
+	}
+
+	areas <- vector("list", length(roc$curves))
+	time_start_out <- numeric(length(roc$curves))
+	time_horizon_out <- numeric(length(roc$curves))
+	auc_out <- numeric(length(roc$curves))
+	n_subjects_out <- integer(length(roc$curves))
+	type_weights_out <- character(length(roc$curves))
+	for (curve_index in seq_along(roc$curves)) {
+		areas[[curve_index]] <- JMbayes2::tvAUC(roc$curves[[curve_index]])
+		time_start_out[[curve_index]] <- areas[[curve_index]]$Tstart
+		time_horizon_out[[curve_index]] <- areas[[curve_index]]$Thoriz
+		auc_out[[curve_index]] <- areas[[curve_index]]$auc
+		n_subjects_out[[curve_index]] <- areas[[curve_index]]$nr
+		type_weights_out[[curve_index]] <- areas[[curve_index]]$type_weights
+	}
+	out <- data.frame(
+		time_start = time_start_out,
+		time_horizon = time_horizon_out,
+		auc = auc_out,
+		n_subjects = n_subjects_out,
+		type_weights = type_weights_out,
+		stringsAsFactors = FALSE
+	)
 	class(out) <- c("tvAUC_JoiNMeFit", "data.frame")
 	out
 }
@@ -1814,13 +2697,13 @@ stan_rhat.JoiNMeFit <- function(
 	...
 ) {
 	
-	draws_obj <- draws(object, format = "draws_array")
+	draws_obj <- posterior_draws(object, format = "draws_array")
 	vars <- posterior::variables(draws_obj)
 	vars <- .filter_diag_vars(vars, pars, regex_pars)
 	if (length(vars) == 0) {
 		return(data.frame(variable = character(0), rhat = numeric(0)))
 	}
-	draws_obj <- draws(
+	draws_obj <- posterior_draws(
 		object,
 		variables = vars,
 		draws = draws,
@@ -1843,13 +2726,13 @@ stan_ess.JoiNMeFit <- function(
 ) {
 	
 	type <- match.arg(type)
-	draws_obj <- draws(object, format = "draws_array")
+	draws_obj <- posterior_draws(object, format = "draws_array")
 	vars <- posterior::variables(draws_obj)
 	vars <- .filter_diag_vars(vars, pars, regex_pars)
 	if (length(vars) == 0) {
 		return(data.frame(variable = character(0), ess = numeric(0)))
 	}
-	draws_obj <- draws(
+	draws_obj <- posterior_draws(
 		object,
 		variables = vars,
 		draws = draws,
@@ -1875,13 +2758,13 @@ stan_mcse.JoiNMeFit <- function(
 ) {
 	
 	type <- match.arg(type)
-	draws_obj <- draws(object, format = "draws_array")
+	draws_obj <- posterior_draws(object, format = "draws_array")
 	vars <- posterior::variables(draws_obj)
 	vars <- .filter_diag_vars(vars, pars, regex_pars)
 	if (length(vars) == 0) {
 		return(data.frame(variable = character(0), mcse = numeric(0)))
 	}
-	draws_obj <- draws(
+	draws_obj <- posterior_draws(
 		object,
 		variables = vars,
 		draws = draws,

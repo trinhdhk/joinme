@@ -4,9 +4,9 @@ test_that("named links compile their mathematical inverse links", {
 
   expect_equal(log_spec$link, "log")
   expect_equal(log_spec$inv_link$bytecode, c(0L, 7L))
-  expect_equal(joinme:::.link_name_from_inv_link_expr(~ exp(x)), "log")
+  expect_equal(.link_name_from_inv_link_expr(~ exp(x)), "log")
   expect_equal(
-    joinme:::eval_bytecode_vector(
+    eval_bytecode_vector(
       c(-1, 0, 1),
       log_spec$inv_link$bytecode,
       log_spec$inv_link$const_data
@@ -16,9 +16,9 @@ test_that("named links compile their mathematical inverse links", {
 
   expect_equal(exp_spec$link, "exp")
   expect_equal(exp_spec$inv_link$bytecode, c(0L, 6L))
-  expect_equal(joinme:::.link_name_from_inv_link_expr(~ log(x)), "exp")
+  expect_equal(.link_name_from_inv_link_expr(~ log(x)), "exp")
   expect_equal(
-    joinme:::eval_bytecode_vector(
+    eval_bytecode_vector(
       c(1, exp(1)),
       exp_spec$inv_link$bytecode,
       exp_spec$inv_link$const_data
@@ -35,7 +35,7 @@ test_that("formula links are inverted before bytecode compilation", {
   expect_equal(simple$link, "log")
   expect_equal(simple$inv_link$bytecode, c(0L, 7L))
   expect_equal(
-    joinme:::eval_bytecode_vector(
+    eval_bytecode_vector(
       log(c(3, 5)),
       affine$inv_link$bytecode,
       affine$inv_link$const_data
@@ -43,7 +43,7 @@ test_that("formula links are inverted before bytecode compilation", {
     c(1, 2)
   )
   expect_equal(
-    joinme:::eval_bytecode_vector(
+    eval_bytecode_vector(
       c(-8, -1, 0, 1, 8, 27),
       cubic$inv_link$bytecode,
       cubic$inv_link$const_data
@@ -70,10 +70,9 @@ test_that("formula links pass through standata for fit and dynamic prediction", 
   sim <- simulate_joinme(
     n_id = 8,
     families = c("gaussian", "poisson"),
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 3, length.out = 5),
     assoc = "cv_total",
-    assoc_coefs = c(cv_total = 0.2),
+    truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.2))),
     seed = 191
   )
   standata <- joinme_standata(

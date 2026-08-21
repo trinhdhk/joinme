@@ -6,10 +6,9 @@ test_that("summary reports baseline survival covariates only when present", {
   sim <- simulate_joinme(
     n_id = 6,
     families = rep("gaussian", 2),
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 3, length.out = 5),
     assoc = c("cv_total"),
-    assoc_coefs = c(cv_total = 0.2),
+    truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.2))),
     seed = 931
   )
 

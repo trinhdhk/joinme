@@ -116,7 +116,19 @@ assoc.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary 
         out_tbl$component <- component_meta$component[idx]
         out_tbl$row <- component_meta$row[idx]
         out_tbl$col <- component_meta$col[idx]
-        out_tbl <- out_tbl[, c("component", "row", "col", "term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
+        out_tbl <- out_tbl[, c(
+          "component",
+          "row",
+          "col",
+          "term",
+          "Estimate",
+          "Est.Error",
+          "Q2.5",
+          "Q97.5",
+          "Rhat",
+          "ess_bulk",
+          "ess_tail"
+        ), drop = FALSE]
       }
       out_tbl
     } else {
@@ -226,7 +238,7 @@ print.PosteriorAssoc <- function(x, ...) {
           .cli_print_table(matrix_groups[[row_label]])
         }
       } else {
-        .cli_print_table(term_tbl)
+        .cli_print_table(.posterior_assoc_display_table(term_tbl))
       }
     } else {
       draw_block <- x[[term_name]]
@@ -239,7 +251,75 @@ print.PosteriorAssoc <- function(x, ...) {
     }
   }
 
+  class_association <- attr(x, "class_association") %||%
+    list() # class-specific hazard-contribution summaries attached by joinme_mix()
+  if (length(class_association) > 0L) {
+    .cli_summary_heading(
+      "Association contributions by latent class",
+      level = 2L
+    )
+    .cli_print_bullets(c(
+      paste0(
+        "Class estimand: ",
+        meta$class_association_estimand %||% "mean_per_class"
+      ),
+      "Only association terms affected by a fitted class-specific random-effect block are shown.",
+      "The reported reference points span the fitted time or covariance-covariate range; plot() displays the full curve."
+    ))
+    for (association_term in names(class_association)) {
+      .cli_print_table_section(
+        paste0("Class association: ", association_term),
+        class_association[[association_term]],
+        level = 3L
+      )
+    }
+  } else if (
+    !is.null(meta$mixture) &&
+      isTRUE(meta$summary) &&
+      isTRUE(meta$class_specific_requested)
+  ) {
+    .cli_print_bullets(
+      "No fitted class-specific block changes the displayed association term; the coefficient therefore remains common across classes."
+    )
+  }
+
   invisible(x)
+}
+
+#' Select the common posterior columns used for association printing
+#'
+#' @description
+#' Association summaries use the same compact schema as the ordinary model
+#' summary: posterior mean (`Estimate`), posterior standard deviation
+#' (`Est.Error`), central interval and sampling diagnostics. Duplicate
+#' `Mean`, `Median`, and `SD` columns are not reported.
+#'
+#' @param table A posterior association summary table.
+#'
+#' @return A data frame prepared for concise console printing.
+#' @keywords internal
+#' @noRd
+.posterior_assoc_display_table <- function(table) {
+  if (is.null(table) || !is.data.frame(table)) {
+    return(table)
+  }
+  metric_columns <- c(
+    "Estimate",
+    "Est.Error",
+    "Q2.5",
+    "Q97.5",
+    "Rhat",
+    "ess_bulk",
+    "ess_tail"
+  ) # explicit posterior location, spread, interval and simulation diagnostics
+  identifier_columns <- setdiff(
+    names(table),
+    c(metric_columns, "Mean", "Median", "SD")
+  ) # association labels and covariance-component identifiers
+  table[, c(
+    identifier_columns,
+    intersect(metric_columns, names(table))
+  ), drop = FALSE]
 }
 
 #' Format covariance-style posterior association summaries for printing
@@ -268,7 +348,16 @@ print.PosteriorAssoc <- function(x, ...) {
   groups <- lapply(row_levels, function(row_label) {
     block <- tbl[as.character(tbl$row) == row_label, , drop = FALSE]
     block <- block[, c(
-      intersect(c("col", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), names(block))
+      intersect(c(
+        "col",
+        "Estimate",
+        "Est.Error",
+        "Q2.5",
+        "Q97.5",
+        "Rhat",
+        "ess_bulk",
+        "ess_tail"
+      ), names(block))
     ), drop = FALSE]
     names(block)[names(block) == "col"] <- "term"
     block
@@ -283,17 +372,17 @@ print.PosteriorAssoc <- function(x, ...) {
 #' @description
 #' Derived association effects do not necessarily exist as named Stan variables.
 #' This helper converts an iteration x chain x term array into the same summary
-#' schema used elsewhere in JoiNMe: posterior mean, posterior standard
-#' deviation, central 95% interval, split-chain R-hat, and bulk/tail effective
-#' sample sizes.
+#' schema used elsewhere in JoiNMe: posterior mean (`Estimate`), posterior
+#' standard deviation (`Est.Error`), central 95% interval, split-chain R-hat,
+#' and bulk/tail effective sample sizes.
 #'
 #' @param draw_array Numeric array with dimensions iteration x chain x term.
 #' @param term_labels Character vector naming the third dimension.
 #' @param digits Number of decimal places used for posterior location and
 #'   interval summaries.
 #'
-#' @return A data frame with columns `term`, `Estimate`, `Est.Error`, `Q2.5`,
-#'   `Q97.5`, `Rhat`, `ess_bulk`, and `ess_tail`.
+#' @return A data frame containing `Estimate`, `Est.Error`, `Q2.5`, `Q97.5`,
+#'   `Rhat`, `ess_bulk`, and `ess_tail`, preceded by the term label.
 #' @keywords internal
 #' @noRd
 .assoc_summary_from_draw_array <- function(draw_array, term_labels, digits = 3) {
@@ -301,18 +390,46 @@ print.PosteriorAssoc <- function(x, ...) {
     return(NULL)
   }
 
-  term_labels <- as.character(term_labels %||% paste0("term_", seq_len(dim(draw_array)[3])))
+  number_terms <- dim(
+    draw_array
+  )[3] # number of posterior quantities stored along the variable dimension
+  term_labels <- as.character(
+    term_labels %||% paste0("term_", seq_len(number_terms))
+  ) # user-facing labels, which may legitimately repeat across classes or domains
+  if (length(term_labels) != number_terms) {
+    cli::cli_abort(
+      "{.arg term_labels} must contain one label for every posterior quantity."
+    )
+  }
+
+  source_variable_names <- dimnames(draw_array)[[3]]
+  if (
+    is.null(source_variable_names) ||
+      length(source_variable_names) != number_terms ||
+      any(!nzchar(source_variable_names))
+  ) {
+    source_variable_names <- paste0(".joinme_summary_", seq_len(number_terms))
+  }
+  internal_variable_names <- make.unique(
+    as.character(source_variable_names),
+    sep = "__"
+  ) # unique diagnostic keys kept separate from possibly repeated display labels
   dimnames(draw_array) <- list(
     iteration = dimnames(draw_array)[[1]] %||% as.character(seq_len(dim(draw_array)[1])),
     chain = dimnames(draw_array)[[2]] %||% as.character(seq_len(dim(draw_array)[2])),
-    variable = term_labels
+    variable = internal_variable_names
   )
 
   draws_obj <- posterior::as_draws_array(draw_array)
   draws_df <- posterior::as_draws_df(draws_obj)
   sum_df <- data.frame(
     term = term_labels,
-    do.call(rbind, lapply(term_labels, function(label) .summarize_draw_col(draws_df[[label]]))),
+    do.call(rbind, lapply(
+      internal_variable_names,
+      function(variable_name) {
+        .summarize_draw_col(draws_df[[variable_name]])
+      }
+    )),
     row.names = NULL,
     check.names = FALSE,
     stringsAsFactors = FALSE
@@ -324,15 +441,30 @@ print.PosteriorAssoc <- function(x, ...) {
   ))
   if (!is.null(diag_df)) {
     diag_df <- diag_df[, c("variable", "rhat", "ess_bulk", "ess_tail"), drop = FALSE]
-    names(diag_df) <- c("term", "Rhat", "ess_bulk", "ess_tail")
-    sum_df <- merge(sum_df, diag_df, by = "term", all.x = TRUE, sort = FALSE)
+    diagnostic_position <- match(
+      internal_variable_names,
+      as.character(diag_df$variable)
+    ) # one-to-one diagnostic row for each source variable, independent of labels
+    sum_df$Rhat <- diag_df$rhat[diagnostic_position]
+    sum_df$ess_bulk <- diag_df$ess_bulk[diagnostic_position]
+    sum_df$ess_tail <- diag_df$ess_tail[diagnostic_position]
   } else {
     sum_df$Rhat <- NA_real_
     sum_df$ess_bulk <- NA_real_
     sum_df$ess_tail <- NA_real_
   }
 
-  .round_summary_table(sum_df, digits = digits)
+  sum_df <- .round_summary_table(sum_df, digits = digits)
+  sum_df[, c(
+    "term",
+    "Estimate",
+    "Est.Error",
+    "Q2.5",
+    "Q97.5",
+    "Rhat",
+    "ess_bulk",
+    "ess_tail"
+  ), drop = FALSE]
 }
 
 #' Build labels for covariance-style association components
@@ -492,4 +624,3 @@ print.PosteriorAssoc <- function(x, ...) {
   out <- posterior::as_draws_matrix(posterior::as_draws_array(draw_array))
   out[, term_labels, drop = FALSE]
 }
-

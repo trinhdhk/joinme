@@ -6,11 +6,10 @@ test_that("simulate_joinme corr uses off-diagonal correlation features", {
       (0 + x1 + (1 + time + I(time^2) | id) | marker),
     n_id = 5,
     families = c("gaussian", "gaussian", "gaussian", "gaussian"),
-    n_obs_per_marker_per_id = 4,
     times_obs = seq(0, 3, length.out = 5),
     seed = 3301,
     assoc = "corr",
-    assoc_coefs = list(corr = vc),
+    truth = jm_truth(assoc_coef = list(slope = stats::setNames(vc, paste0("corr[", seq_along(vc), "]")))),
     transforms = list(corr = list(type = "identity"))
   )
 
@@ -25,15 +24,14 @@ test_that("simulate_joinme corr uses off-diagonal correlation features", {
   expect_equal(unname(sim$truth$assoc_coefs[vc_names]), vc)
 })
 
-test_that("simulate_joinme corr coefficient parsing truncates to M_corr", {
+test_that("simulate_joinme corr coefficient names match M_corr", {
   sim <- simulate_joinme(
     n_id = 4,
     families = c("gaussian", "gaussian", "gaussian"),
-    n_obs_per_marker_per_id = 4,
     times_obs = seq(0, 2, length.out = 4),
     seed = 3302,
     assoc = "corr",
-    assoc_coefs = c(corr = 0.7, corr2 = -0.5),
+    truth = jm_truth(assoc_coef = list(slope = c("corr[1]" = 0.7))),
     transforms = list(corr = list(type = "identity"))
   )
 
@@ -49,11 +47,10 @@ test_that("simulate_joinme corr is available with one marker and multiple id-mar
     formulaLong = y ~ 1 + time + (1 + time | id) + (0 + (1 + time | id) | marker),
     n_id = 4,
     families = "gaussian",
-    n_obs_per_marker_per_id = 5,
     times_obs = seq(0, 2, length.out = 5),
     seed = 3303,
     assoc = "corr",
-    assoc_coefs = list(corr = 0.35),
+    truth = jm_truth(assoc_coef = list(slope = c("corr[1]" = 0.35))),
     transforms = list(corr = list(type = "identity"))
   )
 

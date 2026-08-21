@@ -94,5 +94,6 @@ index for survival data. \emph{Statistics in Medicine}, 24, 3927--3944.
 \doi{10.1002/sim.2427}.
 }
 \seealso{
-\code{\link[=auc.JoiNMeFit]{auc.JoiNMeFit()}}, \code{\link[=predict.JoiNMeFit]{predict.JoiNMeFit()}}, \code{\link[survival:concordance]{survival::concordance()}}
+\code{\link[=tvROC.JoiNMeFit]{tvROC.JoiNMeFit()}}, \code{\link[=tvAUC.JoiNMeFit]{tvAUC.JoiNMeFit()}},
+\code{\link[=predict.JoiNMeFit]{predict.JoiNMeFit()}}, \code{\link[survival:concordance]{survival::concordance()}}
 }

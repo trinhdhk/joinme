@@ -1,5 +1,5 @@
 test_that("standard normal CDF and probit quantile have distinct bytecodes", {
-  normal_ops <- joinme:::.bytecode_normal_ops()
+  normal_ops <- .bytecode_normal_ops()
   expect_identical(normal_ops, c(PHI = 26L, INV_PHI = 27L))
 
   cdf_programs <- list(
@@ -15,7 +15,7 @@ test_that("standard normal CDF and probit quantile have distinct bytecodes", {
   for (program in cdf_programs) {
     expect_identical(program$bytecode, c(0L, normal_ops[["PHI"]]))
     expect_equal(
-      joinme:::eval_bytecode_vector(c(-2, 0, 2), program$bytecode),
+      eval_bytecode_vector(c(-2, 0, 2), program$bytecode),
       stats::pnorm(c(-2, 0, 2))
     )
   }
@@ -24,7 +24,7 @@ test_that("standard normal CDF and probit quantile have distinct bytecodes", {
   for (program in quantile_programs) {
     expect_identical(program$bytecode, c(0L, normal_ops[["INV_PHI"]]))
     expect_equal(
-      joinme:::eval_bytecode_vector(probabilities, program$bytecode),
+      eval_bytecode_vector(probabilities, program$bytecode),
       stats::qnorm(probabilities)
     )
   }
@@ -36,14 +36,14 @@ test_that("formula-link inversion respects the two normal directions", {
   cdf_formula <- invert_transform_expr(~ Phi(x))
 
   expect_equal(
-    joinme:::eval_bytecode_vector(
+    eval_bytecode_vector(
       c(-1, 0, 1),
       parse_transform_expr(probit_formula)$bytecode
     ),
     stats::pnorm(c(-1, 0, 1))
   )
   expect_equal(
-    joinme:::eval_bytecode_vector(
+    eval_bytecode_vector(
       c(-1, 0, 1),
       parse_transform_expr(probit_alias_formula)$bytecode
     ),
@@ -52,7 +52,7 @@ test_that("formula-link inversion respects the two normal directions", {
 
   probabilities <- c(0.1, 0.5, 0.9)
   expect_equal(
-    joinme:::eval_bytecode_vector(
+    eval_bytecode_vector(
       probabilities,
       parse_transform_expr(cdf_formula)$bytecode
     ),
@@ -73,7 +73,7 @@ test_that("normal bytecodes retain fitted affine-shift indices", {
   expect_identical(program$op_iota_intercept_idx, c(0L, 1L))
   expect_identical(program$op_iota_slope_idx, c(0L, 1L))
   expect_equal(
-    joinme:::eval_bytecode_vector(
+    eval_bytecode_vector(
       c(-1, 0, 1),
       bytecode = program$bytecode,
       iota_intercepts = 0.4,
@@ -94,7 +94,7 @@ test_that("named and formula probit families compile the Phi inverse link", {
     expect_identical(specification$link, "probit")
     expect_identical(specification$inv_link$bytecode, c(0L, 26L))
     expect_equal(
-      joinme:::eval_bytecode_vector(
+      eval_bytecode_vector(
         c(-1, 0, 1),
         specification$inv_link$bytecode
       ),
@@ -107,31 +107,31 @@ test_that("response-scale methods share one inverse-link implementation", {
   eta <- matrix(c(-1, 0, 1, 2), nrow = 2)
 
   expect_equal(
-    joinme:::.apply_inverse_link_matrix(eta, 1L),
+    .apply_inverse_link_matrix(eta, 1L),
     eta
   )
   expect_equal(
-    joinme:::.apply_inverse_link_matrix(eta, 2L),
+    .apply_inverse_link_matrix(eta, 2L),
     exp(eta)
   )
   expect_equal(
-    joinme:::.apply_inverse_link_matrix(eta, 3L),
+    .apply_inverse_link_matrix(eta, 3L),
     matrix(stats::plogis(eta), nrow = nrow(eta))
   )
   expect_equal(
-    joinme:::.apply_inverse_link_matrix(eta, 4L),
+    .apply_inverse_link_matrix(eta, 4L),
     matrix(stats::pnorm(eta), nrow = nrow(eta))
   )
 
   positive_eta <- exp(eta)
   expect_equal(
-    joinme:::.apply_inverse_link_matrix(positive_eta, 5L),
+    .apply_inverse_link_matrix(positive_eta, 5L),
     eta
   )
 
   probabilities <- matrix(c(0.1, 0.25, 0.75, 0.9), nrow = 2)
   expect_equal(
-    joinme:::.apply_inverse_link_matrix(
+    .apply_inverse_link_matrix(
       probabilities,
       link_code = 0L,
       bytecode = c(0L, 27L)
@@ -152,7 +152,6 @@ test_that("simulation evaluates the inverse-normal bytecode instruction", {
   simulation <- simulate_joinme(
     n_id = 4,
     families = rep(list(custom_family), 3),
-    n_obs_per_marker_per_id = 2,
     times_obs = c(0, 1),
     time_cens = 1.5,
     seed = 2701,
@@ -166,7 +165,9 @@ test_that("simulation evaluates the inverse-normal bytecode instruction", {
 
 test_that("fit and dynamic-prediction Stan data admit both normal operations", {
   root <- normalizePath(
-    if (file.exists(file.path("inst", "stan", "helper", "data", "fit_data.stan"))) {
+    if (file.exists(file.path(
+      "inst", "stan", "include", "submodels", "longitudinal", "data", "fit.stan"
+    ))) {
       "."
     } else {
       file.path("..", "..")
@@ -175,8 +176,8 @@ test_that("fit and dynamic-prediction Stan data admit both normal operations", {
   )
   stan_files <- file.path(
     root,
-    "inst", "stan", "helper", "data",
-    c("fit_data.stan", "dynpred_data.stan")
+    "inst", "stan", "include", "submodels", "longitudinal", "data",
+    c("fit.stan", "dynamic_prediction.stan")
   )
   stan_text <- lapply(stan_files, readLines, warn = FALSE)
 
@@ -188,8 +189,8 @@ test_that("fit and dynamic-prediction Stan data admit both normal operations", {
 
   evaluator <- readLines(
     file.path(
-      root, "inst", "stan", "helper", "functions",
-      "functional_transform.stanfunctions"
+      root, "inst", "stan", "include", "etc", "bytecode",
+      "interpreter.stanfunctions"
     ),
     warn = FALSE
   )

@@ -1,13 +1,12 @@
-test_that("association summaries include marker weights when estimated", {
+test_that("marker-weight summaries are compact and individual weights have an accessor", {
   set.seed(123)
   sim <- simulate_joinme(
     n_id = 4,
     families = rep("student_t", 2),
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 4, length.out = 8),
     seed = 123,
     assoc = c("cv_total"),
-    assoc_coefs = c(cv_total = 0.6)
+    truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.6))),
   )
 
   formulaLong <- y ~ 1 + time + x1 +
@@ -23,7 +22,6 @@ test_that("association summaries include marker weights when estimated", {
     assoc = c("cv_total"),
     families = rep("student_t", 2),
     transforms = list(cv_total = list(type = "identity")),
-    fixed_marker_weights = FALSE,
     control = list(
       engine = "rstan",
       chains = 1,
@@ -39,9 +37,15 @@ test_that("association summaries include marker weights when estimated", {
 
   s <- summary(fit)
   assoc_tbl <- s$tables$assoc
-  expect_true(any(grepl("^weight:", assoc_tbl$term)))
+  expect_false(any(grepl("^weight:", assoc_tbl$term)))
+  expect_equal(s$tables$marker_weights$term, c("mean weight", "SD weight"))
+
+  individual <- marker_weights(fit)
+  expect_equal(individual$marker, fit$stan_data$marker_levels)
+  expect_true(all(c("offset", "Estimate", "Est.Error", "Q2.5", "Q97.5") %in% names(individual)))
 
   re <- ranef(fit)
-  expect_true(!is.null(re$formulaLong$assoc_weight))
-  expect_true(any(grepl("^weight:", re$formulaLong$assoc_weight$term)))
+  expect_null(re$formulaLong$marker_weight)
+  expect_true(!is.null(re$assoc))
+  expect_true(all(c("assoc_term", "marker") %in% names(re$assoc)))
 })

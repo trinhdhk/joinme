@@ -11,6 +11,7 @@ simulate_joinme(
   formulaDist = NULL,
   formulaAssoc = NULL,
   transforms = NULL,
+  truth = joinme_truth(),
   n_id = 50,
   families = c("gaussian", "student_t", "binomial"),
   marker_levels = NULL,
@@ -19,30 +20,16 @@ simulate_joinme(
   censor_longitudinal_after_event = TRUE,
   left_truncation_max = 0,
   truncate_longitudinal_before_entry = TRUE,
-  ...,
   seed = .Random.seed[[1]],
   covariate_formulas = list(x1 ~ rnorm(n_id), x2 ~ rnorm(n_id)),
-  marker_weights = NULL,
-  shared_marker_weights = TRUE,
-  fixed_marker_weights = FALSE,
   shrinkage = 0L,
   assoc = c("cv_total"),
-  assoc_coefs = c(cv_total = 0.6),
-  beta_long = NULL,
-  beta_event = NULL,
-  dist_coefs = list(),
-  re_params = list(id = list(sd = NULL, corr = NULL), marker = list(sd = NULL, corr =
-    NULL), id_marker_cov = list(latent = list(sd = NULL, corr = NULL), alpha = NULL, beta
-    = NULL, lambda = NULL, diag_link = "softplus"), dist = list()),
+  vcov_diag_link = "softplus",
   family_params = list(gaussian = list(sigma = 1), student_t = list(sigma = 1.5, nu = 4),
     bernoulli = list(), binomial = list(trials = 10), poisson = list(), negbin2 =
     list(phi = 2), skew_normal = list(sigma = 1, alpha = 0), double_exponential =
     list(sigma = 1), skew_double_exponential = list(sigma = 1, tau = 0.5), beta =
     list(kappa = 10), cumulative_logit = list(cutpoints = c(-1, 1))),
-  h0 = NULL,
-  baseline_hazard = list(type = "weibull", shape = 1.4, scale = 6),
-  formulaBasehaz = NULL,
-  beta_basehaz = NULL,
   time_cens = 8,
   eps_cs = 0.001,
   integration_control = list(rel.tol = 1e-06, subdivisions = 2000L, stop.on.error = TRUE),
@@ -55,7 +42,8 @@ simulate_joinme(
   time_var = "time",
   y_var = "y",
   event_time_var = "time",
-  event_var = "event"
+  event_var = "event",
+  .mixture_specification = NULL
 )
 }
 \arguments{
@@ -67,18 +55,24 @@ should be available in generated covariates (for example via
 keeps marker-only and marker-by-id blocks independent, while inner
 \code{( ... || id )} makes the marker-by-id covariance diagonal.}
 
-\item{formulaEvent}{Event/survival formula (same role as in \code{joinme()}).}
+\item{formulaEvent}{Event/survival formula (same role as in \code{joinme()}). Set
+this to \code{NULL} to simulate only the nested longitudinal process. In that
+case \code{dataEvent} is \code{NULL}, the complete scheduled longitudinal history is
+retained, and \code{assoc} and \code{formulaAssoc} must be absent.}
 
-\item{formulaVCov}{Optional covariance-regression formula for the id-specific
-marker-by-id covariance factor (same role as in \code{joinme_standata()}).
-This formula is evaluated on event-level covariates (one row per subject),
+\item{formulaVCov}{Optional covariance-regression specification for the
+id-specific marker-by-id covariance factor. A formula is shared by both
+covariance components; \code{list(sd = ~ ..., corr = ~ ...)} supplies
+independent observed-covariate regressions with exactly the same syntax as
+\code{\link[=joinme]{joinme()}} and \code{\link[=joinme_mix]{joinme_mix()}}. Each formula is evaluated on event-level covariates (one row per subject),
 must not include random-effect bars \code{( ... | ... )}, and must not include
 the longitudinal time variable.
 
-Internally, this formula drives subject-specific standard deviations and
-Cholesky-correlation-factor rows used to build \code{L_i = SD_i * K_i}; see
-\code{re_params$id_marker_cov}.
-The default \code{~ 1} is supported and gives an intercept-only covariance regression.}
+The \code{sd} formula drives subject-specific standard deviations and the
+\code{corr} formula drives Cholesky-correlation-factor rows used to build
+\code{L_i = SD_i * K_i}; their population intercepts, slopes and latent
+loadings are declared under \code{truth$vcov}.
+The default \code{~ 1} gives intercept-only regressions for both components.}
 
 \item{formulaDist}{Optional distributional regression formulas (same role as in \code{joinme()}).
 Supported LHS parameters are \code{sigma}, \code{nu}, \code{phi}, \code{alpha} (aliases:
@@ -120,7 +114,7 @@ and \code{lambda = 1} when omitted.
 monotone I-spline evaluated on \code{plogis(x)}; explicit knots are supplied
 on the expit scale.
 \item \code{list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), y = seq(0.02, 0.98, length.out = 50)^0.8, n_knots = 6, degree = 3, lambda = 1)}:
-penalised monotone I-spline on \code{plogis(x)} in legacy plug-in mode.
+penalised monotone I-spline on \code{plogis(x)} in plug-in mode.
 \item \code{list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))}:
 piecewise-linear transform; \code{x} and \code{y} are required.
 Simulation deliberately treats these as fixed interpolation pairs. This
@@ -146,19 +140,42 @@ on \code{plogis(x)} for a bounded-domain representation. Training \code{x} value
 and explicit \code{knots} for these transform types are specified on that
 bounded expit scale. This is useful
 when the raw association feature has long tails or steep nonlinear effects.
-}
+}}
 
-In other words, simulation currently uses the legacy plug-in spline mode;
-it does not estimate spline coefficients jointly inside Stan.}
+\item{truth}{A \code{\link[=jm_truth]{jm_truth()}} declaration for population generation. A numeric
+intercept or slope fixes its
+population coefficient vector; a \verb{prior_*()} declaration draws that
+vector once. This applies to \code{longitudinal}, \code{survival}, \code{baseline},
+\code{assoc_coef}, \code{vcov}, \code{functional}, and named \code{formulaDist} components. Its
+\code{marker_weights$offset} component supplies the marker-specific
+constant contribution and its \code{marker_weights$family} component generates centred
+marker-specific weight departures, because those departures are otherwise
+random simulation parameters. That field accepts a family name such as
+\code{"student_t"}, \code{"normal"}, \code{"laplace"}, or \code{"horseshoe"}. The names
+\code{"constant"} and \code{"none"} use the offset without a random departure. The
+family name \code{"student_t"} draws one value per active set as
+\code{2 + Gamma(2, 0.1)}, matching fitting. Departure location and ordinary scale remain zero and
+one. All declarations and their realised population coefficients are
+retained in the realised simulation truth.
+Set \code{marker_weights$family} to \code{"constant"} or \code{"none"} when the
+declared offset is the complete marker weight. No common location or
+marker-specific departure is then drawn. Under a stochastic family, the
+effective weight is \code{offset + marker_weight_mean + departure}, where the
+departure is drawn directly from the declared centred unit-scale family.
+No additional marker-weight scale is used: the survival association slope
+already scales the weighted marker feature.}
 
 \item{n_id}{Number of subjects.}
 
-\item{families}{Marker-specific family names.
-Use \code{jm_family()} entries to supply custom \code{link}/\code{inv_link} expressions.
+\item{families}{Marker-specific family names or \code{jm_family()} declarations.
+Use \code{jm_family()} entries to supply custom \code{link}/\code{inv_link} expressions
+or to fix the skew-Laplace quantile for a marker, for example
+\code{jm_family("skew_laplace", tau = 0.8)}.
 A named probit link applies \code{Phi} as its inverse link. In formula
 expressions, \code{Phi}/\code{pnorm} are the standard normal CDF and
 \code{inv_Phi}/\code{qnorm}/\code{probit} are the standard normal quantile. Simulation
-evaluates the same bytecode instructions as fitting and prediction.}
+evaluates the same bytecode instructions and fixed-quantile selection as
+fitting and prediction.}
 
 \item{marker_levels}{Optional marker names; defaults to \code{m1}, \code{m2}, ...}
 
@@ -182,8 +199,6 @@ each subject receives a sampled entry in
 is active (\code{left_truncation_max > 0}), longitudinal rows observed before the
 sampled entry time are removed.}
 
-\item{...}{Additional arguments passed to fun.}
-
 \item{seed}{RNG seed.}
 
 \item{covariate_formulas}{Named or LHS formulas used to generate event-level covariates,
@@ -195,30 +210,11 @@ Time-varying step covariates are supported via
 In this mode, each id receives stepwise periods over \verb{[0, time_cens]}, and
 each period value is sampled from \code{fun}.}
 
-\item{marker_weights}{Optional base marker weights used for association
-aggregation. If \code{shared_marker_weights = TRUE}, supply one numeric vector to
-be shared across all active weighted marker-based association terms. If
-\code{shared_marker_weights = FALSE}, you may instead supply a named list with
-entries \code{cv_total}, \code{cs_total}, \code{cv_marker}, and \code{cs_marker}.}
-
-\item{shared_marker_weights}{Logical. If \code{TRUE}, all active weighted
-marker-based association terms share one marker-weight structure. If
-\code{FALSE}, each active weighted marker-based association term uses its own
-marker-weight structure.}
-
-\item{fixed_marker_weights}{Logical. This has the same meaning as in
-\code{joinme()}. If \code{TRUE}, \code{marker_weights} are the effective weights and no
-latent perturbation is drawn. If \code{FALSE} (the default), \code{marker_weights}
-are base weights and the effective weights are
-\code{marker_weights + z_marker_weights}. When base weights are omitted they
-default to zero, exactly as they do in \code{joinme()} when marker weights are
-estimated.}
-
-\item{shrinkage}{Integer selecting the distribution of each standardized
-latent marker-weight perturbation when \code{fixed_marker_weights = FALSE}:
-\code{0} draws Student-t with 6 degrees of freedom, \code{1} draws standard Laplace,
-and \code{2} draws standard Normal. This is the same switch used by the Stan
-priors. It does not change explicitly supplied fixed weights.}
+\item{shrinkage}{Integer selecting the random-effect component distribution:
+\code{0} denotes Student-t with 6 degrees of freedom, \code{1} Laplace, and \code{2}
+Normal. Marker-weight departures no longer use this switch; their family
+is declared by \code{truth = jm_truth(marker_weights = list(family = "normal"))}
+or another supported family name.}
 
 \item{assoc}{Association components (same names as fit): \code{cv_total}, \code{cv_mean},
 \code{cv_marker}, \code{cs_total}, \code{cs_mean}, \code{cs_marker}, \code{corr}, \code{vcov}.
@@ -234,87 +230,10 @@ subject-specific standard deviations.
 }
 
 You can also provide \code{formulaAssoc = ~ ...} to select channels; when present,
-it overrides \code{assoc}.}
-
-\item{assoc_coefs}{Association coefficients for hazard terms.
-Non-\code{corr}/\code{vcov} terms accept scalar values. The \code{corr} term accepts a vector of
-off-diagonal \code{K} coefficients ordered as \verb{(2,1), (3,1), (3,2), ...} in
-lower-triangular row-major order of the marker-by-id random-effect
-covariance dimension. The \code{vcov} term accepts the same off-diagonal \code{K}
-entries followed by the subject-specific standard deviations,
-\verb{(2,1), (3,1), (3,2), ..., sd_1, sd_2, ...}; when \code{||} is used in the
-marker-by-id random-effects block, only the standard deviation entries are used.
-
-Accepted input forms:
-\itemize{
-\item named numeric vector, e.g. \code{c(cv_total = 0.4, cs_mean = -0.2)},
-\item named list, e.g. \code{list(cv_total = 0.4, corr = c(0.2, -0.1), vcov = c(0.4, 0.1, 0.5))}.
-Missing channels default to 0.
-}}
-
-\item{beta_long}{Fixed-effect coefficients for \code{formulaLong} fixed part. If NULL,
-coefficients are randomly generated and named by model-matrix columns.}
-
-\item{beta_event}{Survival baseline-covariate coefficients for non-intercept
-terms in \code{formulaEvent} RHS.
-If NULL, coefficients are randomly generated.}
-
-\item{dist_coefs}{Distributional fixed-effect coefficients for \code{formulaDist}
-parameters (\code{sigma}, \code{nu}, \code{phi}, \code{alpha}, \code{kappa}, \code{tau}).
-
-For each parameter, coefficients can be:
-\itemize{
-\item an unnamed numeric vector (matched by column order),
-\item a named numeric vector (matched by model-matrix column names),
-\item for family-scoped formulas, a named list with per-scope entries.
-}
-
-Family-scoped list syntax examples:
-\itemize{
-\item \code{dist_coefs = list(sigma = list(default = c("(Intercept)" = -0.3), gaussian = c(...), student_t = c(...)))}
-\item alias keys like \code{"sigma[family='student_t']"} are also recognised and
-mapped to the matching family scope.
-}}
-
-\item{re_params}{Random-effects simulation controls.
-
-Structure:
-\itemize{
-\item \code{id}: controls id-level random effects from \code{( ... | id)} in \code{formulaLong}.
-\item \code{marker}: controls marker-level random effects from marker-only terms.
-\item \code{id_marker_cov}: controls subject-specific covariance-regression for
-marker-by-id latent effects.
-\item \code{dist}: controls random effects for distributional regressions in
-\code{formulaDist}.
-}
-
-For \code{id} and \code{marker}, each block is a list:
-\itemize{
-\item \code{sd}: scalar or length-K vector of random-effect standard deviations,
-\item \code{corr}: KxK correlation matrix.
-}
-
-\code{id_marker_cov} fields:
-\itemize{
-\item \code{latent}: deprecated compatibility input. If supplied, its implied
-lower-triangular factor is folded into the baseline \code{alpha} intercepts
-before simulation. Marker-by-id latent seeds are still drawn as iid
-standard normal values. Prefer setting \code{alpha} directly in new code.
-\item \code{alpha}: baseline linear predictors for the subject-specific covariance
-regression entries. Diagonal positions control standard deviations;
-off-diagonal positions control the row-wise correlation-factor regression,
-on the tanh scale.
-\item \code{beta}: covariate effects from \code{formulaVCov} design matrix (systematic
-subject-to-subject covariance shifts by observed covariates),
-\item \code{lambda}: non-negative loading on an iid standard-normal subject latent
-perturbation; if a negative value is supplied, the simulator folds the
-sign into the latent draw so the effective model remains unchanged but
-follows the identified convention used during fitting,
-\item \code{diag_link}: link for the subject-specific standard deviations (\code{"softplus"}
-or \code{"exp"}).
-}
-
-Element-wise covariance-regression form is:
+it overrides \code{assoc}.
+Covariance-regression population values belong to \code{truth$vcov}. Its \code{sd}
+and \code{corr} components each accept \code{intercept}, \code{slope}, and \code{latent}
+declarations. Their element-wise form is
 \verb{eta_\{im\} = alpha_m + x_i^T beta_m + lambda_m z_\{im\}}, with
 \code{lambda_m >= 0} and \verb{z_\{im\} ~ Normal(0, 1)}. Diagonal entries apply
 \code{diag_link} to give positive subject-specific standard deviations. Off-diagonal
@@ -324,7 +243,17 @@ reconstructed as \code{L_i = SD_i * K_i}. Marker-by-id latent seeds are sampled 
 iid standard normal values and the final marker-by-id effects are obtained as
 \verb{b_id = L_i z_id}.
 
-Dimension rules for \code{id_marker_cov} entries follow marker-by-id random-effect
+In the ordinary non-mixture model, \eqn{\lambda_m} is the
+conditional standard deviation of the unexplained subject heterogeneity
+on covariance-predictor coordinate \eqn{m}, before applying \code{diag_link} or
+\code{tanh}. It is not itself an entry of \code{L_i}, a covariance, or a correlation.
+With \code{class_type = "corr"} or \code{"vcov"}, the selected \verb{z_\{im\}} has a
+class-specific location and scale. Conditional on class \eqn{g}, its
+contribution to \verb{eta_\{im\}} consequently has location
+\code{lambda_m * mix_location[g, m]} and distributional scale
+\code{lambda_m * mix_scale[g, m]}.
+
+The covariance-regression dimension follows the marker-by-id random-effect
 dimension \code{Q_idm}:
 \itemize{
 \item if covariance is full: \code{M = Q_idm * (Q_idm + 1) / 2} lower-tri entries,
@@ -339,28 +268,19 @@ distributional parameter,
 controls (same \code{sd}/\code{corr} fields as above).
 }}
 
+\item{vcov_diag_link}{Link applied to covariance-regression scale predictors;
+either \code{"softplus"} or \code{"exp"}.}
+
 \item{family_params}{Family-specific constants used when the corresponding
 parameter has no distributional regression. In particular, specify the
 Beta mean/sample-size model with \code{beta = list(kappa = ...)} and the
 skew double exponential model with
 \code{skew_double_exponential = list(sigma = ..., tau = ...)}.
 \code{kappa} must be positive. \code{tau} must lie in \eqn{(0,1)}, with
-\eqn{0.5} giving the symmetric double exponential distribution.}
-
-\item{h0}{Optional baseline hazard function \code{h0(t)}
-If supplied, it takes precedence over \code{baseline_hazard}/\code{formulaBasehaz}.}
-
-\item{baseline_hazard}{Optional baseline hazard specification. Supported forms:
-\itemize{
-\item character: one of \code{"constant"}, \code{"linear"}, \code{"piecewise"}, \code{"weibull"}, \code{"spline"}.
-\item named list: \code{list(type = ..., ...)} with mode-specific parameters.
-}}
-
-\item{formulaBasehaz}{Optional formula-based baseline hazard model on time,
-e.g. \code{~ 1 + time + I(time^2)}.}
-
-\item{beta_basehaz}{Optional coefficients for \code{formulaBasehaz} (aligned by
-model-matrix column names). If NULL, coefficients are generated.}
+\eqn{0.5} giving the symmetric double exponential distribution.
+A marker-specific \code{tau} in \code{jm_family()} takes precedence over this shared
+family constant and over a \code{tau} distributional regression for that
+marker, matching the fitted likelihood.}
 
 \item{time_cens}{Administrative censoring horizon.}
 
@@ -382,21 +302,36 @@ from the main \code{seed} for reproducible simulations.}
 \item{id_var, marker_var, time_var, y_var, event_time_var, event_var}{Column names aligned
 with \code{joinme_standata()} defaults.}
 
+\item{.mixture_specification}{Private latent-progress simulation
+specification assembled by \code{\link[=simulate_joinme_mix]{simulate_joinme_mix()}}. Users should call
+\code{\link[=simulate_joinme_mix]{simulate_joinme_mix()}} rather than supplying this argument directly.}
+
 \item{fun}{Function to apply.}
+
+\item{...}{Additional arguments passed to fun.}
 
 \item{x}{Numeric vector on link scale.}
 
 \item{inv_link_bc}{Parsed inverse-link bytecode.}
 }
 \value{
-A list containing \code{dataLong}, \code{dataEvent}, \code{truth} (also available as
-\code{true_params}), \code{marker_info}, \code{helpers}, and \code{tmax}. Marker-weight truth
-distinguishes base, latent, and effective values. Baseline-hazard truth is
+A list containing \code{dataLong}, \code{dataEvent}, \code{truth}, \code{marker_info},
+\code{helpers}, and \code{tmax}. Marker-weight truth
+distinguishes base, common-location, departure, and effective values. Baseline-hazard truth is
 stored in \code{truth$baseline_hazard}; when a log-linear representation exists,
 its resolved coefficients are also in \code{truth$stan_fit$bs_gamma_c}.
+Marker-specific fixed skew-Laplace quantiles are recorded in
+\code{truth$stan_fit$use_tau_fixed} and \code{truth$stan_fit$tau_fixed}; realised
+row-specific quantiles are recorded in
+\code{truth$distributional$rowwise$tau}.
 Hazard-scale association coefficients are stored as \code{alpha_cv_total},
 \code{alpha_cs_total}, \code{alpha_cv_mean}, \code{alpha_cs_mean}, \code{alpha_corr}, and
 \code{alpha_vcov}, matching the fitted posterior output names.
+\code{truth$recovery} contains the paired fitting entry-point name and a
+directly reusable argument list. Thus
+\code{do.call(joinme, c(sim$truth$recovery$arguments, list(seed = 1)))}
+recreates the full fitted specification without retyping formulae, priors,
+association controls, or covariance settings.
 
 List of results.
 
@@ -415,6 +350,12 @@ the model fit interface.
 
 The implementation is model-matrix based end-to-end, so every simulated component
 is generated from the same formula machinery used during fitting.
+
+Population coefficients are declared through \code{truth}. A \verb{prior_*()} object
+generates one population coefficient vector and a finite numeric vector
+fixes that vector exactly. Every realised coefficient is stored in \code{truth}.
+Random effects, marker-weight departures, observations and event times remain
+conditional random realisations.
 }
 \examples{
 \dontrun{

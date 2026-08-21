@@ -4,12 +4,13 @@ test_that("predict accepts time_start column and plot returns ribbons", {
   sim <- simulate_joinme(
     n_id = 6,
     families = rep("student_t", 3),
-    n_obs_per_marker_per_id = 4,
     times_obs = seq(0, 6, length.out = 10),
     seed = 2027,
     assoc = c("cv_total"),
-    assoc_coefs = c(cv_total = 0.2),
-    beta_event = c("(Intercept)" = -2.5, "x1" = 0.1, "x2" = -0.1),
+    truth = jm_truth(
+      assoc_coef = list(slope = c(cv_total = 0.2)),
+      survival = list(slope = c(x1 = 0.1, x2 = -0.1))
+    ),
     time_cens = 8
   )
 

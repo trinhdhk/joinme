@@ -1,22 +1,29 @@
 #' Extract posterior draws from JoiNMe objects
 #'
 #' @description
-#' S3 generic to extract component-specific posterior payloads from
+#' S3 generic to extract component-specific posterior results from
 #' `JoiNMeFit` and `JoiNMeDynPred` objects.
 #'
-#' Compared with [draws()], `extract()` provides lower-level
+#' Together with [posterior_draws()], `extract()` is the lowest public posterior
 #' interface. It works component by component and returns the metadata needed to
 #' understand how a requested summary term maps back to the stored Stan
 #' variables or prediction draw blocks.
 #'
+#' The coefficient hierarchy is deliberately one-directional. `extract()` owns
+#' the draw-level representations selected by `what = "fixed_effects"`,
+#' `"random_effects"`, and `"coefficients"`; [posterior_summary()] summarises
+#' those representations; and [fixef()], [ranef()], and [coef()] are the
+#' conventional high-level entry points. This single path avoids parallel
+#' coefficient APIs with competing semantics.
+#'
 #' Use `extract()` when you need a specific model component, the corresponding
-#' `term_map`, or a specialised payload such as `what = "association_plot"`.
-#' Use [draws()] when you want a single posterior object ready for `posterior`
+#' `term_map`, or a specialised result such as `what = "association_plot"`.
+#' Use [posterior_draws()] when you want a single posterior object ready for `posterior`
 #' or `bayesplot` workflows.
 #'
 #' @param object A supported JoiNMe object.
 #' @param ... Additional method-specific arguments.
-#' @seealso [draws()]
+#' @seealso [posterior_draws()]
 #' @export
 extract <- function(object, ...) {
   UseMethod("extract")
@@ -91,9 +98,7 @@ extract <- function(object, ...) {
 #'
 #' @description
 #' Selects the posterior coefficient representation on the original time scale
-#' and pairs every selected Stan variable with its model-matrix term. The
-#' original-scale `beta` coefficients are preferred over `beta_scaled` whenever
-#' both are present.
+#' and pairs every selected Stan variable with its model-matrix term.
 #'
 #' @param sd Stan data and fitted-model metadata.
 #' @param all_vars Character vector of available posterior variables.
@@ -110,16 +115,8 @@ extract <- function(object, ...) {
     return(data.frame(term = character(0), variable = character(0), stringsAsFactors = FALSE))
   }
 
-  beta_scaled_vars <- paste0("beta_scaled[", seq_len(p), "]")
   beta_vars <- paste0("beta[", seq_len(p), "]")
-
-  if (all(beta_vars %in% all_vars)) {
-    chosen <- beta_vars
-  } else if (all(beta_scaled_vars %in% all_vars)) {
-    chosen <- beta_scaled_vars
-  } else {
-    chosen <- beta_vars[beta_vars %in% all_vars]
-  }
+  chosen <- beta_vars[beta_vars %in% all_vars]
 
   if (!length(chosen)) {
     return(data.frame(term = character(0), variable = character(0), stringsAsFactors = FALSE))
@@ -242,30 +239,6 @@ extract <- function(object, ...) {
 
     map <- data.frame(term = as.character(assoc_terms), variable = as.character(assoc_vars), stringsAsFactors = FALSE)
 
-    marker_terms <- sd$marker_levels %||% paste0("marker_", seq_len(sd$D %||% 0L))
-    shared_weights <- isTRUE(as.integer(sd$shared_marker_weights %||% 1L) == 1L)
-    weight_term_keys <- .active_weighted_assoc_terms(sd)
-    if (shared_weights && length(weight_term_keys) > 1L) {
-      weight_term_keys <- weight_term_keys[1L]
-    }
-    mw_rows <- list()
-    for (term_key in weight_term_keys) {
-      mw_vars <- paste0(.marker_weight_var_prefix(term_key, effective = TRUE), "[", seq_len(sd$D %||% 0L), "]")
-      mw_vars <- mw_vars[mw_vars %in% all_vars]
-      if (length(mw_vars) == 0L) next
-      this_marker_terms <- marker_terms
-      if (length(this_marker_terms) != length(mw_vars)) this_marker_terms <- paste0("marker_", seq_along(mw_vars))
-      mw_rows[[length(mw_rows) + 1L]] <- data.frame(
-        term = vapply(this_marker_terms, function(marker_label) {
-          .marker_weight_summary_label(term_key, marker_label, shared_marker_weights = shared_weights)
-        }, character(1)),
-        variable = as.character(mw_vars),
-        stringsAsFactors = FALSE
-      )
-    }
-    if (length(mw_rows) > 0L) {
-      map <- rbind(map, do.call(rbind, mw_rows))
-    }
   } else if (what == "distributional") {
     dist_map <- .distributional_term_map(sd, cfg, all_vars)
     if (length(dist_map) > 0) {
@@ -303,54 +276,38 @@ extract <- function(object, ...) {
   } else if (what == "likelihood_scale") {
     map_rows <- list()
 
-    beta_vars <- paste0("beta_scaled[", seq_len(sd$P), "]")
-    beta_vars <- beta_vars[beta_vars %in% all_vars]
-    if (length(beta_vars) == 0L) {
-      beta_vars <- paste0("beta[", seq_len(sd$P), "]")
-    }
+    beta_vars <- paste0("beta[", seq_len(sd$P), "]")
     beta_vars <- beta_vars[beta_vars %in% all_vars]
     if (length(beta_vars) > 0) {
       beta_terms <- .fit_design_term_labels(object, what = "fixef", n_terms = sd$P)
       if (length(beta_terms) != length(beta_vars)) beta_terms <- beta_vars
       map_rows[[length(map_rows) + 1L]] <- data.frame(
-        term = paste0("beta_scaled: ", as.character(beta_terms)),
+        term = paste0("beta: ", as.character(beta_terms)),
         variable = as.character(beta_vars),
         stringsAsFactors = FALSE
       )
     }
 
-    tau_id_vars <- paste0("tau_u_eff[", seq_len(sd$R_id %||% 0L), "]")
+    tau_id_vars <- paste0("tau_u[", seq_len(sd$R_id %||% 0L), "]")
     tau_id_vars <- tau_id_vars[tau_id_vars %in% all_vars]
     if (length(tau_id_vars) > 0) {
       tau_id_terms <- sd$zid_cols %||% tau_id_vars
       if (length(tau_id_terms) != length(tau_id_vars)) tau_id_terms <- tau_id_vars
       map_rows[[length(map_rows) + 1L]] <- data.frame(
-        term = paste0("id_sd_eff: ", as.character(tau_id_terms)),
+        term = paste0("id_sd: ", as.character(tau_id_terms)),
         variable = as.character(tau_id_vars),
         stringsAsFactors = FALSE
       )
     }
 
-    tau_marker_vars <- paste0("tau_v_eff[", seq_len(sd$R_mk %||% 0L), "]")
+    tau_marker_vars <- paste0("tau_v[", seq_len(sd$R_mk %||% 0L), "]")
     tau_marker_vars <- tau_marker_vars[tau_marker_vars %in% all_vars]
     if (length(tau_marker_vars) > 0) {
       tau_marker_terms <- sd$zmk_cols %||% tau_marker_vars
       if (length(tau_marker_terms) != length(tau_marker_vars)) tau_marker_terms <- tau_marker_vars
       map_rows[[length(map_rows) + 1L]] <- data.frame(
-        term = paste0("marker_sd_eff: ", as.character(tau_marker_terms)),
+        term = paste0("marker_sd: ", as.character(tau_marker_terms)),
         variable = as.character(tau_marker_vars),
-        stringsAsFactors = FALSE
-      )
-    }
-
-    row_scale_vars <- paste0("marker_id_row_scale_eff[", seq_len(sd$Q_idm %||% 0L), "]")
-    row_scale_vars <- row_scale_vars[row_scale_vars %in% all_vars]
-    if (length(row_scale_vars) > 0) {
-      row_scale_terms <- sd$zidm_cols %||% row_scale_vars
-      if (length(row_scale_terms) != length(row_scale_vars)) row_scale_terms <- row_scale_vars
-      map_rows[[length(map_rows) + 1L]] <- data.frame(
-        term = paste0("id_marker_row_scale_eff: ", as.character(row_scale_terms)),
-        variable = as.character(row_scale_vars),
         stringsAsFactors = FALSE
       )
     }
@@ -369,21 +326,23 @@ extract <- function(object, ...) {
 #' Extracts one fitted-model component at a time and returns both the draw-level
 #' values and the mapping that produced them.
 #'
-#' This differs from [draws()] in two important ways:
+#' This differs from [posterior_draws()] in two important ways:
 #' - `extract()` keeps the request scoped to one semantic component such as
 #'   fixed effects, survival coefficients, association terms, distributional
 #'   terms, or likelihood-scale parameters.
-#' - `extract()` returns a structured list with `draws` plus `term_map`
+#' - `extract()` returns a structured list with `posterior_draws` plus `term_map`
 #'   (and for `what = "association_plot"`, additional plotting support data)
 #'   instead of a single `posterior` draws object.
 #'
 #' In short, use `extract()` when you need component-aware extraction and use
-#' [draws()] when you need one renamed posterior object for general downstream
+#' [posterior_draws()] when you need one renamed posterior object for general downstream
 #' analysis.
 #'
 #' @param object A `JoiNMeFit` object.
 #' @param what Character component selector. One of
-#'   `"fixef"`, `"gamma_w"`, `"basehaz"`,
+#'   `"fixed_effects"`, `"random_effects"`, `"coefficients"`,
+#'   `"marker_weights"`, `"fixef"`,
+#'   `"gamma_w"`, `"basehaz"`,
 #'   `"baseline_hazard"`, `"assoc"`, `"association_plot"`,
 #'   `"distributional"`, `"distributional_regression"`, `"likelihood_scale"`,
 #'   or `"raw"`.
@@ -398,7 +357,7 @@ extract <- function(object, ...) {
 #'   draws-by-term matrix.
 #'
 #' @return A list with fields:
-#'   - `draws`: numeric array when `keep_chains = TRUE` (iteration x chain x term),
+#'   - `posterior_draws`: numeric array when `keep_chains = TRUE` (iteration x chain x term),
 #'     otherwise a numeric matrix (rows = draws, cols = requested terms). For
 #'     `what = "association_plot"`, this is a named list of compact draw
 #'     matrices keyed by association term.
@@ -408,10 +367,10 @@ extract <- function(object, ...) {
 #'   - `transform_coeff_draws`: for `what = "association_plot"`,
 #'     draw-specific fitted I-spline or ordered piecewise-linear ordinates,
 #'     including one matrix per covariance component when applicable.
-#' @seealso [draws()] for a higher-level interface that returns a single `posterior`
+#' @seealso [posterior_draws()] for a higher-level interface that returns a single `posterior`
 #' @export
 extract.JoiNMeFit <- function(object,
-                              what = c("fixef", "gamma_w", "basehaz", "baseline_hazard", "assoc", "association_plot", "distributional", "distributional_regression", "likelihood_scale", "raw"),
+                              what = c("fixed_effects", "random_effects", "coefficients", "marker_weights", "fixef", "gamma_w", "basehaz", "baseline_hazard", "assoc", "association_plot", "distributional", "distributional_regression", "likelihood_scale", "raw"),
                               term = NULL,
                               variable = NULL,
                               draws = NULL,
@@ -422,6 +381,68 @@ extract.JoiNMeFit <- function(object,
   fit <- object$fit
   sd <- object$stan_data
   cfg <- object$config
+
+  # These three selectors own the complete draw-level inputs used by the
+  # posterior-summary layer and corresponding high-level coefficient methods. They deliberately return
+  # scientific structures rather than Stan storage coordinates. The shorter
+  # `what = "fixef"` selector below remains the longitudinal design-matrix
+  # component and is useful when a rectangular posterior object is required.
+  if (what %in% c("fixed_effects", "random_effects", "coefficients")) {
+    structured_draws <- switch(
+      what,
+      fixed_effects = .extract_fixed_effect_draws(object, draws = draws, seed = seed),
+      random_effects = .extract_random_effect_draws(object, draws = draws, seed = seed),
+      coefficients = .extract_combined_coefficient_draws(object, draws = draws, seed = seed)
+    )
+    return(list(
+      posterior_draws = structured_draws,
+      term_map = NULL,
+      metadata = list(
+        what = what,
+        scale = "scientific",
+        keep_chains = FALSE
+      )
+    ))
+  }
+
+  # Marker weights are a derived posterior quantity rather than one rectangular
+  # Stan variable. This selector makes their chain-preserving reconstruction
+  # available without requiring callers to reach into package internals.
+  if (identical(what, "marker_weights")) {
+    active_terms <- .reported_marker_weight_terms(sd) # one representative term per fitted shared or term-specific set
+    if (!is.null(term)) active_terms <- intersect(active_terms, as.character(term))
+    if (!length(active_terms)) {
+      cli::cli_abort("No matching marker-weight set is available for extraction.")
+    }
+    all_variables <- tryCatch(
+      posterior::variables(.get_draws_obj(fit)),
+      error = function(error) character(0)
+    ) # posterior vocabulary used to select fitted rather than constant weights
+    weight_arrays <- lapply(active_terms, function(term_key) {
+      .association_marker_weight_array(
+        object,
+        term_key = term_key,
+        draws = draws,
+        seed = seed,
+        all_vars = all_variables
+      )
+    })
+    names(weight_arrays) <- active_terms
+    if (!isTRUE(keep_chains)) {
+      weight_arrays <- lapply(weight_arrays, function(weight_array) {
+        posterior::as_draws_matrix(posterior::as_draws_array(weight_array))
+      })
+    }
+    return(list(
+      posterior_draws = if (length(weight_arrays) == 1L) weight_arrays[[1L]] else weight_arrays,
+      term_map = data.frame(
+        term = active_terms,
+        variable = "effective_marker_weight",
+        stringsAsFactors = FALSE
+      ),
+      metadata = list(what = what, keep_chains = isTRUE(keep_chains))
+    ))
+  }
 
   if (what == "association_plot") {
     data <- .get_association_plot_data(object, seed = seed)
@@ -444,7 +465,7 @@ extract.JoiNMeFit <- function(object,
     }
 
     return(list(
-      draws = data$coeff_draws[keep_terms],
+      posterior_draws = data$coeff_draws[keep_terms],
       term_map = term_map,
       support = support,
       marker_weight_draws = data$marker_weight_draws,
@@ -480,7 +501,10 @@ extract.JoiNMeFit <- function(object,
     event_rows <- seq_len(nrow(b_event))
     row_labels <- if (!is.null(object$dataEvent) && nrow(object$dataEvent) == nrow(b_event)) {
       ids <- as.character(object$dataEvent$id %||% event_rows)
-      tvals <- as.numeric(object$dataEvent$time %||% rep(NA_real_, nrow(b_event)))
+      tvals <- .event_ordinate_to_original_time(
+        sd$S_event,
+        tmax
+      ) # endpoint labels in original study-time units, independent of the Surv variable's name
       if (k_event > 1L && !is.null(sd$event_type) && length(sd$event_type) == nrow(b_event)) {
         paste0("etype", sd$event_type, "|id=", ids, "|time=", signif(tvals, 6))
       } else {
@@ -500,8 +524,12 @@ extract.JoiNMeFit <- function(object,
         k_idx <- match(k_vars, dimnames(arr)[[3]])
         if (any(is.na(k_idx))) next
         for (ch in seq_len(dim(arr)[2])) {
-          coef_mat <- arr[, ch, k_idx, drop = FALSE]
-          out[, ch, col_pos:(col_pos + nrow(b_event) - 1L)] <- exp(as.matrix(coef_mat) %*% t(b_event)) / tmax
+          coef_mat <- matrix(
+            arr[, ch, k_idx, drop = FALSE],
+            nrow = dim(arr)[1],
+            ncol = length(k_idx)
+          ) # iteration-by-basis coefficient matrix after removing the singleton chain dimension
+          out[, ch, col_pos:(col_pos + nrow(b_event) - 1L)] <- exp(coef_mat %*% t(b_event)) / tmax
         }
         prefix <- if (k_event > 1L) paste0("event", k, ":") else ""
         dimnames(out)[[3]][col_pos:(col_pos + nrow(b_event) - 1L)] <- paste0(prefix, row_labels)
@@ -513,7 +541,7 @@ extract.JoiNMeFit <- function(object,
         map <- map[keep, , drop = FALSE]
         out <- out[, , keep, drop = FALSE]
       }
-      return(list(draws = out, term_map = map))
+      return(list(posterior_draws = out, term_map = map))
     }
 
     dm <- .get_draws_matrix(fit, variables = bh_vars, draws = draws, seed = seed)
@@ -537,7 +565,7 @@ extract.JoiNMeFit <- function(object,
       map <- map[keep, , drop = FALSE]
       out <- out[, keep, drop = FALSE]
     }
-    return(list(draws = out, term_map = map))
+    return(list(posterior_draws = out, term_map = map))
   }
 
   all_vars <- tryCatch(posterior::variables(.get_draws_obj(fit)), error = function(e) character(0))
@@ -555,23 +583,6 @@ extract.JoiNMeFit <- function(object,
       x = "No matching variables found for extraction.",
       i = "Check {.arg what}, {.arg term}, and {.arg variable} filters."
     ))
-  }
-
-  .event_time_terms <- function(sd, mapped_terms) {
-    idx <- as.integer(sd$idx_time_gamma %||% integer(0))
-    idx <- idx[is.finite(idx) & idx >= 1L]
-    labels <- as.character(sd$w_cols %||% character(0))
-    if (!length(idx) || length(labels) < max(idx)) {
-      return(character(0))
-    }
-    base_terms <- unique(labels[idx])
-    if (isTRUE(as.integer(sd$K_event %||% 1L) > 1L)) {
-      base_terms <- c(
-        base_terms,
-        as.vector(outer(seq_len(as.integer(sd$K_event %||% 1L)), base_terms, function(k, term_label) paste0("event", k, ": ", term_label)))
-      )
-    }
-    intersect(as.character(mapped_terms %||% character(0)), base_terms)
   }
 
   # Preserve order and duplicates from the map for user-facing terms.
@@ -594,16 +605,6 @@ extract.JoiNMeFit <- function(object,
     for (j in seq_len(nrow(map))) {
       out[, , j] <- arr[, , var_idx[j]]
     }
-    if (identical(what, "gamma_w")) {
-      tmax <- suppressWarnings(as.numeric(sd$tmax %||% 1.0))
-      if (is.finite(tmax) && length(tmax) == 1L && tmax > 0) {
-        time_terms <- .event_time_terms(sd, map$term)
-        if (length(time_terms) > 0L) {
-          keep <- map$term %in% time_terms
-          out[, , keep] <- out[, , keep, drop = FALSE] / tmax
-        }
-      }
-    }
   } else {
     dm <- .get_draws_matrix(fit, variables = var_unique, draws = draws, seed = seed)
     out <- matrix(NA_real_, nrow = nrow(dm), ncol = nrow(map))
@@ -611,20 +612,10 @@ extract.JoiNMeFit <- function(object,
     for (j in seq_len(nrow(map))) {
       out[, j] <- dm[, map$variable[j]]
     }
-    if (identical(what, "gamma_w")) {
-      tmax <- suppressWarnings(as.numeric(sd$tmax %||% 1.0))
-      if (is.finite(tmax) && length(tmax) == 1L && tmax > 0) {
-        time_terms <- .event_time_terms(sd, map$term)
-        if (length(time_terms) > 0L) {
-          keep <- map$term %in% time_terms
-          out[, keep] <- out[, keep, drop = FALSE] / tmax
-        }
-      }
-    }
   }
 
   list(
-    draws = out,
+    posterior_draws = out,
     term_map = map
   )
 }
@@ -634,10 +625,10 @@ extract.JoiNMeFit <- function(object,
 #' @description
 #' Extracts stored prediction draw blocks without flattening them first.
 #'
-#' This is the structured companion to [draws.JoiNMeDynPred()]. Use
+#' This is the structured companion to [posterior_draws.JoiNMeDynPred()]. Use
 #' `extract()` when you want to keep the original prediction block semantics
 #' (`longitudinal`, `survival`, `cumhaz`, random effects, and scale/id filters).
-#' Use [draws()] when you want those blocks flattened into one
+#' Use [posterior_draws()] when you want those blocks flattened into one
 #' `posterior`-compatible draw object with composite variable labels.
 #'
 #' @param object A `JoiNMeDynPred` object.
@@ -647,7 +638,7 @@ extract.JoiNMeFit <- function(object,
 #' @param scale Optional scale filter for longitudinal blocks (`epred`, `linpred`, `predict`).
 #'
 #' @return A list with fields:
-#'   - `draws`: numeric matrix or list of matrices
+#'   - `posterior_draws`: numeric matrix or list of matrices
 #'   - `meta`: extraction metadata
 #' @export
 extract.JoiNMeDynPred <- function(
@@ -680,7 +671,7 @@ extract.JoiNMeDynPred <- function(
 
   # For random-effect components, return raw structured content with optional id filter.
   if (what %in% c("random_effects_id", "random_effects_marker_id")) {
-    return(list(draws = dd, meta = list(what = what, ids = names(dd))))
+    return(list(posterior_draws = dd, meta = list(what = what, ids = names(dd))))
   }
 
   # Flatten longitudinal/survival draw components into matrices with informative column names.
@@ -720,7 +711,7 @@ extract.JoiNMeDynPred <- function(
   mats <- mats[!vapply(mats, is.null, logical(1))]
 
   list(
-    draws = mats,
+    posterior_draws = mats,
     meta = list(what = what, ids = names(mats), scale = scale)
   )
 }

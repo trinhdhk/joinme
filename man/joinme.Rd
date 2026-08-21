@@ -7,8 +7,8 @@
 joinme(
   formulaLong,
   dataLong,
-  formulaEvent,
-  dataEvent,
+  formulaEvent = NULL,
+  dataEvent = NULL,
   formulaVCov = ~1,
   formulaDist = NULL,
   control = list(),
@@ -16,8 +16,6 @@ joinme(
   families = NULL,
   transforms = NULL,
   priors = joinme_priors(),
-  fixed_marker_weights = FALSE,
-  shared_marker_weights = TRUE,
   basehaz = joinme_basehaz(),
   fit = TRUE,
   seed = NULL,
@@ -38,18 +36,34 @@ formula-scoped subject/group weights.}
 \item{dataLong}{Long-format longitudinal data with columns for id, marker, time,
 outcome, and covariates referenced in \code{formulaLong}.}
 
-\item{formulaEvent}{Survival formula for baseline covariates and event model.
+\item{formulaEvent}{Optional survival formula for baseline covariates and
+the event model. Supply it together with \code{dataEvent}, or leave both \code{NULL}
+to fit only the nested longitudinal mixed model.
 Supported LHS forms are \code{survival::Surv(time, status)},
 \code{survival::Surv(start, stop, status)},
 \code{survival::Surv(time, status, type = "left")}, and
 \code{survival::Surv(time1, time2, type = "interval2")}.
-The legacy \code{type = "interval"} representation is not supported.}
+The former \code{type = "interval"} representation is not supported.
+An \code{interval2} response must contain one row per id and presently describes
+one event type. Its full likelihood is evaluated as
+\eqn{S(L)-S(R)} for \eqn{L<T\le R}; the lower inspection limit is not
+treated as delayed entry. The event covariates on that row are held over
+the represented risk time, whilst longitudinal association terms remain
+time-varying. See the model-interpretation vignette for all four censoring
+contributions.}
 
-\item{dataEvent}{Event-process data with either one row per id
+\item{dataEvent}{Optional event-process data with either one row per id
 (\code{Surv(time, status)}) or multiple interval rows per id
-(\code{Surv(start, stop, status)}). Covariates in \code{formulaEvent} may vary by interval.}
+(\code{Surv(start, stop, status)}). Covariates in \code{formulaEvent} may vary by
+interval for a counting-process response. Left- and interval-censored
+responses require one row per id. Leave this and \code{formulaEvent} as \code{NULL}
+for longitudinal-only fitting.}
 
-\item{formulaVCov}{Covariance regression formula for id-specific marker-by-id effects.
+\item{formulaVCov}{Covariance regression specification for id-specific
+marker-by-id effects. Supply one formula to share its observed covariates,
+or \code{list(sd = ~ ..., corr = ~ ...)} to model standard deviations and
+off-diagonal partial correlations independently. Intercepts are always
+component-specific parameters and are not duplicated in either design.
 If the marker block omits the inner \code{( ... | id )}, marker-by-id effects are
 absent and covariance-style associations (\code{corr}, \code{vcov}) are not allowed.
 When present, \code{corr} associations use the off-diagonal entries of the
@@ -109,12 +123,8 @@ Defaults to the full subject count when \code{threads_per_chain = 1}, and to
 otherwise.
 \item force_recompile: logical; recompile the Stan model if needed.
 \item quadrature_nodes: optional positive integer total node target for survival
-integration. Allowed values are exactly 7/15/31/41/51/61. Only the node
-count is passed to Stan; GK nodes/weights are fixed in the Stan code.
+integration. Allowed values are exactly 7/15/31/41/51/61.
 \item vcov_diag_link: "softplus" or "exp" for covariance regression diagonals.
-\item \code{tau_fixed}: optional fixed \code{tau} in \eqn{(0,1)} for the skew double
-exponential distribution. It cannot be combined with a \code{tau}
-distributional regression.
 }}
 
 \item{draws}{Optional number of posterior draws used for summaries (not sampling).}
@@ -122,6 +132,8 @@ distributional regression.
 \item{families}{Marker-specific family specification (optional).
 Can be a character vector of family names aligned to marker order, or a
 list of \code{jm_family(...)} entries with per-marker links.
+A skew-Laplace marker may fix its quantile/asymmetry parameter through
+\code{jm_family("skew_laplace", tau = 0.8)}; otherwise \code{tau} is estimated.
 Supported named forward links are \code{identity}, \code{log}, \code{logit}, \code{probit},
 and \code{exp}; \code{jm_family()} also accepts an invertible formula link or a
 directly specified inverse-link formula. In formula syntax,
@@ -136,19 +148,19 @@ shift through \code{intercept = TRUE} and/or \code{slope = TRUE}, for example
 \code{joinme_tf(cv_total = ~ expit(x, intercept = TRUE, slope = TRUE))}, which
 is fitted as \code{expit(iota_1 + iota_2 * x)}. See details.}
 
-\item{priors}{Prior declaration. Prefer \code{joinme_priors(...)}; raw named lists
-with components \code{beta}, \code{alpha}, \code{iota}, and \code{lkj} remain supported.}
-
-\item{fixed_marker_weights}{Logical; if TRUE, marker weights are fixed at the
-supplied base values. If FALSE, marker-weight perturbations are estimated
-using the family selected by \code{shrinkage} (0 = Student-t(6), 1 = Laplace,
-2 = Normal).}
-
-\item{shared_marker_weights}{Logical; if TRUE, all weighted marker-based
-association terms share one marker-weight structure. If FALSE, each active
-weighted marker-based association term gets its own marker-weight structure.
-When \code{marker_weights} is a named list, use names \code{cv_total}, \code{cs_total},
-\code{cv_marker}, and \code{cs_marker}.}
+\item{priors}{Prior declaration from \code{\link[=jm_prior]{jm_prior()}}. Global \code{intercept} and
+\code{slope} declarations may be replaced independently within \code{longitudinal},
+\code{survival}, \code{vcov}, \code{assoc}, \code{functional}, \code{marker_weights}, and named
+distributional regressions. Distributional names may use family or marker
+selectors, for example \code{`sigma[family='student']`} or
+\code{`sigma[marker='y']`}; marker selection requires a uniquely associated
+family-scoped \code{formulaDist} block. \code{marker$family}, \code{class$slope}, and an
+LKJ declaration govern their distinct structures.
+The \code{priors$marker_weights} component contains the complete marker-weight
+declaration. Its \code{offset} is added to fitted weights and must be wholly
+named or wholly unnamed. Set \code{family = "constant"} (or \code{"none"}) to use
+that offset exactly. Otherwise the model adds a fitted common location and
+standardised marker-specific departures from the declared family.}
 
 \item{basehaz}{An object of class \code{joinme_basehaz} created by \code{joinme_basehaz()}.
 This controls the baseline hazard parameterisation and spline basis. See \code{?joinme_basehaz} for details.}
@@ -185,14 +197,29 @@ are rescaled within Stan so fixed effects remain interpretable on the original s
 
 Marker weights (see \code{joinme_standata()}) are used to form marker-average summaries
 for both current value (CV) and current slope (CS) association components. When
-\code{shared_marker_weights = TRUE}, all weighted marker-based association terms share
-one marker-weight structure. When \code{shared_marker_weights = FALSE}, each active
+\code{priors$marker_weights$shared = TRUE}, all weighted marker-based association terms share
+one marker-weight structure. When \code{priors$marker_weights$shared = FALSE}, each active
 weighted marker-based association term (\code{cv_total}, \code{cs_total}, \code{cv_marker},
 \code{cs_marker}) gets its own marker-weight structure. When
-\code{fixed_marker_weights = FALSE}, signed perturbations are estimated around the
-supplied base weights. The effective marker intensities are used directly,
-without additional normalisation, to scale the corresponding association
-contribution.
+the family is stochastic, one common mean per weight set and signed
+marker-specific departures are estimated around the offset declared in
+\code{priors$marker_weights$offset}. Each offset vector must be wholly named or
+wholly unnamed. The common mean uses
+\code{jm_prior(marker_weights = list(intercept = ...))}; standardised departures
+use the centred unit-scale family named by \code{marker_weights$family}, for
+example \code{jm_prior(marker_weights = list(family = "laplace"))}. The family
+intercept is a fitting prior and does not set a simulation truth. A bare
+numeric value retains the ordinary prior-scale shorthand. The marker-only
+current-value and slope channels can supply little
+information about a common shift when the average centred marker trajectory
+is close to zero, so this location prior is substantively important. The family
+name \code{"student_t"} learns set-specific degrees of freedom; each excess above
+two has a \code{Gamma(2, 0.1)} shape--rate prior. A
+\code{prior_student_t(df = ...)} declaration always fixes \code{df} instead. The
+family names \code{"constant"} and \code{"none"} instead use the declared offset as
+the complete marker weight and fit neither a common mean nor departures. The
+effective marker intensities are used directly, without additional
+normalisation, to scale the corresponding association contribution.
 
 The returned \code{JoiNMeFit} object stores a compact association plotting bundle
 containing only the posterior quantities needed to draw association curves
@@ -201,9 +228,17 @@ support ranges). This keeps association plotting usable after serialization
 without needing the full transient CmdStan CSV outputs.
 
 For CmdStanR fits, \code{joinme()} also eagerly imports the CSV-backed fit
-contents in memory before returning. This mirrors the loading step used by
+contents in memory before returning. This mirrors the loading operation used by
 \code{cmdstanr::save_object()} so later \code{saveRDS()} calls do not rely on the
 original CmdStan CSV files remaining on disk.
+
+\code{joinme()} can also fit the nested multivariate longitudinal model without
+an event process. Leave both \code{formulaEvent} and \code{dataEvent} as \code{NULL}. The
+longitudinal likelihood and every random-effect block are retained, whereas
+the survival likelihood and longitudinal--survival association are removed.
+Internally, a likelihood-neutral event scaffold is used only to reuse the
+common design and Stan infrastructure. Its event parameters are not reported
+as fitted scientific results.
 
 Formula-scoped subject weighting is supported in random-effect grouping terms via
 \verb{weighted(group, weights = <column>)}. For example:
@@ -277,7 +312,7 @@ should fall as the raw association feature increases.
 \item \code{x}: raw association-feature values used either to define training pairs or
 to help derive knot locations.
 \item \code{y}: optional target transformed values at those \code{x} points. Supplying \code{y}
-activates the legacy plug-in fit; omitting it activates Stan estimation.
+activates the plug-in fit; omitting it activates Stan estimation.
 \item \code{lambda}: smoothness control (larger = smoother transform).
 \item \code{direction}: monotone orientation for penalised spline families. Accepted
 values are \code{"increasing"} and \code{"decreasing"}. When \code{y} is supplied, the
@@ -305,6 +340,13 @@ lme4-style \code{||} in \code{formulaLong} to request diagonal random-effect cov
 }
 \examples{
 \dontrun{
+longitudinal_fit <- joinme(
+  formulaLong = y ~ time + (1 + time | id) +
+    (1 + time + (1 + time | id) | marker),
+  dataLong = dataLong,
+  families = rep("gaussian", 3)
+)
+
 formulaDist <- list(
   sigma[family=student_t] ~ 1 + time + (1 | id),
   sigma[family=gaussian] ~ 1 + x1,

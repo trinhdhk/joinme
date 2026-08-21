@@ -3,7 +3,7 @@
  * @brief Threaded implementation of the Joint Mixed-Effects Model using reduce_sum.
  *
  * @details
- * This is the thread-capable joinme fitting program used for both serial and
+ * This is the ordinary, non-mixture fitting programme used for both serial and
  * parallel execution. It uses `reduce_sum` to parallelize the likelihood
  * computation over subjects when more than one thread is requested.
  *
@@ -14,312 +14,87 @@
  */
 
 functions {
-  #include helper/functions/eta_fd.stanfunctions 
-  #include helper/functions/eta_chol_corr.stanfunctions
-  #include helper/functions/eta_vcov_weighted_const.stanfunctions
-  #include helper/functions/cumhaz.stanfunctions
-  #include helper/functions/functional_transform.stanfunctions
-  #include helper/functions/link_functions.stanfunctions 
-  #include helper/functions/basis_functions.stanfunctions
-  #include helper/functions/composite_transform.stanfunctions 
-  #include helper/functions/joinme_fit_partial.stanfunctions
+  #include include/etc/functions/eta_fd.stanfunctions 
+  #include include/etc/functions/eta_chol_corr.stanfunctions
+  #include include/etc/functions/eta_vcov_weighted_const.stanfunctions
+  #include include/etc/functions/cumhaz.stanfunctions
+  #include include/etc/bytecode/interpreter.stanfunctions
+  #include include/etc/functions/link_functions.stanfunctions 
+  #include include/etc/functions/basis_functions.stanfunctions
+  #include include/etc/functions/composite_transform.stanfunctions
+  #include include/etc/functions/prior_families.stanfunctions
+  #include include/etc/functions/joinme_fit_partial.stanfunctions
 }
 
 data {
-  #include helper/data/fit_data.stan
-  array[n_id] int<lower=1, upper=N> id_start;
-  array[n_id] int<lower=1, upper=N> id_end;
-  int<lower=1> grainsize;
+  // The master programme assembles scientific data in dependency order.
+  #include include/submodels/longitudinal/data/fit.stan
+  #include include/submodels/marker_weight/data/fit.stan
+  #include include/submodels/survival/data/fit.stan
+  #include include/submodels/assoc/data/fit.stan
+  #include include/submodels/functional/data/fit.stan
+  #include include/etc/data/regression_prior_data.stan
+  array[n_id] int<lower=1, upper=N> id_start; // first longitudinal row belonging to each individual
+  array[n_id] int<lower=1, upper=N> id_end; // final longitudinal row belonging to each individual
+  int<lower=1> grainsize; // number of individuals assigned to each reduce-sum slice
 }
 
 transformed data {
-  #include helper/transformed_data/fit_cov_index.stan
+  // Each submodel performs its own parameter-free preparation.
+  #include include/submodels/longitudinal/transformed_data/fit.stan
+  #include include/submodels/marker_weight/transformed_data/fit.stan
+  #include include/submodels/survival/transformed_data/fit.stan
+  #include include/submodels/assoc/transformed_data/fit.stan
+  #include include/submodels/functional/transformed_data/fit.stan
 
-  array[n_id] int id_seq;
+  array[n_id] int id_seq; // consecutive individual indices passed to reduce_sum
   for (i in 1 : n_id) {
     id_seq[i] = i;
   }
 }
 
 parameters {
-  #include helper/parameters/joinme_fit_common.stan
+  // Unknown quantities remain grouped by their scientific interpretation.
+  #include include/submodels/longitudinal/parameters/fit.stan
+  #include include/submodels/survival/parameters/fit.stan
+  #include include/submodels/assoc/parameters/fit.stan
+  #include include/submodels/marker_weight/parameters/fit.stan
+  #include include/submodels/functional/parameters/fit.stan
+  #include include/etc/parameters/regression_prior_parameters.stan
 }
 
 transformed parameters {
-  #include helper/transformed_parameters/fit_scaling_and_effects.stan
+  // Common prior transformations precede scientifically derived quantities.
+  #include include/etc/transformed_parameters/regression_coefficients.stan
+  #include include/submodels/longitudinal/transformed_parameters/fit.stan
+  #include include/submodels/marker_weight/transformed_parameters/fit.stan
+  #include include/submodels/functional/transformed_parameters/fit.stan
+  #include include/submodels/assoc/transformed_parameters/fit.stan
+  #include include/submodels/survival/transformed_parameters/fit.stan
 }
 
 model {
-  #include helper/model/fit_priors.stan
-  
-  // -------------------- Threaded likelihood
-  // Each task evaluates a slice of subjects (id_seq), summing both longitudinal
-  // and survival contributions. The grainsize controls chunk size; adjust based
-  // on subject count and per-subject cost for best throughput.
-  target += reduce_sum(
-    partial_joinme,
-    id_seq,
-    grainsize,
-    /* Longitudinal observation layout */
-    id,
-    event_id,
-    event_start_idx,
-    event_end_idx,
-    marker,
-    y_real,
-    y_int,
-    trials,
-    family_long,
-    link_long,
-    max_inv_link_ops,
-    inv_link_n_ops,
-    inv_link_ops,
-    max_inv_link_const,
-    inv_link_n_const,
-    inv_link_const,
-    n_family_sigma,
-    marker_to_sigma_family,
-    n_family_nu,
-    marker_to_nu_family,
-    n_family_phi,
-    marker_to_phi_family,
-    n_family_alpha,
-    marker_to_alpha_family,
-    n_family_kappa,
-    marker_to_kappa_family,
-    n_family_tau,
-    marker_to_tau_family,
-    // flag_resid_dim,
-    use_tau_fixed,
-    tau_fixed,
-    X_obs,
-    Z_id_obs,
-    Z_mk_obs,
-    Z_idm_obs,
-    R_mk,
-    Q_idm,
-    /* Fixed effects + distributional regression design */
-    beta_scaled,
-    P_sigma,
-    X_sigma,
-    P_nu,
-    X_nu,
-    P_phi,
-    X_phi,
-    P_alpha,
-    X_alpha,
-    P_kappa,
-    X_kappa,
-    P_tau,
-    X_tau,
-    /* Distributional regression coefficients */
-    beta_sigma,
-    beta_nu,
-    beta_phi,
-    beta_alpha,
-    beta_kappa,
-    beta_tau,
-    /* Distributional random effects (by submodel) */
-    n_re_sigma,
-    K_sigma,
-    K_sigma_max,
-    Z_sigma,
-    J_sigma,
-    tau_sigma,
-    z_sigma,
-    n_re_nu,
-    K_nu,
-    K_nu_max,
-    Z_nu,
-    J_nu,
-    tau_nu,
-    z_nu,
-    n_re_phi,
-    K_phi,
-    K_phi_max,
-    Z_phi,
-    J_phi,
-    tau_phi,
-    z_phi,
-    n_re_alpha,
-    K_alpha,
-    K_alpha_max,
-    Z_alpha,
-    J_alpha,
-    tau_alpha,
-    z_alpha,
-    n_re_kappa,
-    K_kappa,
-    K_kappa_max,
-    Z_kappa,
-    J_kappa,
-    tau_kappa,
-    z_kappa,
-    n_re_tau,
-    K_tau,
-    K_tau_max,
-    Z_tau,
-    J_tau,
-    tau_tau,
-    z_tau,
-    /* Realized random effects + longitudinal distributional parameters */
-    u_id,
-    v_marker,
-    w_idm,
-    wbar_i,
-    sigma_family,
-    nu_family,
-    phi_family,
-    alpha_family,
-    kappa_family,
-    tau_family,
-    K_ord,
-    cutpoints_ord,
-    /* Hazard covariates */
-    p_w,
-    W,
-    gamma_w,
-    /* Baseline hazard spline pieces */
-    bs_gamma_c,
-    Kbs,
-    Bs_event_c,
-    Bs_gk_c,
-    /* Event times + integration controls */
-    S_entry,
-    S_event,
-    d_event,
-    event_censor_type,
-    subject_weights,
-    K_event,
-    event_type,
-    eps_fd,
-    n_gk,
-    /* Design matrices at GK and event grids */
-    X_gk_now,
-    X_gk_fwd,
-    Z_id_gk_now,
-    Z_id_gk_fwd,
-    X_event_now,
-    X_event_fwd,
-    Z_id_event_now,
-    Z_id_event_fwd,
-    Z_mk_gk_now,
-    Z_mk_gk_fwd,
-    Z_idm_gk_now,
-    Z_idm_gk_fwd,
-    Z_mk_event_now,
-    Z_mk_event_fwd,
-    Z_idm_event_now,
-    Z_idm_event_fwd,
-    /* Association features + covariance regression */
-    vbar,
-    marker_weights_eff_cv_total,
-    marker_weights_eff_cs_total,
-    marker_weights_eff_cv_marker,
-    marker_weights_eff_cs_marker,
-    L_i,
-    row_scale_idm,
-    a_cv_total,
-    a_cs_total,
-    a_cv_mean,
-    a_cv_marker,
-    a_cs_mean,
-    a_cs_marker,
-    a_corr,
-    a_vcov,
-    /* Transform modes (which path to use) */
-    tf_mode_cv_tot,
-    tf_mode_cs_tot,
-    tf_mode_corr,
-    tf_mode_vcov,
-    tf_mode_cv_mean,
-    tf_mode_cv_marker,
-    tf_mode_cs_mean,
-    tf_mode_cs_marker,
-    /* Transform bytecode + constants */
-    functional_ops_cv,
-    functional_iota_intercept_idx_cv,
-    functional_iota_slope_idx_cv,
-    const_data_cv,
-    knots_cv,
-    coeff_cv_eff,
-    spline_degree_cv,
-    iota_intercept_cv_eff,
-    iota_slope_cv_eff,
-    functional_ops_cs,
-    functional_iota_intercept_idx_cs,
-    functional_iota_slope_idx_cs,
-    const_data_cs,
-    knots_cs,
-    coeff_cs_eff,
-    spline_degree_cs,
-    iota_intercept_cs_eff,
-    iota_slope_cs_eff,
-    functional_ops_corr,
-    functional_iota_intercept_idx_corr,
-    functional_iota_slope_idx_corr,
-    const_data_corr,
-    knots_corr,
-    coeff_corr_eff,
-    spline_degree_corr,
-    estimate_iota_intercept_corr,
-    iota_intercept_corr_eff,
-    estimate_iota_slope_corr,
-    iota_slope_corr_eff,
-    functional_ops_vcov,
-    functional_iota_intercept_idx_vcov,
-    functional_iota_slope_idx_vcov,
-    const_data_vcov,
-    knots_vcov,
-    coeff_vcov_eff,
-    spline_degree_vcov,
-    estimate_iota_intercept_vcov,
-    iota_intercept_vcov_eff,
-    estimate_iota_slope_vcov,
-    iota_slope_vcov_eff,
-    functional_ops_cv_mean,
-    functional_iota_intercept_idx_cv_mean,
-    functional_iota_slope_idx_cv_mean,
-    const_data_cv_mean,
-    knots_cv_mean,
-    coeff_cv_mean_eff,
-    spline_degree_cv_mean,
-    iota_intercept_cv_mean_eff,
-    iota_slope_cv_mean_eff,
-    functional_ops_cv_marker,
-    functional_iota_intercept_idx_cv_marker,
-    functional_iota_slope_idx_cv_marker,
-    const_data_cv_marker,
-    knots_cv_marker,
-    coeff_cv_marker_eff,
-    spline_degree_cv_marker,
-    iota_intercept_cv_marker_eff,
-    iota_slope_cv_marker_eff,
-    functional_ops_cs_mean,
-    functional_iota_intercept_idx_cs_mean,
-    functional_iota_slope_idx_cs_mean,
-    const_data_cs_mean,
-    knots_cs_mean,
-    coeff_cs_mean_eff,
-    spline_degree_cs_mean,
-    iota_intercept_cs_mean_eff,
-    iota_slope_cs_mean_eff,
-    functional_ops_cs_marker,
-    functional_iota_intercept_idx_cs_marker,
-    functional_iota_slope_idx_cs_marker,
-    const_data_cs_marker,
-    knots_cs_marker,
-    coeff_cs_marker_eff,
-    spline_degree_cs_marker,
-    iota_intercept_cs_marker_eff,
-    iota_slope_cs_marker_eff,
-    /* Subject ranges + time scaling */
-    id_start,
-    id_end,
-    tmax
-  );
+  // Priors are contributed by their owner before the shared joint likelihood.
+  #include include/submodels/longitudinal/model/fit.stan
+  #include include/etc/model/regression_priors.stan
+  #include include/submodels/survival/model/fit.stan
+  #include include/submodels/assoc/model/fit.stan
+  #include include/submodels/marker_weight/model/fit.stan
+  #include include/submodels/functional/model/fit.stan
+  #include include/etc/model/fit_threaded_likelihood.stan
 }
 
 generated quantities {
-  #include helper/generated_quantities/fit_outputs.stan
+  // Stan requires all posterior-output declarations before calculations.
+  #include include/submodels/longitudinal/generated_quantities/fit_declarations.stan
+  #include include/submodels/survival/generated_quantities/fit_declarations.stan
+  #include include/submodels/assoc/generated_quantities/fit_declarations.stan
+  #include include/submodels/marker_weight/generated_quantities/fit_declarations.stan
+  #include include/submodels/functional/generated_quantities/fit_declarations.stan
+
+  #include include/submodels/longitudinal/generated_quantities/fit_calculations.stan
+  #include include/submodels/survival/generated_quantities/fit_calculations.stan
+  #include include/submodels/assoc/generated_quantities/fit_calculations.stan
+  #include include/submodels/marker_weight/generated_quantities/fit_calculations.stan
+  #include include/submodels/functional/generated_quantities/fit_calculations.stan
 }

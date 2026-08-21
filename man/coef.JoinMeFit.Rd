@@ -2,8 +2,18 @@
 % Please edit documentation in R/posterior.R
 \name{coef.JoiNMeFit}
 \alias{coef.JoiNMeFit}
+\alias{.summarise_combined_coefficient_posterior}
 \title{Combined posterior coefficients for fitted JoiNMe models}
 \usage{
+.summarise_combined_coefficient_posterior(
+  object,
+  draws = NULL,
+  seed = 1,
+  digits = 3,
+  summary = TRUE,
+  ...
+)
+
 \method{coef}{JoiNMeFit}(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...)
 }
 \arguments{
@@ -25,7 +35,11 @@ When \code{summary = FALSE}, a nested list of draw-level data frames for
 the longitudinal, event, distributional, and covariance-regression parts of
 the model. When \code{summary = TRUE}, the same structure is returned after
 summarising each coefficient with posterior means, posterior uncertainty,
-interval estimates, and MCMC diagnostics.
+interval estimates, and MCMC diagnostics. \code{assoc} contains effective
+marker weights and includes \code{assoc_term} to distinguish term-specific
+sets. Its \code{term} column identifies the marker, so the redundant \code{marker}
+column is omitted. \code{formulaLong$population} is not returned because the
+same longitudinal population coefficients are available from \code{\link[nlme:fixef]{fixef()}}.
 }
 \description{
 Returns posterior coefficients on the scale used by each model component.
@@ -39,4 +53,9 @@ coefficient is the population-level coefficient itself.
 This mirrors the interpretation used in multilevel modelling:
 a subject-specific or marker-specific coefficient is the coefficient that
 would multiply the corresponding column of the model matrix for that unit.
+Longitudinal population coefficients are deliberately not repeated under
+\code{formulaLong}; they are returned by \code{\link[nlme:fixef]{fixef()}}. The population coefficients
+are nevertheless used internally when constructing every combined
+subject- or marker-specific coefficient.
 }
+\keyword{internal}

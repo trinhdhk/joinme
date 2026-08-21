@@ -5,7 +5,6 @@ test_that("summary reports family-aware distributional parameters with marker la
   set.seed(431)
   sim <- simulate_joinme(
     n_id = 4,
-    n_obs_per_marker_per_id = 4,
     families = c("gaussian", "negbin2", "skew_normal"),
     times_obs = seq(0, 2, length.out = 4),
     seed = 431,

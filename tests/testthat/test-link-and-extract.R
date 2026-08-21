@@ -3,10 +3,9 @@ test_that("jm_family link specs are mapped into standata link_long", {
   sim <- simulate_joinme(
     n_id = 8,
     families = c("gaussian", "bernoulli"),
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 3, length.out = 5),
     assoc = c("cv_total"),
-    assoc_coefs = c(cv_total = 0.2),
+    truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.2))),
     seed = 911
   )
 
@@ -71,11 +70,11 @@ test_that("jm_family invertibility warning only triggers for likely non-injectiv
 
   expect_warning(
     jm_family("gaussian", inv_link = ~ abs(x)),
-    "Custom inverse-link bytecode"
+    "may be non-invertible"
   )
 })
 
-test_that("extract.JoiNMeDynPred returns flattened draw payloads", {
+test_that("extract.JoiNMeDynPred returns flattened draw results", {
   toy_draw <- matrix(rnorm(12), nrow = 3, ncol = 4)
   pred_obj <- JoiNMeDynPred$new(
     predictions = list(),
@@ -98,14 +97,14 @@ test_that("extract.JoiNMeDynPred returns flattened draw payloads", {
   )
 
   ext_long <- extract(pred_obj, what = "longitudinal", id = 1, scale = "epred")
-  expect_true(is.list(ext_long$draws))
-  expect_true("1" %in% names(ext_long$draws))
-  expect_true("epred" %in% names(ext_long$draws[["1"]]))
-  expect_equal(nrow(ext_long$draws[["1"]][["epred"]]), 3)
+  expect_true(is.list(ext_long$posterior_draws))
+  expect_true("1" %in% names(ext_long$posterior_draws))
+  expect_true("epred" %in% names(ext_long$posterior_draws[["1"]]))
+  expect_equal(nrow(ext_long$posterior_draws[["1"]][["epred"]]), 3)
 
   ext_surv <- extract(pred_obj, what = "survival", id = 1)
-  expect_true(is.list(ext_surv$draws))
-  expect_equal(nrow(ext_surv$draws[["1"]]), 3)
+  expect_true(is.list(ext_surv$posterior_draws))
+  expect_equal(nrow(ext_surv$posterior_draws[["1"]]), 3)
 })
 
 test_that("extract.JoiNMeFit returns draw matrices by friendly names", {
@@ -116,10 +115,9 @@ test_that("extract.JoiNMeFit returns draw matrices by friendly names", {
   sim <- simulate_joinme(
     n_id = 20,
     families = rep("gaussian", 2),
-    n_obs_per_marker_per_id = 4,
     times_obs = seq(0, 4, length.out = 6),
     assoc = c("cv_total"),
-    assoc_coefs = c(cv_total = 0.25),
+    truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.25))),
     seed = 707
   )
 
@@ -142,19 +140,18 @@ test_that("extract.JoiNMeFit returns draw matrices by friendly names", {
   )
 
   ex_fixef <- extract(fit, what = "fixef")
-  expect_true(is.matrix(ex_fixef$draws))
-  expect_gt(nrow(ex_fixef$draws), 0)
-  expect_gt(ncol(ex_fixef$draws), 0)
+  expect_true(is.matrix(ex_fixef$posterior_draws))
+  expect_gt(nrow(ex_fixef$posterior_draws), 0)
+  expect_gt(ncol(ex_fixef$posterior_draws), 0)
 
   ex_assoc <- extract(fit, what = "assoc")
-  expect_true(is.matrix(ex_assoc$draws))
-  expect_true(any(grepl("cv_total", colnames(ex_assoc$draws))))
+  expect_true(is.matrix(ex_assoc$posterior_draws))
+  expect_true(any(grepl("cv_total", colnames(ex_assoc$posterior_draws))))
 
   ex_eff <- extract(fit, what = "likelihood_scale", keep_chains = FALSE)
-  expect_true(is.matrix(ex_eff$draws))
-  expect_true(any(grepl("^beta_scaled: time$", colnames(ex_eff$draws))))
-  expect_true(any(grepl("^id_sd_eff: time$", colnames(ex_eff$draws))))
-  expect_true(any(grepl("^id_marker_row_scale_eff: time$", colnames(ex_eff$draws))))
+  expect_true(is.matrix(ex_eff$posterior_draws))
+  expect_true(any(grepl("^beta: time$", colnames(ex_eff$posterior_draws))))
+  expect_true(any(grepl("^id_sd: time$", colnames(ex_eff$posterior_draws))))
 })
 
 test_that("extract.JoiNMeFit assoc uses canonical hazard-scale vcov coefficients", {
@@ -184,21 +181,19 @@ test_that("extract.JoiNMeFit assoc uses canonical hazard-scale vcov coefficients
   )
 
   ex_assoc <- extract(fit_obj, what = "assoc", keep_chains = FALSE)
-  expect_equal(colnames(ex_assoc$draws), "vcov[1]")
-  expect_equal(as.numeric(ex_assoc$draws[, 1]), c(0.4, 0.5, 0.6))
+  expect_equal(colnames(ex_assoc$posterior_draws), "vcov[1]")
+  expect_equal(as.numeric(ex_assoc$posterior_draws[, 1]), c(0.4, 0.5, 0.6))
   expect_equal(as.character(ex_assoc$term_map$variable), "alpha_vcov[1]")
 })
 
-test_that("extract.JoiNMeFit fixef prefers internal coefficients on original-time scale", {
+test_that("extract.JoiNMeFit fixef returns coefficients on original-time scale", {
   draws_obj <- posterior::as_draws_matrix(stats::setNames(
     data.frame(
       beta_intercept = c(1.0, 1.0, 1.0),
       beta_time_raw = c(0.5, 0.5, 0.5),
-      beta_scaled_intercept = c(1.0, 1.0, 1.0),
-      beta_scaled_time = c(2.0, 2.0, 2.0),
       check.names = FALSE
     ),
-    c("beta[1]", "beta[2]", "beta_scaled[1]", "beta_scaled[2]")
+    c("beta[1]", "beta[2]")
   ))
 
   fit_obj <- structure(list(
@@ -216,8 +211,8 @@ test_that("extract.JoiNMeFit fixef prefers internal coefficients on original-tim
   )
 
   ex_fixef <- extract(fit_obj, what = "fixef", keep_chains = FALSE)
-  expect_equal(colnames(ex_fixef$draws), c("(Intercept)", "time"))
-  expect_equal(as.numeric(ex_fixef$draws[, "time"]), c(0.5, 0.5, 0.5))
+  expect_equal(colnames(ex_fixef$posterior_draws), c("(Intercept)", "time"))
+  expect_equal(as.numeric(ex_fixef$posterior_draws[, "time"]), c(0.5, 0.5, 0.5))
   expect_equal(
     as.character(ex_fixef$term_map$variable),
     c("beta[1]", "beta[2]")
@@ -232,10 +227,9 @@ test_that("summary reports survival_process baseline covariates when present", {
   sim <- simulate_joinme(
     n_id = 20,
     families = rep("gaussian", 2),
-    n_obs_per_marker_per_id = 4,
     times_obs = seq(0, 4, length.out = 6),
     assoc = c("cv_total"),
-    assoc_coefs = c(cv_total = 0.2),
+    truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.2))),
     seed = 1707
   )
 

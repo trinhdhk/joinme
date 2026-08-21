@@ -1,8 +1,8 @@
 test_that("prediction draw count resolves independently from posterior extraction", {
-  expect_equal(.resolve_n_pred_draws(NULL, 12), 12)
-  expect_equal(.resolve_n_pred_draws(7, 12), 7)
-  expect_error(.resolve_n_pred_draws(0, 12), "must be >= 1")
-  expect_error(.resolve_n_pred_draws(c(2, 3), 12), "single finite numeric")
+  expect_equal(.get_n_pred_draws(NULL, 12), 12)
+  expect_equal(.get_n_pred_draws(7, 12), 7)
+  expect_error(.get_n_pred_draws(0, 12), "must be >= 1")
+  expect_error(.get_n_pred_draws(c(2, 3), 12), "single finite numeric")
 })
 
 
@@ -72,7 +72,7 @@ test_that("draw-dependent containers are re-indexed to prediction draw count", {
 })
 
 
-test_that("marker-id draw reconstruction uses scaled-time rows only in w_idm", {
+test_that("marker-id draw reconstruction retains the original-time covariance basis", {
   draws_matrix <- matrix(
     c(log(2), 3, log(4), 0, 0, 0, 5, 7),
     nrow = 1,
@@ -90,20 +90,24 @@ test_that("marker-id draw reconstruction uses scaled-time rows only in w_idm", {
     n_random_marker_id = 2L,
     n_marker_types = 1L,
     alpha_vcov_reg = matrix(c(log(2), 3, log(4)), nrow = 1),
-    beta_vcov_reg_flat = matrix(numeric(0), nrow = 1, ncol = 0),
+    beta_vcov_sd_flat = matrix(numeric(0), nrow = 1, ncol = 0),
+    beta_vcov_corr_flat = matrix(numeric(0), nrow = 1, ncol = 0),
     lambda_vcov_reg = matrix(0, nrow = 1, ncol = 3),
-    vec_cov_vcov = numeric(0),
+    vec_cov_vcov_sd = numeric(0),
+    vec_cov_vcov_corr = numeric(0),
+    tau_marker = matrix(numeric(0), nrow = 1, ncol = 0),
+    Lcorr_marker = array(numeric(0), dim = c(1, 0, 0)),
+    B_cross = array(numeric(0), dim = c(1, 2, 0)),
     idx_row_cov = c(1L, 2L, 2L),
     idx_col_cov = c(1L, 1L, 2L),
     n_random_marker = 0L,
     flag_indep_marker_re = 1L,
     flag_allow_marker_crosscorr = 0L,
-    marker_id_row_scale = c(1, 10),
     vcov_diag_link = 1L,
     zidm_cols = c("(Intercept)", "time")
   )
 
-  out <- joinme:::.reconstruct_subject_marker_id_draws(draws_matrix, standata_subject, n_draws_target = 1)
+  out <- .reconstruct_subject_marker_id_draws(draws_matrix, standata_subject, n_draws_target = 1)
 
   k21 <- tanh(3)
   l_i <- matrix(
@@ -114,7 +118,7 @@ test_that("marker-id draw reconstruction uses scaled-time rows only in w_idm", {
     nrow = 2,
     byrow = TRUE
   )
-  l_i_eff <- sweep(l_i, 1, c(1, 10), `*`)
+  l_i_eff <- l_i
   expected_w <- as.numeric(l_i_eff %*% c(5, 7))
 
   expect_equal(unname(out$matrix[1, ]), expected_w, tolerance = 1e-8)

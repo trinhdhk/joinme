@@ -22,7 +22,7 @@ test_that("stan cache key tracks include dependency content", {
     "}"
   ), helper_file)
 
-  key1 <- joinme:::.stan_cache_key(root_file, cpp_options = list(stan_threads = TRUE))
+  key1 <- .stan_cache_key(root_file, cpp_options = list(stan_threads = TRUE))
 
   writeLines(c(
     "real f1(real x) {",
@@ -30,7 +30,7 @@ test_that("stan cache key tracks include dependency content", {
     "}"
   ), helper_file)
 
-  key2 <- joinme:::.stan_cache_key(root_file, cpp_options = list(stan_threads = TRUE))
+  key2 <- .stan_cache_key(root_file, cpp_options = list(stan_threads = TRUE))
 
   expect_true(nzchar(key1))
   expect_true(nzchar(key2))
@@ -49,8 +49,8 @@ test_that("stan cache key reflects cpp options", {
     "model { y ~ normal(0, 1); }"
   ), root_file)
 
-  key_no_threads <- joinme:::.stan_cache_key(root_file, cpp_options = list(stan_threads = FALSE))
-  key_threads <- joinme:::.stan_cache_key(root_file, cpp_options = list(stan_threads = TRUE))
+  key_no_threads <- .stan_cache_key(root_file, cpp_options = list(stan_threads = FALSE))
+  key_threads <- .stan_cache_key(root_file, cpp_options = list(stan_threads = TRUE))
 
   expect_false(identical(key_no_threads, key_threads))
 })
@@ -90,8 +90,8 @@ test_that("stan cache key is stable across different absolute root paths", {
   root1 <- make_tree(tmp1)
   root2 <- make_tree(tmp2)
 
-  key1 <- joinme:::.stan_cache_key(root1, cpp_options = list(stan_threads = TRUE))
-  key2 <- joinme:::.stan_cache_key(root2, cpp_options = list(stan_threads = TRUE))
+  key1 <- .stan_cache_key(root1, cpp_options = list(stan_threads = TRUE))
+  key2 <- .stan_cache_key(root2, cpp_options = list(stan_threads = TRUE))
 
   expect_equal(key1, key2)
 })

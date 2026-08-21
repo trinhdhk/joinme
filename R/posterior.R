@@ -62,94 +62,92 @@
 }
 
 #' @keywords internal
-.rescale_time <- function(stan_data) {
-  scale_factor <- suppressWarnings(as.numeric(stan_data$tmax %||% 1.0))
-  if (!is.finite(scale_factor) || length(scale_factor) != 1L || scale_factor <= 0) {
-    return(1.0)
-  }
-  scale_factor
-}
-
-#' @keywords internal
-.rescale_public_longitudinal_draws <- function(draws_df, stan_data, idx, term_labels) {
-  if (is.null(draws_df) || !nrow(draws_df)) return(draws_df)
-
-  scale_factor <- .rescale_time(stan_data)
-  if (abs(scale_factor - 1.0) < 1e-12) return(draws_df)
-
-  idx <- as.integer(idx %||% integer(0))
-  idx <- idx[is.finite(idx) & idx >= 1L]
-  if (!length(idx)) return(draws_df)
-
-  term_labels <- as.character(term_labels %||% character(0))
-  if (length(term_labels) < max(idx)) return(draws_df)
-
-  time_terms <- unique(term_labels[idx])
-  keep <- draws_df$term %in% time_terms
-  if (!any(keep)) return(draws_df)
-
-  draws_df$value[keep] <- draws_df$value[keep] / scale_factor
-  draws_df
-}
-
-#' @keywords internal
-.rescale_public_longitudinal_summary <- function(summary_df, stan_data, idx, term_labels) {
-  if (is.null(summary_df) || !nrow(summary_df)) return(summary_df)
-
-  scale_factor <- .rescale_time(stan_data)
-  if (abs(scale_factor - 1.0) < 1e-12) return(summary_df)
-
-  idx <- as.integer(idx %||% integer(0))
-  idx <- idx[is.finite(idx) & idx >= 1L]
-  if (!length(idx)) return(summary_df)
-
-  term_labels <- as.character(term_labels %||% character(0))
-  if (length(term_labels) < max(idx)) return(summary_df)
-
-  time_terms <- unique(term_labels[idx])
-  keep <- summary_df$term %in% time_terms
-  if (!any(keep)) return(summary_df)
-
-  value_cols <- intersect(c("Estimate", "Est.Error", "Q2.5", "Q97.5"), names(summary_df))
-  if (length(value_cols) == 0L) return(summary_df)
-
-  summary_df[keep, value_cols] <- lapply(summary_df[keep, value_cols, drop = FALSE], function(x) x / scale_factor)
-  summary_df
-}
-
-#' @keywords internal
-.rescale_public_event_draws <- function(draws_df, stan_data) {
-  if (is.null(draws_df) || !nrow(draws_df)) return(draws_df)
-  if (!("term" %in% names(draws_df)) || !("value" %in% names(draws_df))) return(draws_df)
-
-  scale_factor <- .rescale_time(stan_data)
-  if (abs(scale_factor - 1.0) < 1e-12) return(draws_df)
-
-  idx <- as.integer(stan_data$idx_time_gamma %||% integer(0))
-  idx <- idx[is.finite(idx) & idx >= 1L]
-  term_labels <- as.character(stan_data$w_cols %||% character(0))
-  if (!length(idx) || length(term_labels) < max(idx)) return(draws_df)
-
-  time_terms <- unique(term_labels[idx])
-  keep <- draws_df$term %in% time_terms
-  if (!any(keep)) return(draws_df)
-
-  draws_df$value[keep] <- draws_df$value[keep] / scale_factor
-  draws_df
-}
-
-#' @keywords internal
 .id_labels <- function(object, n_id) {
-  ids <- object$dataLong$id %||% object$dataEvent$id %||% seq_len(n_id)
-  ids <- unique(as.character(ids))
+  id_variable <- .get_call_args(object$call, "id_var", "id") # fitted grouping column whose order defines the Stan subject index
+  ids <- object$dataLong[[id_variable]] %||%
+    object$dataEvent[[id_variable]] %||%
+    seq_len(n_id)
+  ids <- as.character(sort(unique(ids))) # sort on the original type, exactly as joinme_standata() does before naming its index map
   if (length(ids) < n_id) {
     ids <- c(ids, as.character(seq_len(n_id - length(ids)) + length(ids)))
   }
   ids[seq_len(n_id)]
 }
 
+#' Map event-process population coefficients to fitted terms
+#'
+#' @param object A fitted `JoiNMeFit` object.
+#' @param all_vars Character vector of available posterior variables.
+#'
+#' @return A data frame containing Stan variable, event, scientific term and a
+#'   unique display label for every fitted event-process coefficient.
 #' @keywords internal
-.posterior_fixef_matrix <- function(object, draws = NULL, seed = 1) {
+#' @noRd
+.event_fixed_effect_var_map <- function(object, all_vars) {
+  stan_data <- object$stan_data # fitted event dimension and model-matrix labels
+  number_terms <- as.integer(stan_data$p_w %||% 0L) # number of event-regression columns per event type
+  number_events <- as.integer(stan_data$K_event %||% 1L) # number of competing event types
+  if (number_terms < 1L) {
+    return(data.frame(
+      variable = character(0), event = character(0), term = character(0),
+      display_term = character(0), stringsAsFactors = FALSE
+    ))
+  }
+
+  variables <- paste0("gamma_w[", seq_len(number_terms), "]") # one-dimensional names used by single-event fits
+  variables <- variables[variables %in% all_vars]
+  if (!length(variables)) {
+    variables <- as.vector(outer(
+      seq_len(number_events),
+      seq_len(number_terms),
+      function(event_index, term_index) paste0("gamma_w[", event_index, ",", term_index, "]")
+    )) # matrix names used by competing-event fits
+    variables <- variables[variables %in% all_vars]
+  }
+  if (!length(variables)) {
+    return(data.frame(
+      variable = character(0), event = character(0), term = character(0),
+      display_term = character(0), stringsAsFactors = FALSE
+    ))
+  }
+
+  parsed_indices <- regmatches(
+    variables,
+    regexec("^gamma_w\\[(\\d+)(?:,(\\d+))?\\]$", variables)
+  ) # captured event and term indices, with the first index denoting the term for a one-dimensional coefficient
+  event_indices <- vapply(parsed_indices, function(indices) {
+    if (length(indices) >= 3L && nzchar(indices[[3L]])) as.integer(indices[[2L]]) else 1L
+  }, integer(1)) # event type for every coefficient
+  term_indices <- vapply(parsed_indices, function(indices) {
+    if (length(indices) >= 3L && nzchar(indices[[3L]])) as.integer(indices[[3L]]) else as.integer(indices[[2L]])
+  }, integer(1)) # event model-matrix column for every coefficient
+  available_terms <- as.character(
+    stan_data$w_cols %||% .fit_design_term_labels(object, what = "gamma_w", n_terms = number_terms)
+  ) # event model-matrix labels in fitted order
+  if (length(available_terms) < max(term_indices)) {
+    available_terms <- c(
+      available_terms,
+      paste0("w_", seq.int(length(available_terms) + 1L, max(term_indices)))
+    )
+  }
+  event_labels <- if (number_events > 1L) {
+    paste0("event[", event_indices, "]")
+  } else {
+    rep("event", length(variables))
+  } # user-facing event identity
+  scientific_terms <- available_terms[term_indices] # event covariate terms aligned with posterior variables
+
+  data.frame(
+    variable = variables,
+    event = event_labels,
+    term = scientific_terms,
+    display_term = paste0(event_labels, ": ", scientific_terms),
+    stringsAsFactors = FALSE
+  )
+}
+
+#' @keywords internal
+.extract_fixed_effect_draws <- function(object, draws = NULL, seed = 1) {
   fit <- object$fit
   sd <- object$stan_data
   if (is.null(draws)) draws <- object$config$draws_default
@@ -170,23 +168,31 @@
     labels <- c(labels, as.character(beta_terms))
   }
 
+  event_map <- .event_fixed_effect_var_map(object, all_vars) # fitted event-process population coefficients and unique display labels
+  if (nrow(event_map) > 0L) {
+    event_matrix <- .get_draws_matrix(
+      fit,
+      variables = event_map$variable,
+      draws = draws,
+      seed = seed
+    ) # posterior event coefficients on the original-time formula basis
+    mats[[length(mats) + 1L]] <- event_matrix
+    labels <- c(labels, event_map$display_term)
+  }
+
   show_marker_weights <- isTRUE(sd$assoc_cv_total == 1) ||
     isTRUE(sd$assoc_cv_marker == 1) ||
     isTRUE(sd$assoc_cs_total == 1) ||
     isTRUE(sd$assoc_cs_marker == 1)
   if (isTRUE(show_marker_weights) && isTRUE((sd$D %||% 0L) > 0L)) {
-    marker_terms <- sd$marker_levels %||% paste0("marker_", seq_len(sd$D))
-    shared_weights <- isTRUE(as.integer(sd$shared_marker_weights %||% 1L) == 1L)
-    weight_term_keys <- .active_weighted_assoc_terms(sd)
-    if (shared_weights && length(weight_term_keys) > 1L) weight_term_keys <- weight_term_keys[1L]
-    for (term_key in weight_term_keys) {
-      mw_vars <- paste0(.marker_weight_var_prefix(term_key, effective = TRUE), "[", seq_len(sd$D), "]")
-      mw_vars <- mw_vars[mw_vars %in% all_vars]
-      if (!length(mw_vars)) next
-      mats[[length(mats) + 1L]] <- .get_draws_matrix(fit, variables = mw_vars, draws = draws, seed = seed)
-      labels <- c(labels, vapply(marker_terms[seq_along(mw_vars)], function(marker_label) {
-        .marker_weight_summary_label(term_key, marker_label, shared_marker_weights = shared_weights)
-      }, character(1)))
+    mean_map <- .marker_weight_mean_map(sd, all_vars = all_vars) # common marker-weight locations indexed by their actual fitted set
+    n_weight_means <- as.integer(sd$n_marker_weight_means %||% 0L) # common marker-weight locations reported beside fixed effects
+    if (n_weight_means > 0L) {
+      mean_vars <- mean_map$variable
+      if (length(mean_vars) > 0L) {
+        mats[[length(mats) + 1L]] <- .get_draws_matrix(fit, variables = mean_vars, draws = draws, seed = seed)
+        labels <- c(labels, mean_map$term)
+      }
     }
   }
 
@@ -199,7 +205,7 @@
 }
 
 #' @keywords internal
-.posterior_event_coef_draws <- function(object, draws = NULL, seed = 1) {
+.extract_event_coefficient_draws <- function(object, draws = NULL, seed = 1) {
   fit <- object$fit
   sd <- object$stan_data
   if (is.null(draws)) draws <- object$config$draws_default
@@ -228,12 +234,11 @@
     term = as.character(term_labels[j_idx]),
     stringsAsFactors = FALSE
   )
-  out <- .pivot_long_from_matrix(dmat, meta)
-  .rescale_public_event_draws(out, sd)
+  .pivot_long_from_matrix(dmat, meta)
 }
 
 #' @keywords internal
-.posterior_distreg_draws <- function(object, draws = NULL, seed = 1) {
+.extract_distributional_coefficient_draws <- function(object, draws = NULL, seed = 1) {
   fit <- object$fit
   cfg <- object$config
   if (is.null(draws)) draws <- object$config$draws_default
@@ -261,7 +266,7 @@
 }
 
 #' @keywords internal
-.posterior_fit_ranef <- function(object, draws = NULL, seed = 1) {
+.extract_random_effect_draws <- function(object, draws = NULL, seed = 1) {
   fit <- object$fit
   sd <- object$stan_data
   cfg <- object$config
@@ -323,49 +328,13 @@
     ) else NULL
   )
 
-  out_long$id <- .rescale_public_longitudinal_draws(
-    out_long$id,
-    sd,
-    sd$idx_time_uid,
-    sd$zid_cols %||% character(0)
-  )
-  out_long$marker <- .rescale_public_longitudinal_draws(
-    out_long$marker,
-    sd,
-    sd$idx_time_vmk,
-    sd$zmk_cols %||% character(0)
-  )
-  out_long$marker_by_id <- .rescale_public_longitudinal_draws(
-    out_long$marker_by_id,
-    sd,
-    sd$idx_time_idm,
-    sd$zidm_cols %||% character(0)
-  )
-
-  show_marker_weights <- isTRUE(sd$assoc_cv_total == 1) ||
-    isTRUE(sd$assoc_cv_marker == 1) ||
-    isTRUE(sd$assoc_cs_total == 1) ||
-    isTRUE(sd$assoc_cs_marker == 1)
-  if (isTRUE(show_marker_weights) && isTRUE((sd$D %||% 0L) > 0L)) {
-    shared_weights <- isTRUE(as.integer(sd$shared_marker_weights %||% 1L) == 1L)
-    weight_term_keys <- .active_weighted_assoc_terms(sd)
-    if (shared_weights && length(weight_term_keys) > 1L) weight_term_keys <- weight_term_keys[1L]
-    weight_rows <- list()
-    for (term_key in weight_term_keys) {
-      vars <- paste0(.marker_weight_var_prefix(term_key, effective = TRUE), "[", seq_len(sd$D), "]")
-      vars <- vars[vars %in% all_vars]
-      if (!length(vars)) next
-      dmat <- .get_draws_matrix(fit, variables = vars, draws = draws, seed = seed)
-      meta <- data.frame(
-        term = vapply(marker_labels[seq_along(vars)], function(marker_label) {
-          .marker_weight_summary_label(term_key, marker_label, shared_marker_weights = shared_weights)
-        }, character(1)),
-        stringsAsFactors = FALSE
-      )
-      weight_rows[[length(weight_rows) + 1L]] <- .pivot_long_from_matrix(dmat, meta)
-    }
-    if (length(weight_rows) > 0L) out_long$assoc_weight <- do.call(rbind, weight_rows)
-  }
+  out_assoc <- .marker_weight_long_draws(
+    object,
+    quantity = "departure",
+    draws = draws,
+    seed = seed,
+    all_vars = all_vars
+  ) # association-weight departures after removing the set mean and declared offsets
 
   summarize_dist_draws <- function(param_name) {
     n_re <- as.integer(sd[[paste0("n_re_", param_name)]] %||% 0L)
@@ -478,6 +447,7 @@
 
   list(
     formulaLong = out_long,
+    assoc = out_assoc,
     formulaDist = out_dist,
     formulaVCov = out_vcov
   )
@@ -501,24 +471,30 @@
 }
 
 #' @keywords internal
-.posterior_fit_coef <- function(object, draws = NULL, seed = 1) {
-  fixed_long <- .posterior_fixef_matrix(object, draws = draws, seed = seed)
+.extract_combined_coefficient_draws <- function(object, draws = NULL, seed = 1) {
+  fixed_long <- .extract_fixed_effect_draws(object, draws = draws, seed = seed)
   beta_only <- fixed_long
   if (is.matrix(beta_only) && ncol(beta_only) > 0L) {
-    weight_cols <- grepl("^weight", colnames(beta_only))
-    if (any(weight_cols)) beta_only <- beta_only[, !weight_cols, drop = FALSE]
+    event_cols <- grepl("^event(\\[[0-9]+\\])?: ", colnames(beta_only)) # event-process coefficients belong to formulaEvent rather than longitudinal trajectories
+    if (any(event_cols)) beta_only <- beta_only[, !event_cols, drop = FALSE]
   }
-  ranef_draws <- .posterior_fit_ranef(object, draws = draws, seed = seed)
-  dist_fixed <- .posterior_distreg_draws(object, draws = draws, seed = seed)
-  event_fixed <- .posterior_event_coef_draws(object, draws = draws, seed = seed)
+  ranef_draws <- .extract_random_effect_draws(object, draws = draws, seed = seed)
+  dist_fixed <- .extract_distributional_coefficient_draws(object, draws = draws, seed = seed)
+  event_fixed <- .extract_event_coefficient_draws(object, draws = draws, seed = seed)
 
   out_long <- ranef_draws$formulaLong
+  out_assoc <- .marker_weight_long_draws(
+    object,
+    quantity = "effective",
+    draws = draws,
+    seed = seed
+  ) # combined marker weights equal to declared offset plus fitted mean plus departure
+  if (!is.null(out_assoc)) {
+    out_assoc$marker <- NULL # term already carries the marker identity in the combined coefficient representation
+  }
   out_long$id <- .combine_fixed_random_long_draws(out_long$id, beta_only)
   out_long$marker <- .combine_fixed_random_long_draws(out_long$marker, beta_only)
   out_long$marker_by_id <- .combine_fixed_random_long_draws(out_long$marker_by_id, beta_only)
-  out_long$population <- if (is.matrix(beta_only) && ncol(beta_only) > 0L) {
-    .pivot_long_from_matrix(beta_only, data.frame(term = colnames(beta_only), stringsAsFactors = FALSE))
-  } else NULL
 
   out_dist <- list()
   if (length(dist_fixed) > 0L) {
@@ -548,6 +524,7 @@
 
   list(
     formulaLong = out_long,
+    assoc = out_assoc,
     formulaEvent = event_fixed,
     formulaDist = out_dist,
     formulaVCov = list(
@@ -568,11 +545,16 @@
 #'   posterior draw matrix.
 #' @param ... Unused.
 #'
-#' @return When `summary = TRUE`, a data.frame of posterior summaries. When
-#'   `summary = FALSE`, a draws-by-term matrix.
-#' @importFrom lme4 fixef
-#' @export
-fixef.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
+#' @return When `summary = TRUE`, a data frame containing longitudinal
+#'   population coefficients, event-process coefficients, and fitted common
+#'   marker-weight locations. The `component`, `event`, and `assoc_term`
+#'   columns identify their statistical roles; `assoc_term` is particularly
+#'   important when marker-weight sets are not shared. When `summary = FALSE`,
+#'   a draws-by-term matrix is returned, with event and term-specific
+#'   marker-weight identities included in the column labels.
+#' @name fixef.JoiNMeFit
+#' @keywords internal
+.summarise_fixed_effect_posterior <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
   
   assertthat::assert_that(is.logical(summary) && length(summary) == 1L && !is.na(summary),
                           msg = "summary must be TRUE or FALSE.")
@@ -581,15 +563,15 @@ fixef.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary 
   if (is.null(draws)) draws <- object$config$draws_default
 
   if (!isTRUE(summary)) {
-    cache_key <- paste0("posterior_fixef_", draws)
+    cache_key <- paste0("fixed_effect_draws_event_marker_weight_v4_", draws)
     cached <- object$cache_get(cache_key)
     if (!is.null(cached)) return(cached)
-    out <- .posterior_fixef_matrix(object, draws = draws, seed = seed)
+    out <- extract(object, what = "fixed_effects", draws = draws, seed = seed)$posterior_draws
     object$cache_set(cache_key, out)
     return(out)
   }
 
-  cache_key <- paste0("fixef_", draws, "_", digits)
+  cache_key <- paste0("fixef_event_marker_weight_v3_", draws, "_", digits)
   cached <- object$cache_get(cache_key)
   if (!is.null(cached)) return(cached)
 
@@ -609,13 +591,42 @@ fixef.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary 
     recovered_terms <- .fit_design_term_labels(object, what = "fixef", n_terms = nrow(s))
     s$term <- if (length(recovered_terms) == nrow(s)) recovered_terms else s$variable
   }
-  out <- s[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
+  summary_columns <- c("component", "event", "assoc_term", "term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail") # stable public order shared by all fixed-effect components
+  prepare_summary <- function(summary_table, component, event = NA_character_, assoc_term = NA_character_) {
+    summary_table$component <- component # statistical submodel to which each coefficient belongs
+    summary_table$event <- event # event identity for competing-risk regressions; absent elsewhere
+    summary_table$assoc_term <- assoc_term # weighted association identity; absent for ordinary regression coefficients
+    summary_table <- summary_table[, summary_columns, drop = FALSE]
+    summary_table$Estimate <- round(summary_table$Estimate, digits)
+    summary_table$Est.Error <- round(summary_table$Est.Error, digits)
+    summary_table$Q2.5 <- round(summary_table$Q2.5, digits)
+    summary_table$Q97.5 <- round(summary_table$Q97.5, digits)
+    summary_table$Rhat <- round(summary_table$Rhat, 3)
+    summary_table
+  } # format one coefficient family without altering effective sample sizes
+  out <- prepare_summary(s, component = "longitudinal")
 
-  out$Estimate <- round(out$Estimate, digits)
-  out$Est.Error <- round(out$Est.Error, digits)
-  out$Q2.5 <- round(out$Q2.5, digits)
-  out$Q97.5 <- round(out$Q97.5, digits)
-  out$Rhat <- round(out$Rhat, 3)
+  # Event-process regression coefficients are fixed effects in precisely the
+  # same inferential sense as longitudinal population coefficients. Their
+  # event identity is retained explicitly. Every coefficient is already on the
+  # original-time model-matrix basis used during fitting.
+  event_map <- .event_fixed_effect_var_map(object, all_vars)
+  if (nrow(event_map) > 0L) {
+    event_summary <- as.data.frame(.summarise_draws_diag(
+      fit,
+      event_map$variable,
+      draws = draws,
+      seed = seed
+    )) # posterior summaries in Stan variable order
+    event_positions <- match(event_summary$variable, event_map$variable) # alignment with event and design-term metadata
+    event_summary$term <- event_map$term[event_positions] # scientific design term; component and event columns provide its model context
+
+    out <- rbind(out, prepare_summary(
+      event_summary,
+      component = "event",
+      event = event_map$event[event_positions]
+    ))
+  }
 
   # Append marker-weight summaries only for marker-weighted association models
   show_marker_weights <- isTRUE(sd$assoc_cv_total == 1) ||
@@ -623,47 +634,26 @@ fixef.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary 
     isTRUE(sd$assoc_cs_total == 1) ||
     isTRUE(sd$assoc_cs_marker == 1)
 
-  if (sd$D > 0 && show_marker_weights) {
-    marker_terms <- sd$marker_levels %||% paste0("marker_", seq_len(sd$D))
-    shared_weights <- isTRUE(as.integer(sd$shared_marker_weights %||% 1L) == 1L)
-    weight_term_keys <- .active_weighted_assoc_terms(sd)
-    if (shared_weights && length(weight_term_keys) > 1L) {
-      weight_term_keys <- weight_term_keys[1L]
-    }
-    weight_rows <- list()
-    for (term_key in weight_term_keys) {
-      mw_vars <- paste0(.marker_weight_var_prefix(term_key, effective = TRUE), "[", seq_len(sd$D), "]")
-      mw_vars <- mw_vars[mw_vars %in% all_vars]
-      if (length(mw_vars) == 0L) next
-      mw <- as.data.frame(.summarise_draws_diag(fit, mw_vars, draws = draws, seed = seed))
-      mw$term <- vapply(marker_terms[seq_len(nrow(mw))], function(marker_label) {
-        .marker_weight_summary_label(term_key, marker_label, shared_marker_weights = shared_weights)
-      }, character(1))
-      mw <- mw[, c("term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
-      mw$Estimate <- round(mw$Estimate, digits)
-      mw$Est.Error <- round(mw$Est.Error, digits)
-      mw$Q2.5 <- round(mw$Q2.5, digits)
-      mw$Q97.5 <- round(mw$Q97.5, digits)
-      mw$Rhat <- round(mw$Rhat, 3)
-      weight_rows[[length(weight_rows) + 1L]] <- mw
-    }
-    if (length(weight_rows) > 0L) {
-      out <- rbind(out, do.call(rbind, weight_rows))
+  if (isTRUE((sd$D %||% 0L) > 0L) && show_marker_weights) {
+    mean_map <- .marker_weight_mean_map(sd, all_vars = all_vars) # actual compact-set mapping, including term-specific means when sharing is disabled
+    if (nrow(mean_map) > 0L) {
+      mean_summary <- as.data.frame(.summarise_draws_diag(
+        fit,
+        mean_map$variable,
+        draws = draws,
+        seed = seed
+      )) # posterior summaries of common marker-weight locations
+      mean_positions <- match(mean_summary$variable, mean_map$variable) # alignment through the explicit Stan set index rather than activation order
+      mean_summary$term <- mean_map$term[mean_positions]
+      out <- rbind(out, prepare_summary(
+        mean_summary,
+        component = "marker_weight",
+        assoc_term = mean_map$assoc_term[mean_positions]
+      ))
     }
   }
   object$cache_set(cache_key, out)
   out
-}
-
-#' Posterior fixed-effect alias for fitted JoiNMe models
-#'
-#' @param object A `JoiNMeFit` object.
-#' @param ... Additional arguments forwarded to [fixef()].
-#'
-#' @return The same object returned by `fixef(object, summary = FALSE, ...)`.
-#' @export
-posterior_fixef <- function(object, ...) {
-  fixef(object, summary = FALSE, ...)
 }
 
 #' Extract random effects
@@ -676,14 +666,18 @@ posterior_fixef <- function(object, ...) {
 #'   return the posterior extraction on the coefficient scale.
 #' @param ... Unused.
 #'
-#' @return A nested list with top-level entries `formulaLong` and `formulaDist`.
+#' @return A nested list with top-level entries `formulaLong`, `assoc`, and
+#'   `formulaDist`.
 #'   `formulaLong` contains random-effect summaries for longitudinal model
-#'   components (`id`, `marker`, `marker_by_id_latent`, when present).
+#'   components (`id`, `marker`, `marker_by_id_latent`, when present). `assoc`
+#'   contains only marker-specific weight departures,
+#'   calculated as effective weight minus fitted mean minus declared offset;
+#'   `assoc_term` distinguishes term-specific weight sets.
 #'   `formulaDist` contains distributional random-effect summaries organised by
 #'   parameter and family scope (e.g., `sigma$student_t`, `nu$allFamilies`).
-#' @importFrom lme4 ranef
-#' @export
-ranef.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
+#' @name ranef.JoiNMeFit
+#' @keywords internal
+.summarise_random_effect_posterior <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
   
   assertthat::assert_that(is.logical(summary) && length(summary) == 1L && !is.na(summary),
                           msg = "summary must be TRUE or FALSE.")
@@ -692,15 +686,15 @@ ranef.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary 
   if (is.null(draws)) draws <- object$config$draws_default
 
   if (!isTRUE(summary)) {
-    cache_key <- paste0("posterior_ranef_", draws)
+    cache_key <- paste0("random_effect_draws_assoc_v4_", draws)
     cached <- object$cache_get(cache_key)
     if (!is.null(cached)) return(cached)
-    out <- .posterior_fit_ranef(object, draws = draws, seed = seed)
+    out <- extract(object, what = "random_effects", draws = draws, seed = seed)$posterior_draws
     object$cache_set(cache_key, out)
     return(out)
   }
 
-  cache_key <- paste0("ranef_", draws, "_", digits)
+  cache_key <- paste0("ranef_assoc_v3_", draws, "_", digits)
   cached <- object$cache_get(cache_key)
   if (!is.null(cached)) return(cached)
 
@@ -759,61 +753,21 @@ ranef.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary 
     marker_by_id_latent = summarize_block(zw_vars, "marker_by_id_latent", term_labels = sd$zidm_cols %||% character(0))
   )
 
-  out_long$id <- .rescale_public_longitudinal_summary(
-    out_long$id,
-    sd,
-    sd$idx_time_uid,
-    sd$zid_cols %||% character(0)
-  )
-  out_long$marker <- .rescale_public_longitudinal_summary(
-    out_long$marker,
-    sd,
-    sd$idx_time_vmk,
-    sd$zmk_cols %||% character(0)
-  )
-
   show_marker_weights <- isTRUE(sd$assoc_cv_total == 1) ||
     isTRUE(sd$assoc_cv_marker == 1) ||
     isTRUE(sd$assoc_cs_total == 1) ||
     isTRUE(sd$assoc_cs_marker == 1)
 
-  weight_term_keys <- .active_weighted_assoc_terms(sd)
-  shared_weights <- isTRUE(as.integer(sd$shared_marker_weights %||% 1L) == 1L)
-  if (shared_weights && length(weight_term_keys) > 1L) {
-    weight_term_keys <- weight_term_keys[1L]
-  }
-  mw_vars <- unlist(lapply(weight_term_keys, function(term_key) {
-    paste0(.marker_weight_var_prefix(term_key, effective = TRUE), "[", seq_len(sd$D), "]")
-  }), use.names = FALSE)
-  mw_vars <- mw_vars[mw_vars %in% vars]
-  if (show_marker_weights && length(mw_vars) > 0) {
-    mw <- summarize_block(mw_vars, "assoc_weight")
-    if (!is.null(mw) && !is.null(sd$marker_levels)) {
-      marker_terms <- unlist(lapply(weight_term_keys, function(term_key) {
-        vapply(sd$marker_levels, function(marker_label) {
-          .marker_weight_summary_label(term_key, marker_label, shared_marker_weights = shared_weights)
-        }, character(1))
-      }), use.names = FALSE)
-      if (length(marker_terms) == nrow(mw)) {
-        mw$term <- marker_terms
-      }
-    }
-    out_long$assoc_weight <- mw
-  } else if (show_marker_weights && isTRUE(as.logical(sd$fixed_marker_weights)) && !is.null(sd$marker_weights)) {
-    marker_terms <- sd$marker_levels %||% paste0("marker_", seq_len(sd$D))
-    mw <- data.frame(
-      term = paste0("weight: ", marker_terms),
-      Estimate = as.numeric(sd$marker_weights),
-      Est.Error = NA_real_,
-      Q2.5 = NA_real_,
-      Q97.5 = NA_real_,
-      Rhat = NA_real_,
-      ess_bulk = NA_real_,
-      ess_tail = NA_real_,
-      group = "assoc_weight",
-      stringsAsFactors = FALSE
-    )
-    out_long$assoc_weight <- mw
+  out_assoc <- NULL
+  if (show_marker_weights) {
+    out_assoc <- .marker_weight_component_summary(
+      object,
+      quantity = "departure",
+      draws = draws,
+      seed = seed,
+      digits = digits,
+      all_vars = vars
+    ) # marker-specific random-effect summaries centred on the fitted mean and declared offsets
   }
 
   # Distributional random effects are represented as latent z and scale tau.
@@ -903,21 +857,11 @@ ranef.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary 
 
   out <- list(
     formulaLong = out_long,
+    assoc = out_assoc,
     formulaDist = out_dist
   )
   object$cache_set(cache_key, out)
   out
-}
-
-#' Posterior random-effect alias for fitted JoiNMe models
-#'
-#' @param object A `JoiNMeFit` object.
-#' @param ... Additional arguments forwarded to [ranef()].
-#'
-#' @return The same object returned by `ranef(object, summary = FALSE, ...)`.
-#' @export
-posterior_ranef <- function(object, ...) {
-  ranef(object, summary = FALSE, ...)
 }
 
 #' Combined posterior coefficients for fitted JoiNMe models
@@ -934,6 +878,10 @@ posterior_ranef <- function(object, ...) {
 #' This mirrors the interpretation used in multilevel modelling:
 #' a subject-specific or marker-specific coefficient is the coefficient that
 #' would multiply the corresponding column of the model matrix for that unit.
+#' Longitudinal population coefficients are deliberately not repeated under
+#' `formulaLong`; they are returned by [fixef()]. The population coefficients
+#' are nevertheless used internally when constructing every combined
+#' subject- or marker-specific coefficient.
 #'
 #' @param object A `JoiNMeFit` object.
 #' @param draws Optional number of posterior draws to retain.
@@ -947,24 +895,28 @@ posterior_ranef <- function(object, ...) {
 #'   the longitudinal, event, distributional, and covariance-regression parts of
 #'   the model. When `summary = TRUE`, the same structure is returned after
 #'   summarising each coefficient with posterior means, posterior uncertainty,
-#'   interval estimates, and MCMC diagnostics.
-#' @method coef JoiNMeFit
-#' @export
-coef.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
+#'   interval estimates, and MCMC diagnostics. `assoc` contains effective
+#'   marker weights and includes `assoc_term` to distinguish term-specific
+#'   sets. Its `term` column identifies the marker, so the redundant `marker`
+#'   column is omitted. `formulaLong$population` is not returned because the
+#'   same longitudinal population coefficients are available from [fixef()].
+#' @name coef.JoiNMeFit
+#' @keywords internal
+.summarise_combined_coefficient_posterior <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
   
   assertthat::assert_that(is.logical(summary) && length(summary) == 1L && !is.na(summary),
                           msg = "summary must be TRUE or FALSE.")
   if (is.null(draws)) draws <- object$config$draws_default
 
   cache_key <- if (isTRUE(summary)) {
-    paste0("coef_summary_", draws, "_", digits)
+    paste0("coef_event_assoc_v5_summary_", draws, "_", digits)
   } else {
-    paste0("coef_draws_", draws)
+    paste0("coef_event_assoc_v5_draws_", draws)
   }
   cached <- object$cache_get(cache_key)
   if (!is.null(cached)) return(cached)
 
-  out <- .posterior_fit_coef(object, draws = draws, seed = seed)
+  out <- extract(object, what = "coefficients", draws = draws, seed = seed)$posterior_draws
   if (isTRUE(summary)) {
     summarize_component <- function(x) {
       if (is.null(x)) return(NULL)
@@ -982,21 +934,65 @@ coef.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary =
       x
     }
     out <- summarize_component(out)
+    if (!is.null(out$assoc)) {
+      out$assoc <- .marker_weight_component_summary(
+        object,
+        quantity = "effective",
+        draws = draws,
+        seed = seed,
+        digits = digits
+      ) # combined marker-weight summaries retaining chain-aware diagnostics
+      out$assoc$marker <- NULL # term is the sole marker identifier in coef(), avoiding duplicate columns
+    }
   }
 
   object$cache_set(cache_key, out)
   out
 }
 
-#' Posterior coefficient alias for fitted JoiNMe models
-#'
-#' @param object A `JoiNMeFit` object.
-#' @param ... Additional arguments forwarded to [coef()].
-#'
-#' @return The same object returned by `coef(object, summary = FALSE, ...)`.
+#' @rdname fixef.JoiNMeFit
+#' @importFrom lme4 fixef
 #' @export
-posterior_coef <- function(object, ...) {
-  coef(object, summary = FALSE, ...)
+fixef.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
+  posterior_summary(
+    object,
+    what = "fixef",
+    draws = draws,
+    seed = seed,
+    digits = digits,
+    summary = summary,
+    ...
+  )
+}
+
+#' @rdname ranef.JoiNMeFit
+#' @importFrom lme4 ranef
+#' @export
+ranef.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
+  posterior_summary(
+    object,
+    what = "ranef",
+    draws = draws,
+    seed = seed,
+    digits = digits,
+    summary = summary,
+    ...
+  )
+}
+
+#' @rdname coef.JoiNMeFit
+#' @method coef JoiNMeFit
+#' @export
+coef.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...) {
+  posterior_summary(
+    object,
+    what = "coef",
+    draws = draws,
+    seed = seed,
+    digits = digits,
+    summary = summary,
+    ...
+  )
 }
 
 #' Extract predicted random effects from dynamic predictions

@@ -27,14 +27,29 @@
 #'
 #' Marker weights (see `joinme_standata()`) are used to form marker-average summaries
 #' for both current value (CV) and current slope (CS) association components. When
-#' `shared_marker_weights = TRUE`, all weighted marker-based association terms share
-#' one marker-weight structure. When `shared_marker_weights = FALSE`, each active
+#' `priors$marker_weights$shared = TRUE`, all weighted marker-based association terms share
+#' one marker-weight structure. When `priors$marker_weights$shared = FALSE`, each active
 #' weighted marker-based association term (`cv_total`, `cs_total`, `cv_marker`,
 #' `cs_marker`) gets its own marker-weight structure. When
-#' `fixed_marker_weights = FALSE`, signed perturbations are estimated around the
-#' supplied base weights. The effective marker intensities are used directly,
-#' without additional normalisation, to scale the corresponding association
-#' contribution.
+#' the family is stochastic, one common mean per weight set and signed
+#' marker-specific departures are estimated around the offset declared in
+#' `priors$marker_weights$offset`. Each offset vector must be wholly named or
+#' wholly unnamed. The common mean uses
+#' `jm_prior(marker_weights = list(intercept = ...))`; standardised departures
+#' use the centred unit-scale family named by `marker_weights$family`, for
+#' example `jm_prior(marker_weights = list(family = "laplace"))`. The family
+#' intercept is a fitting prior and does not set a simulation truth. A bare
+#' numeric value retains the ordinary prior-scale shorthand. The marker-only
+#' current-value and slope channels can supply little
+#' information about a common shift when the average centred marker trajectory
+#' is close to zero, so this location prior is substantively important. The family
+#' name `"student_t"` learns a single degrees-of-freedom value shared across all
+#' weight sets; its excess above two has a `Gamma(2, 0.1)` shape--rate prior. A
+#' `prior_student_t(df = ...)` declaration always fixes `df` instead. The
+#' family names `"constant"` and `"none"` instead use the declared offset as
+#' the complete marker weight and fit neither a common mean nor departures. The
+#' effective marker intensities are used directly, without additional
+#' normalisation, to scale the corresponding association contribution.
 #'
 #' The returned `JoiNMeFit` object stores a compact association plotting bundle
 #' containing only the posterior quantities needed to draw association curves
@@ -43,9 +58,17 @@
 #' without needing the full transient CmdStan CSV outputs.
 #'
 #' For CmdStanR fits, `joinme()` also eagerly imports the CSV-backed fit
-#' contents in memory before returning. This mirrors the loading step used by
+#' contents in memory before returning. This mirrors the loading operation used by
 #' `cmdstanr::save_object()` so later `saveRDS()` calls do not rely on the
 #' original CmdStan CSV files remaining on disk.
+#'
+#' `joinme()` can also fit the nested multivariate longitudinal model without
+#' an event process. Leave both `formulaEvent` and `dataEvent` as `NULL`. The
+#' longitudinal likelihood and every random-effect block are retained, whereas
+#' the survival likelihood and longitudinal--survival association are removed.
+#' Internally, a likelihood-neutral event scaffold is used only to reuse the
+#' common design and Stan infrastructure. Its event parameters are not reported
+#' as fitted scientific results.
 #'
 #' Formula-scoped subject weighting is supported in random-effect grouping terms via
 #' `weighted(group, weights = <column>)`. For example:
@@ -116,7 +139,7 @@
 #' - `x`: raw association-feature values used either to define training pairs or
 #'   to help derive knot locations.
 #' - `y`: optional target transformed values at those `x` points. Supplying `y`
-#'   activates the legacy plug-in fit; omitting it activates Stan estimation.
+#'   activates the plug-in fit; omitting it activates Stan estimation.
 #' - `lambda`: smoothness control (larger = smoother transform).
 #' - `direction`: monotone orientation for penalised spline families. Accepted
 #'   values are `"increasing"` and `"decreasing"`. When `y` is supplied, the
@@ -152,16 +175,32 @@
 #'   formula-scoped subject/group weights.
 #' @param dataLong Long-format longitudinal data with columns for id, marker, time,
 #'   outcome, and covariates referenced in `formulaLong`.
-#' @param formulaEvent Survival formula for baseline covariates and event model.
+#' @param formulaEvent Optional survival formula for baseline covariates and
+#'   the event model. Supply it together with `dataEvent`, or leave both `NULL`
+#'   to fit only the nested longitudinal mixed model.
 #'   Supported LHS forms are `survival::Surv(time, status)`,
 #'   `survival::Surv(start, stop, status)`,
 #'   `survival::Surv(time, status, type = "left")`, and
 #'   `survival::Surv(time1, time2, type = "interval2")`.
-#'   The legacy `type = "interval"` representation is not supported.
-#' @param dataEvent Event-process data with either one row per id
+#'   The former `type = "interval"` representation is not supported.
+#'   An `interval2` response must contain one row per id and presently describes
+#'   one event type. Its full likelihood is evaluated as
+#'   \eqn{S(L)-S(R)} for \eqn{L<T\le R}; the lower inspection limit is not
+#'   treated as delayed entry. The event covariates on that row are held over
+#'   the represented risk time, whilst longitudinal association terms remain
+#'   time-varying. See the model-interpretation vignette for all four censoring
+#'   contributions.
+#' @param dataEvent Optional event-process data with either one row per id
 #'   (`Surv(time, status)`) or multiple interval rows per id
-#'   (`Surv(start, stop, status)`). Covariates in `formulaEvent` may vary by interval.
-#' @param formulaVCov Covariance regression formula for id-specific marker-by-id effects.
+#'   (`Surv(start, stop, status)`). Covariates in `formulaEvent` may vary by
+#'   interval for a counting-process response. Left- and interval-censored
+#'   responses require one row per id. Leave this and `formulaEvent` as `NULL`
+#'   for longitudinal-only fitting.
+#' @param formulaVCov Covariance regression specification for id-specific
+#'   marker-by-id effects. Supply one formula to share its observed covariates,
+#'   or `list(sd = ~ ..., corr = ~ ...)` to model standard deviations and
+#'   off-diagonal partial correlations independently. Intercepts are always
+#'   component-specific parameters and are not duplicated in either design.
 #'   If the marker block omits the inner `( ... | id )`, marker-by-id effects are
 #'   absent and covariance-style associations (`corr`, `vcov`) are not allowed.
 #'   When present, `corr` associations use the off-diagonal entries of the
@@ -212,16 +251,14 @@
 #'     otherwise.
 #'   - force_recompile: logical; recompile the Stan model if needed.
 #'   - quadrature_nodes: optional positive integer total node target for survival
-#'     integration. Allowed values are exactly 7/15/31/41/51/61. Only the node
-#'     count is passed to Stan; GK nodes/weights are fixed in the Stan code.
+#'     integration. Allowed values are exactly 7/15/31/41/51/61. 
 #'   - vcov_diag_link: "softplus" or "exp" for covariance regression diagonals.
-#'   - `tau_fixed`: optional fixed `tau` in \eqn{(0,1)} for the skew double
-#'     exponential distribution. It cannot be combined with a \code{tau}
-#'     distributional regression.
 #' @param draws Optional number of posterior draws used for summaries (not sampling).
 #' @param families Marker-specific family specification (optional).
 #'   Can be a character vector of family names aligned to marker order, or a
 #'   list of `jm_family(...)` entries with per-marker links.
+#'   A skew-Laplace marker may fix its quantile/asymmetry parameter through
+#'   `jm_family("skew_laplace", tau = 0.8)`; otherwise `tau` is estimated.
 #'   Supported named forward links are `identity`, `log`, `logit`, `probit`,
 #'   and `exp`; `jm_family()` also accepts an invertible formula link or a
 #'   directly specified inverse-link formula. In formula syntax,
@@ -235,17 +272,19 @@
 #'   `joinme_tf(cv_total = ~ expit(x, intercept = TRUE, slope = TRUE))`, which
 #'   is fitted as `expit(iota_1 + iota_2 * x)`. See details.
 #'
-#' @param priors Prior declaration. Prefer `joinme_priors(...)`; raw named lists
-#'   with components `beta`, `alpha`, `iota`, and `lkj` remain supported.
-#' @param fixed_marker_weights Logical; if TRUE, marker weights are fixed at the
-#'   supplied base values. If FALSE, marker-weight perturbations are estimated
-#'   using the family selected by `shrinkage` (0 = Student-t(6), 1 = Laplace,
-#'   2 = Normal).
-#' @param shared_marker_weights Logical; if TRUE, all weighted marker-based
-#'   association terms share one marker-weight structure. If FALSE, each active
-#'   weighted marker-based association term gets its own marker-weight structure.
-#'   When `marker_weights` is a named list, use names `cv_total`, `cs_total`,
-#'   `cv_marker`, and `cs_marker`.
+#' @param priors Prior declaration from [jm_prior()]. Global `intercept` and
+#'   `slope` declarations may be replaced independently within `longitudinal`,
+#'   `survival`, `vcov`, `assoc`, `functional`, `marker_weights`, and named
+#'   distributional regressions. Distributional names may use family or marker
+#'   selectors, for example `` `sigma[family='student']` `` or
+#'   `` `sigma[marker='y']` ``; marker selection requires a uniquely associated
+#'   family-scoped `formulaDist` block. `marker$family`, `class$slope`, and an
+#'   LKJ declaration govern their distinct structures.
+#'   The `priors$marker_weights` component contains the complete marker-weight
+#'   declaration. Its `offset` is added to fitted weights and must be wholly
+#'   named or wholly unnamed. Set `family = "constant"` (or `"none"`) to use
+#'   that offset exactly. Otherwise the model adds a fitted common location and
+#'   standardised marker-specific departures from the declared family.
 #' @param basehaz An object of class `joinme_basehaz` created by `joinme_basehaz()`.
 #' This controls the baseline hazard parameterisation and spline basis. See `?joinme_basehaz` for details.
 #' @param fit logical; if TRUE, the model is fitted and a `JoiNMeFit` object is returned. If FALSE, only the Stan data list is returned.
@@ -254,6 +293,13 @@
 #'
 #' @examples
 #' \dontrun{
+#' longitudinal_fit <- joinme(
+#'   formulaLong = y ~ time + (1 + time | id) +
+#'     (1 + time + (1 + time | id) | marker),
+#'   dataLong = dataLong,
+#'   families = rep("gaussian", 3)
+#' )
+#'
 #' formulaDist <- list(
 #'   sigma[family=student_t] ~ 1 + time + (1 | id),
 #'   sigma[family=gaussian] ~ 1 + x1,
@@ -270,11 +316,12 @@
 # - Validate inputs and build Stan data.
 # - Resolve threading/engine settings and select the Stan program.
 # - Fit with cmdstanr/rstan and wrap results in a JoiNMeFit object.
+
 joinme <- function(
   formulaLong,
   dataLong,
-  formulaEvent,
-  dataEvent,
+  formulaEvent = NULL,
+  dataEvent = NULL,
   formulaVCov = ~1,
   formulaDist = NULL,
   control = list(),
@@ -282,13 +329,77 @@ joinme <- function(
   families = NULL,
   transforms = NULL,
   priors = joinme_priors(),
-  fixed_marker_weights = FALSE,
-  shared_marker_weights = TRUE,
   basehaz = joinme_basehaz(),
   fit = TRUE,
   seed = NULL,
   ...
 ) {
+  # Identify whether the user supplied a complete event process before
+  # constructing any internal scaffold. A formula without event data, or event
+  # data without its formula, has no unambiguous statistical interpretation and
+  # is therefore rejected rather than silently treated as longitudinal-only.
+  has_survival_process <- !is.null(formulaEvent) || !is.null(dataEvent)
+  if (xor(is.null(formulaEvent), is.null(dataEvent))) {
+    cli::cli_abort(c(
+      x = "{.arg formulaEvent} and {.arg dataEvent} must be supplied together.",
+      i = "Leave both NULL to fit only the nested longitudinal mixed model."
+    ))
+  }
+
+  # Resolve association terms before calling `joinme_standata()`,
+  # That default remains appropriate for a joint longitudinal--survival model, but it must not accidentally
+  # introduce a prior-only association parameter in a longitudinal-only fit.
+  dot_arguments <- list(...)
+  dot_argument_names <- names(dot_arguments) # names used to match additional arguments to the standata constructor
+  if (length(dot_arguments) > 0L &&
+      (is.null(dot_argument_names) || any(is.na(dot_argument_names) | !nzchar(dot_argument_names)))) {
+    cli::cli_abort(c(
+      x = "Every argument supplied through {.arg ...} must be named.",
+      i = "Use the argument names documented for {.fn joinme_standata}."
+    ))
+  }
+  unknown_dot_arguments <- setdiff(
+    dot_argument_names,
+    names(formals(joinme_standata))
+  ) # names that cannot be interpreted by the shared data constructor
+  if (length(unknown_dot_arguments) > 0L) {
+    cli::cli_abort(c(
+      x = "Unknown argument{?s}: {.field {unknown_dot_arguments}}.",
+      i = "Arguments supplied through {.arg ...} must be recognised by {.fn joinme_standata}."
+    ))
+  }
+  association_terms <- dot_arguments$assoc
+  if (is.null(association_terms)) {
+    association_terms <- if (has_survival_process) {
+      "cv_mean"
+    } else {
+      character(0)
+    }
+  }
+  if (!has_survival_process && length(association_terms) > 0L) {
+    cli::cli_abort(c(
+      x = "Association terms require a survival process.",
+      i = "Remove {.arg assoc}, or supply both {.arg formulaEvent} and {.arg dataEvent}."
+    ))
+  }
+  dot_arguments$assoc <- association_terms
+
+  # Construct one administrative, event-free row per subject when the
+  # analysis contains no survival outcome. Positive follow-up keeps the common
+  # time-design code well-defined; `include_survival = FALSE` below then sets
+  # all event likelihood contributions to exactly zero before sampling.
+  if (!has_survival_process) {
+    dataEvent <- .longitudinal_only_event_scaffold(
+      data_long = dataLong,
+      id_variable = dot_arguments$id_var %||% "id",
+      time_variable = dot_arguments$time_var %||% "time"
+    )
+    formulaEvent <- survival::Surv(
+      .joinme_follow_up,
+      .joinme_event
+    ) ~ 1
+  }
+
   if (!is.list(control)) {
     cli::cli_abort(c(
       x = "{.arg control} must be a named list.",
@@ -299,7 +410,7 @@ joinme <- function(
     transforms,
     validate = FALSE
   ))
-  priors <- unclass(.joinme_priors_(priors, validate = TRUE))
+  priors <- .joinme_priors_(priors, validate = TRUE)
 
   if (length(control) > 0 && is.null(names(control))) {
     cli::cli_abort(c(
@@ -311,9 +422,8 @@ joinme <- function(
   # Workflow: build standata -> resolve threading -> choose engine -> fit -> wrap
   # - sd: prepared Stan data list with all dimensions and transforms
   vcov_diag_link <- control$vcov_diag_link %||% "softplus"
-  tau_fixed <- control$tau_fixed %||% NULL
   quadrature_nodes <- control$quadrature_nodes %||% NULL
-  formulaVCov <- .resolve_vcov_formula(
+  formulaVCov <- .get_vcov_formula(
     formulaVCov = formulaVCov,
     default = ~1,
     context = "joinme()"
@@ -323,7 +433,7 @@ joinme <- function(
     msg = "{.arg basehaz} must be a {.cls joinme_basehaz} object, created by {.fn joinme_basehaz()} or {.fn jm_basehaz()}."
   )
 
-  arg_list <- list(...)
+  arg_list <- dot_arguments
   arg_list <- arg_list[names(arg_list) %in% names(formals(joinme_standata))]
   arg_list <- modifyList(
     arg_list,
@@ -332,19 +442,14 @@ joinme <- function(
       dataLong = dataLong,
       formulaEvent = formulaEvent,
       dataEvent = dataEvent,
+      include_survival = has_survival_process,
       formulaVCov = formulaVCov,
       formulaDist = formulaDist,
       families = families,
       transforms = transforms,
-      beta_prior = priors$beta,
-      alpha_prior = priors$alpha,
-      iota_prior = priors$iota,
-      lkj_prior = priors$lkj,
-      fixed_marker_weights = fixed_marker_weights,
-      shared_marker_weights = shared_marker_weights,
+      prior_specification = priors,
       quadrature_nodes = quadrature_nodes,
       vcov_diag_link = vcov_diag_link,
-      tau_fixed = tau_fixed,
       basehaz = basehaz$type,
       basehaz_n_knots = basehaz$n_knots,
       basehaz_knots = basehaz$knots,
@@ -413,11 +518,11 @@ joinme <- function(
   }
 
   stan_file <- .get_stan_file(
-    program = "joinme_fit",
+    program = .stan_fit_program(sd),
     threaded = TRUE
   )
 
-  engine <- .resolve_stan_engine(control$engine)
+  engine <- .get_stan_engine(control$engine)
   if (engine == "rstan") {
     old_stan_thread <- getOption("stan.thread")
     options(stan.thread = threads_per_chain)
@@ -489,14 +594,23 @@ joinme <- function(
   sd_stan$grainsize <- grainsize
 
   # Ensure time index arrays are preserved for cmdstanr JSON (avoid auto-unbox)
-  sd_stan <- .coerce_rstan_time_indices(sd_stan)
+  sd_stan <- .coerce_rstan_mixture_data(sd_stan)
 
   # Coerce arrays/vectors consistently for both cmdstanr and rstan
   sd_stan <- .coerce_rstan_dist_arrays(sd_stan)
   sd_stan <- .coerce_rstan_vectors(
     sd_stan,
     c(
-      "beta_scale",
+      "prior_regression_mu",
+      "prior_regression_scale",
+      "prior_regression_df",
+      "prior_regression_horseshoe_local_df",
+      "prior_regression_horseshoe_global_df",
+      "prior_regression_horseshoe_global_scale",
+      "prior_regression_horseshoe_slab_df",
+      "prior_regression_horseshoe_slab_scale",
+      "prior_class_regression_mu",
+      "prior_class_regression_scale",
       "const_data_cv",
       "const_data_cs",
       "const_data_corr",
@@ -619,9 +733,8 @@ joinme <- function(
   }
 
   call <- match.call()
-  jm_sd <-
-    JoiNMeStanData$new(
-      formulaLong = formulaLong,
+  sd_recipe <- list(
+    formulaLong = formulaLong,
       formulaEvent = formulaEvent,
       formulaVCov = formulaVCov,
       parent_call = call,
@@ -639,11 +752,124 @@ joinme <- function(
       stan_mod = mod,
       stan_engine = engine,
       stan_args = if (engine == "cmdstanr") args else rstan_args
-    )
+  )
+  jm_sd <- JoiNMeStanData$new(sd_recipe)
   # If no fitting is requested, return the prepared Stan data list, program sample args
   if (!fit) {
     return(jm_sd)
   }
 
   jm_sd$sample()
+}
+
+#' Construct a likelihood-neutral event scaffold
+#'
+#' @param data_long Long-format longitudinal data.
+#' @param id_variable Name of the subject identifier.
+#' @param time_variable Name of the longitudinal time variable.
+#'
+#' @return One data-frame row per subject, with positive administrative
+#'   follow-up and a zero event indicator.
+#' @keywords internal
+#' @noRd
+.longitudinal_only_event_scaffold <- function(
+  data_long,
+  id_variable,
+  time_variable
+) {
+  if (!is.data.frame(data_long)) {
+    cli::cli_abort("{.arg dataLong} must be a data frame.")
+  }
+  missing_variables <- setdiff(
+    c(id_variable, time_variable),
+    names(data_long)
+  ) # longitudinal columns required to identify subjects and follow-up
+  if (length(missing_variables) > 0L) {
+    cli::cli_abort(
+      "Longitudinal-only fitting requires columns: {paste(missing_variables, collapse = ', ')}."
+    )
+  }
+
+  valid_rows <- !is.na(data_long[[id_variable]]) &
+    is.finite(
+      as.numeric(data_long[[time_variable]])
+    ) # observations carrying both an identifier and a finite measurement time
+  observed_data <- data_long[
+    valid_rows,
+    ,
+    drop = FALSE
+  ] # eligible longitudinal rows from which subject records can be copied
+  if (nrow(observed_data) == 0L) {
+    cli::cli_abort("No finite longitudinal observation time is available.")
+  }
+
+  ordered_rows <- order(
+    as.character(observed_data[[id_variable]]),
+    as.numeric(observed_data[[time_variable]])
+  ) # subject-major ordering with the latest observation last
+  observed_data <- observed_data[
+    ordered_rows,
+    ,
+    drop = FALSE
+  ]
+  scaffold <- observed_data[
+    !duplicated(
+      as.character(observed_data[[id_variable]]),
+      fromLast = TRUE
+    ),
+    ,
+    drop = FALSE
+  ] # one covariate-complete row copied from the last observation of each subject
+  overall_follow_up <- max(
+    as.numeric(observed_data[[time_variable]]),
+    na.rm = TRUE
+  ) # common positive administrative time needed only by the design builder
+  if (!is.finite(overall_follow_up) || overall_follow_up <= 0) {
+    overall_follow_up <- 1
+  }
+  scaffold$.joinme_follow_up <-
+    overall_follow_up # neutral administrative endpoint for every subject
+  scaffold$.joinme_event <- 0L # zero event indicator removing endpoint hazards
+  rownames(scaffold) <- NULL
+  scaffold
+}
+
+#' Determine whether a fitted model contains an observed event process
+#'
+#' @param object A fitted JoiNMe object carrying configuration or Stan data.
+#'
+#' @return A single logical value. Objects created before longitudinal-only
+#'   support are conservatively treated as joint models.
+#' @keywords internal
+#' @noRd
+.fit_includes_survival <- function(object) {
+  if (inherits(object, "JoiNMeMixFit")) {
+    mixture_specification <- object$mixture %||%
+      object$config$mixture # checked latent-class model description
+    if (!is.null(mixture_specification$include_survival)) {
+      return(isTRUE(mixture_specification$include_survival))
+    }
+  }
+  isTRUE(
+    object$config$include_survival %||%
+      (as.integer(object$stan_data$include_survival %||% 1L) == 1L)
+  )
+}
+
+#' Require an observed event process for a survival-specific operation
+#'
+#' @param object A fitted JoiNMe object.
+#' @param operation Plain-language name of the requested operation.
+#'
+#' @return The input object, invisibly, when the requirement is met.
+#' @keywords internal
+#' @noRd
+.require_fitted_survival_process <- function(object, operation) {
+  if (!.fit_includes_survival(object)) {
+    cli::cli_abort(c(
+      x = "{operation} is unavailable for a longitudinal-only fit.",
+      i = "Fit with both {.arg formulaEvent} and {.arg dataEvent} to model an event process."
+    ))
+  }
+  invisible(object)
 }

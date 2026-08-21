@@ -1,0 +1,738 @@
+/**
+ * @file dynpred_output_calculations.stan
+ * @brief Common longitudinal and survival prediction calculations.
+ *
+ * @details The enclosing entry point declares all outputs before including
+ * this module. Keeping calculations separate permits the latent-class entry
+ * point to add allocation outputs without duplicating this substantial loop.
+ */
+
+for (k in 1 : n_draws) {
+
+  // -------------------------------------------------------------
+  // 1. Reconstruct Subject Random Effects (Scale and Correlate)
+  // -------------------------------------------------------------
+
+  // Shared ID Random Effects: u_id
+  matrix[n_random_id, n_random_id] L_u; // Role: Cholesky factor u.
+  if (flag_indep_id_re == 1)
+    L_u = diag_matrix(tau_id[k]);
+  else
+    L_u = diag_pre_multiply(tau_id[k], Lcorr_id[k]);
+  vector[n_random_id] u_id_dynamic = L_u * z_u[k]; // newly conditioned id effects used by ordinary dynamic prediction
+  vector[n_random_id] u_id = reuse_fitted_re == 1
+    ? fitted_u_id[k]
+    : u_id_dynamic; // realised id effects selected from the fit or newly conditioned history
+
+  // Marker-Specific Random Effects (optional): v_marker
+  matrix[n_random_marker, n_random_marker] L_v; // Role: Cholesky factor v.
+  if (n_random_marker > 0) {
+    if (flag_indep_marker_re == 1)
+      L_v = diag_matrix(tau_marker[k]);
+    else
+      L_v = diag_pre_multiply(tau_marker[k], Lcorr_marker[k]);
+  }
+  array[n_marker_types] vector[n_random_marker] v_marker; // realized marker REs
+  if (n_random_marker > 0) {
+    for (d in 1 : n_marker_types)
+      v_marker[d] = reuse_fitted_re == 1
+        ? fitted_v_marker[k, d]
+        : L_v * z_v[k, d];
+  }
+
+  // Marker-by-ID Latent Effects: z_w
+  // These latent seeds are iid standard normal. The full subject-specific
+  // covariance lives in Li, there is no separate marker-by-id baseline
+  // covariance matrix to reconstruct here.
+  array[n_marker_types] vector[n_random_marker_id] z_w; // latent marker-id effects
+  for (d in 1 : n_marker_types) {
+    vector[n_random_marker_id] cross = rep_vector(0.0, n_random_marker_id); // Role: cross term.
+    if (flag_allow_marker_crosscorr == 1 && n_random_marker > 0)
+      cross = B_cross[k] * v_marker[d];
+    z_w[d] = reuse_fitted_re == 1
+      ? fitted_z_w[k, d]
+      : cross + z_w_lat[k, d];
+  }
+
+  // Use covariance regression to construct L_i = SD_i * K_i.
+  matrix[n_random_marker_id, n_random_marker_id] Ki = rep_matrix(0.0, n_random_marker_id, n_random_marker_id); // draw-specific row-normalised Cholesky correlation factor
+  matrix[n_random_marker_id, n_random_marker_id] Li = rep_matrix(0.0,
+                                                                 n_random_marker_id,
+                                                                 n_random_marker_id);
+  vector[n_random_marker_id] sd_i = rep_vector(1.0, n_random_marker_id); // Role: sd i.
+  int m_pos = 1; // Role: m pos.
+  for (m in 1 : num_unique_cov_entries) {
+    int r_ = idx_row_cov[m]; // Role: r.
+    int c_ = idx_col_cov[m]; // Role: c.
+    real beta_contrib = 0.0; // Role: coefficient contrib.
+    if (r_ == c_) {
+      if (n_cov_vcov_sd > 0) {
+        int first_slope = (r_ - 1) * n_cov_vcov_sd + 1; // first SD slope for diagonal coordinate r_
+        int final_slope = r_ * n_cov_vcov_sd; // final SD slope for diagonal coordinate r_
+        vector[n_cov_vcov_sd] bL_m = beta_vcov_sd_flat[k][first_slope : final_slope]; // draw-specific SD coefficients
+        beta_contrib = dot_product(bL_m, vec_cov_vcov_sd);
+      }
+      real lp = alpha_vcov_reg[k][m] + beta_contrib + lambda_vcov_reg[k][m] * z_L[k][m]; // standard-deviation linear predictor
+      sd_i[r_] = (vcov_diag_link == 1) ? exp(lp) : log1p_exp(lp);
+    }
+  }
+
+  // Rebuild K_i from tanh-linked partial correlations. The sequential
+  // square-root product makes each row have norm one, which preserves the
+  // marginal meaning of sd_i when correlation predictors change. The
+  // covariance factor is L_i = diag_pre_multiply(sd_i, K_i).
+  for (r in 1 : n_random_marker_id) {
+    if (r == 1) {
+      Ki[1, 1] = 1.0;
+      if (flag_indep_idmarker_cov == 0)
+        m_pos += 1;
+    } else if (flag_indep_idmarker_cov == 1) {
+      Ki[r, r] = 1.0;
+      m_pos += 1;
+    } else {
+      real remaining_scale = 1.0; // square-root scale not assigned to preceding coordinates in this row
+      for (c in 1 : r) {
+        if (c < r) {
+            real beta_contrib = 0.0; // Role: coefficient contrib.
+            if (n_cov_vcov_corr > 0) {
+              int correlation_coordinate = ((r - 1) * (r - 2)) %/% 2 + c; // row-major off-diagonal coordinate
+              int first_slope = (correlation_coordinate - 1) * n_cov_vcov_corr + 1; // first correlation slope
+              int final_slope = correlation_coordinate * n_cov_vcov_corr; // final correlation slope
+              vector[n_cov_vcov_corr] bL_m = beta_vcov_corr_flat[k][first_slope : final_slope]; // draw-specific correlation coefficients
+              beta_contrib = dot_product(bL_m, vec_cov_vcov_corr);
+            }
+            {
+              real lp = alpha_vcov_reg[k][m_pos] + beta_contrib + lambda_vcov_reg[k][m_pos] * z_L[k][m_pos]; // Role: linear predictor.
+              real partial_correlation = tanh(lp); // partial correlation for coordinate (r,c)
+              Ki[r, c] = remaining_scale * partial_correlation;
+              remaining_scale *= sqrt(fmax(1e-12, 1.0 - square(partial_correlation)));
+            }
+        } else {
+          Ki[r, r] = remaining_scale;
+        }
+        m_pos += 1;
+      }
+    }
+  }
+
+  Li = reuse_fitted_re == 1
+    ? fitted_L_i[k]
+    : diag_pre_multiply(sd_i, Ki);
+
+  matrix[n_random_marker_id, n_random_marker_id] Li_eff = Li; // covariance factor on the original study-time basis
+
+  // Scale latent effects: w_idm
+  array[n_marker_types] vector[n_random_marker_id] w_idm; // scaled marker-id REs
+  for (d in 1 : n_marker_types)
+    w_idm[d] = Li_eff * z_w[d];
+
+  // -------------------------------------------------------------
+  // 2. Prepare for Association (Averages)
+  // -------------------------------------------------------------
+  vector[n_marker_types] marker_weights_cv_total_k = to_vector(marker_weights_draws_cv_total[k, ]); // Role: marker weights current value total k.
+  vector[n_marker_types] marker_weights_cs_total_k = to_vector(marker_weights_draws_cs_total[k, ]); // Role: marker weights current slope total k.
+  vector[n_marker_types] marker_weights_cv_marker_k = to_vector(marker_weights_draws_cv_marker[k, ]); // Role: marker weights current value marker k.
+  vector[n_marker_types] marker_weights_cs_marker_k = to_vector(marker_weights_draws_cs_marker[k, ]); // Role: marker weights current slope marker k.
+  // Aggregation is by marker count D to match fit-time construction.
+  // Marker weights are applied in transformed marker aggregation, not here.
+  vector[n_random_marker] vbar; // unweighted mean marker REs
+  if (n_random_marker > 0) {
+    for (r in 1 : n_random_marker) {
+      real acc = 0; // Role: running accumulator.
+      for (d in 1 : n_marker_types)
+        acc += v_marker[d][r];
+      vbar[r] = acc / n_marker_types;
+    }
+  }
+  vector[n_random_marker_id] zbar; // unweighted mean marker-id latents
+  for (q in 1 : n_random_marker_id) {
+    real acc = 0; // Role: running accumulator.
+    for (d in 1 : n_marker_types)
+      acc += z_w[d][q];
+    zbar[q] = acc / n_marker_types;
+  }
+  vector[n_random_marker_id] wbar_i = Li_eff * zbar; // scaled mean marker-id effects
+    array[n_marker_types] vector[n_random_marker_id] w_draw; // Role: w draw.
+    for (d in 1 : n_marker_types)
+      w_draw[d] = Li_eff * z_w[d];
+
+  // Global Association Scales
+  real a_cv_total = flag_assoc_cv_total * coeff_assoc_cv_total[k]; // Role: a current value total.
+  real a_cs_total = flag_assoc_cs_total * coeff_assoc_cs_total[k]; // Role: a current slope total.
+  real a_cv_mean = flag_assoc_cv_mean * coeff_assoc_cv_mean[k]; // Role: a current value mean.
+  real a_cs_mean = flag_assoc_cs_mean * coeff_assoc_cs_mean[k]; // Role: a current slope mean.
+  real a_cv_marker = flag_assoc_cv_marker * coeff_assoc_cv_marker[k]; // Role: a current value marker.
+  real a_cs_marker = flag_assoc_cs_marker * coeff_assoc_cs_marker[k]; // Role: a current slope marker.
+  vector[(n_random_marker_id * (n_random_marker_id - 1)) %/% 2] a_corr = flag_assoc_corr
+                      * coeff_assoc_corr[k];
+  vector[num_unique_cov_entries] a_vcov = flag_assoc_vcov * coeff_assoc_vcov[k]; // Role: a covariance.
+
+  // -------------------------------------------------------------
+  // 3. Fitted values for observed history (scale-aware)
+  // -------------------------------------------------------------
+  for (n in 1 : n_obs_long) {
+    int d = idx_marker_obs[n]; // Role: marker loop position.
+     real eta_long = dot_product(mat_fixed_obs[n], beta_fixed[k])
+                    + dot_product(mat_id_obs[n], u_id)
+                    + ((n_random_marker > 0)
+                       ? dot_product(mat_marker_obs[n], v_marker[d]) : 0.0)
+                    + dot_product(mat_marker_id_obs[n], w_idm[d]);
+     // eta_long: linear predictor for observed history
+
+    y_fit_linpred[k, n] = eta_long;
+    {
+      int link_d = make_canonical_link(d, inv_link_n_ops, inv_link_ops, inv_link_n_const); // Role: link d.
+      real mu_long = inv_link_bytecode(eta_long, d, inv_link_n_ops, inv_link_ops, inv_link_n_const, inv_link_const); // Role: mu long.
+
+      if (family_long[d] == 1) {
+        y_fit_epred[k, n] = mu_long;
+      } else if (family_long[d] == 2) {
+        y_fit_epred[k, n] = mu_long;
+      } else if (family_long[d] == 3) {
+        y_fit_epred[k, n] = fmin(fmax(mu_long, 1e-12), 1 - 1e-12);
+      } else if (family_long[d] == 4) {
+        y_fit_epred[k, n] = trials_obs[n] * fmin(fmax(mu_long, 1e-12), 1 - 1e-12);
+      } else if (family_long[d] == 5) {
+        y_fit_epred[k, n] = fmax(mu_long, 1e-12);
+      } else if (family_long[d] == 6) {
+        y_fit_epred[k, n] = fmax(mu_long, 1e-12);
+      } else if (family_long[d] == 7) {
+        y_fit_epred[k, n] = mu_long;
+      } else if (family_long[d] == 8) {
+        y_fit_epred[k, n] = mu_long;
+      } else if (family_long[d] == 9) {
+        y_fit_epred[k, n] = mu_long;
+      } else if (family_long[d] == 10) {
+        y_fit_epred[k, n] = fmin(fmax(mu_long, 1e-12), 1 - 1e-12);
+      } else {
+      // Cumulative logit: report expected category
+      vector[K_ord] p; // Role: p.
+      p[1] = inv_logit(cutpoints_ord[k][1] - eta_long);
+      for (c in 2 : (K_ord - 1))
+        p[c] = inv_logit(cutpoints_ord[k][c] - eta_long)
+               - inv_logit(cutpoints_ord[k][c - 1] - eta_long);
+      p[K_ord] = 1 - inv_logit(cutpoints_ord[k][K_ord - 1] - eta_long);
+      real acc = 0; // Role: running accumulator.
+      for (c in 1 : K_ord) acc += c * p[c];
+      y_fit_epred[k, n] = acc;
+      }
+    }
+  }
+
+  // -------------------------------------------------------------
+  // 4. Longitudinal Prediction
+  // -------------------------------------------------------------
+  for (n in 1 : n_obs_pred) {
+    int d = idx_marker_pred[n]; // Role: marker loop position.
+     real eta_long = dot_product(mat_fixed_pred[n], beta_fixed[k])
+                    + dot_product(mat_id_pred[n], u_id)
+                    + ((n_random_marker > 0)
+                       ? dot_product(mat_marker_pred[n], v_marker[d]) : 0.0)
+                    + dot_product(mat_marker_id_pred[n], w_idm[d]);
+     // eta_long: linear predictor for prediction grid
+
+    y_pred_linpred[k, n] = eta_long;
+    {
+      int link_d = make_canonical_link(d, inv_link_n_ops, inv_link_ops, inv_link_n_const); // Role: link d.
+      real mu_long = inv_link_bytecode(eta_long, d, inv_link_n_ops, inv_link_ops, inv_link_n_const, inv_link_const); // Role: mu long.
+
+      if (family_long[d] == 1) {
+      // Gaussian
+      real sig = (P_sigma > 0) ? exp(fmin(dot_product(X_sigma_pred[n], beta_sigma[k]), 20))
+             : sigma_family[k][marker_to_sigma_family[d]];
+      // sig: residual scale for Gaussian prediction
+      y_pred_epred[k, n] = mu_long;
+      y_pred[k, n] = normal_rng(mu_long, sig);
+      } else if (family_long[d] == 2) {
+      // Student-t
+      real sig = (P_sigma > 0) ? exp(fmin(dot_product(X_sigma_pred[n], beta_sigma[k]), 20))
+             : sigma_family[k][marker_to_sigma_family[d]];
+      real nu = (P_nu > 0) ? (2 + exp(fmin(dot_product(X_nu_pred[n], beta_nu[k]), 20)))
+            : nu_family[k][marker_to_nu_family[d]];
+      // nu: degrees of freedom for Student-t prediction
+      y_pred_epred[k, n] = mu_long;
+      y_pred[k, n] = student_t_rng(nu, mu_long, sig);
+      } else if (family_long[d] == 3) {
+      // Bernoulli (logit link)
+      real p = fmin(fmax(mu_long, 1e-12), 1 - 1e-12); // Bernoulli probability
+      y_pred_epred[k, n] = p;
+      y_pred[k, n] = bernoulli_rng(p);
+      } else if (family_long[d] == 4) {
+      // Binomial (logit link)
+      real p = fmin(fmax(mu_long, 1e-12), 1 - 1e-12); // Binomial success probability
+      y_pred_epred[k, n] = trials_pred[n] * p;
+      y_pred[k, n] = binomial_rng(trials_pred[n], p);
+      } else if (family_long[d] == 5) {
+      // Poisson (log link)
+      real mu = fmax(mu_long, 1e-12); // Poisson mean
+      y_pred_epred[k, n] = mu;
+      y_pred[k, n] = poisson_rng(mu);
+      } else if (family_long[d] == 6) {
+      // Negative binomial 2 (log link)
+      real mu = fmax(mu_long, 1e-12); // NegBin mean
+      y_pred_epred[k, n] = mu;
+      {
+        real phi = (P_phi > 0) ? exp(dot_product(X_phi_pred[n], beta_phi[k]))
+             : phi_family[k][marker_to_phi_family[d]];
+        // phi: dispersion for NegBin2
+        y_pred[k, n] = neg_binomial_2_rng(mu, phi);
+      }
+      } else if (family_long[d] == 7) {
+      // Skew-normal
+      real sig = (P_sigma > 0) ? exp(fmin(dot_product(X_sigma_pred[n], beta_sigma[k]), 20))
+             : sigma_family[k][marker_to_sigma_family[d]];
+      real alpha = (P_alpha > 0) ? dot_product(X_alpha_pred[n], beta_alpha[k])
+          : alpha_family[k][marker_to_alpha_family[d]];
+      // sig: residual scale, alpha: skew parameter
+      y_pred_epred[k, n] = mu_long;
+      y_pred[k, n] = skew_normal_rng(mu_long, sig, alpha);
+      } else if (family_long[d] == 8) {
+      // Double exponential (Laplace)
+      real sig = (P_sigma > 0) ? exp(fmin(dot_product(X_sigma_pred[n], beta_sigma[k]), 20))
+             : sigma_family[k][marker_to_sigma_family[d]];
+      // sig: Laplace scale
+      y_pred_epred[k, n] = mu_long;
+      y_pred[k, n] = double_exponential_rng(mu_long, sig);
+      } else if (family_long[d] == 9) {
+      // Skew double exponential (asymmetric Laplace)
+        real sig = (P_sigma > 0) ? exp(fmin(dot_product(X_sigma_pred[n], beta_sigma[k]), 20))
+             : sigma_family[k][marker_to_sigma_family[d]];
+      // Step 1: use the fixed quantile/asymmetry parameter when requested.
+      // Step 2: otherwise propagate the draw-specific regression or family
+      // value into posterior predictive outcome sampling.
+      real tau = use_tau_fixed[d] == 1
+                 ? tau_fixed[d]
+                 : ((P_tau > 0)
+                    ? inv_logit(dot_product(X_tau_pred[n], beta_tau[k]))
+                    : tau_family[k][marker_to_tau_family[d]]);
+      // sig: scale, tau: skewness in (0,1)
+      y_pred_epred[k, n] = mu_long;
+      y_pred[k, n] = skew_double_exponential_rng(mu_long, sig, tau);
+      } else if (family_long[d] == 10) {
+      // Beta
+      real kappa = (P_kappa > 0) ? exp(dot_product(X_kappa_pred[n], beta_kappa[k]))
+                      : kappa_family[k][marker_to_kappa_family[d]];
+      real mu = fmin(fmax(mu_long, 1e-12), 1 - 1e-12); // Role: mu.
+      real shape1 = fmax(mu * kappa, 1e-6); // Role: shape1.
+      real shape2 = fmax((1 - mu) * kappa, 1e-6); // Role: shape2.
+      // mu: mean, kappa: sample size, shape1/shape2: Beta shapes
+      y_pred_epred[k, n] = mu;
+      y_pred[k, n] = beta_rng(shape1, shape2);
+      } else {
+      // Cumulative logit (ordered logistic)
+      vector[K_ord] p; // Role: p.
+      p[1] = inv_logit(cutpoints_ord[k][1] - eta_long);
+      for (c in 2 : (K_ord - 1))
+        p[c] = inv_logit(cutpoints_ord[k][c] - eta_long)
+               - inv_logit(cutpoints_ord[k][c - 1] - eta_long);
+      p[K_ord] = 1 - inv_logit(cutpoints_ord[k][K_ord - 1] - eta_long);
+      real acc = 0; // Role: running accumulator.
+      for (c in 1 : K_ord) acc += c * p[c];
+      // p: category probabilities, acc: expected category
+      y_pred_epred[k, n] = acc;
+      y_pred[k, n] = ordered_logistic_rng(eta_long, cutpoints_ord[k]);
+      }
+    }
+  }
+
+  // -------------------------------------------------------------
+  // 5. Survival Prediction S(t | T_cond)
+  // -------------------------------------------------------------
+  // Calculate Cumulative Hazard at Conditioning Time: H(T_cond)
+  real H_cond; // cumulative hazard at conditioning time
+  {
+    vector[n_gk] cvm, cvk, cvm_f, cvk_f; // mean/marker CV at nodes and forward shift
+    for (j in 1 : n_gk) {
+      // Mean trajectory association (Current Value)
+      cvm[j] = dot_product(mat_fixed_gk_cond[j], beta_fixed[k])
+               + dot_product(mat_id_gk_cond[j], u_id);
+      cvm_f[j] = dot_product(mat_fixed_gk_cond_fwd[j], beta_fixed[k])
+                 + dot_product(mat_id_gk_cond_fwd[j], u_id);
+
+      // Marker-Specific trajectory association
+      real mk_part = 0, mk_part_f = 0; // Role: mk part.
+      if (n_random_marker > 0) {
+        mk_part = dot_product(mat_marker_gk_cond[j], vbar);
+        mk_part_f = dot_product(mat_marker_gk_cond_fwd[j], vbar);
+      }
+      cvk[j] = mk_part + dot_product(mat_marker_id_gk_cond[j], wbar_i);
+      cvk_f[j] = mk_part_f
+                 + dot_product(mat_marker_id_gk_cond_fwd[j], wbar_i);
+    }
+
+    vector[n_gk] csm_raw = eta_fd(cvm, cvm_f, eps_finite_diff); // mean slope
+    vector[n_gk] csk_raw; // marker slope (weighted across markers)
+    int M_corr_local = num_elements(a_corr); // Role: derived dimension correlation local.
+    vector[M_corr_local] corr_terms_raw = eta_chol_corr(Li); // Role: correlation terms unscaled.
+    int M_vcov_local = num_elements(a_vcov); // Role: derived dimension covariance local.
+    vector[M_vcov_local] vcov_terms_raw = eta_vcov_weighted_const(Li_eff, flag_indep_idmarker_cov); // Role: covariance terms unscaled.
+
+    vector[n_gk] cv_tot = cvm + cvk; // total current value
+
+    vector[n_gk] cv_tot_tf; // Role: current value total transformation.
+    vector[n_gk] cv_mean_tf = apply_transform_vector(
+      cvm,
+      tf_mode_cv_mean,
+      functional_ops_cv_mean,
+      functional_iota_intercept_idx_cv_mean,
+      functional_iota_slope_idx_cv_mean,
+      const_data_cv_mean,
+      knots_cv_mean,
+        coeff_cv_mean[k],
+      spline_degree_cv_mean,
+      iota_intercept_cv_mean[k],
+      iota_slope_cv_mean[k]
+    );
+    vector[n_gk] cv_marker_tf; // Role: current value marker transformation.
+    vector[n_gk] cs_tot_tf; // Role: current slope total transformation.
+    vector[n_gk] cs_marker_tf; // Role: current slope marker transformation.
+    for (j in 1 : n_gk) {
+      real acc_cv_tot_tf = 0; // Role: acc current value total transformation.
+      real acc_cv_marker_tf = 0; // Role: acc current value marker transformation.
+      real acc_csk_raw = 0; // Role: acc csk unscaled.
+      real acc_cs_tot_tf = 0; // Role: acc current slope total transformation.
+      real acc_cs_marker_tf = 0; // Role: acc current slope marker transformation.
+      for (d in 1 : n_marker_types) {
+        real mk_part_d = 0; // Role: mk part d.
+        real mk_part_f_d = 0; // Role: mk part f d.
+        if (n_random_marker > 0) {
+          mk_part_d = dot_product(mat_marker_gk_cond[j], v_marker[d]);
+          mk_part_f_d = dot_product(mat_marker_gk_cond_fwd[j], v_marker[d]);
+        }
+        real cvk_d = mk_part_d + dot_product(mat_marker_id_gk_cond[j], w_draw[d]); // Role: cvk d.
+        real cvk_f_d = mk_part_f_d + dot_product(mat_marker_id_gk_cond_fwd[j], w_draw[d]); // Role: cvk f d.
+        real cv_tot_d = cvm[j] + cvk_d; // Role: current value total d.
+
+        acc_cv_tot_tf += marker_weights_cv_total_k[d]
+          * apply_transform_scalar(cv_tot_d, tf_mode_cv_tot,
+                                   functional_ops_cv, functional_iota_intercept_idx_cv, functional_iota_slope_idx_cv, const_data_cv,
+                                   knots_cv, coeff_cv[k], spline_degree_cv,
+                                   iota_intercept_cv[k], iota_slope_cv[k]);
+        acc_cv_marker_tf += marker_weights_cv_marker_k[d]
+          * apply_transform_scalar(cvk_d, tf_mode_cv_marker,
+                                   functional_ops_cv_marker, functional_iota_intercept_idx_cv_marker, functional_iota_slope_idx_cv_marker, const_data_cv_marker,
+                                   knots_cv_marker, coeff_cv_marker[k], spline_degree_cv_marker,
+                                   iota_intercept_cv_marker[k], iota_slope_cv_marker[k]);
+        {
+          real csk_raw_d = (cvk_f_d - cvk_d) / eps_finite_diff; // Role: csk unscaled d.
+          real cs_tot_raw_d = csm_raw[j] + csk_raw_d; // Role: current slope total unscaled d.
+
+          acc_csk_raw += marker_weights_cs_marker_k[d] * csk_raw_d;
+          acc_cs_tot_tf += marker_weights_cs_total_k[d]
+            * apply_transform_scalar(cs_tot_raw_d, tf_mode_cs_tot,
+                                     functional_ops_cs, functional_iota_intercept_idx_cs, functional_iota_slope_idx_cs, const_data_cs,
+                                     knots_cs, coeff_cs[k], spline_degree_cs,
+                                     iota_intercept_cs[k], iota_slope_cs[k]);
+          acc_cs_marker_tf += marker_weights_cs_marker_k[d]
+            * apply_transform_scalar(csk_raw_d, tf_mode_cs_marker,
+                                     functional_ops_cs_marker, functional_iota_intercept_idx_cs_marker, functional_iota_slope_idx_cs_marker, const_data_cs_marker,
+                                     knots_cs_marker, coeff_cs_marker[k], spline_degree_cs_marker,
+                                     iota_intercept_cs_marker[k], iota_slope_cs_marker[k]);
+        }
+      }
+      cv_tot_tf[j] = acc_cv_tot_tf / n_marker_types;
+      cv_marker_tf[j] = acc_cv_marker_tf / n_marker_types;
+      csk_raw[j] = acc_csk_raw / n_marker_types;
+      cs_tot_tf[j] = acc_cs_tot_tf / n_marker_types;
+      cs_marker_tf[j] = acc_cs_marker_tf / n_marker_types;
+    }
+
+    vector[n_gk] cs_mean_tf = apply_transform_vector(
+      csm_raw,
+      tf_mode_cs_mean,
+      functional_ops_cs_mean,
+      functional_iota_intercept_idx_cs_mean,
+      functional_iota_slope_idx_cs_mean,
+      const_data_cs_mean,
+      knots_cs_mean,
+        coeff_cs_mean[k],
+      spline_degree_cs_mean,
+      iota_intercept_cs_mean[k],
+      iota_slope_cs_mean[k]
+    );
+    vector[M_corr_local] corr_terms_tf = apply_transform_vector_by_component(
+      corr_terms_raw,
+      tf_mode_corr,
+      functional_ops_corr,
+      functional_iota_intercept_idx_corr,
+      functional_iota_slope_idx_corr,
+      const_data_corr,
+      knots_corr,
+        coeff_corr[k],
+      spline_degree_corr,
+      iota_intercept_corr[k],
+      iota_slope_corr[k]
+    );
+      vector[M_corr_local] corr_terms_ref = apply_transform_vector_by_component(
+        rep_vector(0, M_corr_local),
+        tf_mode_corr,
+        functional_ops_corr,
+        functional_iota_intercept_idx_corr,
+        functional_iota_slope_idx_corr,
+        const_data_corr,
+        knots_corr,
+        coeff_corr[k],
+        spline_degree_corr,
+        iota_intercept_corr[k],
+        iota_slope_corr[k]
+      );
+      corr_terms_tf = corr_terms_tf - corr_terms_ref;
+    real corr_assoc_scalar = dot_product(a_corr, corr_terms_tf); // Role: correlation assoc scalar.
+    vector[n_gk] corr_assoc = rep_vector(corr_assoc_scalar, n_gk); // Role: correlation assoc.
+    vector[M_vcov_local] vcov_terms_tf = apply_transform_vector_by_component(
+      vcov_terms_raw,
+      tf_mode_vcov,
+      functional_ops_vcov,
+      functional_iota_intercept_idx_vcov,
+      functional_iota_slope_idx_vcov,
+      const_data_vcov,
+      knots_vcov,
+        coeff_vcov[k],
+      spline_degree_vcov,
+      iota_intercept_vcov[k],
+      iota_slope_vcov[k]
+    );
+    vector[M_vcov_local] vcov_terms_ref = apply_transform_vector_by_component(
+      rep_vector(0, M_vcov_local),
+      tf_mode_vcov,
+      functional_ops_vcov,
+      functional_iota_intercept_idx_vcov,
+      functional_iota_slope_idx_vcov,
+      const_data_vcov,
+      knots_vcov,
+      coeff_vcov[k],
+      spline_degree_vcov,
+      iota_intercept_vcov[k],
+      iota_slope_vcov[k]
+    );
+    vcov_terms_tf = vcov_terms_tf - vcov_terms_ref;
+    real vcov_assoc_scalar = dot_product(a_vcov, vcov_terms_tf); // Role: covariance assoc scalar.
+    vector[n_gk] vcov_assoc = rep_vector(vcov_assoc_scalar, n_gk); // Role: covariance assoc.
+
+    vector[n_gk] eta_assoc_nodes = a_cv_total * cv_tot_tf
+                                 + a_cv_mean * cv_mean_tf
+                                 + a_cv_marker * cv_marker_tf
+                                 + a_cs_total * cs_tot_tf
+                                 + a_cs_mean * cs_mean_tf
+                                 + a_cs_marker * cs_marker_tf
+                                 + corr_assoc
+                                 + vcov_assoc;
+    // eta_assoc_nodes: association predictor at GK nodes
+
+    vector[n_gk] log_h_total; // total log-hazard at quadrature nodes
+    for (j in 1 : n_gk) {
+      vector[K_event] log_h_cause; // cause-specific log hazards
+      for (k_ev in 1 : K_event) {
+        real eta_w = 0; // Role: linear predictor w.
+        if (n_cov_hazard > 0)
+          eta_w = dot_product(to_vector(mat_cov_hazard_gk_cond[j]'), gamma_hazard[k, k_ev]);
+        log_h_cause[k_ev] = dot_product(mat_basis_gk_cond[j], bs_gamma_c[k, k_ev])
+                            + eta_w
+                            + eta_assoc_nodes[j];
+      }
+      log_h_total[j] = log_sum_exp(log_h_cause);
+    }
+
+    H_cond = cumhaz(time_condition, n_gk, log_h_total, rep_vector(0.0, n_gk));
+    // H_cond: cumulative hazard at time_condition
+  }
+
+  // Calculate H(t_surv) for each prediction time and compute S(t_surv | T_cond)
+  for (s in 1 : n_times_surv) {
+    real H_t; // cumulative hazard at prediction time s
+
+    vector[n_gk] cvm, cvk, cvm_f, cvk_f; // CV features at quadrature nodes for time s
+    for (j in 1 : n_gk) {
+      cvm[j] = dot_product(mat_fixed_gk_surv[s][j], beta_fixed[k])
+               + dot_product(mat_id_gk_surv[s][j], u_id);
+      cvm_f[j] = dot_product(mat_fixed_gk_surv_fwd[s][j], beta_fixed[k])
+                 + dot_product(mat_id_gk_surv_fwd[s][j], u_id);
+
+      real mk_part = 0, mk_part_f = 0; // marker-only contribution
+      if (n_random_marker > 0) {
+        mk_part = dot_product(mat_marker_gk_surv[s][j], vbar);
+        mk_part_f = dot_product(mat_marker_gk_surv_fwd[s][j], vbar);
+      }
+      cvk[j] = mk_part + dot_product(mat_marker_id_gk_surv[s][j], wbar_i);
+      cvk_f[j] = mk_part_f
+                 + dot_product(mat_marker_id_gk_surv_fwd[s][j], wbar_i);
+    }
+
+    vector[n_gk] csm_raw = eta_fd(cvm, cvm_f, eps_finite_diff); // mean slope
+    vector[n_gk] csk_raw; // marker slope (weighted across markers)
+    int M_corr_local2 = num_elements(a_corr); // Role: derived dimension correlation local2.
+    vector[M_corr_local2] corr_terms_raw = eta_chol_corr(Li); // Role: correlation terms unscaled.
+    int M_vcov_local2 = num_elements(a_vcov); // Role: derived dimension covariance local2.
+    vector[M_vcov_local2] vcov_terms_raw = eta_vcov_weighted_const(Li_eff, flag_indep_idmarker_cov); // Role: covariance terms unscaled.
+
+    vector[n_gk] cv_tot = cvm + cvk; // total current value
+
+    vector[n_gk] cv_tot_tf; // Role: current value total transformation.
+    vector[n_gk] cv_mean_tf = apply_transform_vector(
+      cvm,
+      tf_mode_cv_mean,
+      functional_ops_cv_mean,
+      functional_iota_intercept_idx_cv_mean,
+      functional_iota_slope_idx_cv_mean,
+      const_data_cv_mean,
+      knots_cv_mean,
+        coeff_cv_mean[k],
+      spline_degree_cv_mean,
+      iota_intercept_cv_mean[k],
+      iota_slope_cv_mean[k]
+    );
+    vector[n_gk] cv_marker_tf; // Role: current value marker transformation.
+    vector[n_gk] cs_tot_tf; // Role: current slope total transformation.
+    vector[n_gk] cs_marker_tf; // Role: current slope marker transformation.
+    for (j in 1 : n_gk) {
+      real acc_cv_tot_tf = 0; // Role: acc current value total transformation.
+      real acc_cv_marker_tf = 0; // Role: acc current value marker transformation.
+      real acc_csk_raw = 0; // Role: acc csk unscaled.
+      real acc_cs_tot_tf = 0; // Role: acc current slope total transformation.
+      real acc_cs_marker_tf = 0; // Role: acc current slope marker transformation.
+      for (d in 1 : n_marker_types) {
+        real mk_part_d = 0; // Role: mk part d.
+        real mk_part_f_d = 0; // Role: mk part f d.
+        if (n_random_marker > 0) {
+          mk_part_d = dot_product(mat_marker_gk_surv[s][j], v_marker[d]);
+          mk_part_f_d = dot_product(mat_marker_gk_surv_fwd[s][j], v_marker[d]);
+        }
+        real cvk_d = mk_part_d + dot_product(mat_marker_id_gk_surv[s][j], w_draw[d]); // Role: cvk d.
+        real cvk_f_d = mk_part_f_d + dot_product(mat_marker_id_gk_surv_fwd[s][j], w_draw[d]); // Role: cvk f d.
+        real cv_tot_d = cvm[j] + cvk_d; // Role: current value total d.
+
+        acc_cv_tot_tf += marker_weights_cv_total_k[d]
+          * apply_transform_scalar(cv_tot_d, tf_mode_cv_tot,
+                                   functional_ops_cv, functional_iota_intercept_idx_cv, functional_iota_slope_idx_cv, const_data_cv,
+                                   knots_cv, coeff_cv[k], spline_degree_cv,
+                                   iota_intercept_cv[k], iota_slope_cv[k]);
+        acc_cv_marker_tf += marker_weights_cv_marker_k[d]
+          * apply_transform_scalar(cvk_d, tf_mode_cv_marker,
+                                   functional_ops_cv_marker, functional_iota_intercept_idx_cv_marker, functional_iota_slope_idx_cv_marker, const_data_cv_marker,
+                                   knots_cv_marker, coeff_cv_marker[k], spline_degree_cv_marker,
+                                   iota_intercept_cv_marker[k], iota_slope_cv_marker[k]);
+        {
+          real csk_raw_d = (cvk_f_d - cvk_d) / eps_finite_diff; // Role: csk unscaled d.
+          real cs_tot_raw_d = csm_raw[j] + csk_raw_d; // Role: current slope total unscaled d.
+
+          acc_csk_raw += marker_weights_cs_marker_k[d] * csk_raw_d;
+          acc_cs_tot_tf += marker_weights_cs_total_k[d]
+            * apply_transform_scalar(cs_tot_raw_d, tf_mode_cs_tot,
+                                     functional_ops_cs, functional_iota_intercept_idx_cs, functional_iota_slope_idx_cs, const_data_cs,
+                                     knots_cs, coeff_cs[k], spline_degree_cs,
+                                     iota_intercept_cs[k], iota_slope_cs[k]);
+          acc_cs_marker_tf += marker_weights_cs_marker_k[d]
+            * apply_transform_scalar(csk_raw_d, tf_mode_cs_marker,
+                                     functional_ops_cs_marker, functional_iota_intercept_idx_cs_marker, functional_iota_slope_idx_cs_marker, const_data_cs_marker,
+                                     knots_cs_marker, coeff_cs_marker[k], spline_degree_cs_marker,
+                                     iota_intercept_cs_marker[k], iota_slope_cs_marker[k]);
+        }
+      }
+      cv_tot_tf[j] = acc_cv_tot_tf / n_marker_types;
+      cv_marker_tf[j] = acc_cv_marker_tf / n_marker_types;
+      csk_raw[j] = acc_csk_raw / n_marker_types;
+      cs_tot_tf[j] = acc_cs_tot_tf / n_marker_types;
+      cs_marker_tf[j] = acc_cs_marker_tf / n_marker_types;
+    }
+
+    vector[n_gk] cs_mean_tf = apply_transform_vector(
+      csm_raw,
+      tf_mode_cs_mean,
+      functional_ops_cs_mean,
+      functional_iota_intercept_idx_cs_mean,
+      functional_iota_slope_idx_cs_mean,
+      const_data_cs_mean,
+      knots_cs_mean,
+        coeff_cs_mean[k],
+      spline_degree_cs_mean,
+      iota_intercept_cs_mean[k],
+      iota_slope_cs_mean[k]
+    );
+    vector[M_corr_local2] corr_terms_tf = apply_transform_vector_by_component(
+      corr_terms_raw,
+      tf_mode_corr,
+      functional_ops_corr,
+      functional_iota_intercept_idx_corr,
+      functional_iota_slope_idx_corr,
+      const_data_corr,
+      knots_corr,
+        coeff_corr[k],
+      spline_degree_corr,
+      iota_intercept_corr[k],
+      iota_slope_corr[k]
+    );
+      vector[M_corr_local2] corr_terms_ref = apply_transform_vector_by_component(
+        rep_vector(0, M_corr_local2),
+        tf_mode_corr,
+        functional_ops_corr,
+        functional_iota_intercept_idx_corr,
+        functional_iota_slope_idx_corr,
+        const_data_corr,
+        knots_corr,
+        coeff_corr[k],
+        spline_degree_corr,
+        iota_intercept_corr[k],
+        iota_slope_corr[k]
+      );
+      corr_terms_tf = corr_terms_tf - corr_terms_ref;
+    real corr_assoc_scalar = dot_product(a_corr, corr_terms_tf); // Role: correlation assoc scalar.
+    vector[n_gk] corr_assoc = rep_vector(corr_assoc_scalar, n_gk); // Role: correlation assoc.
+    vector[M_vcov_local2] vcov_terms_tf = apply_transform_vector_by_component(
+      vcov_terms_raw,
+      tf_mode_vcov,
+      functional_ops_vcov,
+      functional_iota_intercept_idx_vcov,
+      functional_iota_slope_idx_vcov,
+      const_data_vcov,
+      knots_vcov,
+        coeff_vcov[k],
+      spline_degree_vcov,
+      iota_intercept_vcov[k],
+      iota_slope_vcov[k]
+    );
+    vector[M_vcov_local2] vcov_terms_ref = apply_transform_vector_by_component(
+      rep_vector(0, M_vcov_local2),
+      tf_mode_vcov,
+      functional_ops_vcov,
+      functional_iota_intercept_idx_vcov,
+      functional_iota_slope_idx_vcov,
+      const_data_vcov,
+      knots_vcov,
+      coeff_vcov[k],
+      spline_degree_vcov,
+      iota_intercept_vcov[k],
+      iota_slope_vcov[k]
+    );
+    vcov_terms_tf = vcov_terms_tf - vcov_terms_ref;
+    real vcov_assoc_scalar = dot_product(a_vcov, vcov_terms_tf); // Role: covariance assoc scalar.
+    vector[n_gk] vcov_assoc = rep_vector(vcov_assoc_scalar, n_gk); // Role: covariance assoc.
+
+    vector[n_gk] eta_assoc_nodes = a_cv_total * cv_tot_tf
+                                 + a_cv_mean * cv_mean_tf
+                                 + a_cv_marker * cv_marker_tf
+                                 + a_cs_total * cs_tot_tf
+                                 + a_cs_mean * cs_mean_tf
+                                 + a_cs_marker * cs_marker_tf
+                                 + corr_assoc
+                                 + vcov_assoc;
+    // eta_assoc_nodes: association predictor at GK nodes
+
+    vector[n_gk] log_h_total; // total log-hazard at quadrature nodes
+    for (j in 1 : n_gk) {
+      vector[K_event] log_h_cause; // cause-specific log hazards
+      for (k_ev in 1 : K_event) {
+        real eta_w = 0; // Role: linear predictor w.
+        if (n_cov_hazard > 0)
+          eta_w = dot_product(to_vector(mat_cov_hazard_gk_surv[s][j]'), gamma_hazard[k, k_ev]);
+        log_h_cause[k_ev] = dot_product(mat_basis_gk_surv[s][j], bs_gamma_c[k, k_ev])
+                            + eta_w
+                            + eta_assoc_nodes[j];
+      }
+      log_h_total[j] = log_sum_exp(log_h_cause);
+    }
+
+    H_t = cumhaz(vec_time_surv[s], n_gk, log_h_total, rep_vector(0.0, n_gk));
+    surv_prob[k, s] = exp(H_cond - H_t); // S(t | T_cond)
+    cumhaz_cond[k, s] = H_t - H_cond;    // H(t) - H(T_cond)
+  }
+}

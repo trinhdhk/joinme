@@ -13,11 +13,12 @@
 #' may contain only the fixed-effect contribution, add the fitted marker-level
 #' deviation, or average marker-specific predictions over the selected markers.
 #' Subject- and marker-by-subject deviations are excluded from all three
-#' longitudinal estimands. Event effects describe the proportional-hazards
-#' multiplier `exp(W gamma)` (or its logarithm), with the baseline hazard and
-#' longitudinal association contribution held fixed. Consequently, event
-#' contrasts isolate the part of the event process attributable to covariates
-#' in `formulaEvent`.
+#' longitudinal estimands unless `reuse_fitted_re = TRUE` explicitly selects a
+#' subject represented in the fitted model. Event effects describe the
+#' proportional-hazards multiplier `exp(W gamma)` (or its logarithm), with the
+#' baseline hazard and longitudinal association contribution held fixed.
+#' Consequently, event contrasts isolate the part of the event process
+#' attributable to covariates in `formulaEvent`.
 #'
 #' The returned data follow the `brms` conditional-effects convention. Each
 #' effect table contains `estimate__`, `se__`, `lower__`, `upper__`, and
@@ -56,14 +57,14 @@
 #'   controlled separately by `event_scale`.
 #' @param longitudinal_estimand Longitudinal quantity to evaluate.
 #'   `"population"` uses only the fixed-effect contribution, corresponding to
-#'   exclusion of group-level effects in `brms`. `"marker"` adds the fitted
-#'   marker-level deviation but excludes subject and marker-by-subject
-#'   deviations. `"marginal_marker"` first calculates each selected marker's
-#'   posterior prediction, including its marker-level deviation and fitted
-#'   inverse link, and then takes an equally weighted mean across markers within
-#'   every posterior draw. Thus, on the expected-response scale it estimates an
-#'   average of marker responses rather than the response obtained from an
-#'   averaged linear predictor.
+#'   exclusion of group-level effects in `brms`, and averages the selected
+#'   marker trajectories within each posterior draw. `"marker"` adds the fitted
+#'   marker-level deviation and retains a separate trajectory for every selected
+#'   marker. `"marginal_marker"` also adds the marker-level deviation but then
+#'   takes an equally weighted mean across selected markers within every draw.
+#'   Marker-specific inverse links are applied before either marker average.
+#'   Subject and marker-by-subject deviations are excluded unless
+#'   `reuse_fitted_re = TRUE`.
 #' @param event_scale Event-process estimand. `"hazard_ratio"` returns the
 #'   covariate-specific proportional-hazards multiplier `exp(W gamma)`;
 #'   `"log_hazard_ratio"` returns `W gamma`.
@@ -74,33 +75,53 @@
 #'   represented by a small set of conditioning curves.
 #' @param markers Optional character vector restricting longitudinal results to
 #'   selected marker levels. By default all fitted markers are used. For
-#'   `longitudinal_estimand = "marginal_marker"`, this argument defines the
-#'   markers entering the equally weighted posterior average.
+#'   `longitudinal_estimand = "population"` or `"marginal_marker"`, this
+#'   argument defines the markers entering the equally weighted posterior
+#'   average.
 #' @param draws Optional positive integer limiting the posterior draws used in
 #'   the calculation. `NULL` uses all available draws.
+#' @param summary Logical. If `TRUE`, return posterior centres, standard errors,
+#'   and credible intervals. If `FALSE`, return a tidy draw-level data frame.
+#'   Each row contains one posterior value, its `.draw` index, its `.value`, and
+#'   the complete condition and estimand description. Draw-level results are
+#'   returned without plotting.
+#' @param reuse_fitted_re Logical. If `TRUE`, `conditions` must contain the
+#'   fitted subject identifier. Subject and marker-by-subject posterior effects
+#'   for those identifiers are added draw by draw, avoiding a separate dynamic
+#'   random-effect fit. All identifiers must have occurred during fitting.
 #' @param seed Integer seed used when posterior draws are subsampled.
-#' @param plot Logical. If `TRUE`, construct and display conditional-effects
-#'   plots. If `FALSE`, return the underlying `JoiNMeConditionalEffects` data
-#'   object. The data object can subsequently be plotted with `plot()`.
+#' @param plot Logical. If `TRUE` and `summary = TRUE`, construct and display
+#'   conditional-effects plots. If `FALSE`, return the underlying
+#'   `JoiNMeConditionalEffects` object. `summary = FALSE` always returns the
+#'   draw-level object without plotting.
 #' @param ... Additional arguments passed to the plotting method when
-#'   `plot = TRUE`, for example `points`, `rug`, `stype`, or `theme`; see
-#'   [brms::conditional_effects()] for the corresponding graphical arguments.
+#'   `plot = TRUE`, for example `points`, `rug`, `stype`, `theme`, or the
+#'   conditional-plot arrangement arguments; see
+#'   [plot.JoiNMeConditionalEffects()] and [brms::conditional_effects()].
 #'
-#' @return If `plot = FALSE`, a `JoiNMeConditionalEffects` object: a named list
+#' @return If `summary = TRUE` and `plot = FALSE`, a
+#'   `JoiNMeConditionalEffects` object: a named list
 #'   with one component per requested process. Each process component is a
 #'   `brms_conditional_effects`-compatible named list containing one data frame
 #'   per effect. Longitudinal tables identify their estimand in
-#'   `longitudinal_estimand__`. If `plot = TRUE`, a similarly nested named list
-#'   of `ggplot` objects is returned invisibly after plotting.
+#'   `longitudinal_estimand__`. With `summary = FALSE`, each effect is a tidy
+#'   data frame with one row per posterior draw and estimand, identified by
+#'   `.draw`, `.value`, and `estimand__`. If `summary = TRUE` and `plot = TRUE`,
+#'   the plotting method invisibly returns either the similarly nested named
+#'   list of `ggplot` objects or an arranged `patchwork` display.
 #'
 #' @details
 #' Numeric predictors not named in an effect are held at their observed mean;
 #' factors are held at their first level. Values supplied in `conditions`
 #' override those defaults. Group-level subject deviations are excluded, as in
 #' the default `re_formula = NA` behavior of `brms::conditional_effects()`.
-#' Marker-level deviations are also excluded for the `"population"` estimand,
-#' retained for the `"marker"` estimand, and integrated by finite averaging for
-#' the `"marginal_marker"` estimand.
+#' Marker-level deviations are excluded for the `"population"` estimand,
+#' retained separately for the `"marker"` estimand, and integrated by finite
+#' averaging for the `"marginal_marker"` estimand. Population and
+#' marker-marginal results each contain one trajectory per condition because
+#' their selected marker trajectories are averaged draw by draw. When fitted
+#' random effects are reused, the selected subject and marker-by-subject
+#' deviations enter all three estimands.
 #'
 #' The event result is a relative-hazard effect rather than a dynamic survival
 #' prediction. Dynamic survival probabilities depend on a subject's observed
@@ -125,7 +146,7 @@
 #'   process = c("longitudinal", "event"),
 #'   plot = FALSE
 #' )
-#' plot(cond_eff, ask = FALSE)
+#' plot(cond_eff, arrange = "grid", ncol = 2, guides = "collect")
 #'
 #' # Request marker-specific longitudinal expected responses.
 #' conditional_effects(
@@ -165,6 +186,8 @@ conditional_effects.JoiNMeFit <- function(
     surface = FALSE,
     markers = NULL,
     draws = NULL,
+    summary = TRUE,
+    reuse_fitted_re = FALSE,
     seed = 1,
     plot = TRUE,
     ...) {
@@ -192,6 +215,12 @@ conditional_effects.JoiNMeFit <- function(
   }
   if (!is.logical(plot) || length(plot) != 1L || is.na(plot)) {
     cli::cli_abort("{.arg plot} must be either TRUE or FALSE.")
+  }
+  if (!is.logical(summary) || length(summary) != 1L || is.na(summary)) {
+    cli::cli_abort("{.arg summary} must be either TRUE or FALSE.")
+  }
+  if (!is.logical(reuse_fitted_re) || length(reuse_fitted_re) != 1L || is.na(reuse_fitted_re)) {
+    cli::cli_abort("{.arg reuse_fitted_re} must be either TRUE or FALSE.")
   }
   resolution <- as.integer(resolution)
   if (length(resolution) != 1L || !is.finite(resolution) || resolution < 2L) {
@@ -231,7 +260,19 @@ conditional_effects.JoiNMeFit <- function(
   # Step 3: Validate and label the shared conditioning rows. A single condition
   # table is deliberately shared across processes so longitudinal and event
   # panels describe the same named scientific profiles.
+  id_variable <- .get_call_args(x$call, "id_var", "id") # fitted grouping variable used only when subject effects are requested
   all_model_variables <- unique(unlist(lapply(process_specs[process], `[[`, "variables"), use.names = FALSE))
+  if (isTRUE(reuse_fitted_re)) {
+    if (is.null(conditions) || !(id_variable %in% names(conditions))) {
+      cli::cli_abort(c(
+        x = "{.arg conditions} must contain the fitted subject identifier when {.arg reuse_fitted_re = TRUE}.",
+        i = "Add a {.field {id_variable}} column containing one or more identifiers represented during fitting."
+      ))
+    }
+    .fitted_subject_indices(x, conditions[[id_variable]], id_variable)
+    process_specs$longitudinal$variables <- union(process_specs$longitudinal$variables, id_variable)
+    all_model_variables <- union(all_model_variables, id_variable)
+  }
   condition_rows <- .conditional_effect_conditions(
     conditions = conditions,
     model_variables = all_model_variables
@@ -255,6 +296,8 @@ conditional_effects.JoiNMeFit <- function(
       draw_surface = surface,
       marker_selection = markers,
       posterior_draws = draws,
+      summarise = summary,
+      reuse_fitted_re = reuse_fitted_re,
       random_seed = seed
     )
   }
@@ -271,6 +314,7 @@ conditional_effects.JoiNMeFit <- function(
       grid_resolution = resolution,
       draw_surface = surface,
       posterior_draws = draws,
+      summarise = summary,
       random_seed = seed
     )
   }
@@ -283,16 +327,18 @@ conditional_effects.JoiNMeFit <- function(
     process = process,
     probability = prob,
     robust = robust,
+    summary = summary,
     method = method,
     longitudinal_estimand = longitudinal_estimand,
+    reuse_fitted_re = reuse_fitted_re,
     event_scale = event_scale,
     call = match.call()
   )
 
-  # Step 6: Match the requested convenience behavior. plot = FALSE exposes the
-  # brms-compatible effect tables; plot = TRUE delegates their graphical
-  # representation to the class method below.
-  if (!isTRUE(plot)) {
+  # Step 6: Raw MCMC matrices are returned directly because interval ribbons
+  # require the summarised table contract. For summaries, plot = FALSE exposes
+  # the brms-compatible tables and plot = TRUE delegates their graphical form.
+  if (!isTRUE(summary) || !isTRUE(plot)) {
     return(out)
   }
   invisible(plot(out, plot = TRUE, ...))
@@ -310,21 +356,84 @@ conditional_effects.JoiNMeFit <- function(
 #' @param plot Logical. If `TRUE`, draw each plot in the active graphics device.
 #'   If `FALSE`, return the plots without drawing them.
 #' @param ask Logical. Whether to prompt before drawing a subsequent plot.
+#' @param arrange Arrangement of multiple plots. `"separate"` retains a named
+#'   list and draws one figure at a time; `"grid"` uses an automatically sized
+#'   grid; `"row"` or `"column"` uses a single row or column; and `"design"`
+#'   follows the layout supplied through `design`.
+#' @param ncol,nrow Optional positive whole numbers giving the grid dimensions
+#'   when `arrange = "grid"`.
+#' @param design A patchwork design string or area description used when
+#'   `arrange = "design"`. The panels follow their returned order: all
+#'   longitudinal effects first, followed by all event effects.
+#' @param widths,heights Optional positive numeric vectors giving relative
+#'   column widths and row heights in the arranged display.
+#' @param guides How legends are treated across an arranged display. One of
+#'   `"keep"`, `"collect"`, or `"auto"`.
 #' @param ... Arguments passed to the `brms_conditional_effects` plot method,
 #'   including `points`, `rug`, `stype`, `line_args`, `surface_args`, and
 #'   `theme`.
 #'
-#' @return Invisibly, a named list by process and effect containing `ggplot`
-#'   objects.
+#' @return Invisibly, a named list by process and effect when
+#'   `arrange = "separate"`, or one `patchwork` display for every other
+#'   arrangement.
 #' @export
-plot.JoiNMeConditionalEffects <- function(x, plot = TRUE, ask = FALSE, ...) {
+plot.JoiNMeConditionalEffects <- function(
+    x,
+    plot = TRUE,
+    ask = FALSE,
+    arrange = c("separate", "grid", "row", "column", "design"),
+    ncol = NULL,
+    nrow = NULL,
+    design = NULL,
+    widths = NULL,
+    heights = NULL,
+    guides = c("keep", "collect", "auto"),
+    ...) {
   # Validate the stored conditional-effect contract before delegating.
   if (!inherits(x, "JoiNMeConditionalEffects")) {
     cli::cli_abort("{.arg x} must inherit from {.cls JoiNMeConditionalEffects}.")
   }
+  if (identical(attr(x, "summary", exact = TRUE), FALSE)) {
+    cli::cli_abort(c(
+      x = "Draw-level conditional effects cannot be plotted directly.",
+      i = "Recalculate with {.arg summary = TRUE} to obtain interval plots."
+    ))
+  }
   if (!is.logical(plot) || length(plot) != 1L || is.na(plot)) {
     cli::cli_abort("{.arg plot} must be either TRUE or FALSE.")
   }
+  if (!is.logical(ask) || length(ask) != 1L || is.na(ask)) {
+    cli::cli_abort("{.arg ask} must be either TRUE or FALSE.")
+  }
+  arrange <- match.arg(arrange) # requested relationship among the process-specific figures
+  guides <- match.arg(guides) # requested treatment of repeated legends in an arranged display
+
+  # Construct every panel without drawing it when a joint display is requested.
+  # This prevents the process-specific brms method from drawing the same panels
+  # separately before patchwork places them in their common layout.
+  if (!identical(arrange, "separate")) {
+    plots <- lapply(x, function(process_tables) {
+      if (!length(process_tables)) return(list())
+      plot(process_tables, plot = FALSE, ask = FALSE, ...)
+    }) # nested process-and-effect collection preserving the scientific labels
+    arranged_plot <- .arrange_conditional_plots(
+      plots = plots,
+      arrange = arrange,
+      ncol = ncol,
+      nrow = nrow,
+      design = design,
+      widths = widths,
+      heights = heights,
+      guides = guides
+    ) # one patchwork display containing every non-empty conditional-effect panel
+    if (isTRUE(plot)) print(arranged_plot)
+    return(invisible(arranged_plot))
+  }
+
+  # Layout arguments have no interpretation when figures are requested
+  # separately. Rejecting them prevents a requested arrangement being silently
+  # overlooked because `arrange` was omitted.
+  .validate_separate_conditional_layout(ncol, nrow, design, widths, heights)
 
   # Delegate construction and optional drawing to brms for each process.
   # Passing plot and ask through preserves the established brms behavior. Empty
@@ -350,12 +459,15 @@ print.JoiNMeConditionalEffects <- function(x, ...) {
   process_names <- names(x)
   effect_counts <- vapply(x, length, integer(1))
   .cli_summary_heading("Conditional effects for JoiNMe model\n")
+  if (identical(attr(x, "summary", exact = TRUE), FALSE)) {
+    cli::cli_bullets(c("*" = "Output: draw-level MCMC samples"))
+  }
   longitudinal_estimand <- attr(x, "longitudinal_estimand", exact = TRUE)
   if ("longitudinal" %in% process_names && !is.null(longitudinal_estimand)) {
-    cli::cli_bullets('*' = sprintf(" Longitudinal estimand: %s\n", longitudinal_estimand))
+    cli::cli_bullets(c("*" = sprintf("Longitudinal estimand: %s", longitudinal_estimand)))
   }
   for (i in seq_along(process_names)) {
-    cli::cli_bullets('*' = sprintf("%s process: %d effect%s\n", toTitleCase(process_names[[i]]), effect_counts[[i]], if (effect_counts[[i]] == 1L) "" else "s"))
+    cli::cli_bullets(c("*" = sprintf("%s process: %d effect%s", tools::toTitleCase(process_names[[i]]), effect_counts[[i]], if (effect_counts[[i]] == 1L) "" else "s")))
   }
   invisible(x)
 }
@@ -370,6 +482,13 @@ print.JoiNMeConditionalEffects <- function(x, ...) {
 #' @keywords internal
 #' @noRd
 .conditional_effect_process_spec <- function(formula, data, process) {
+  # Conditional calculations require named, independently typed columns. A
+  # fitted object may contain a matrix-like copy of its analysis data, for
+  # example after serialisation through another modelling workflow. Converting
+  # that copy at this boundary prevents later `$<-` assignments from coercing
+  # a matrix to an unnamed list and losing the predictors used by model.matrix().
+  process_data <- as.data.frame(data, stringsAsFactors = FALSE) # named analysis columns used to construct conditional profiles
+
   # Step 1: Remove the response and group-level terms so the effect vocabulary
   # contains only population-level predictors that can be varied in new rows.
   formula_use <- if (identical(process, "event")) {
@@ -377,7 +496,7 @@ print.JoiNMeConditionalEffects <- function(x, ...) {
   } else {
     stats::delete.response(stats::terms(reformulas::nobars(formula)))
   }
-  variables <- intersect(all.vars(formula_use), names(data))
+  variables <- intersect(all.vars(formula_use), names(process_data))
 
   # Step 2: Translate fitted term labels to one- or two-predictor requests.
   # Transformations such as splines remain represented by their underlying
@@ -398,7 +517,7 @@ print.JoiNMeConditionalEffects <- function(x, ...) {
     formula = formula,
     variables = variables,
     effects = defaults,
-    data = data
+    data = process_data
   )
 }
 
@@ -687,6 +806,97 @@ print.JoiNMeConditionalEffects <- function(x, ...) {
   )
 }
 
+#' Retain conditional estimands as tidy posterior draws
+#'
+#' @description
+#' Constructs the common unsummarised result used by conditional effects and
+#' conditional contrasts. Every posterior matrix column is expanded into one
+#' row per retained draw, following the long-form convention used by tidy
+#' posterior workflows. The `estimand__` column identifies the evaluated
+#' profile, `.draw` identifies the retained posterior draw, and `.value` stores
+#' the corresponding posterior quantity.
+#'
+#' @param posterior_matrix Numeric matrix with posterior draws in rows and
+#'   evaluated estimands in columns.
+#' @param estimand_data Data frame containing one descriptive row per matrix
+#'   column.
+#' @param response_label Human-readable description of the posterior quantity.
+#'
+#' @return A data frame inheriting from `JoiNMeConditionalMCMCSamples`, with one
+#'   row per posterior draw and estimand.
+#' @keywords internal
+#' @noRd
+.conditional_mcmc_samples <- function(posterior_matrix,
+                                      estimand_data,
+                                      response_label) {
+  posterior_matrix <- as.matrix(posterior_matrix) # numerical MCMC values with draws retained along rows
+  estimand_data <- as.data.frame(estimand_data) # scientific labels corresponding to posterior-matrix columns
+  if (nrow(posterior_matrix) < 1L) {
+    cli::cli_abort("No posterior draws are available for the requested conditional estimand.")
+  }
+  if (ncol(posterior_matrix) != nrow(estimand_data)) {
+    cli::cli_abort(c(
+      x = "Conditional MCMC samples and their estimand descriptions have incompatible dimensions.",
+      i = "The sample matrix has {ncol(posterior_matrix)} columns but the description has {nrow(estimand_data)} rows."
+    ))
+  }
+  draw_count <- nrow(posterior_matrix) # number of retained MCMC draws represented for every estimand
+  estimand_count <- nrow(estimand_data) # number of conditional profiles represented by posterior-matrix columns
+  estimand_labels <- paste0("estimand_", seq_len(estimand_count)) # stable keys identifying conditional profiles after long-form expansion
+  tidy_draws <- estimand_data[
+    rep(seq_len(estimand_count), each = draw_count),
+    ,
+    drop = FALSE
+  ] # estimand metadata repeated once for every retained posterior draw
+  rownames(tidy_draws) <- NULL
+  tidy_draws$estimand__ <- rep(estimand_labels, each = draw_count) # stable conditional-profile key shared by all of its posterior draws
+  tidy_draws$.draw <- rep(seq_len(draw_count), times = estimand_count) # sequential retained-draw identifier following tidybayes conventions
+  tidy_draws$.value <- as.numeric(posterior_matrix) # column-major expansion pairing every posterior value with its estimand metadata
+  structure(
+    tidy_draws,
+    class = c("JoiNMeConditionalMCMCSamples", "data.frame"),
+    response = response_label
+  )
+}
+
+#' Count retained posterior draws for a deterministic conditional estimand
+#'
+#' @description
+#' Some contrasts are exactly constant, notably an event-profile contrast when
+#' `formulaEvent` contains no direct covariates. The calculation still returns
+#' one identical value per retained posterior draw so its sample matrix follows
+#' the same contract as a stochastic contrast.
+#'
+#' @param object Fitted model.
+#' @param posterior_draws Optional requested draw count.
+#' @param random_seed Seed governing posterior subsampling.
+#'
+#' @return Positive integer number of retained draws.
+#' @keywords internal
+#' @noRd
+.conditional_effect_draw_count <- function(object,
+                                           posterior_draws,
+                                           random_seed) {
+  anchor_draws <- .conditional_effect_draw_matrix(
+    object = object,
+    variables = "lp__",
+    posterior_draws = posterior_draws,
+    random_seed = random_seed
+  ) # lightweight sampler quantity present in ordinary Stan outputs
+  if (nrow(anchor_draws) < 1L) {
+    anchor_draws <- .conditional_effect_draw_matrix(
+      object = object,
+      variables = "beta[1]",
+      posterior_draws = posterior_draws,
+      random_seed = random_seed
+    ) # fallback for synthetic or reduced stored-fit objects
+  }
+  if (nrow(anchor_draws) < 1L) {
+    cli::cli_abort("Could not determine the number of retained posterior draws for the conditional estimand.")
+  }
+  as.integer(nrow(anchor_draws))
+}
+
 #' Construct observed points for a longitudinal conditional-effect table
 #'
 #' @param object Fitted model.
@@ -705,8 +915,8 @@ print.JoiNMeConditionalEffects <- function(x, ...) {
                                                     marker_levels,
                                                     draw_surface) {
   effect_variables <- attr(effect_table, "effects")
-  marker_variable <- .JoiNMefit_call_arg_chr(object$call, "marker_var", "marker")
-  response_variable <- .resolve_response_var(object$formulaLong, object$dataLong, context = "conditional_effects()")
+  marker_variable <- .get_call_args(object$call, "marker_var", "marker")
+  response_variable <- .get_response_var(object$formulaLong, object$dataLong, context = "conditional_effects()")
   observed_data <- object$dataLong
 
   # Step 1: Reproduce every condition-marker facet represented in the posterior
@@ -823,16 +1033,17 @@ print.JoiNMeConditionalEffects <- function(x, ...) {
                                                    prediction_method,
                                                    longitudinal_estimand,
                                                    posterior_draws,
-                                                   random_seed) {
+                                                   reuse_fitted_re = FALSE,
+                                                   random_seed = 1) {
   stan_data <- object$stan_data
-  time_variable <- .JoiNMefit_call_arg_chr(object$call, "time_var", stan_data$time_var %||% "time")
-  marker_variable <- .JoiNMefit_call_arg_chr(object$call, "marker_var", "marker")
+  time_variable <- .get_call_args(object$call, "time_var", stan_data$time_var %||% "time")
+  marker_variable <- .get_call_args(object$call, "marker_var", "marker")
 
   # Step 1: Reuse the fitted-trajectory design builder so conditional effects
   # inherit the exact fixed- and marker-effect bases used by plot.JoiNMeFit().
-  # The builder applies the stored time transformation and validates every
-  # model-matrix dimension against the fitted Stan data.
-  longitudinal_design <- .JoiNMefit_longitudinal_design_matrices(
+  # The builder applies the stored original-time spline basis and validates
+  # every model-matrix dimension against the fitted Stan data.
+  longitudinal_design <- ..longitudinal_design_matrices(
     fitted_model = object,
     longitudinal_evaluation_data = evaluation_data,
     time_variable = time_variable,
@@ -840,6 +1051,8 @@ print.JoiNMeConditionalEffects <- function(x, ...) {
   )
   fixed_design <- longitudinal_design$fixed
   marker_design <- longitudinal_design$marker
+  subject_design <- longitudinal_design$subject
+  marker_subject_design <- longitudinal_design$subject_marker
   expected_coefficients <- as.integer(stan_data$P %||% ncol(fixed_design))
   marker_coefficient_count <- as.integer(stan_data$R_mk %||% ncol(marker_design))
   fitted_marker_levels <- as.character(
@@ -848,11 +1061,24 @@ print.JoiNMeConditionalEffects <- function(x, ...) {
       unique(as.character(object$dataLong[[marker_variable]]))
   )
   include_marker_deviation <- longitudinal_estimand %in% c("marker", "marginal_marker")
+  id_variable <- .get_call_args(object$call, "id_var", "id") # grouping column selecting fitted posterior effects
+  subject_index <- if (isTRUE(reuse_fitted_re)) {
+    if (!(id_variable %in% names(evaluation_data))) {
+      cli::cli_abort("The longitudinal evaluation data must contain {.field {id_variable}} when fitted random effects are reused.")
+    }
+    unname(.fitted_subject_indices(object, evaluation_data[[id_variable]], id_variable))
+  } else {
+    integer(0)
+  } # fitted Stan subject coordinate for every evaluation row
+  marker_index <- match(as.character(evaluation_data[[marker_variable]]), fitted_marker_levels) # fitted marker coordinate for every evaluation row
+  if (anyNA(marker_index)) {
+    cli::cli_abort("The longitudinal conditional grid contains an unknown marker level.")
+  }
 
   # Step 2: Request fixed- and, when required, marker-level draws together. A
   # joint request guarantees that every coefficient block refers to the same
   # sampled MCMC iterations when a draw limit is used.
-  scaled_names <- paste0("beta_scaled[", seq_len(expected_coefficients), "]")
+  raw_names <- paste0("beta[", seq_len(expected_coefficients), "]")
   marker_names <- if (include_marker_deviation && marker_coefficient_count > 0L) {
     as.vector(outer(
       seq_along(fitted_marker_levels),
@@ -864,48 +1090,69 @@ print.JoiNMeConditionalEffects <- function(x, ...) {
   } else {
     character(0)
   }
+  subject_names <- if (isTRUE(reuse_fitted_re) && ncol(subject_design) > 0L) {
+    unique(as.vector(outer(
+      unique(subject_index),
+      seq_len(ncol(subject_design)),
+      function(subject, coefficient) paste0("u_id[", subject, ",", coefficient, "]")
+    )))
+  } else character(0) # fitted subject effects required by the requested condition rows
+  marker_subject_names <- if (isTRUE(reuse_fitted_re) && ncol(marker_subject_design) > 0L) {
+    unique(unlist(lapply(seq_len(nrow(evaluation_data)), function(row_index) {
+      paste0(
+        "w_idm[", subject_index[[row_index]], ",", marker_index[[row_index]], ",",
+        seq_len(ncol(marker_subject_design)), "]"
+      )
+    }), use.names = FALSE))
+  } else character(0) # realised marker-by-subject effects for all requested subject-marker pairs
+  random_effect_names <- c(subject_names, marker_subject_names)
   requested_draws <- .conditional_effect_draw_matrix(
     object,
-    c(scaled_names, marker_names),
+    c(raw_names, marker_names, random_effect_names),
     posterior_draws,
     random_seed
   )
-  scaled_positions <- match(scaled_names, colnames(requested_draws))
-  if (!anyNA(scaled_positions)) {
-    coefficient_draws <- requested_draws[, scaled_positions, drop = FALSE]
+  raw_positions <- match(raw_names, colnames(requested_draws))
+  coefficient_draws <- if (!anyNA(raw_positions)) {
+    requested_draws[, raw_positions, drop = FALSE]
   } else {
-    # Step 3: Retain the established raw-coefficient reconstruction for fitted
-    # objects that do not store beta_scaled. Marker draws are requested in the
-    # same call so posterior iteration alignment is preserved in this branch.
-    raw_names <- paste0("beta[", seq_len(expected_coefficients), "]")
-    requested_draws <- .conditional_effect_draw_matrix(
-      object,
-      c(raw_names, marker_names),
-      posterior_draws,
-      random_seed
-    )
-    raw_positions <- match(raw_names, colnames(requested_draws))
-    coefficient_draws <- if (!anyNA(raw_positions)) {
-      requested_draws[, raw_positions, drop = FALSE]
-    } else {
-      matrix(numeric(0), nrow = nrow(requested_draws), ncol = 0L)
-    }
-    time_indices <- as.integer(stan_data$idx_time_beta %||% integer(0))
-    time_indices <- time_indices[time_indices >= 1L & time_indices <= ncol(coefficient_draws)]
-    if (length(time_indices)) {
-      time_scale <- as.numeric(object$tmax %||% object$config$tmax %||% stan_data$tmax %||% 1)
-      coefficient_draws[, time_indices] <- coefficient_draws[, time_indices, drop = FALSE] * time_scale
-    }
+    matrix(numeric(0), nrow = nrow(requested_draws), ncol = 0L)
   }
   if (!nrow(coefficient_draws) || ncol(coefficient_draws) != expected_coefficients) {
     cli::cli_abort("Could not extract fitted fixed-effect draws for longitudinal conditional effects.")
   }
 
   # Step 4: Form the fixed-effect linear predictor. Subject and
-  # marker-by-subject random effects are intentionally absent for every
-  # conditional-effects estimand because no observed individual is conditioned
-  # upon.
+  # marker-by-subject effects remain absent for the population calculation.
+  # The explicitly requested fitted-subject calculation below adds both using
+  # posterior draws belonging to the identifier in each evaluation row.
   linear_predictor <- coefficient_draws %*% t(fixed_design)
+
+  # Add realised fitted subject effects only when explicitly requested. Each
+  # evaluation row may name a different fitted subject, so posterior columns are
+  # selected row by row while remaining paired to the population draws.
+  if (isTRUE(reuse_fitted_re) && ncol(subject_design) > 0L) {
+    draw_count <- nrow(coefficient_draws) # posterior rows shared across all effect blocks
+    for (coefficient_index in seq_len(ncol(subject_design))) {
+      row_names <- paste0("u_id[", subject_index, ",", coefficient_index, "]") # fitted effect associated with each evaluation row
+      positions <- match(row_names, colnames(requested_draws))
+      if (anyNA(positions)) cli::cli_abort("Could not extract fitted subject random-effect draws for conditional prediction.")
+      effect_by_row <- requested_draws[, positions, drop = FALSE]
+      design_by_draw <- matrix(rep(subject_design[, coefficient_index], each = draw_count), nrow = draw_count)
+      linear_predictor <- linear_predictor + effect_by_row * design_by_draw
+    }
+  }
+  if (isTRUE(reuse_fitted_re) && ncol(marker_subject_design) > 0L) {
+    draw_count <- nrow(coefficient_draws) # posterior rows shared across marker-by-subject coordinates
+    for (coefficient_index in seq_len(ncol(marker_subject_design))) {
+      row_names <- paste0("w_idm[", subject_index, ",", marker_index, ",", coefficient_index, "]") # subject-marker effect associated with each evaluation row
+      positions <- match(row_names, colnames(requested_draws))
+      if (anyNA(positions)) cli::cli_abort("Could not extract fitted marker-by-subject random-effect draws for conditional prediction.")
+      effect_by_row <- requested_draws[, positions, drop = FALSE]
+      design_by_draw <- matrix(rep(marker_subject_design[, coefficient_index], each = draw_count), nrow = draw_count)
+      linear_predictor <- linear_predictor + effect_by_row * design_by_draw
+    }
+  }
 
   # Step 5: For marker-specific and marker-marginal estimands, add the fitted
   # marker-level deviation at every evaluation row. This is the same v_marker
@@ -917,10 +1164,6 @@ print.JoiNMeConditionalEffects <- function(x, ...) {
       cli::cli_abort("Could not extract fitted marker-level draws for longitudinal conditional effects.")
     }
     marker_draws <- requested_draws[, marker_positions, drop = FALSE]
-    marker_index <- match(as.character(evaluation_data[[marker_variable]]), fitted_marker_levels)
-    if (anyNA(marker_index)) {
-      cli::cli_abort("The longitudinal conditional grid contains an unknown marker level.")
-    }
     draw_count <- nrow(coefficient_draws)
     marker_count <- length(fitted_marker_levels)
     for (coefficient_index in seq_len(marker_coefficient_count)) {
@@ -1043,10 +1286,13 @@ print.JoiNMeConditionalEffects <- function(x, ...) {
 #' @param draw_surface Whether two continuous predictors form a surface.
 #' @param marker_selection Optional fitted marker levels to retain or average.
 #' @param posterior_draws Optional number of posterior draws.
+#' @param summarise Whether to replace the draw matrix by posterior summaries.
+#' @param reuse_fitted_re Whether fitted subject and marker-by-subject effects
+#'   are included in the longitudinal estimand.
 #' @param random_seed Seed used when posterior draws are subsampled.
 #'
-#' @return A `brms_conditional_effects`-compatible list of longitudinal effect
-#'   tables.
+#' @return A `brms_conditional_effects`-compatible list when `summarise` is
+#'   true, otherwise an effect-indexed list of tidy draw-level data frames.
 #' @keywords internal
 #' @noRd
 .conditional_effects_longitudinal <- function(object,
@@ -1062,8 +1308,10 @@ print.JoiNMeConditionalEffects <- function(x, ...) {
                                               draw_surface,
                                               marker_selection,
                                               posterior_draws,
-                                              random_seed) {
-  marker_variable <- .JoiNMefit_call_arg_chr(object$call, "marker_var", "marker")
+                                              summarise = TRUE,
+                                              reuse_fitted_re = FALSE,
+                                              random_seed = 1) {
+  marker_variable <- .get_call_args(object$call, "marker_var", "marker")
   marker_levels <- as.character(object$stan_data$marker_levels %||% levels(object$dataLong[[marker_variable]]) %||% unique(as.character(object$dataLong[[marker_variable]])))
 
   # Step 1: Restrict marker strata before expanding any evaluation grid.
@@ -1079,9 +1327,10 @@ print.JoiNMeConditionalEffects <- function(x, ...) {
   }
 
   # Step 2: Evaluate every requested effect and retain one brms-compatible table
-  # per effect. Population and marker-specific estimands retain marker strata
-  # because fitted inverse links may differ by marker. The marker-marginal
-  # estimand removes those strata only after draw-level response calculation.
+  # per effect. Only the marker-specific estimand retains marker strata.
+  # Population and marker-marginal estimands remove those strata only after
+  # calculating every marker trajectory within each posterior draw, allowing
+  # the fitted inverse link to remain specific to its marker.
   tables <- setNames(vector("list", length(effect_requests)), effect_requests)
   for (effect_name in effect_requests) {
     grid <- .conditional_effect_grid(
@@ -1095,9 +1344,10 @@ print.JoiNMeConditionalEffects <- function(x, ...) {
     grid_effects <- attr(grid, "effects")
     grid_types <- attr(grid, "types")
     marker_is_focal <- marker_variable %in% grid_effects
-    if (identical(longitudinal_estimand, "marginal_marker") && marker_is_focal) {
+    marginalise_marker_trajectories <- longitudinal_estimand %in% c("population", "marginal_marker") # whether one draw-level average replaces the selected marker trajectories
+    if (isTRUE(marginalise_marker_trajectories) && marker_is_focal) {
       cli::cli_abort(c(
-        x = "A marker-marginal conditional effect cannot use the marker variable as a focal predictor.",
+        x = "A marker-marginalised conditional effect cannot use the marker variable as a focal predictor.",
         i = "Choose another focal effect or use {.arg longitudinal_estimand} = {.val marker}."
       ))
     }
@@ -1142,14 +1392,16 @@ print.JoiNMeConditionalEffects <- function(x, ...) {
       prediction_method = prediction_method,
       longitudinal_estimand = longitudinal_estimand,
       posterior_draws = posterior_draws,
+      reuse_fitted_re = reuse_fitted_re,
       random_seed = random_seed
     )
 
-    # Step 5: For the marker-marginal estimand, average marker-specific values
-    # within each draw and predictor profile. This order yields an average of
-    # expected marker responses on posterior_epred rather than an inverse-link
-    # transformation of an averaged marker effect.
-    if (identical(longitudinal_estimand, "marginal_marker")) {
+    # Step 5: For population and marker-marginal estimands, average the selected
+    # marker trajectories within each draw and predictor profile. Population
+    # trajectories omit marker deviations; marker-marginal trajectories include
+    # them. In both cases posterior_epred applies each marker's inverse link
+    # before averaging rather than transforming an averaged linear predictor.
+    if (isTRUE(marginalise_marker_trajectories)) {
       marginal_result <- .conditional_effect_marginalize_markers(
         posterior_matrix = posterior_values,
         evaluation_data = evaluation_data,
@@ -1163,41 +1415,51 @@ print.JoiNMeConditionalEffects <- function(x, ...) {
     # levels, and then summarise the declared posterior estimand.
     internal_columns <- c(".conditional_grid_row__", ".conditional_base_condition__")
     evaluation_data <- evaluation_data[, setdiff(names(evaluation_data), internal_columns), drop = FALSE]
-    if (identical(longitudinal_estimand, "marginal_marker") && !marker_is_focal) {
+    if (isTRUE(marginalise_marker_trajectories) && !marker_is_focal) {
       evaluation_data[[marker_variable]] <- NULL
     }
     evaluation_data$cond__ <- factor(
       evaluation_data$cond__,
       levels = unique(as.character(evaluation_data$cond__))
     )
-    summary_data <- .conditional_effect_summary(posterior_values, probability, robust_center)
-    table <- cbind(evaluation_data, summary_data)
-    table$process__ <- "longitudinal"
-    table$longitudinal_estimand__ <- longitudinal_estimand
-
-    # Step 7: Attach the attributes consumed by the brms plotting method. Raw
-    # marker observations are available for population and marker-specific
-    # panels. No individual observation represents an across-marker mean, so
-    # the marker-marginal table receives a typed empty point data frame.
-    attr(table, "effects") <- grid_effects
+    evaluation_data$process__ <- "longitudinal"
+    evaluation_data$longitudinal_estimand__ <- longitudinal_estimand
     response_prefix <- switch(
       longitudinal_estimand,
       population = "Population",
       marker = "Marker-specific",
       marginal_marker = "Marker-marginal"
     )
-    attr(table, "response") <- if (identical(prediction_method, "posterior_linpred")) {
+    response_label <- if (identical(prediction_method, "posterior_linpred")) {
       paste(response_prefix, "longitudinal linear predictor")
     } else {
       paste(response_prefix, "expected longitudinal response")
+    } # human-readable quantity shared by summarised and draw-level results
+    if (!isTRUE(summarise)) {
+      tables[[effect_name]] <- .conditional_mcmc_samples(
+        posterior_matrix = posterior_values,
+        estimand_data = evaluation_data,
+        response_label = response_label
+      )
+      next
     }
+
+    summary_data <- .conditional_effect_summary(posterior_values, probability, robust_center)
+    table <- cbind(evaluation_data, summary_data)
+
+    # Step 7: Attach the attributes consumed by the brms plotting method. Raw
+    # marker observations are available for marker-specific panels. No single
+    # observation represents an across-marker mean, so both marginalised
+    # estimands receive a typed empty point data frame.
+    attr(table, "effects") <- grid_effects
+    attr(table, "response") <- response_label
     attr(table, "surface") <- isTRUE(draw_surface) && length(grid_effects) == 2L && all(grid_types == "numeric")
     attr(table, "categorical") <- FALSE
     attr(table, "catscale") <- NULL
     attr(table, "ordinal") <- FALSE
     attr(table, "spaghetti") <- NULL
     attr(table, "longitudinal_estimand") <- longitudinal_estimand
-    attr(table, "points") <- if (identical(longitudinal_estimand, "marginal_marker")) {
+    attr(table, "points") <- if (isTRUE(marginalise_marker_trajectories)) {
       .conditional_effect_empty_points(table)
     } else {
       .conditional_effect_longitudinal_points(
@@ -1210,7 +1472,13 @@ print.JoiNMeConditionalEffects <- function(x, ...) {
     }
     tables[[effect_name]] <- table
   }
-  structure(tables, class = c("brms_conditional_effects", "list"))
+  structure(
+    tables,
+    class = c(
+      if (isTRUE(summarise)) "brms_conditional_effects" else "JoiNMeConditionalMCMCEffects",
+      "list"
+    )
+  )
 }
 
 #' Evaluate event-regression conditional draws
@@ -1265,6 +1533,11 @@ print.JoiNMeConditionalEffects <- function(x, ...) {
 
 #' Build event conditional-effect tables
 #'
+#' @param summarise Whether to replace the cause-specific draw matrices by
+#'   posterior summaries.
+#'
+#' @return A `brms_conditional_effects`-compatible list when `summarise` is
+#'   true, otherwise an effect-indexed list of tidy draw-level data frames.
 #' @keywords internal
 #' @noRd
 .conditional_effects_event <- function(object,
@@ -1278,12 +1551,19 @@ print.JoiNMeConditionalEffects <- function(x, ...) {
                                        grid_resolution,
                                        draw_surface,
                                        posterior_draws,
+                                       summarise = TRUE,
                                        random_seed) {
   # Step 1: Retain an explicit empty event component for intercept-only event
   # models. This records that the process was requested even though no event
   # covariate effect exists to vary.
   if (!length(effect_requests)) {
-    return(structure(list(), class = c("brms_conditional_effects", "list")))
+    return(structure(
+      list(),
+      class = c(
+        if (isTRUE(summarise)) "brms_conditional_effects" else "JoiNMeConditionalMCMCEffects",
+        "list"
+      )
+    ))
   }
 
   event_type_count <- as.integer(object$stan_data$K_event %||% 1L)
@@ -1310,22 +1590,39 @@ print.JoiNMeConditionalEffects <- function(x, ...) {
       posterior_draws = posterior_draws,
       random_seed = random_seed
     )
-    event_tables <- lapply(seq_len(event_type_count), function(event_type) {
+    event_grids <- lapply(seq_len(event_type_count), function(event_type) {
       event_grid <- grid
       event_grid$event_type__ <- event_type
       base_condition <- as.character(event_grid$cond__)
       event_grid$cond__ <- if (event_type_count > 1L) paste0(base_condition, " | event type: ", event_type) else base_condition
-      cbind(event_grid, .conditional_effect_summary(draws_by_event_type[[event_type]], probability, robust_center))
+      event_grid$process__ <- "event"
+      event_grid$event_scale__ <- event_estimand
+      event_grid
+    })
+    estimand_data <- do.call(rbind, event_grids) # event-major descriptions matching the column binding below
+    rownames(estimand_data) <- NULL
+    estimand_data$cond__ <- factor(estimand_data$cond__, levels = unique(as.character(estimand_data$cond__)))
+    response_label <- if (identical(event_estimand, "hazard_ratio")) "Relative event hazard" else "Log relative event hazard"
+    if (!isTRUE(summarise)) {
+      tables[[effect_name]] <- .conditional_mcmc_samples(
+        posterior_matrix = do.call(cbind, draws_by_event_type),
+        estimand_data = estimand_data,
+        response_label = response_label
+      )
+      next
+    }
+
+    event_tables <- lapply(seq_len(event_type_count), function(event_type) {
+      cbind(event_grids[[event_type]], .conditional_effect_summary(draws_by_event_type[[event_type]], probability, robust_center))
     })
     table <- do.call(rbind, event_tables)
     rownames(table) <- NULL
     table$cond__ <- factor(table$cond__, levels = unique(as.character(table$cond__)))
-    table$process__ <- "event"
 
     # Step 3: Attach the standard brms conditional-effects metadata so its plot
     # method can render numeric, categorical, interaction, and surface effects.
     attr(table, "effects") <- grid_effects
-    attr(table, "response") <- if (identical(event_estimand, "hazard_ratio")) "Relative event hazard" else "Log relative event hazard"
+    attr(table, "response") <- response_label
     attr(table, "surface") <- isTRUE(draw_surface) && length(grid_effects) == 2L && all(grid_types == "numeric")
     attr(table, "categorical") <- FALSE
     attr(table, "catscale") <- NULL
@@ -1337,5 +1634,11 @@ print.JoiNMeConditionalEffects <- function(x, ...) {
     attr(table, "points") <- .conditional_effect_empty_points(table)
     tables[[effect_name]] <- table
   }
-  structure(tables, class = c("brms_conditional_effects", "list"))
+  structure(
+    tables,
+    class = c(
+      if (isTRUE(summarise)) "brms_conditional_effects" else "JoiNMeConditionalMCMCEffects",
+      "list"
+    )
+  )
 }

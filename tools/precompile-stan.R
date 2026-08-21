@@ -112,7 +112,7 @@ stan_cache_key <- function(stan_file, cpp_options = NULL) {
         cpp_sig <- paste(cpp_parts, collapse = ";")
     }
 
-    payload <- c(
+    signature_lines <- c(
         "JoiNMe-stan-cache-v2",
         paste(dep_ids, unname(dep_md5), sep = "="),
         paste0("cpp:", cpp_sig)
@@ -120,7 +120,7 @@ stan_cache_key <- function(stan_file, cpp_options = NULL) {
 
     tmp <- tempfile(fileext = ".txt")
     on.exit(unlink(tmp), add = TRUE)
-    writeLines(payload, con = tmp, useBytes = TRUE)
+    writeLines(signature_lines, con = tmp, useBytes = TRUE)
     substr(unname(tools::md5sum(tmp)), 1, 16)
 }
 
@@ -185,7 +185,15 @@ if (quiet_require("cmdstanr")) {
     )
     if (!is.na(ver)) {
         for (sf in stan_files) {
-            cpp_options <- list(stan_threads = TRUE)
+            is_fitted_effect_prediction <- basename(sf) %in% c(
+                "joinme_fitpred_threading.stan",
+                "joinme_mix_fitpred_threading.stan"
+            ) # parameter-free prediction has no threaded likelihood
+            cpp_options <- if (is_fitted_effect_prediction) {
+                NULL
+            } else {
+                list(stan_threads = TRUE)
+            } # omit STAN_THREADS for the parameter-free programme; assigning FALSE still defines the compilation macro
 
             key <- stan_cache_key(sf, cpp_options = cpp_options)
             model_base_name <- paste0(

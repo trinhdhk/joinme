@@ -225,7 +225,7 @@ test_that("plot.JoiNMeFit can plot association curves", {
       if (!is.null(term)) {
         map <- map[map$term %in% term, , drop = FALSE]
       }
-      list(draws = vals, term_map = map)
+      list(posterior_draws = vals, term_map = map)
     },
     .package = "joinme"
   )
@@ -280,7 +280,9 @@ test_that("plot.JoiNMeFit supports all diagnostic plot types with parameter filt
 
   fit <- joinme::JoiNMeFit$new(
     fit = structure(list(), class = "mock_fit"),
-    stan_data = list(),
+    stan_data = list(
+      P = 0L # no indexed longitudinal fixed effects: alpha, beta and gamma are deliberately generic diagnostic variables
+    ),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
     formulaVCov = NULL,
@@ -567,7 +569,7 @@ test_that("longitudinal heatmap aggregates smooth trajectories without requiring
     metadata = list(marker_var = "marker")
   )
 
-  heatmap_data <- .JoiNMefit_longitudinal_heatmap_data(
+  heatmap_data <- .longitudinal_heatmap_data(
     posterior_prediction = posterior_prediction,
     prediction_scale = "epred",
     sign_threshold = 0.05,
@@ -811,7 +813,7 @@ test_that("plot.JoiNMeFit association curves respect marker selection", {
       map <- data.frame(term = "cv_total", variable = "alpha_cv_total", stringsAsFactors = FALSE)
       vals <- matrix(seq(0.2, 0.6, length.out = 8), ncol = 1)
       colnames(vals) <- "cv_total"
-      list(draws = vals, term_map = map)
+      list(posterior_draws = vals, term_map = map)
     },
     .package = "joinme"
   )
@@ -857,7 +859,7 @@ test_that("plot.JoiNMeFit rejects expit spline knots outside [0, 1]", {
       map <- data.frame(term = "cv_total", variable = "alpha_cv_total", stringsAsFactors = FALSE)
       vals <- matrix(seq(0.2, 0.6, length.out = 8), ncol = 1)
       colnames(vals) <- "cv_total"
-      list(draws = vals, term_map = map)
+      list(posterior_draws = vals, term_map = map)
     },
     .package = "joinme"
   )
@@ -893,7 +895,7 @@ test_that("plot.JoiNMeFit weighted cv_total curves are marker-specific", {
       vals <- matrix(rep(1, 8), ncol = 1)
       colnames(vals) <- "cv_total"
       list(
-        draws = vals,
+        posterior_draws = vals,
         term_map = data.frame(term = "cv_total", variable = "alpha_cv_total", stringsAsFactors = FALSE)
       )
     },
@@ -904,7 +906,7 @@ test_that("plot.JoiNMeFit weighted cv_total curves are marker-specific", {
     fit = NULL,
     stan_data = list(
       marker_levels = c("m1", "m2"),
-      marker_weights = c(1, 2)
+      marker_weight_offsets = c(1, 2)
     ),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
@@ -938,7 +940,7 @@ test_that("plot.JoiNMeFit weighted cv_total curves are marker-specific", {
     marker = NA
   )
 
-  median_col <- joinme:::.quantile_name_from_prob(0.5)
+  median_col <- .quantile_name_from_prob(0.5)
   vals <- stats::setNames(p$data[[median_col]], as.character(p$data$marker))
   expect_equal(unname(vals[["m2"]]), 2 * unname(vals[["m1"]]), tolerance = 1e-8)
 })
@@ -950,7 +952,7 @@ test_that("plot.JoiNMeFit cv_total default grid uses observed y support", {
       vals <- matrix(rep(1, 8), ncol = 1)
       colnames(vals) <- "cv_total"
       list(
-        draws = vals,
+        posterior_draws = vals,
         term_map = data.frame(term = "cv_total", variable = "alpha_cv_total", stringsAsFactors = FALSE)
       )
     },
@@ -959,7 +961,7 @@ test_that("plot.JoiNMeFit cv_total default grid uses observed y support", {
 
   fit <- joinme::JoiNMeFit$new(
     fit = NULL,
-    stan_data = list(marker_levels = c("m1"), marker_weights = 1),
+    stan_data = list(marker_levels = c("m1"), marker_weight_offsets = 1),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
     formulaVCov = NULL,
@@ -987,7 +989,7 @@ test_that("plot.JoiNMeFit cv_total warns and falls back to knot support when y e
       vals <- matrix(rep(1, 8), ncol = 1)
       colnames(vals) <- "cv_total"
       list(
-        draws = vals,
+        posterior_draws = vals,
         term_map = data.frame(term = "cv_total", variable = "alpha_cv_total", stringsAsFactors = FALSE)
       )
     },
@@ -996,7 +998,7 @@ test_that("plot.JoiNMeFit cv_total warns and falls back to knot support when y e
 
   fit <- joinme::JoiNMeFit$new(
     fit = NULL,
-    stan_data = list(marker_levels = c("m1"), marker_weights = 1),
+    stan_data = list(marker_levels = c("m1"), marker_weight_offsets = 1),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
     formulaVCov = NULL,
@@ -1026,7 +1028,7 @@ test_that("plot.JoiNMeFit association curves respect nonlinear functional transf
       vals <- matrix(rep(1, 8), ncol = 1)
       colnames(vals) <- "corr"
       list(
-        draws = vals,
+        posterior_draws = vals,
         term_map = data.frame(term = "corr", variable = "alpha_corr", stringsAsFactors = FALSE)
       )
     },
@@ -1063,7 +1065,7 @@ test_that("plot.JoiNMeFit association curves respect nonlinear functional transf
   )
 
   expected <- 1 / (1 + exp(x_grid))
-  median_col <- joinme:::.quantile_name_from_prob(0.5)
+  median_col <- .quantile_name_from_prob(0.5)
   expect_equal(p$data[[median_col]], expected, tolerance = 1e-8)
   expect_false(isTRUE(all.equal(diff(p$data[[median_col]]), rep(diff(p$data[[median_col]])[1], length(diff(p$data[[median_col]]))))))
 })
@@ -1075,7 +1077,7 @@ test_that("plot.JoiNMeFit association_options range controls the raw evaluation 
       vals <- matrix(rep(1, 8), ncol = 1)
       colnames(vals) <- "cv_total"
       list(
-        draws = vals,
+        posterior_draws = vals,
         term_map = data.frame(term = "cv_total", variable = "alpha_cv_total", stringsAsFactors = FALSE)
       )
     },
@@ -1084,7 +1086,7 @@ test_that("plot.JoiNMeFit association_options range controls the raw evaluation 
 
   fit <- joinme::JoiNMeFit$new(
     fit = NULL,
-    stan_data = list(marker_levels = c("m1"), marker_weights = 1),
+    stan_data = list(marker_levels = c("m1"), marker_weight_offsets = 1),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
     formulaVCov = NULL,
@@ -1112,7 +1114,7 @@ test_that("plot.JoiNMeFit association_options range controls the raw evaluation 
   )
 
   x_grid <- seq(-4, 4, length.out = 5)
-  median_col <- joinme:::.quantile_name_from_prob(0.5)
+  median_col <- .quantile_name_from_prob(0.5)
 
   expect_equal(p$data$x, x_grid, tolerance = 1e-8)
   expect_equal(p$data[[median_col]], stats::plogis(x_grid), tolerance = 1e-8)
@@ -1121,7 +1123,7 @@ test_that("plot.JoiNMeFit association_options range controls the raw evaluation 
 test_that("plot.JoiNMeFit rejects simultaneous association grid and range", {
   fit <- joinme::JoiNMeFit$new(
     fit = NULL,
-    stan_data = list(marker_levels = c("m1"), marker_weights = 1),
+    stan_data = list(marker_levels = c("m1"), marker_weight_offsets = 1),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
     formulaVCov = NULL,
@@ -1160,7 +1162,7 @@ test_that("plot.JoiNMeFit association curves use fitted spline coefficients", {
       vals <- matrix(rep(1, 8), ncol = 1)
       colnames(vals) <- "cv_total"
       list(
-        draws = vals,
+        posterior_draws = vals,
         term_map = data.frame(term = "cv_total", variable = "alpha_cv_total", stringsAsFactors = FALSE)
       )
     },
@@ -1213,7 +1215,7 @@ test_that("plot.JoiNMeFit association curves use fitted spline coefficients", {
     Boundary.knots = c(-1, 1)
   )
   expected <- as.numeric(as.matrix(basis) %*% c(0, 1, 1))
-  median_col <- joinme:::.quantile_name_from_prob(0.5)
+  median_col <- .quantile_name_from_prob(0.5)
   expect_equal(p$data[[median_col]], expected, tolerance = 1e-8)
 })
 
@@ -1226,7 +1228,7 @@ test_that("plot.JoiNMeFit association curves evaluate expit splines on the trans
       vals <- matrix(rep(1, 8), ncol = 1)
       colnames(vals) <- "corr"
       list(
-        draws = vals,
+        posterior_draws = vals,
         term_map = data.frame(term = "corr", variable = "alpha_corr", stringsAsFactors = FALSE)
       )
     },
@@ -1280,14 +1282,14 @@ test_that("plot.JoiNMeFit association curves evaluate expit splines on the trans
     Boundary.knots = c(0.2, 0.8)
   )
   expected <- as.numeric(as.matrix(basis) %*% c(0, 1, 1))
-  median_col <- joinme:::.quantile_name_from_prob(0.5)
+  median_col <- .quantile_name_from_prob(0.5)
 
   expect_equal(p$data$x, x_grid, tolerance = 1e-8)
   expect_equal(p$data[[median_col]], expected, tolerance = 1e-8)
 })
 
 test_that("plot.JoiNMeFit expands vcov association plots to all components", {
-  payload <- list(
+  plot_data <- list(
     coeff_draws = list(
       vcov = structure(
         matrix(c(rep(1, 6), rep(2, 6)), nrow = 6, ncol = 2),
@@ -1313,7 +1315,7 @@ test_that("plot.JoiNMeFit expands vcov association plots to all components", {
   )
 
   testthat::local_mocked_bindings(
-    .get_association_plot_data = function(x, seed = 1) payload,
+    .get_association_plot_data = function(x, seed = 1) plot_data,
     .package = "joinme"
   )
 
@@ -1349,13 +1351,13 @@ test_that("plot.JoiNMeFit expands vcov association plots to all components", {
   expect_type(plots, "list")
   expect_setequal(names(plots), c("vcov[1]", "vcov[2]"))
 
-  median_col <- joinme:::.quantile_name_from_prob(0.5)
+  median_col <- .quantile_name_from_prob(0.5)
   expect_equal(plots[["vcov[1]"]]$data[[median_col]], x_grid, tolerance = 1e-8)
   expect_equal(plots[["vcov[2]"]]$data[[median_col]], 2 * x_grid, tolerance = 1e-8)
 })
 
 test_that("plot.JoiNMeFit uses component-specific vcov support ranges", {
-  payload <- list(
+  plot_data <- list(
     coeff_draws = list(
       vcov = structure(
         matrix(c(rep(-1, 6), rep(-2, 6)), nrow = 6, ncol = 2),
@@ -1381,7 +1383,7 @@ test_that("plot.JoiNMeFit uses component-specific vcov support ranges", {
   )
 
   testthat::local_mocked_bindings(
-    .get_association_plot_data = function(x, seed = 1) payload,
+    .get_association_plot_data = function(x, seed = 1) plot_data,
     .package = "joinme"
   )
 
@@ -1417,7 +1419,7 @@ test_that("plot.JoiNMeFit uses component-specific vcov support ranges", {
 })
 
 test_that("plot.JoiNMeFit zero-references covariance-style hazard contributions", {
-  payload <- list(
+  plot_data <- list(
     coeff_draws = list(
       vcov = structure(
         matrix(rep(1, 6), nrow = 6, ncol = 1),
@@ -1443,7 +1445,7 @@ test_that("plot.JoiNMeFit zero-references covariance-style hazard contributions"
   )
 
   testthat::local_mocked_bindings(
-    .get_association_plot_data = function(x, seed = 1) payload,
+    .get_association_plot_data = function(x, seed = 1) plot_data,
     .package = "joinme"
   )
 
@@ -1493,12 +1495,12 @@ test_that("plot.JoiNMeFit zero-references covariance-style hazard contributions"
     p_transform <- p_transform[[1]]
   }
 
-  median_col <- joinme:::.quantile_name_from_prob(0.5)
+  median_col <- .quantile_name_from_prob(0.5)
   expect_equal(p_transform$data[[median_col]], exp(-x_grid), tolerance = 1e-8)
   expect_equal(p_hazard$data[[median_col]], exp(-x_grid) - 1, tolerance = 1e-8)
 })
 
-test_that("association plot payload uses canonical covariance coefficients", {
+test_that("association plot data use canonical covariance coefficients", {
   draws_obj <- posterior::as_draws_matrix(stats::setNames(
     data.frame(
       raw = c(0.1, 0.1, 0.1),
@@ -1524,7 +1526,7 @@ test_that("association plot payload uses canonical covariance coefficients", {
     .package = "joinme"
   )
 
-  payload <- .build_association_plot_data(
+  plot_data <- .build_association_plot_data(
     fit = structure(list(), class = "mock_fit"),
     stan_data = list(Q_idm = 1L, indep_idmarker_cov = 1L, D = 1L),
     config = list(
@@ -1535,9 +1537,9 @@ test_that("association plot payload uses canonical covariance coefficients", {
     seed = 1
   )
 
-  expect_equal(payload$term_map$term, "vcov[1]")
-  expect_equal(payload$term_map$variable, "alpha_vcov[1]")
-  expect_equal(as.numeric(payload$coeff_draws$vcov[, 1]), c(0.4, 0.5, 0.6))
+  expect_equal(plot_data$term_map$term, "vcov[1]")
+  expect_equal(plot_data$term_map$variable, "alpha_vcov[1]")
+  expect_equal(as.numeric(plot_data$coeff_draws$vcov[, 1]), c(0.4, 0.5, 0.6))
 })
 
 test_that("plot.JoiNMeFit defaults expit-spline fallback grids on the raw scale", {
@@ -1547,7 +1549,7 @@ test_that("plot.JoiNMeFit defaults expit-spline fallback grids on the raw scale"
       vals <- matrix(rep(1, 8), ncol = 1)
       colnames(vals) <- "cv_total"
       list(
-        draws = vals,
+        posterior_draws = vals,
         term_map = data.frame(term = "cv_total", variable = "alpha_cv_total", stringsAsFactors = FALSE)
       )
     },
@@ -1556,7 +1558,7 @@ test_that("plot.JoiNMeFit defaults expit-spline fallback grids on the raw scale"
 
   fit <- joinme::JoiNMeFit$new(
     fit = NULL,
-    stan_data = list(marker_levels = c("m1"), marker_weights = 1),
+    stan_data = list(marker_levels = c("m1"), marker_weight_offsets = 1),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
     formulaVCov = NULL,
@@ -1581,10 +1583,10 @@ test_that("plot.JoiNMeFit defaults expit-spline fallback grids on the raw scale"
   expect_equal(range(p$data$x), stats::qlogis(c(0.2, 0.8)), tolerance = 1e-6)
 })
 
-test_that("plot.JoiNMeFit uses cached association plotting payload when available", {
+test_that("plot.JoiNMeFit uses cached association plotting data when available", {
   fit <- joinme::JoiNMeFit$new(
     fit = NULL,
-    stan_data = list(marker_levels = c("m1"), marker_weights = 1),
+    stan_data = list(marker_levels = c("m1"), marker_weight_offsets = 1),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
     formulaVCov = NULL,
@@ -1616,7 +1618,7 @@ test_that("plot.JoiNMeFit uses cached association plotting payload when availabl
   )
 
   p <- plot(fit, type = "association", association_options = list(association_term = "cv_total", association_metric = "hazard"))
-  median_col <- joinme:::.quantile_name_from_prob(0.5)
+  median_col <- .quantile_name_from_prob(0.5)
 
   expect_equal(range(p$data$x), c(-3, 3), tolerance = 1e-8)
   expect_equal(p$data[[median_col]], 2 * (1 / (1 + exp(-p$data$x))), tolerance = 1e-8)
@@ -1625,7 +1627,7 @@ test_that("plot.JoiNMeFit uses cached association plotting payload when availabl
 test_that("plot.JoiNMeFit applies iota affine shifts to functional association transforms", {
   fit <- joinme::JoiNMeFit$new(
     fit = NULL,
-    stan_data = list(marker_levels = c("m1"), marker_weights = 1),
+    stan_data = list(marker_levels = c("m1"), marker_weight_offsets = 1),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
     formulaVCov = NULL,
@@ -1658,7 +1660,7 @@ test_that("plot.JoiNMeFit applies iota affine shifts to functional association t
   )
 
   p <- plot(fit, type = "association", association_options = list(association_term = "cv_total", association_metric = "transform"))
-  median_col <- joinme:::.quantile_name_from_prob(0.5)
+  median_col <- .quantile_name_from_prob(0.5)
 
   expect_equal(p$data[[median_col]], stats::plogis(0.5 + 2 * p$data$x), tolerance = 1e-8)
 })

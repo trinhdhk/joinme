@@ -8,11 +8,11 @@ testthat::test_that("all", {
     times_obs = seq(0, 8, length.out = 20),
     seed = 42,
     assoc = c("cv_total"),
-    assoc_coefs = c(cv_total = 0.5),
-    fixed_marker_weights = FALSE,
+    truth = jm_truth(
+      assoc_coef = list(slope = c(cv_total = 0.5)),
+      basehaz = list(type = "constant", lambda = 0.1)
+    ),
     shrinkage = 2L,
-    baseline_hazard = list(type = "constant", lambda = 0.1),
-    # beta_basehaz = c(-1),
     integration_control = list(rel.tol = 1e-6, subdivisions = 2000L, stop.on.error = TRUE)
   )
 
@@ -30,12 +30,10 @@ testthat::test_that("all", {
     families = "student_t",
     basehaz = joinme_basehaz(type = "formula", formula = ~ 1),
     transforms = joinme_tf(cv_total = "identity"),
-    fixed_marker_weights = FALSE,
     shrinkage = 2L,
     priors = joinme_priors(
-      beta = list(scale = 3),
-      alpha = list(scale = 3),
-      iota = list(scale = 3)
+      intercept = prior_student_t(df = 6, scale = 3),
+      slope = prior_student_t(df = 6, scale = 3)
     ),
     control = list(
       engine = "rstan",
@@ -52,11 +50,11 @@ testthat::test_that("all", {
 
   expect_s3_class(fit, "JoiNMeFit")
   expect_equal(sim$truth$shrinkage, fit$stan_data$shrinkage)
-  expect_false(sim$truth$fixed_marker_weights)
-  expect_equal(unname(sim$truth$marker_weights_base), fit$stan_data$marker_weights)
+  expect_identical(sim$truth$marker_weight_prior_family, "student_t")
+  expect_equal(unname(sim$truth$marker_weights_offset), fit$stan_data$marker_weight_offsets)
   expect_equal(
     unname(sim$truth$marker_weights),
-    unname(sim$truth$marker_weights_base + sim$truth$marker_weights_latent)
+    unname(sim$truth$marker_weights_offset + sim$truth$marker_weights_latent)
   )
   expect_equal(sim$truth$baseline_hazard$parameters$rate, 0.1)
   expect_equal(unname(sim$truth$stan_fit$bs_gamma_c), log(0.1), tolerance = 1e-12)
