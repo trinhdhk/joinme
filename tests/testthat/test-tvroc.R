@@ -12,21 +12,21 @@ test_that("tvROC time resolution preserves the former AUC parameter recipe", {
   )
   data_event <- data.frame(time = c(2, 7), event = c(1L, 0L))
 
-  by_width <- joinme:::.get_tvroc_times(
+  by_width <- .get_tvroc_times(
     object,
     data_event,
     time_start = c(1, 2),
     time_horizon = NULL,
     Dt = 3
   )
-  by_horizon <- joinme:::.get_tvroc_times(
+  by_horizon <- .get_tvroc_times(
     object,
     data_event,
     time_start = c(1, 2),
     time_horizon = 6,
     Dt = NULL
   )
-  by_default <- joinme:::.get_tvroc_times(
+  by_default <- .get_tvroc_times(
     object,
     data_event,
     time_start = 1,
@@ -38,7 +38,7 @@ test_that("tvROC time resolution preserves the former AUC parameter recipe", {
   expect_equal(by_horizon$time_horizon, c(6, 6))
   expect_equal(by_default$time_horizon, 7)
   expect_error(
-    joinme:::.get_tvroc_times(
+    .get_tvroc_times(
       object,
       data_event,
       time_start = 2,
@@ -59,7 +59,7 @@ test_that("model-based ROC weights represent uncertain horizon status", {
     time_horizon = rep(3, 5)
   )
 
-  weights <- joinme:::.tvroc_status_weights(
+  weights <- .tvroc_status_weights(
     risk_set,
     type_weights = "model-based",
     cause = 1L
@@ -79,7 +79,7 @@ test_that("IPCW ROC weights use observable cases and controls", {
     time_horizon = rep(3, 6)
   )
 
-  weights <- joinme:::.tvroc_status_weights(
+  weights <- .tvroc_status_weights(
     risk_set,
     type_weights = "IPCW",
     cause = 1L
@@ -105,7 +105,7 @@ test_that("one ROC curve follows the JMbayes2 tvROC contract", {
     c(0.88, 0.68, 0.28, 0.08)
   )
 
-  roc <- joinme:::.tvroc_from_risk_set(
+  roc <- .tvroc_from_risk_set(
     risk_set,
     time_start = 0,
     time_horizon = 3,
@@ -149,7 +149,7 @@ test_that("posterior event-risk draws are aligned at each exact horizon", {
     )
   )))
 
-  risks <- joinme:::.discrimination_horizon_risk_draws(
+  risks <- .discrimination_horizon_risk_draws(
     prediction,
     ids = 1:2,
     horizons = c("1" = 2, "2" = 3)
@@ -207,7 +207,7 @@ test_that("the cumulative case window includes an event at the horizon", {
     .package = "joinme"
   )
 
-  risk_set <- joinme:::.dynamic_discrimination_risk_set(
+  risk_set <- .dynamic_discrimination_risk_set(
     object,
     newdataLong = data_long,
     newdataEvent = data_event,
@@ -271,7 +271,7 @@ test_that("ROC estimation rejects a window without requested-cause events", {
   )
 
   expect_error(
-    joinme:::.tvroc_from_risk_set(
+    .tvroc_from_risk_set(
       risk_set,
       time_start = 0,
       time_horizon = 3,

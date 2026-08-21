@@ -13,11 +13,11 @@ test_that("survival-curve concordance has the Antolini orientation", {
     dimnames = list(c("1", "2"), c("1", "2", "3"))
   )
 
-  ordered <- joinme:::.concordance_from_survival_curves(
+  ordered <- .concordance_from_survival_curves(
     outcomes,
     ordered_survival
   )
-  reversed <- joinme:::.concordance_from_survival_curves(
+  reversed <- .concordance_from_survival_curves(
     outcomes,
     1 - ordered_survival
   )
@@ -44,7 +44,7 @@ test_that("survival-curve concordance gives half credit to prediction ties", {
     dimnames = list(c("1", "2"), c("1", "2", "3"))
   )
 
-  out <- joinme:::.concordance_from_survival_curves(outcomes, survival)
+  out <- .concordance_from_survival_curves(outcomes, survival)
 
   expect_equal(out$concordant, 2)
   expect_equal(out$tied, 1)
@@ -63,7 +63,7 @@ test_that("premature censoring is incomparable and same-time censoring is compar
     dimnames = list("1", as.character(seq_len(4)))
   )
 
-  out <- joinme:::.concordance_from_survival_curves(outcomes, survival)
+  out <- .concordance_from_survival_curves(outcomes, survival)
 
   # Subject 2 was lost before the event and is not comparable.  Subject 3 was
   # censored at the event time and is known to have survived through that time.
@@ -77,13 +77,13 @@ test_that("concordance event weights follow survival::concordance", {
     cause_event = c(1L, 1L, 0L, 1L, 0L)
   )
 
-  harrell <- joinme:::.concordance_event_weights(outcomes, "none")
-  uno <- joinme:::.concordance_event_weights(outcomes, "n/G2")
+  harrell <- .concordance_event_weights(outcomes, "none")
+  uno <- .concordance_event_weights(outcomes, "n/G2")
 
   expect_equal(harrell[outcomes$cause_event == 1L], rep(1, 3))
   expect_true(all(uno[outcomes$cause_event == 1L] >= harrell[outcomes$cause_event == 1L]))
   expect_error(
-    joinme:::.concordance_event_weights(outcomes, "unsupported"),
+    .concordance_event_weights(outcomes, "unsupported"),
     "type_weights"
   )
 })
@@ -96,7 +96,7 @@ test_that("counting-process event rows reduce to one terminal outcome", {
     event = c(0L, 1L, 0L, 0L)
   )
 
-  outcome <- joinme:::.subject_event_outcomes(
+  outcome <- .subject_event_outcomes(
     survival::Surv(start, stop, event) ~ 1,
     data_event,
     id_var = "id",
@@ -114,7 +114,7 @@ test_that("subject-specific time columns remain aligned across interval rows", {
     landmark = c(0.5, 0.5, 1, 1)
   )
 
-  mapped <- joinme:::.subject_time_map(
+  mapped <- .subject_time_map(
     "landmark",
     ids = c(1, 2),
     data_event = data_event,
@@ -125,7 +125,7 @@ test_that("subject-specific time columns remain aligned across interval rows", {
   expect_equal(unname(mapped), c(0.5, 1))
   data_event$landmark[2] <- 0.75
   expect_error(
-    joinme:::.subject_time_map(
+    .subject_time_map(
       "landmark",
       ids = c(1, 2),
       data_event = data_event,
@@ -142,7 +142,7 @@ test_that("last measurement landmarks strictly precede observed outcomes", {
     time = c(0, 1, 2, 0, 3)
   )
 
-  landmark <- joinme:::.last_preoutcome_measurement(
+  landmark <- .last_preoutcome_measurement(
     ids = c(1, 2),
     event_time = c(2, 4),
     data_long = data_long,
@@ -195,7 +195,7 @@ test_that("concordance prediction grids contain every observable event time", {
     .package = "joinme"
   )
 
-  curves <- joinme:::.concordance_survival_curves(
+  curves <- .concordance_survival_curves(
     object = object,
     newdataLong = data_long,
     newdataEvent = data_event,

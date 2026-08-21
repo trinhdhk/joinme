@@ -11,11 +11,10 @@ test_that("single-thread and multi-thread threaded Stan paths stay aligned", {
   sim <- simulate_joinme(
     n_id = 6,
     families = rep("student_t", 2),
-    n_obs_per_marker_per_id = 4,
     times_obs = seq(0, 5, length.out = 10),
     seed = seed,
     assoc = c("cv_total"),
-    assoc_coefs = c(cv_total = 0.6),
+    truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.6))),
     time_cens = 5.0,
     family_params = list(
       student_t = list(sigma = 0.35, nu = 4)
@@ -79,7 +78,7 @@ test_that("single-thread and multi-thread threaded Stan paths stay aligned", {
 
   if (inherits(fit_thread$fit, "CmdStanMCMC")) {
     mod_thread <- tryCatch(fit_thread$fit$cmdstan_model(), error = function(e) NULL)
-    threads_enabled <- tryCatch(joinme:::.cmdstan_threads_enabled(mod_thread), error = function(e) FALSE)
+    threads_enabled <- tryCatch(.cmdstan_threads_enabled(mod_thread), error = function(e) FALSE)
     if (!isTRUE(threads_enabled)) {
       skip("CmdStan model not compiled with threads; skipping threading equivalence checks.")
     }

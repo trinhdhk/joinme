@@ -5,7 +5,7 @@ test_that("jm_family stores a valid fixed skew-Laplace quantile", {
   expect_identical(specification$family, "skew_double_exponential")
   expect_equal(specification$tau, 0.8)
 
-  extracted <- joinme:::.extract_family_and_link(specification)
+  extracted <- .extract_family_and_link(specification)
   expect_identical(extracted$family_code, 9L)
   expect_equal(extracted$tau_fixed, 0.8)
 })
@@ -38,7 +38,7 @@ test_that("family validation preserves marker-specific fixed tau", {
     y = c(0.1, 0.2, -0.3, 0.4, 0.5, -0.2)
   )
 
-  validated <- joinme:::.validate_family_list(
+  validated <- .validate_family_list(
     families = list(
       jm_family("gaussian"),
       jm_family("skew_laplace", tau = 0.8),
@@ -54,7 +54,7 @@ test_that("family validation preserves marker-specific fixed tau", {
   expect_identical(validated$use_tau_fixed, c(0L, 1L, 0L))
   expect_equal(validated$tau_fixed, c(0.5, 0.8, 0.5))
 
-  tau_index <- joinme:::.build_family_parameter_index(
+  tau_index <- .build_family_parameter_index(
     validated$family_codes,
     parameter = "tau",
     eligible = validated$use_tau_fixed == 0L
@@ -67,7 +67,6 @@ test_that("standata carries marker-specific fixed tau into fitting", {
   simulation <- simulate_joinme(
     n_id = 5,
     families = c("gaussian", "skew_double_exponential"),
-    n_obs_per_marker_per_id = 3,
     times_obs = 0:2,
     seed = 991
   )
@@ -93,8 +92,8 @@ test_that("standata carries marker-specific fixed tau into fitting", {
   expect_identical(standata$marker_to_tau_family, c(0L, 0L))
 })
 
-test_that("legacy scalar fixed-tau metadata remains usable in prediction", {
-  normalised <- joinme:::.normalise_fixed_tau_by_marker(
+test_that("earlier scalar fixed-tau metadata remains usable in prediction", {
+  normalised <- .normalise_fixed_tau_by_marker(
     use_tau_fixed = 1L,
     tau_fixed = 0.3,
     family_codes = c(1L, 9L, 9L)
@@ -105,7 +104,7 @@ test_that("legacy scalar fixed-tau metadata remains usable in prediction", {
 })
 
 test_that("distributional term mapping excludes fixed markers from estimated tau", {
-  term_map <- joinme:::.distributional_term_map(
+  term_map <- .distributional_term_map(
     sd = list(
       D = 2L,
       family_long = c(9L, 9L),
@@ -139,7 +138,7 @@ test_that("summary reports fixed tau as a deterministic model quantity", {
     class = "JoiNMeFit"
   )
 
-  summary_table <- joinme:::.fixed_tau_summary_table(fit, digits = 3)
+  summary_table <- .fixed_tau_summary_table(fit, digits = 3)
   expect_identical(summary_table$term, "tau_fixed[skew_marker]")
   expect_equal(summary_table$Estimate, 0.8)
   expect_equal(summary_table$Est.Error, 0)
@@ -202,7 +201,7 @@ test_that("summary.JoiNMeFit includes the family-fixed tau row", {
       assoc_cs_marker = 0L,
       assoc_corr = 0L,
       assoc_vcov = 0L,
-      shared_marker_weights = 1L,
+      marker_weight_sets_shared = 1L,
       tmax = 1
     ),
     formulaLong = y ~ 1 + (1 | id) + (1 | marker),
@@ -248,40 +247,29 @@ test_that("summary.JoiNMeFit includes the family-fixed tau row", {
   expect_equal(fixed_row$Est.Error, 0)
 })
 
-test_that("joinme rejects the former sampling-control route for fixed tau", {
-  expect_error(
-    joinme(control = list(tau_fixed = 0.8)),
-    "no longer a fitting or sampling argument"
-  )
-  expect_error(
-    joinme(tau_fixed = 0.8),
-    "no longer a fitting or sampling argument"
-  )
-})
-
 test_that("fit, log-likelihood, and dynamic prediction use marker-indexed tau", {
   fit_data <- readLines(
-    testthat::test_path("..", "..", "inst", "stan", "helper", "data", "fit_data.stan"),
+    testthat::test_path("..", "..", "inst", "stan", "include", "submodels", "longitudinal", "data", "fit.stan"),
     warn = FALSE
   )
   prediction_data <- readLines(
-    testthat::test_path("..", "..", "inst", "stan", "helper", "data", "dynpred_data.stan"),
+    testthat::test_path("..", "..", "inst", "stan", "include", "submodels", "longitudinal", "data", "dynamic_prediction.stan"),
     warn = FALSE
   )
   fit_likelihood <- readLines(
-    testthat::test_path("..", "..", "inst", "stan", "helper", "functions", "joinme_fit_partial.stanfunctions"),
+    testthat::test_path("..", "..", "inst", "stan", "include", "etc", "functions", "joinme_fit_partial.stanfunctions"),
     warn = FALSE
   )
   prediction_likelihood <- readLines(
-    testthat::test_path("..", "..", "inst", "stan", "helper", "functions", "joinme_dynpred_partial.stanfunctions"),
+    testthat::test_path("..", "..", "inst", "stan", "include", "etc", "functions", "joinme_dynpred_partial.stanfunctions"),
     warn = FALSE
   )
   fit_log_likelihood <- readLines(
-    testthat::test_path("..", "..", "inst", "stan", "helper", "generated_quantities", "fit_outputs.stan"),
+    testthat::test_path("..", "..", "inst", "stan", "include", "submodels", "longitudinal", "generated_quantities", "fit_calculations.stan"),
     warn = FALSE
   )
   posterior_prediction <- readLines(
-    testthat::test_path("..", "..", "inst", "stan", "helper", "generated_quantities", "dynpred_outputs.stan"),
+    testthat::test_path("..", "..", "inst", "stan", "include", "etc", "generated_quantities", "dynpred_output_calculations.stan"),
     warn = FALSE
   )
 
@@ -300,7 +288,6 @@ test_that("simulation gives marker-specific family tau precedence", {
     family_params = list(
       skew_double_exponential = list(sigma = 1, tau = 0.3)
     ),
-    n_obs_per_marker_per_id = 2,
     times_obs = 0:1,
     seed = 733
   )
@@ -326,7 +313,6 @@ test_that("simulation gives marker-specific family tau precedence", {
     family_params = list(
       skew_double_exponential = list(sigma = 1, tau = 0.3)
     ),
-    n_obs_per_marker_per_id = 2,
     times_obs = 0:1,
     seed = 733
   )
@@ -354,10 +340,9 @@ test_that("simulation supports fixed and modelled skew-Laplace tau by marker", {
       skew_double_exponential = list(sigma = 1, tau = 0.3)
     ),
     formulaDist = list(tau ~ 1),
-    dist_coefs = list(
-      tau = c("(Intercept)" = stats::qlogis(0.3))
-    ),
-    n_obs_per_marker_per_id = 2,
+    truth = jm_truth(tau = list(
+      intercept = c("(Intercept)" = stats::qlogis(0.3))
+    )),
     times_obs = 0:1,
     seed = 734
   )
@@ -392,7 +377,6 @@ test_that("simulation rejects an unused tau regression", {
       n_id = 4,
       families = jm_family("skew_laplace", tau = 0.8),
       formulaDist = list(tau ~ 1),
-      n_obs_per_marker_per_id = 2,
       times_obs = 0:1,
       seed = 735
     ),

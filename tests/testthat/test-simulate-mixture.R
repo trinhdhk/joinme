@@ -6,8 +6,6 @@ test_that("simulate_joinme_mix mirrors the fitting mixture syntax", {
     "formulaDist",
     "transforms",
     "families",
-    "fixed_marker_weights",
-    "shared_marker_weights",
     "n_classes",
     "formulaClass",
     "class_type",
@@ -22,6 +20,9 @@ test_that("simulate_joinme_mix mirrors the fitting mixture syntax", {
   expect_true(all(
     mixture_arguments %in% names(formals(joinme_mix))
   ))
+  expect_true("truth" %in% names(formals(simulate_joinme_mix)))
+  expect_true("priors" %in% names(formals(joinme_mix)))
+  expect_false("priors" %in% names(formals(simulate_joinme_mix)))
   expect_true(all(
     names(formals(simulate_joinme)) %in%
       c(names(formals(simulate_joinme_mix)), ".mixture_specification")
@@ -42,11 +43,11 @@ test_that("subject mixture draws follow their recorded class parameters", {
     formulaClass = ~x1,
     class_type = "subject",
     class_dimensions = 1,
+    truth = jm_truth(class = list(
+      slope = c("class_1:x1" = -0.8)
+    )),
     class_parameters = list(
       probability = c(0.45, 0.55),
-      coefficient = list(
-        subject = c("class_1:x1" = -0.8)
-      ),
       location = matrix(c(-2.5, 2.5), nrow = 2),
       scale = 0.001
     ),
@@ -63,6 +64,7 @@ test_that("subject mixture draws follow their recorded class parameters", {
   expect_s3_class(simulation$dataEvent, "data.frame")
   expect_identical(mixture$n_classes, 2L)
   expect_identical(mixture$class_type, "subject")
+  expect_equal(unname(mixture$coefficient$subject), -0.8)
   expect_equal(realised, expected, tolerance = 0.01)
   expect_equal(
     unname(rowSums(mixture$probability_by_unit$subject)),
@@ -70,6 +72,40 @@ test_that("subject mixture draws follow their recorded class parameters", {
   )
   expect_false(any(c("class", "latent_class") %in% names(simulation$dataLong)))
   expect_false(any(c("class", "latent_class") %in% names(simulation$dataEvent)))
+  expect_false("true_params" %in% names(simulation))
+})
+
+test_that("omitted mixture population parameters are drawn once and stored", {
+  simulation_arguments <- list(
+    n_id = 5,
+    families = c("gaussian", "gaussian"),
+    times_obs = c(0, 0.1),
+    time_cens = 0.2,
+    n_classes = 2,
+    formulaClass = ~x1,
+    class_type = "subject",
+    class_dimensions = 1,
+    use_mirai = FALSE
+  )
+  simulation_a <- do.call(
+    simulate_joinme_mix,
+    c(simulation_arguments, list(seed = 8121))
+  )
+  simulation_b <- do.call(
+    simulate_joinme_mix,
+    c(simulation_arguments, list(seed = 8122))
+  )
+
+  truth_a <- simulation_a$truth$mixture
+  expect_equal(sum(truth_a$probability), 1)
+  expect_true(all(is.finite(truth_a$coefficient$subject)))
+  expect_true(all(is.finite(truth_a$location)))
+  expect_true(all(truth_a$scale > 0))
+  expect_false(identical(truth_a$location, simulation_b$truth$mixture$location))
+  expect_false(identical(
+    truth_a$coefficient$subject,
+    simulation_b$truth$mixture$coefficient$subject
+  ))
 })
 
 test_that("compatible subject blocks use one simulated allocation", {
@@ -203,7 +239,6 @@ test_that("mixture simulation validates ordering and context-sensitive defaults"
       families = c("gaussian", "gaussian"),
       times_obs = c(0, 0.1),
       time_cens = 0.2,
-      fixed_marker_weights = TRUE,
       class_type = "marker_weight",
       seed = 8110,
       use_mirai = FALSE

@@ -1,15 +1,20 @@
 test_that(".get_stan_file always resolves the threaded Stan sources", {
   expect_warning(
-    fit_file <- joinme:::.get_stan_file("joinme_fit", threaded = FALSE),
+    fit_file <- .get_stan_file("joinme_fit", threaded = FALSE),
     "deprecated"
   )
-  pred_file <- joinme:::.get_stan_file("joinme_dynpred", threaded = TRUE)
-  mix_fit_file <- joinme:::.get_stan_file(
+  pred_file <- .get_stan_file("joinme_dynpred", threaded = TRUE)
+  mix_fit_file <- .get_stan_file(
     "joinme_mix_fit",
     threaded = TRUE
   )
-  mix_pred_file <- joinme:::.get_stan_file(
+  mix_pred_file <- .get_stan_file(
     "joinme_mix_dynpred",
+    threaded = TRUE
+  )
+  fitpred_file <- .get_stan_file("joinme_fitpred", threaded = TRUE)
+  mix_fitpred_file <- .get_stan_file(
+    "joinme_mix_fitpred",
     threaded = TRUE
   )
 
@@ -20,15 +25,20 @@ test_that(".get_stan_file always resolves the threaded Stan sources", {
     basename(mix_pred_file),
     "joinme_mix_dynpred_threading\\.stan$"
   )
+  expect_match(basename(fitpred_file), "joinme_fitpred_threading\\.stan$")
+  expect_match(
+    basename(mix_fitpred_file),
+    "joinme_mix_fitpred_threading\\.stan$"
+  )
 })
 
 test_that("Stan programme routing follows the fitted model family", {
   expect_identical(
-    joinme:::.stan_fit_program(list(use_mixture = 0L)),
+    .stan_fit_program(list(use_mixture = 0L)),
     "joinme_fit"
   )
   expect_identical(
-    joinme:::.stan_fit_program(list(use_mixture = 1L)),
+    .stan_fit_program(list(use_mixture = 1L)),
     "joinme_mix_fit"
   )
 
@@ -38,12 +48,20 @@ test_that("Stan programme routing follows the fitted model family", {
     class = c("JoiNMeMixFit", "JoiNMeFit")
   )
   expect_identical(
-    joinme:::.stan_dynpred_program(ordinary),
+    .stan_dynpred_program(ordinary),
     "joinme_dynpred"
   )
   expect_identical(
-    joinme:::.stan_dynpred_program(mixture),
+    .stan_dynpred_program(mixture),
     "joinme_mix_dynpred"
+  )
+  expect_identical(
+    .stan_fitpred_program(ordinary),
+    "joinme_fitpred"
+  )
+  expect_identical(
+    .stan_fitpred_program(mixture),
+    "joinme_mix_fitpred"
   )
 })
 
@@ -54,7 +72,7 @@ test_that(".get_stan_engine falls back to an available backend", {
   )
 
   expect_warning(
-    resolved <- joinme:::.get_stan_engine("cmdstanr"),
+    resolved <- .get_stan_engine("cmdstanr"),
     "Falling back"
   )
   expect_identical(resolved, "rstan")

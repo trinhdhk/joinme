@@ -47,12 +47,96 @@ test_that("ranef/vcov.JoiNMeDynPred require id-dependent marker covariance", {
   expect_error(vcov(pred_bad), "depends on id")
 })
 
+test_that("vcov.JoiNMeFit covariance table uses compact summary columns", {
+  testthat::local_mocked_bindings(
+    .get_draws_matrix = function(fit, variables = NULL, draws = NULL, seed = 1) {
+      # dim = 1 block: tau_u[1] and Lcorr_u[1,1]
+      matrix(
+        c(1.0, 1.0,
+          1.1, 1.0,
+          0.9, 1.0,
+          1.2, 1.0),
+        nrow = 4L,
+        byrow = TRUE,
+        dimnames = list(
+          NULL,
+          c("tau_u[1]", "Lcorr_u[1,1]")
+        )
+      )
+    },
+    .package = "joinme"
+  )
+
+  fit <- joinme::JoiNMeFit$new(
+    fit = NULL,
+    stan_data = list(R_id = 1L, R_mk = 0L, indep_id_re = 0L),
+    formulaLong = y ~ 1,
+    formulaEvent = survival::Surv(time, event) ~ 1,
+    formulaVCov = NULL,
+    config = list(draws_default = 4L, family_long = "gaussian"),
+    call = NULL,
+    tmax = 1,
+    dataLong = data.frame(id = 1, time = 0, marker = "m", y = 0),
+    dataEvent = data.frame(id = 1, time = 1, event = 0)
+  )
+
+  out <- vcov(fit, what = "id", draws = 4)
+
+  expect_true(all(c(
+    "block", "row", "col", "Estimate", "Est.Error",
+    "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"
+  ) %in% names(out)))
+  expect_false(any(c("Mean", "Median", "SD") %in% names(out)))
+})
+
+test_that("diagnosis.JoiNMeFit omits the unused subsection column", {
+  tables <- list(
+    diagnostics = data.frame(metric = c("draws", "n_terms_total"), value = c(10, 1)),
+    fixef = data.frame(
+      term = "(Intercept)",
+      Estimate = 0.1,
+      Est.Error = 0.01,
+      Q2.5 = 0.0,
+      Q97.5 = 0.2,
+      Rhat = 1.00,
+      ess_bulk = 50,
+      ess_tail = 60,
+      stringsAsFactors = FALSE
+    ),
+    corr = list(
+      id = data.frame(
+        block = "id",
+        row = 1L,
+        col = 1L,
+        Estimate = 1,
+        Est.Error = 0.1,
+        Q2.5 = 0.8,
+        Q97.5 = 1.2,
+        Rhat = 1.00,
+        ess_bulk = 20,
+        ess_tail = 20,
+        stringsAsFactors = FALSE
+      )
+    )
+  )
+  obj <- joinme::SummaryJoiNMeFit$new(
+    tables = tables,
+    diagnostics = list(draws = 10),
+    metadata = list(family = "gaussian", tmax = 1)
+  )
+
+  diag_tbl <- .diagnosis_parameter_table_from_tables(obj$tables)
+  expect_false("subsection" %in% names(diag_tbl))
+  expect_true("section" %in% names(diag_tbl))
+  expect_true(all(diag_tbl$section %in% c("fixef", "corr")))
+})
+
 test_that("marker_corr_depends_on_id follows fitted Q_idm", {
   fit_like_with_qidm <- list(stan_data = list(Q_idm = 2L))
   fit_like_without_qidm <- list(stan_data = list(Q_idm = 0L))
 
-  expect_true(joinme:::.marker_corr_depends_on_id(fit_like_with_qidm))
-  expect_false(joinme:::.marker_corr_depends_on_id(fit_like_without_qidm))
+  expect_true(.marker_corr_depends_on_id(fit_like_with_qidm))
+  expect_false(.marker_corr_depends_on_id(fit_like_without_qidm))
 })
 
 test_that("vcov.JoiNMeDynPred works when Q_idm > 0 without formulaVCov terms", {
@@ -71,11 +155,10 @@ test_that("vcov.JoiNMeDynPred works when Q_idm > 0 without formulaVCov terms", {
   sim <- simulate_joinme(
     n_id = 4,
     families = rep("gaussian", 2),
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 2, length.out = 5),
     seed = 917,
     assoc = c("cv_total"),
-    assoc_coefs = c(cv_total = 0.2)
+    truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.2)))
   )
 
   formulaLong <- y ~ 1 + time + x1 +
@@ -145,7 +228,6 @@ test_that("ranef/vcov.JoiNMeFit include formulaDist random-effects blocks", {
   sim <- simulate_joinme(
     n_id = 4,
     families = c("student_t", "student_t"),
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 2, length.out = 4),
     seed = 902
   )
@@ -310,7 +392,7 @@ test_that("concordance.JoiNMeFit supports split marker-weight fits", {
     .concordance_survival_curves = function(
         object, newdataLong, newdataEvent, time_start, cause,
         n_samples, seed, ...) {
-      expect_identical(object$stan_data$shared_marker_weights, 0L)
+      expect_identical(object$stan_data$marker_weight_sets_shared, 0L)
       list(
         outcomes = data.frame(
           residual_time = c(0.5, 2),
@@ -328,12 +410,15 @@ test_that("concordance.JoiNMeFit supports split marker-weight fits", {
 
   fit <- joinme::JoiNMeFit$new(
     fit = NULL,
-    stan_data = list(shared_marker_weights = 0L),
+    stan_data = list(marker_weight_sets_shared = 0L),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
     formulaVCov = NULL,
     config = list(transforms = list(), transforms_spec = list()),
-    call = quote(joinme::joinme(formulaLong = y ~ 1 + time, shared_marker_weights = FALSE)),
+    call = quote(joinme::joinme(
+      formulaLong = y ~ 1 + time,
+      priors = jm_prior(marker_weights = list(shared = FALSE))
+    )),
     tmax = 2,
     dataLong = data.frame(id = c(1, 1, 2, 2), time = c(0, 1, 0, 1), marker = c("m1", "m2", "m1", "m2"), y = c(1, 2, 1.5, 2.5)),
     dataEvent = data.frame(id = c(1, 2), time = c(1.5, 3), event = c(1L, 0L))

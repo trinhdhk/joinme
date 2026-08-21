@@ -1,5 +1,8 @@
 test_that("standata supports Surv(start, stop, event) interval rows", {
   sim <- simulate_joinme(
+    formulaLong = y ~ 1 + time + x1 +
+      (1 + time | id) +
+      (0 + x1 + (1 + time | id) | marker),
     n_id = 8,
     seed = 123,
     formulaEvent = survival::Surv(time_start, time_stop, event) ~ x1 + x2,
@@ -33,6 +36,9 @@ test_that("standata supports Surv(start, stop, event) interval rows", {
 
 test_that("time_varyring supports exact steps breakpoints", {
   sim <- simulate_joinme(
+    formulaLong = y ~ 1 + time + x +
+      (1 + time | id) +
+      (0 + x + (1 + time | id) | marker),
     n_id = 8,
     seed = 909,
     formulaEvent = survival::Surv(time_start, time_stop, event) ~ x + x2,
@@ -98,11 +104,19 @@ test_that("standata supports Surv left and interval2 censoring", {
 
   expect_true(all(sd_left$event_censor_type %in% c(0L, 2L)))
 
+  # Give the first four subjects, respectively, right-censored, exact,
+  # left-censored and proper interval-censored observations.  Remaining rows
+  # are right censored.  These four forms are the definitions used by
+  # survival::Surv(..., type = "interval2").
   dataEvent_int2 <- dataEvent_subject
-  dataEvent_int2$time1 <- ifelse(dataEvent_int2$event == 1L, pmax(dataEvent_int2$time - 0.2, 0), dataEvent_int2$time)
-  dataEvent_int2$time2 <- ifelse(dataEvent_int2$event == 1L, dataEvent_int2$time, NA_real_)
-  dataEvent_int2$time1[1] <- NA_real_
-  dataEvent_int2$time2[1] <- max(0.2, min(dataEvent_int2$time[1], 1.0))
+  dataEvent_int2$time1 <- pmax(dataEvent_int2$time, 0.5)
+  dataEvent_int2$time2 <- NA_real_
+  dataEvent_int2$time1[2] <- 1.25
+  dataEvent_int2$time2[2] <- 1.25
+  dataEvent_int2$time1[3] <- NA_real_
+  dataEvent_int2$time2[3] <- 1.5
+  dataEvent_int2$time1[4] <- 1
+  dataEvent_int2$time2[4] <- 2
 
   sd_int2 <- joinme_standata(
     formulaLong = y ~ 1 + time + x1 +
@@ -114,10 +128,54 @@ test_that("standata supports Surv left and interval2 censoring", {
     assoc = c("cv_total")
   )
 
-  expect_true(all(sd_int2$event_censor_type %in% c(0L, 1L, 2L, 3L)))
+  expect_true(all(c(0L, 1L, 2L, 3L) %in% sd_int2$event_censor_type))
+
+  # A proper interval (L, R] must include the known survival from zero to L.
+  # Stan therefore receives a right-censored row [0, L] immediately before
+  # the failure-within-interval row [L, R].  Without the first row the fitted
+  # probability would be conditional on survival to L and would not be the
+  # interval2 likelihood.
+  interval_subject <- match(dataEvent_int2$id[4], sort(unique(dataEvent_int2$id)))
+  interval_rows <- which(sd_int2$event_id == interval_subject)
+  expect_length(interval_rows, 2L)
+  expect_identical(sd_int2$event_censor_type[interval_rows], c(0L, 3L))
+  expect_equal(sd_int2$S_entry[interval_rows], c(0, 1 / sd_int2$tmax))
+  expect_equal(sd_int2$S_event[interval_rows], c(1 / sd_int2$tmax, 2 / sd_int2$tmax))
+  expect_equal(sd_int2$N_event, nrow(dataEvent_int2) + 1L)
+
+  left_subject <- match(dataEvent_int2$id[3], sort(unique(dataEvent_int2$id)))
+  left_row <- which(sd_int2$event_id == left_subject)
+  expect_length(left_row, 1L)
+  expect_identical(sd_int2$event_censor_type[left_row], 2L)
+  expect_equal(sd_int2$S_entry[left_row], 0)
+  expect_equal(sd_int2$S_event[left_row], 1.5 / sd_int2$tmax)
 })
 
-test_that("legacy Surv interval type is rejected", {
+test_that("Stan uses the unconditional interval2 likelihood in fitting and reporting", {
+  stan_root <- testthat::test_path("..", "..", "inst", "stan")
+  partial_source <- paste(
+    readLines(
+      file.path(stan_root, "include", "etc", "functions", "joinme_fit_partial.stanfunctions"),
+      warn = FALSE
+    ),
+    collapse = "\n"
+  )
+  generated_source <- paste(
+    readLines(
+      file.path(stan_root, "include", "submodels", "survival", "generated_quantities", "fit_calculations.stan"),
+      warn = FALSE
+    ),
+    collapse = "\n"
+  )
+
+  expect_match(partial_source, "log_failure_within_interval\\(cumulative_hazard_interval\\)")
+  expect_match(partial_source, "-H\\(L\\).+log", perl = TRUE)
+  expect_match(generated_source, "event_start_idx\\[i\\].+event_end_idx\\[i\\]", perl = TRUE)
+  expect_match(generated_source, "log_failure_within_interval\\(cumulative_hazard_interval\\)")
+  expect_match(generated_source, "vcov_S_assoc")
+})
+
+test_that("former Surv interval type is rejected", {
   sim <- simulate_joinme(n_id = 6, seed = 777)
 
   de <- sim$dataEvent
@@ -179,7 +237,7 @@ test_that("left truncation and time-split run end-to-end", {
   expect_s3_class(fit, "JoiNMeFit")
   expect_true(inherits(summary(fit), "SummaryJoinMeFit"))
 
-  dr <- draws(fit)
+  dr <- posterior_draws(fit)
   expect_true(inherits(dr, c("draws_array", "draws_matrix", "draws_df")))
 
   ex <- extract(fit, what = "assoc")

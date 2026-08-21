@@ -3,10 +3,9 @@ test_that("simulate_joinme keeps event covariates and uses random beta_event def
   sim <- simulate_joinme(
     n_id = 30,
     families = rep("gaussian", 3),
-    n_obs_per_marker_per_id = 4,
     times_obs = seq(0, 4, length.out = 6),
     assoc = c("cv_mean"),
-    assoc_coefs = c(cv_mean = 0.25),
+    truth = jm_truth(assoc_coef = list(slope = c(cv_mean = 0.25))),
     seed = 5001
   )
 
@@ -20,11 +19,11 @@ test_that("simulate_joinme does not freeze event covariates when beta_event is p
   sim <- simulate_joinme(
     n_id = 30,
     families = rep("gaussian", 3),
-    n_obs_per_marker_per_id = 4,
     times_obs = seq(0, 4, length.out = 6),
     assoc = c("cv_mean"),
-    assoc_coefs = c(cv_mean = 0.25),
-    beta_event = c("(Intercept)" = 0.1, "x1" = 0, "x2" = 0),
+    truth = jm_truth(assoc_coef = list(slope = c(cv_mean = 0.25)),
+      survival = list(slope = c(x1 = 0, x2 = 0))
+    ),
     seed = 5002
   )
 
@@ -37,10 +36,9 @@ test_that("simulate_joinme keeps event covariates for non-mean-only assoc", {
   sim <- simulate_joinme(
     n_id = 30,
     families = rep("gaussian", 3),
-    n_obs_per_marker_per_id = 4,
     times_obs = seq(0, 4, length.out = 6),
     assoc = c("cv_total"),
-    assoc_coefs = c(cv_total = 0.25),
+    truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.25))),
     seed = 5003
   )
 
@@ -57,9 +55,8 @@ test_that("simulate_joinme keeps spline-expanded event term labels in beta_event
     families = rep("gaussian", 2),
     time_cens = 1,
     times_obs = seq(0, 1, length.out = 3),
-    n_obs_per_marker_per_id = 3,
     assoc = c("cv_total"),
-    assoc_coefs = c(cv_total = 0),
+    truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0))),
     seed = 5004,
     use_mirai = FALSE
   )

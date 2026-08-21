@@ -202,7 +202,7 @@ test_that("assoc uses different marker-weight structures for different weighted 
       assoc_vcov = 0L,
       D = 2L,
       marker_levels = c("marker_a", "marker_b"),
-      shared_marker_weights = 0L,
+      marker_weight_sets_shared = 0L,
       Q_idm = 0L,
       R_id = 0L,
       R_mk = 0L

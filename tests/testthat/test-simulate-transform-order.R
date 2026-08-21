@@ -3,13 +3,12 @@ test_that("simulate_joinme applies cv_total transform before marker-weight avera
   sim <- simulate_joinme(
     n_id = 3,
     families = c("gaussian", "gaussian"),
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 2, length.out = 4),
     seed = 1201,
     assoc = c("cv_total", "cs_total"),
-    assoc_coefs = c(cv_total = 0.0, cs_total = 0.0),
-    marker_weights = c(2, 1),
-    fixed_marker_weights = TRUE,
+    truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0, cs_total = 0)),
+      marker_weights = list(offset = c(2, 1), family = "constant")
+    ),
     transforms = list(
       cv_total = list(type = "functional", expr = ~ x^2)
     ),
@@ -37,13 +36,12 @@ test_that("simulate_joinme applies cv_marker transform before marker-weight aver
   sim <- simulate_joinme(
     n_id = 3,
     families = c("gaussian", "gaussian", "gaussian"),
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 2, length.out = 4),
     seed = 1202,
     assoc = c("cv_marker"),
-    assoc_coefs = c(cv_marker = 0.0),
-    marker_weights = c(1.5, 0.5, 2.0),
-    fixed_marker_weights = TRUE,
+    truth = jm_truth(assoc_coef = list(slope = c(cv_marker = 0)),
+      marker_weights = list(offset = c(1.5, 0.5, 2.0), family = "constant")
+    ),
     transforms = list(
       cv_marker = list(type = "functional", expr = ~ softplus(x))
     )
@@ -67,13 +65,12 @@ test_that("simulate_joinme applies cs_total transform before marker-weight avera
   sim <- simulate_joinme(
     n_id = 3,
     families = c("gaussian", "gaussian"),
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 2, length.out = 4),
     seed = 1203,
     assoc = c("cs_total"),
-    assoc_coefs = c(cs_total = 0.0),
-    marker_weights = c(2, -1),
-    fixed_marker_weights = TRUE,
+    truth = jm_truth(assoc_coef = list(slope = c(cs_total = 0)),
+      marker_weights = list(offset = c(2, -1), family = "constant")
+    ),
     transforms = list(
       cs_total = list(type = "functional", expr = ~ x^2)
     ),
@@ -100,13 +97,12 @@ test_that("simulate_joinme applies cs_marker transform before marker-weight aver
   sim <- simulate_joinme(
     n_id = 3,
     families = c("gaussian", "gaussian", "gaussian"),
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 2, length.out = 4),
     seed = 1204,
     assoc = c("cs_marker"),
-    assoc_coefs = c(cs_marker = 0.0),
-    marker_weights = c(1.5, 0.5, 2.0),
-    fixed_marker_weights = TRUE,
+    truth = jm_truth(assoc_coef = list(slope = c(cs_marker = 0)),
+      marker_weights = list(offset = c(1.5, 0.5, 2.0), family = "constant")
+    ),
     transforms = list(
       cs_marker = list(type = "functional", expr = ~ softplus(x))
     ),
@@ -133,11 +129,10 @@ test_that("simulate_joinme rejects expit spline knots outside [0, 1]", {
     simulate_joinme(
       n_id = 3,
       families = c("gaussian", "gaussian"),
-      n_obs_per_marker_per_id = 3,
       times_obs = seq(0, 2, length.out = 4),
       seed = 1205,
       assoc = c("cv_total"),
-      assoc_coefs = c(cv_total = 0),
+      truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0))),
       transforms = list(
         cv_total = list(
           type = "ispline_expit",

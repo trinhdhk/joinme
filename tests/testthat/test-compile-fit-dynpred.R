@@ -17,12 +17,11 @@ test_that("fit and dynpred compile with hardcoded GK nodes", {
   sim <- simulate_joinme(
     n_id = 3,
     families = rep("gaussian", 2),
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 2, length.out = 4),
     quadrature_nodes = 7,
     seed = 2026,
     assoc = c("cv_total"),
-    assoc_coefs = c(cv_total = 0.2)
+    truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.2))),
   )
 
   # Build longitudinal and survival formulas for a minimal joint model.

@@ -1,4 +1,4 @@
-test_that("draws.JoiNMeFit returns cached renamed posterior draws", {
+test_that("posterior_draws.JoiNMeFit returns cached renamed posterior draws", {
   raw_draws <- posterior::as_draws_array(array(
     c(
       0.2, 0.4, 0.6, -10,
@@ -26,7 +26,7 @@ test_that("draws.JoiNMeFit returns cached renamed posterior draws", {
       assoc_cs_marker = 0L,
       assoc_corr = 0L,
       assoc_vcov = 0L,
-      shared_marker_weights = 1L
+      marker_weight_sets_shared = 1L
     ),
     formulaLong = y ~ 1 + time,
     formulaEvent = survival::Surv(time, event) ~ 1,
@@ -53,16 +53,33 @@ test_that("draws.JoiNMeFit returns cached renamed posterior draws", {
     .package = "joinme"
   )
 
-  d1 <- draws(fit_obj, format = "draws_matrix")
-  d2 <- draws(fit_obj, variables = "cv_", regex = TRUE, format = "draws_matrix")
+  d1 <- posterior_draws(fit_obj, format = "draws_matrix")
+  d2 <- posterior_draws(fit_obj, variables = "cv_", regex = TRUE, format = "draws_matrix")
+  interval <- posterior_interval(
+    fit_obj,
+    prob = 0.8,
+    variables = "cv_",
+    regex = TRUE
+  )
 
   expect_equal(counter$n, 1L)
   expect_identical(colnames(d1), c("(Intercept)", "time", "cv_total", "lp__"))
   expect_identical(colnames(d2), "cv_total")
+  expect_identical(dim(interval), c(1L, 2L))
+  expect_identical(rownames(interval), "cv_total")
+  expect_identical(colnames(interval), c("10%", "90%"))
 
   arr <- as.array(fit_obj)
   expect_equal(dim(arr), c(2, 1, 4))
   expect_identical(dimnames(arr)[[3]], c("(Intercept)", "time", "cv_total", "lp__"))
+})
+
+test_that("posterior_draws is the sole public draw-extraction generic", {
+  namespace_exports <- getNamespaceExports("joinme")
+
+  expect_true("posterior_draws" %in% namespace_exports)
+  expect_false("draws" %in% namespace_exports)
+  expect_true(is.function(posterior_draws))
 })
 
 test_that("summary and draws recover friendly terms from fits with stripped metadata", {
@@ -103,7 +120,7 @@ test_that("summary and draws recover friendly terms from fits with stripped meta
       assoc_cs_marker = 0L,
       assoc_corr = 0L,
       assoc_vcov = 0L,
-      shared_marker_weights = 1L,
+      marker_weight_sets_shared = 1L,
       family_names = "gaussian",
       tmax = 3
     ),
@@ -147,7 +164,7 @@ test_that("summary and draws recover friendly terms from fits with stripped meta
     .package = "joinme"
   )
 
-  renamed <- draws(fit_obj, format = "draws_matrix")
+  renamed <- posterior_draws(fit_obj, format = "draws_matrix")
   expect_identical(colnames(renamed), c("(Intercept)", "time", "x1"))
 
   fitted_summary <- summary(fit_obj, include_corr = FALSE)
@@ -165,7 +182,7 @@ test_that("summary and draws recover friendly terms from fits with stripped meta
   )))))
 })
 
-test_that("draws.JoiNMeDynPred flattens stored prediction draws", {
+test_that("posterior_draws.JoiNMeDynPred flattens stored prediction draws", {
   toy_draw <- matrix(rnorm(12), nrow = 3, ncol = 4)
   pred_obj <- JoiNMeDynPred$new(
     predictions = list(),
@@ -190,11 +207,21 @@ test_that("draws.JoiNMeDynPred flattens stored prediction draws", {
     n_samples = 3
   )
 
-  out <- draws(pred_obj, variables = c("survival", "random_effects_id"), regex = TRUE, format = "draws_matrix")
+  out <- posterior_draws(pred_obj, variables = c("survival", "random_effects_id"), regex = TRUE, format = "draws_matrix")
   expect_true(is.matrix(out))
   expect_equal(nrow(out), 3)
   expect_true(any(grepl("survival", colnames(out), fixed = TRUE)))
   expect_true(any(grepl("random_effects_id", colnames(out), fixed = TRUE)))
+
+  prediction_interval <- posterior_interval(
+    pred_obj,
+    prob = 0.8,
+    variables = "survival",
+    regex = TRUE
+  )
+  expect_true(is.matrix(prediction_interval))
+  expect_true(all(grepl("survival", rownames(prediction_interval), fixed = TRUE)))
+  expect_identical(colnames(prediction_interval), c("10%", "90%"))
 
   arr <- as.array(pred_obj)
   expect_equal(dim(arr)[1:2], c(3, 1))

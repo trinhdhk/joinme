@@ -44,11 +44,11 @@ test_that("parse_transform_expr treats unary minus as 0-x", {
   )
 })
 
-test_that("legacy unary bytecode is normalised with implicit PUSH_X", {
-  legacy_softplus <- .normalize_bytecode_program(bytecode = 24L, const_data = numeric(0))
+test_that("earlier unary bytecode is normalised with implicit PUSH_X", {
+  earlier_softplus <- .normalize_bytecode_program(bytecode = 24L, const_data = numeric(0))
 
-  expect_equal(legacy_softplus$bytecode, c(0L, 24L))
-  expect_equal(eval_bytecode_scalar(2.5, legacy_softplus$bytecode, legacy_softplus$const_data), softplus(2.5))
+  expect_equal(earlier_softplus$bytecode, c(0L, 24L))
+  expect_equal(eval_bytecode_scalar(2.5, earlier_softplus$bytecode, earlier_softplus$const_data), softplus(2.5))
   expect_equal(
     eval_bytecode_vector(c(-2, 0, 3), 24L, numeric(0)),
     softplus(c(-2, 0, 3))
@@ -77,11 +77,11 @@ test_that("bytecode evaluator applies per-node affine shifts", {
 
 test_that("the portable bytecode registry is complete and stable", {
   expect_identical(
-    unname(joinme:::.bytecode_opcodes()),
+    unname(.bytecode_opcodes()),
     0:27
   )
   expect_identical(
-    names(joinme:::.bytecode_opcodes())[c(1L, 2L, 27L, 28L)],
+    names(.bytecode_opcodes())[c(1L, 2L, 27L, 28L)],
     c("PUSH_X", "PUSH_CONST", "PHI", "INV_PHI")
   )
 })
@@ -128,7 +128,7 @@ test_that("Stan entry points use the neutral interpreter module", {
   )
 
   expect_true(all(grepl(
-    "helper/bytecode/interpreter.stanfunctions",
+    "include/etc/bytecode/interpreter.stanfunctions",
     sources,
     fixed = TRUE
   )))

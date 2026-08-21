@@ -11,10 +11,9 @@ test_that("JoiNMe fits with ispline assoc", {
   sim <- joinme::simulate_joinme(
     n_id = 20,
     families = c("gaussian", "gaussian"),
-    n_obs_per_marker_per_id = 4,
     times_obs = seq(0, 5, length.out = 5),
     assoc = c("cv_total"),
-    assoc_coefs = c(cv_total = 0.3),
+    truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.3))),
     transforms = list(cv_total = list(type = "ispline_penalised", knots = c(0, 1), degree = 3)),
     seed = 123
   )

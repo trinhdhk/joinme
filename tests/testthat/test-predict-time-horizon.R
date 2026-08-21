@@ -1,5 +1,5 @@
 test_that("resolve_time_grid uses default horizon from tmax", {
-  grid <- joinme:::.get_time_grid(
+  grid <- .get_time_grid(
     times = NULL,
     id = "1",
     t_cond = 2,
@@ -17,7 +17,7 @@ test_that("resolve_time_grid uses default horizon from tmax", {
 
 
 test_that("resolve_time_grid honors explicit shorter time_horizon", {
-  grid <- joinme:::.get_time_grid(
+  grid <- .get_time_grid(
     times = NULL,
     id = "1",
     t_cond = 2,
@@ -36,7 +36,7 @@ test_that("resolve_time_grid honors explicit shorter time_horizon", {
 
 test_that("resolve_time_grid truncates horizon to training support", {
   expect_warning(
-    grid <- joinme:::.get_time_grid(
+    grid <- .get_time_grid(
       times = NULL,
       id = "1",
       t_cond = 2,
@@ -56,7 +56,7 @@ test_that("resolve_time_grid truncates horizon to training support", {
 
 test_that("resolve_time_grid filters explicit times by condition and horizon", {
   expect_warning(
-    grid <- joinme:::.get_time_grid(
+    grid <- .get_time_grid(
       times = c(1, 2, 4, 6, 8),
       id = "1",
       t_cond = 2,

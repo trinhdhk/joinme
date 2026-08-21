@@ -72,7 +72,7 @@ test_that("draw-dependent containers are re-indexed to prediction draw count", {
 })
 
 
-test_that("marker-id draw reconstruction uses scaled-time rows only in w_idm", {
+test_that("marker-id draw reconstruction retains the original-time covariance basis", {
   draws_matrix <- matrix(
     c(log(2), 3, log(4), 0, 0, 0, 5, 7),
     nrow = 1,
@@ -103,12 +103,11 @@ test_that("marker-id draw reconstruction uses scaled-time rows only in w_idm", {
     n_random_marker = 0L,
     flag_indep_marker_re = 1L,
     flag_allow_marker_crosscorr = 0L,
-    marker_id_row_scale = c(1, 10),
     vcov_diag_link = 1L,
     zidm_cols = c("(Intercept)", "time")
   )
 
-  out <- joinme:::.reconstruct_subject_marker_id_draws(draws_matrix, standata_subject, n_draws_target = 1)
+  out <- .reconstruct_subject_marker_id_draws(draws_matrix, standata_subject, n_draws_target = 1)
 
   k21 <- tanh(3)
   l_i <- matrix(
@@ -119,7 +118,7 @@ test_that("marker-id draw reconstruction uses scaled-time rows only in w_idm", {
     nrow = 2,
     byrow = TRUE
   )
-  l_i_eff <- sweep(l_i, 1, c(1, 10), `*`)
+  l_i_eff <- l_i
   expected_w <- as.numeric(l_i_eff %*% c(5, 7))
 
   expect_equal(unname(out$matrix[1, ]), expected_w, tolerance = 1e-8)

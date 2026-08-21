@@ -26,8 +26,8 @@ test_that("fitted pwlin uses knots and ordered simplex metadata", {
   expect_equal(decreasing$coeff_cv, seq(0, -1, length.out = 4))
 })
 
-test_that("legacy fitted pwlin y values no longer fix the association", {
-  legacy <- build_standata_transforms(list(
+test_that("earlier fitted pwlin y values no longer fix the association", {
+  earlier <- build_standata_transforms(list(
     corr = list(
       type = "pwlin",
       x = c(-2, -1, 0, 1, 2),
@@ -35,15 +35,15 @@ test_that("legacy fitted pwlin y values no longer fix the association", {
     )
   ), n_corr_components = 2L)
 
-  expect_identical(legacy$estimate_spline_corr, 1L)
-  expect_identical(legacy$n_free_spline_corr, 4L)
-  expect_equal(legacy$coeff_corr[1, ], seq(0, 1, length.out = 5))
-  expect_equal(legacy$coeff_corr[2, ], seq(0, 1, length.out = 5))
-  expect_false(isTRUE(all.equal(legacy$coeff_corr[1, ], c(0.2, 0.5, 1, 0.5, 0.2))))
+  expect_identical(earlier$estimate_spline_corr, 1L)
+  expect_identical(earlier$n_free_spline_corr, 4L)
+  expect_equal(earlier$coeff_corr[1, ], seq(0, 1, length.out = 5))
+  expect_equal(earlier$coeff_corr[2, ], seq(0, 1, length.out = 5))
+  expect_false(isTRUE(all.equal(earlier$coeff_corr[1, ], c(0.2, 0.5, 1, 0.5, 0.2))))
 })
 
-test_that("legacy fitted pwlin infers decreasing direction from endpoints", {
-  legacy <- build_standata_transforms(list(
+test_that("earlier fitted pwlin infers decreasing direction from endpoints", {
+  earlier <- build_standata_transforms(list(
     vcov = list(
       type = "pwlin",
       x = c(-1, 0, 1),
@@ -51,11 +51,11 @@ test_that("legacy fitted pwlin infers decreasing direction from endpoints", {
     )
   ), n_vcov_components = 1L)
 
-  expect_identical(legacy$tf_mode_vcov, 7)
-  expect_equal(as.numeric(legacy$coeff_vcov[1, ]), c(0, -0.5, -1))
+  expect_identical(earlier$tf_mode_vcov, 7)
+  expect_equal(as.numeric(earlier$coeff_vcov[1, ]), c(0, -0.5, -1))
 })
 
-test_that("fitted pwlin validates knots, direction, and legacy lengths", {
+test_that("fitted pwlin validates knots, direction, and earlier field lengths", {
   expect_error(
     build_standata_transforms(list(cv_total = list(type = "pwlin", direction = "increasing"))),
     "require.*knots"
@@ -75,7 +75,7 @@ test_that("fitted pwlin validates knots, direction, and legacy lengths", {
 })
 
 test_that("piecewise-linear interpolation basis is constant-tailed and efficient", {
-  basis <- joinme:::.pwlin_interpolation_basis(
+  basis <- .pwlin_interpolation_basis(
     x_grid = c(-2, -1, -0.5, 0, 1, 2),
     knots = c(-1, 0, 1)
   )
@@ -102,7 +102,7 @@ test_that("piecewise-linear plotting uses posterior ordinates", {
     .package = "joinme"
   )
 
-  out <- joinme:::.pwlin_transform_matrix(
+  out <- .pwlin_transform_matrix(
     object,
     term_key = "cv_total",
     x_grid = c(-2, -0.5, 0.5, 2),
@@ -113,12 +113,13 @@ test_that("piecewise-linear plotting uses posterior ordinates", {
 })
 
 test_that("fit and dynamic Stan paths recognise ordered pwlin mode", {
-  stan_helper <- function(...) testthat::test_path("..", "..", "inst", "stan", "helper", ...)
-  fit_data <- paste(readLines(stan_helper("data", "fit_data.stan"), warn = FALSE), collapse = "\n")
-  dyn_data <- paste(readLines(stan_helper("data", "dynpred_data.stan"), warn = FALSE), collapse = "\n")
+  stan_helper <- function(...) testthat::test_path("..", "..", "inst", "stan", "include", "etc", ...)
+  stan_submodel <- function(...) testthat::test_path("..", "..", "inst", "stan", "include", "submodels", ...)
+  fit_data <- paste(readLines(stan_submodel("functional", "data", "fit.stan"), warn = FALSE), collapse = "\n")
+  dyn_data <- paste(readLines(stan_submodel("functional", "data", "dynamic_prediction.stan"), warn = FALSE), collapse = "\n")
   transform_code <- paste(readLines(stan_helper("functions", "composite_transform.stanfunctions"), warn = FALSE), collapse = "\n")
-  parameter_code <- paste(readLines(stan_helper("parameters", "joinme_fit_common.stan"), warn = FALSE), collapse = "\n")
-  transformed_code <- paste(readLines(stan_helper("transformed_parameters", "fit_scaling_and_effects.stan"), warn = FALSE), collapse = "\n")
+  parameter_code <- paste(readLines(stan_submodel("functional", "parameters", "fit.stan"), warn = FALSE), collapse = "\n")
+  transformed_code <- paste(readLines(stan_submodel("functional", "transformed_parameters", "fit.stan"), warn = FALSE), collapse = "\n")
   prediction_code <- paste(readLines(testthat::test_path("..", "..", "R", "predict.R"), warn = FALSE), collapse = "\n")
 
   expect_match(fit_data, "upper=7")
@@ -138,10 +139,9 @@ test_that("Stan estimates ordered pwlin ordinates in a fitted joint model", {
   sim <- simulate_joinme(
     n_id = 4,
     families = rep("gaussian", 2),
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 3, length.out = 6),
     assoc = "cv_total",
-    assoc_coefs = c(cv_total = 0.3),
+    truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.3))),
     seed = 1729
   )
   fit <- joinme(
@@ -170,7 +170,7 @@ test_that("Stan estimates ordered pwlin ordinates in a fitted joint model", {
   )
 
   ordinate_names <- paste0("coeff_cv_eff[", 1:4, "]")
-  ordinate_draws <- joinme:::.get_draws_matrix(fit$fit, variables = ordinate_names)
+  ordinate_draws <- .get_draws_matrix(fit$fit, variables = ordinate_names)
   expect_s3_class(fit, "JoiNMeFit")
   expect_true(all(apply(ordinate_draws, 1L, function(x) all(diff(x) >= 0))))
   expect_equal(as.numeric(ordinate_draws[, 1L]), rep(0, nrow(ordinate_draws)))
@@ -228,7 +228,7 @@ test_that("piecewise summary reports posterior relative log-hazard ordinates", {
     .package = "joinme"
   )
 
-  out <- joinme:::.summarise_pwlin_ordinates(
+  out <- .summarise_pwlin_ordinates(
     object,
     transform_specs = list(cv_total = list(
       type = "pwlin",

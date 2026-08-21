@@ -3,19 +3,17 @@ test_that("simulate_joinme supports id-specific id:marker covariance via formula
   sim <- simulate_joinme(
     n_id = 12,
     families = c("gaussian", "gaussian", "gaussian"),
-    n_obs_per_marker_per_id = 4,
     times_obs = seq(0, 2, length.out = 5),
     seed = 4401,
     formulaVCov = ~ x1 + x2,
-    re_params = list(
-      id = list(sd = c(0.5, 0.2)),
-      marker = list(sd = 0.3),
-      id_marker_cov = list(
-        latent = list(sd = c(0.5, 0.25)),
-        alpha = c(-0.3, 0.15, -0.1),
-        beta = matrix(0.1, nrow = 3, ncol = 2),
-        lambda = 0.6,
-        diag_link = "softplus"
+    truth = jm_truth(
+      vcov = list(
+        sd = list(intercept = c(-0.3, -0.1), slope = rep(0.1, 4), latent = 0.6),
+        corr = list(intercept = 0.15, slope = c(0.1, 0.1), latent = 0.6)
+      ),
+      re_params = list(
+        id = list(sd = c(0.5, 0.2)),
+        marker = list(sd = 0.3)
       )
     )
   )
@@ -35,18 +33,13 @@ test_that("simulate_joinme covariance regression uses component-specific subject
   sim <- simulate_joinme(
     n_id = 40,
     families = c("gaussian", "gaussian", "gaussian"),
-    n_obs_per_marker_per_id = 4,
     times_obs = seq(0, 2, length.out = 5),
     seed = 4403,
     formulaVCov = ~ 1,
-    re_params = list(
-      id_marker_cov = list(
-        latent = list(sd = c(0.5, 0.25)),
-        alpha = c(-0.3, 0.15, -0.1),
-        lambda = c(0.8, -0.4, 0.6),
-        diag_link = "softplus"
-      )
-    )
+    truth = jm_truth(vcov = list(
+      sd = list(intercept = c(-0.3, -0.1), latent = c(0.8, 0.6)),
+      corr = list(intercept = 0.15, latent = -0.4)
+    ))
   )
 
   Li <- sim$truth$L_i
@@ -71,17 +64,13 @@ test_that("simulate_joinme canonicalizes covariance-regression loadings to lambd
   sim <- simulate_joinme(
     n_id = 30,
     families = c("gaussian", "gaussian", "gaussian"),
-    n_obs_per_marker_per_id = 4,
     times_obs = seq(0, 2, length.out = 5),
     seed = 4410,
     formulaVCov = ~ 1,
-    re_params = list(
-      id_marker_cov = list(
-        alpha = c(-0.3, 0.15, -0.1),
-        lambda = input_lambda,
-        diag_link = "softplus"
-      )
-    )
+    truth = jm_truth(vcov = list(
+      sd = list(intercept = c(-0.3, -0.1), latent = input_lambda[c(1, 3)]),
+      corr = list(intercept = 0.15, latent = input_lambda[2])
+    ))
   )
 
   eff <- sim$truth$id_marker_cov_effective
@@ -117,7 +106,6 @@ test_that("simulate_joinme default covariance regression uses component-specific
   sim <- simulate_joinme(
     n_id = 12,
     families = c("gaussian", "gaussian", "gaussian"),
-    n_obs_per_marker_per_id = 4,
     times_obs = seq(0, 2, length.out = 5),
     seed = 4404,
     assoc = "vcov"
@@ -142,15 +130,13 @@ test_that("covariance-regression lambda is scalar or coordinate vector, not a ma
       families = c("gaussian", "gaussian"),
       times_obs = c(0, 0.2),
       time_cens = 0.3,
-      re_params = list(
-        id_marker_cov = list(
-          lambda = matrix(c(0.5, 0, 0, 0.5), nrow = 2)
-        )
-      ),
+      truth = jm_truth(vcov = list(
+        sd = list(latent = matrix(c(0.5, 0, 0, 0.5), nrow = 2))
+      )),
       use_mirai = FALSE,
       seed = 4411
     ),
-    "scalar or numeric vector"
+    "must be supplied"
   )
 })
 
@@ -161,7 +147,6 @@ test_that("simulate_joinme default covariance regression initialises without len
     formulaEvent = survival::Surv(time, event) ~ 1,
     families = c("gaussian", "gaussian", "gaussian"),
     n_id = 8,
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 2, length.out = 4),
     assoc = "vcov",
     seed = 4405
@@ -175,7 +160,6 @@ test_that("simulate_joinme randomises omitted coefficients reproducibly and expo
   sim1 <- simulate_joinme(
     n_id = 10,
     families = c("gaussian", "gaussian", "gaussian"),
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 2, length.out = 4),
     assoc = c("cv_mean", "vcov"),
     seed = 4406
@@ -184,7 +168,6 @@ test_that("simulate_joinme randomises omitted coefficients reproducibly and expo
   sim2 <- simulate_joinme(
     n_id = 10,
     families = c("gaussian", "gaussian", "gaussian"),
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 2, length.out = 4),
     assoc = c("cv_mean", "vcov"),
     seed = 4406
@@ -199,13 +182,13 @@ test_that("simulate_joinme randomises omitted coefficients reproducibly and expo
   expect_equal(eff$id$corr, sim2$truth$re_structure$id$corr)
   expect_equal(eff$id$Lcorr, sim2$truth$re_structure$id$Lcorr)
   expect_equal(eff$id$cov, sim2$truth$re_structure$id$cov)
-  expect_equal(eff$id_marker_cov$latent$sd, sim2$truth$re_structure$id_marker_cov$latent$sd)
+  expect_equal(eff$id_marker_cov$standardised$sd, sim2$truth$re_structure$id_marker_cov$standardised$sd)
   expect_equal(eff$id_marker_cov$alpha, sim2$truth$re_structure$id_marker_cov$alpha)
   expect_true(all(eff$id$sd > 0))
   expect_true(all(eff$marker$sd > 0))
-  expect_identical(eff$id_marker_cov$latent$mode, "iid_standard_normal")
-  expect_true(all(eff$id_marker_cov$latent$sd > 0))
-  expect_equal(eff$id_marker_cov$latent$corr, diag(length(eff$id_marker_cov$latent$sd)))
+  expect_identical(eff$id_marker_cov$standardised$mode, "iid_standard_normal")
+  expect_true(all(eff$id_marker_cov$standardised$sd > 0))
+  expect_equal(eff$id_marker_cov$standardised$corr, diag(length(eff$id_marker_cov$standardised$sd)))
   expect_equal(diag(eff$id$corr), rep(1, ncol(eff$id$corr)))
   expect_true(isTRUE(all.equal(eff$id$corr, t(eff$id$corr), tolerance = 1e-8)))
   expect_true(all(eff$id_marker_cov$lambda >= 0))
@@ -213,30 +196,39 @@ test_that("simulate_joinme randomises omitted coefficients reproducibly and expo
   expect_true(any(grepl("^vcov\\[", names(sim1$truth$assoc_coefs))))
 })
 
-test_that("simulate_joinme translates legacy latent covariance input into baseline alpha", {
-  sim <- simulate_joinme(
-    n_id = 8,
-    families = c("gaussian", "gaussian", "gaussian"),
-    n_obs_per_marker_per_id = 3,
-    times_obs = seq(0, 2, length.out = 4),
-    seed = 4408,
-    assoc = "vcov",
-    re_params = list(
-      id_marker_cov = list(
-        latent = list(sd = c(0.8, 0.4), corr = matrix(c(1, 0.2, 0.2, 1), 2, 2)),
-        alpha = c(-0.2, 0.05, -0.1),
-        lambda = 0
-      )
-    )
+test_that("simulate_joinme rejects covariance coefficients in re_params", {
+  expect_error(
+    simulate_joinme(
+      n_id = 8,
+      families = c("gaussian", "gaussian", "gaussian"),
+      times_obs = seq(0, 2, length.out = 4),
+      seed = 4408,
+      assoc = "vcov",
+      truth = jm_truth(re_params = list(
+        id_marker_cov = list(
+          latent = list(sd = c(0.8, 0.4), corr = matrix(c(1, 0.2, 0.2, 1), 2, 2))
+        )
+      ))
+    ),
+    "Unknown.*re_params"
   )
+})
 
-  eff <- sim$truth$id_marker_cov_effective
-
-  expect_identical(eff$latent$mode, "iid_standard_normal")
-  expect_false(is.null(eff$legacy_latent_translation$input))
-  expect_identical(eff$legacy_latent_translation$applied_to, "alpha")
-  expect_true(all(dim(eff$legacy_latent_translation$factor) == c(2, 2)))
-  expect_false(isTRUE(all.equal(eff$alpha, c(-0.2, 0.05, -0.1))))
+test_that("simulate_joinme rejects packed covariance coefficients in re_params", {
+  expect_error(
+    simulate_joinme(
+      n_id = 5,
+      families = c("gaussian", "gaussian"),
+      times_obs = c(0, 0.2),
+      time_cens = 0.3,
+      truth = jm_truth(re_params = list(
+        id_marker_cov = list(alpha = c(-0.3, 0.1, -0.2))
+      )),
+      use_mirai = FALSE,
+      seed = 4409
+    ),
+    "Unknown.*re_params"
+  )
 })
 
 test_that("simulate_joinme rejects invalid supplied random-effect correlation matrices", {
@@ -244,15 +236,14 @@ test_that("simulate_joinme rejects invalid supplied random-effect correlation ma
     simulate_joinme(
       n_id = 6,
       families = c("gaussian", "gaussian"),
-      n_obs_per_marker_per_id = 3,
       times_obs = seq(0, 2, length.out = 4),
       seed = 4407,
-      re_params = list(
+      truth = jm_truth(re_params = list(
         id = list(
           sd = c(0.4, 0.2),
           corr = matrix(c(1, 1.2, 0, 1), nrow = 2, byrow = TRUE)
         )
-      )
+      ))
     ),
     "must be symmetric|must lie in \\[-1, 1\\]|must be positive definite"
   )
@@ -263,15 +254,19 @@ test_that("simulate_joinme supports distributional random effects", {
   sim <- simulate_joinme(
     n_id = 10,
     families = c("student_t", "student_t"),
-    n_obs_per_marker_per_id = 5,
     times_obs = seq(0, 2, length.out = 6),
     seed = 4402,
     formulaDist = list(sigma ~ 1 + (1 | id)),
-    re_params = list(
-      id = list(sd = c(0.4, 0.2)),
-      marker = list(sd = 0.25),
-      id_marker_cov = list(latent = list(sd = c(0.4, 0.2))),
-      dist = list(sigma = list(sd = 0.8))
+    truth = jm_truth(
+      vcov = list(
+        sd = list(intercept = rep(log(expm1(0.2)), 2), latent = 0),
+        corr = list(intercept = 0, latent = 0)
+      ),
+      re_params = list(
+        id = list(sd = c(0.4, 0.2)),
+        marker = list(sd = 0.25),
+        dist = list(sigma = list(sd = 0.8))
+      )
     )
   )
 
@@ -285,7 +280,6 @@ test_that("simulate_joinme saves realized distributional parameter truth and avo
   sim <- simulate_joinme(
     n_id = 8,
     families = c("student_t", "skew_normal", "beta"),
-    n_obs_per_marker_per_id = 4,
     times_obs = seq(0, 2, length.out = 5),
     seed = 4411,
     formulaDist = list(
@@ -314,11 +308,10 @@ test_that("simulate_joinme saves realized distributional parameter truth and avo
   expect_false("gamma_w" %in% names(sim$truth))
 })
 
-test_that("simulate_joinme exposes fit-aligned truth for defaults and scaled parameters", {
+test_that("simulate_joinme exposes fit-aligned truth on original study time", {
   sim <- simulate_joinme(
     n_id = 8,
     families = c("gaussian", "student_t", "beta", "cumulative_logit"),
-    n_obs_per_marker_per_id = 4,
     times_obs = seq(0, 2, length.out = 5),
     seed = 4412
   )
@@ -330,12 +323,12 @@ test_that("simulate_joinme exposes fit-aligned truth for defaults and scaled par
   expect_equal(unname(fit_truth$tau_u), sim$truth$re_structure$id$sd)
   expect_equal(unname(fit_truth$Lcorr_u), sim$truth$re_structure$id$Lcorr)
   expect_equal(unname(fit_truth$Sigma_u), sim$truth$re_structure$id$cov)
-  expect_equal(length(fit_truth$beta_scaled), length(sim$truth$beta_long))
+  expect_equal(length(fit_truth$beta), length(sim$truth$beta_long))
+  expect_equal(unname(fit_truth$beta), unname(sim$truth$beta_long))
   expect_true(is.finite(fit_truth$time_scale_generation))
   expect_true(is.finite(fit_truth$time_scale_observed_max))
   expect_gt(fit_truth$time_scale_generation, 0)
   expect_gt(fit_truth$time_scale_observed_max, 0)
-  expect_equal(length(fit_truth$marker_id_row_scale_eff), length(sim$truth$re_structure$id_marker_cov$latent$sd))
   expect_true("student_t" %in% names(fit_truth$sigma_family))
   expect_true("student_t" %in% names(fit_truth$nu_family))
   expect_true("beta" %in% names(fit_truth$kappa_family))
@@ -351,33 +344,18 @@ test_that("simulate_joinme exposes public random-effect draws on the original-ti
     formulaLong = y ~ 1 + time + (1 + time | id) + (1 + time + (1 + time | id) | marker),
     n_id = 10,
     families = rep("gaussian", 2),
-    n_obs_per_marker_per_id = 4,
     times_obs = seq(0, 4, length.out = 5),
     seed = 4421
   )
 
-  scale_factor <- unname(sim$truth$stan_fit$tau_v_eff[2] / sim$truth$re_structure$marker$sd[2])
-  expect_true(is.finite(scale_factor))
-  expect_gt(scale_factor, 0)
-
-  expect_equal(sim$truth$re_draws$marker[, 1], sim$truth$re_draws_likelihood$marker[, 1])
-  expect_equal(
-    sim$truth$re_draws$marker[, 2] * scale_factor,
-    sim$truth$re_draws_likelihood$marker[, 2],
-    tolerance = 1e-8
-  )
-  expect_equal(
-    sim$truth$re_draws$id[, 2] * scale_factor,
-    sim$truth$re_draws_likelihood$id[, 2],
-    tolerance = 1e-8
-  )
+  expect_equal(sim$truth$re_draws$marker, sim$truth$re_draws_likelihood$marker)
+  expect_equal(sim$truth$re_draws$id, sim$truth$re_draws_likelihood$id)
 })
 
 test_that("joinme_standata time scale is determined from observed event times", {
   sim <- simulate_joinme(
     n_id = 10,
     families = rep("gaussian", 2),
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 8, length.out = 10),
     time_cens = 8,
     seed = 4424
@@ -393,15 +371,8 @@ test_that("joinme_standata time scale is determined from observed event times", 
   )
 
   expect_equal(as.numeric(sd$tmax), max(sim$dataEvent$time_stop, na.rm = TRUE))
-
-  idx_time_beta <- as.integer(sim$truth$stan_fit$idx_time_beta %||% integer(0))
-  if (length(idx_time_beta) > 0L) {
-    expect_equal(
-      sim$truth$stan_fit$beta_scaled[idx_time_beta],
-      sim$truth$beta_long[idx_time_beta] * as.numeric(sd$tmax),
-      tolerance = 1e-8
-    )
-  }
+  expect_equal(sim$truth$stan_fit$beta, sim$truth$beta_long)
+  expect_false(any(grepl("^idx_time_", names(sim$truth$stan_fit))))
 })
 
 test_that("simulate_joinme draws id random effects from zero-mean MVN", {
@@ -409,12 +380,11 @@ test_that("simulate_joinme draws id random effects from zero-mean MVN", {
     formulaLong = y ~ 1 + time + (1 + time | id) + (0 + (1 + time | id) | marker),
     n_id = 600,
     families = rep("gaussian", 2),
-    n_obs_per_marker_per_id = 2,
     times_obs = seq(0, 2, length.out = 3),
     seed = 4423,
-    re_params = list(
+    truth = jm_truth(re_params = list(
       id = list(sd = c(0.6, 0.3), corr = matrix(c(1, 0.25, 0.25, 1), 2, 2))
-    )
+    ))
   )
 
   u_draw <- sim$truth$re_draws_likelihood$id

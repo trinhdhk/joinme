@@ -20,7 +20,7 @@ test_that(".import_cmdstanr_fit eagerly loads cmdstanr-backed contents", {
     }
   ), class = "CmdStanMCMC")
 
-  out <- joinme:::.import_cmdstanr_fit(fake_fit)
+  out <- .import_cmdstanr_fit(fake_fit)
 
   expect_identical(out, fake_fit)
   expect_equal(calls, c("draws", "sampler_diagnostics", "init", "profiles"))
@@ -28,7 +28,7 @@ test_that(".import_cmdstanr_fit eagerly loads cmdstanr-backed contents", {
 
 test_that(".import_cmdstanr_fit leaves non-cmdstan fits unchanged", {
   fit_like <- list(a = 1)
-  out <- joinme:::.import_cmdstanr_fit(fit_like)
+  out <- .import_cmdstanr_fit(fit_like)
   expect_identical(out, fit_like)
 })
 
@@ -66,7 +66,7 @@ test_that("chain energy diagnostics use the retained sampler order", {
     class = "CmdStanMCMC"
   )
 
-  energy <- joinme:::.sampler_energy_by_chain(fake_fit)
+  energy <- .sampler_energy_by_chain(fake_fit)
 
   expect_equal(nrow(energy), 2L)
   expect_equal(energy$divergences, c(1L, 0L))

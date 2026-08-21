@@ -23,7 +23,7 @@ test_that("compatible random-effect levels share G rather than forming a product
     use_marker_weight_assoc = 0L,
     n_marker_weight_sets = 0L,
     shrinkage = 0L,
-    shared_marker_weights = 1L
+    marker_weight_sets_shared = 1L
   )
   mixture_data <- .build_mixture_standata(
     stan_data,
@@ -31,8 +31,7 @@ test_that("compatible random-effect levels share G rather than forming a product
       n_classes = 3L,
       class_type = c("subject", "vcov"),
       class_dimensions = NULL,
-      class_probability_concentration = 1,
-      class_regression_prior = prior_normal(),
+      class_prior = list(baseline_prob = 1, slope = prior_normal()),
       include_survival = TRUE
     )
   )
@@ -63,8 +62,7 @@ test_that("corr selects only off-diagonal covariance-regression coordinates", {
       n_classes = 2L,
       class_type = "corr",
       class_dimensions = c(1L, 2L),
-      class_probability_concentration = 1,
-      class_regression_prior = prior_normal(),
+      class_prior = list(baseline_prob = 1, slope = prior_normal()),
       include_survival = TRUE
     )
   )
@@ -85,7 +83,7 @@ test_that("subject and marker domains retain common labels and separate units", 
     use_marker_weight_assoc = 0L,
     n_marker_weight_sets = 0L,
     shrinkage = 2L,
-    shared_marker_weights = 1L
+    marker_weight_sets_shared = 1L
   )
   mixture_data <- .build_mixture_standata(
     stan_data,
@@ -93,8 +91,7 @@ test_that("subject and marker domains retain common labels and separate units", 
       n_classes = 2L,
       class_type = c("subject", "marker"),
       class_dimensions = NULL,
-      class_probability_concentration = c(2, 3),
-      class_regression_prior = prior_normal(),
+      class_prior = list(baseline_prob = c(2, 3), slope = prior_normal()),
       include_survival = TRUE
     )
   )
@@ -108,7 +105,7 @@ test_that("subject and marker domains retain common labels and separate units", 
   )
 })
 
-test_that("class-regression priors materialise in subject-then-marker order", {
+test_that("class-regression priors are assembled in subject-then-marker order", {
   stan_data <- list(
     n_id = 3L,
     D = 2L,
@@ -133,10 +130,12 @@ test_that("class-regression priors materialise in subject-then-marker order", {
   specification <- list(
     n_classes = 2L,
     class_type = c("subject", "marker"),
-    class_probability_concentration = 1,
-    class_regression_prior = prior_laplace(
-      mu = c(0, 0.5, -0.5),
-      scale = c(1, 0.75, 0.5)
+    class_prior = list(
+      baseline_prob = 1,
+      slope = prior_laplace(
+        mu = c(0, 0.5, -0.5),
+        scale = c(1, 0.75, 0.5)
+      )
     ),
     class_design = class_design,
     include_survival = TRUE
@@ -147,7 +146,7 @@ test_that("class-regression priors materialise in subject-then-marker order", {
   expect_equal(mixture_data$prior_class_regression_mu, c(0, 0.5, -0.5))
   expect_equal(mixture_data$prior_class_regression_scale, c(1, 0.75, 0.5))
 
-  specification$class_regression_prior <- prior_normal(scale = c(1, 2))
+  specification$class_prior$slope <- prior_normal(scale = c(1, 2))
   expect_error(
     .build_mixture_standata(stan_data, specification),
     "exactly one value per parameter"
@@ -183,8 +182,7 @@ test_that("mixture dimensions and unavailable levels are explained", {
     n_classes = 2L,
     class_type = "subject",
     class_dimensions = 2L,
-    class_probability_concentration = 1,
-    class_regression_prior = prior_normal(),
+    class_prior = list(baseline_prob = 1, slope = prior_normal()),
     include_survival = FALSE
   )
 
@@ -334,8 +332,7 @@ test_that("class_ordering targets only an intercept, baseline probabilities, or 
     n_classes = 3L,
     class_type = "subject",
     class_dimensions = c(1L, 2L),
-    class_probability_concentration = 1,
-    class_regression_prior = prior_normal(),
+    class_prior = list(baseline_prob = 1, slope = prior_normal()),
     class_ordering = "intercept",
     include_survival = FALSE
   )
@@ -363,18 +360,28 @@ test_that("class_ordering targets only an intercept, baseline probabilities, or 
 
 test_that("latent-class priors are declared through jm_prior", {
   priors <- jm_prior(
-    class_probability = c(2, 3, 4),
-    class_regression = prior_student_t(
-      df = 4,
-      mu = c(0, 0.5),
-      scale = c(1.25, 0.75)
+    class = list(
+      baseline_prob = c(2, 3, 4),
+      slope = prior_student_t(
+        df = 4,
+        mu = c(0, 0.5),
+        scale = c(1.25, 0.75)
+      )
     )
   )
   expect_s3_class(priors, "joinme_priors")
-  expect_equal(priors$class_probability, c(2, 3, 4))
-  expect_identical(priors$class_regression$family, "student_t")
-  expect_equal(priors$class_regression$df, 4)
-  expect_equal(priors$class_regression$mu, c(0, 0.5))
+  expect_equal(priors$class$baseline_prob, c(2, 3, 4))
+  expect_identical(priors$class$slope$family, "student_t")
+  expect_equal(priors$class$slope$df, 4)
+  expect_equal(priors$class$slope$mu, c(0, 0.5))
+  expect_true("class" %in% names(formals(jm_prior)))
+  expect_false("class_probability" %in% names(formals(jm_prior)))
+  expect_false("class_regression" %in% names(formals(jm_prior)))
+  expect_error(jm_prior(class = list(probability = 1)), "baseline_prob")
+  expect_error(jm_prior(class = list(baseline_prob = 0)), "positive")
+  inherited <- jm_prior(slope = prior_laplace(scale = 0.75))
+  expect_identical(inherited$class$slope$family, "laplace")
+  expect_equal(inherited$class$slope$scale, 0.75)
   expect_false("class_probability_prior" %in% names(formals(joinme_mix)))
   expect_false("class_location_scale" %in% names(formals(joinme_mix)))
   expect_false("class_scale_rate" %in% names(formals(joinme_mix)))
@@ -509,7 +516,13 @@ test_that("Stan fit data and source include every mixture field", {
   ) %in% required_data))
 
   source <- paste(.read_stan_with_includes(stan_file), collapse = "\n")
-  expect_match(source, "fit_mixture_priors", fixed = TRUE)
+  master_source <- paste(readLines(stan_file, warn = FALSE), collapse = "\n")
+  expect_match(
+    master_source,
+    "#include include/submodels/latent_class/functions/component_density.stanfunctions",
+    fixed = TRUE
+  )
+  expect_match(source, "include/submodels/latent_class/model/fit.stan", fixed = TRUE)
   expect_match(source, "ordered[n_classes] mix_location_ordered", fixed = TRUE)
   expect_match(source, "mix_location_unordered", fixed = TRUE)
   expect_match(
@@ -532,10 +545,30 @@ test_that("ordinary Stan fitting has no latent-class contract", {
   )
   required_data <- .stan_data_names(stan_file)
   source <- paste(.read_stan_with_includes(stan_file), collapse = "\n")
+  master_source <- paste(readLines(stan_file, warn = FALSE), collapse = "\n")
 
   expect_false(any(grepl("^mix_|^n_classes$|^K_mix$|^use_mixture$", required_data)))
+  expect_false(grepl("include/submodels/latent_class/functions", master_source, fixed = TRUE))
   expect_false(grepl("latent_progress_component_lpdf", source, fixed = TRUE))
   expect_false(grepl("posterior_class_probability_", source, fixed = TRUE))
+})
+
+test_that("mixture masters import only the function definitions they use", {
+  fit_master <- paste(
+    readLines(testthat::test_path("..", "..", "inst", "stan", "joinme_mix_fit_threading.stan"), warn = FALSE),
+    collapse = "\n"
+  )
+  prediction_master <- paste(
+    readLines(testthat::test_path("..", "..", "inst", "stan", "joinme_mix_dynpred_threading.stan"), warn = FALSE),
+    collapse = "\n"
+  )
+
+  component_include <- "include/submodels/latent_class/functions/component_density.stanfunctions"
+  probability_include <- "include/submodels/latent_class/functions/class_probability.stanfunctions"
+  expect_true(grepl(component_include, fit_master, fixed = TRUE))
+  expect_true(grepl(probability_include, fit_master, fixed = TRUE))
+  expect_true(grepl(component_include, prediction_master, fixed = TRUE))
+  expect_false(grepl(probability_include, prediction_master, fixed = TRUE))
 })
 
 test_that("the mixture prior is evaluated once outside the threaded likelihood", {
@@ -548,12 +581,12 @@ test_that("the mixture prior is evaluated once outside the threaded likelihood",
   )
   main_source <- paste(readLines(stan_file, warn = FALSE), collapse = "\n")
   mixture_prior_position <- regexpr(
-    "#include helper/model/fit_mixture_priors.stan",
+    "#include include/submodels/latent_class/model/fit.stan",
     main_source,
     fixed = TRUE
   )[[1L]]
   likelihood_position <- regexpr(
-    "#include helper/model/fit_threaded_likelihood.stan",
+    "#include include/etc/model/fit_threaded_likelihood.stan",
     main_source,
     fixed = TRUE
   )[[1L]]
@@ -562,7 +595,7 @@ test_that("the mixture prior is evaluated once outside the threaded likelihood",
   expect_gt(likelihood_position, mixture_prior_position)
   expect_equal(
     lengths(gregexpr(
-      "#include helper/model/fit_mixture_priors.stan",
+      "#include include/submodels/latent_class/model/fit.stan",
       main_source,
       fixed = TRUE
     )),
@@ -575,7 +608,8 @@ test_that("the mixture prior is evaluated once outside the threaded likelihood",
       "..",
       "inst",
       "stan",
-      "helper",
+      "include",
+      "etc",
       "functions",
       "joinme_fit_partial.stanfunctions"
     ),
@@ -871,10 +905,10 @@ test_that("covariance class reconstruction returns a valid covariance matrix", {
     diagonal_link = 1L
   )
 
-  expect_equal(diag(covariance), c(4, 9), tolerance = 1e-10)
+  expect_equal(diag(covariance), c(4, 9 * (1 + 0.4^2)), tolerance = 1e-10)
   expect_equal(
-    covariance[1, 2] / sqrt(covariance[1, 1] * covariance[2, 2]),
-    0.4,
+    covariance[1, 2] / covariance[2, 2]^0.5 / covariance[1, 1]^0.5,
+    0.4 / sqrt(1 + 0.4^2),
     tolerance = 1e-10
   )
   expect_true(all(eigen(covariance, symmetric = TRUE)$values > 0))
@@ -928,11 +962,36 @@ test_that("Cholesky reconstruction matches the covariance helper", {
   )
 
   expect_equal(covariance, tcrossprod(cholesky))
+  expect_equal(cholesky[2, 2] / exp(log(0.8)), 1, tolerance = 1e-12)
   expect_equal(
     .assoc_corr_features_from_chol(cholesky),
-    -0.25,
+    -0.25 / sqrt(1 + 0.25^2),
     tolerance = 1e-10
   )
+})
+
+test_that("independent SD and K regression lets dependence change marginal variance", {
+  predictor_zero_corr <- c(log(2), atanh(0.0), log(3))
+  predictor_high_corr <- c(log(2), atanh(0.8), log(3))
+
+  covariance_zero_corr <- .mixture_covariance_from_predictor(
+    predictor = predictor_zero_corr,
+    q_dimension = 2L,
+    diagonal_only = FALSE,
+    diagonal_link = 1L
+  )
+  covariance_high_corr <- .mixture_covariance_from_predictor(
+    predictor = predictor_high_corr,
+    q_dimension = 2L,
+    diagonal_only = FALSE,
+    diagonal_link = 1L
+  )
+
+  # In the independent SD+K parameterisation, off-diagonal K entries contribute
+  # to marginal variance through K K^T.
+  expect_equal(diag(covariance_zero_corr), c(4, 9), tolerance = 1e-10)
+  expect_equal(diag(covariance_high_corr), c(4, 9 * (1 + 0.8^2)), tolerance = 1e-10)
+  expect_gt(abs(covariance_high_corr[1, 2]), abs(covariance_zero_corr[1, 2]))
 })
 
 test_that("mixture summaries reduce membership to active class totals", {
@@ -980,9 +1039,6 @@ test_that("mixture summaries reduce membership to active class totals", {
       "Est.Error",
       "Q2.5",
       "Q97.5",
-      "Rhat",
-      "ess_bulk",
-      "ess_tail",
       "assigned_units"
     )
   )
@@ -995,6 +1051,78 @@ test_that("mixture summaries reduce membership to active class totals", {
     c(1L, 1L, 0L)
   )
   expect_false("marker" %in% names(overview))
+})
+
+test_that("mixture class-regression summary skips zero fitted dimensions", {
+  object <- structure(
+    list(
+      mixture = list(
+        class_design = list(
+          subject = list(
+            # Legacy serialized objects may retain this placeholder label even
+            # when no subject-domain class-regression coefficient was fitted.
+            columns = "class_:"
+          )
+        )
+      ),
+      config = list(),
+      stan_data = list(P_class_subject = 0L),
+      fit = NULL
+    ),
+    class = c("JoiNMeMixFit", "JoiNMeFit")
+  )
+
+  expect_null(.mixture_class_regression_summary(
+    object = object,
+    domain = "subject",
+    number_classes = 2L,
+    draws = 20,
+    seed = 1,
+    digits = 3
+  ))
+})
+
+test_that("mixture class-regression summary skips absent draw variables", {
+  object <- structure(
+    list(
+      mixture = list(
+        class_design = list(
+          subject = list(
+            coefficient_covariate = "treatment",
+            coefficient_class = 1L
+          )
+        )
+      ),
+      config = list(),
+      stan_data = list(P_class_subject = 1L),
+      fit = NULL
+    ),
+    class = c("JoiNMeMixFit", "JoiNMeFit")
+  )
+
+  testthat::local_mocked_bindings(
+    .get_draws_obj = function(fit, ...) {
+      posterior::as_draws_array(array(
+        0,
+        dim = c(2L, 1L, 1L),
+        dimnames = list(
+          iteration = c("1", "2"),
+          chain = "1",
+          variable = "other_parameter[1]"
+        )
+      ))
+    },
+    .package = "joinme"
+  )
+
+  expect_null(.mixture_class_regression_summary(
+    object = object,
+    domain = "subject",
+    number_classes = 2L,
+    draws = 20,
+    seed = 1,
+    digits = 3
+  ))
 })
 
 test_that("repeated scientific labels retain one distinct posterior row per variable", {
@@ -1093,7 +1221,6 @@ test_that("class trajectories distinguish centres and response-scale margins", {
         allow_marker_crosscorr = 0L,
         vcov_diag_link = 1L,
         tmax = 1,
-        idx_time_idm = integer(0),
         link_long = 1L,
         inv_link_n_ops = 0L,
         inv_link_n_const = 0L,
@@ -1140,7 +1267,7 @@ test_that("class trajectories distinguish centres and response-scale margins", {
   )
 
   testthat::local_mocked_bindings(
-    .JoiNMefit_longitudinal_design_matrices = function(...) {
+    ..longitudinal_design_matrices = function(...) {
       list(
         fixed = matrix(c(1, 1), ncol = 1L),
         subject = matrix(c(1, 1), ncol = 1L),
@@ -1149,7 +1276,7 @@ test_that("class trajectories distinguish centres and response-scale margins", {
       )
     },
     .get_draws_matrix = function(fit, variables, draws = NULL, seed = 1) {
-      if (all(grepl("^beta_scaled", variables))) {
+      if (all(grepl("^beta\\[", variables))) {
         return(matrix(c(0, 0), ncol = 1L, dimnames = list(NULL, variables)))
       }
       if (all(grepl("^alpha_L", variables))) {
@@ -1239,7 +1366,6 @@ test_that("covariance association plots use the hazard contribution scale", {
         Xcov_corr = matrix(numeric(0), 1L, 0L),
         assoc_vcov = 1L,
         vcov_diag_link = 1L,
-        idx_time_idm = integer(0),
         tmax = 1
       )
     ),

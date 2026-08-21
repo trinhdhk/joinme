@@ -3,11 +3,10 @@ test_that("standata maps weighted id grouping to subject and RE weights", {
   sim <- simulate_joinme(
     n_id = 5,
     families = rep("student_t", 2),
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 2, length.out = 5),
     seed = 2401,
     assoc = c("cv_total"),
-    assoc_coefs = c(cv_total = 0.2)
+    truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.2))),
   )
 
   id_w <- seq_len(nrow(sim$dataEvent)) / 2 + 0.5
@@ -40,11 +39,10 @@ test_that("nested id weighting controls corr latent id weights", {
   sim <- simulate_joinme(
     n_id = 5,
     families = rep("student_t", 2),
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 2, length.out = 5),
     seed = 2403,
     assoc = c("cv_total", "corr"),
-    assoc_coefs = c(cv_total = 0.2, corr = 0.1)
+    truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.2, "corr[1]" = 0.1))),
   )
 
   id_w_nested <- seq_len(nrow(sim$dataEvent)) / 3 + 0.7
@@ -75,11 +73,10 @@ test_that("standata builds weighted distributional random-effects weights", {
   sim <- simulate_joinme(
     n_id = 4,
     families = c("gaussian", "student_t"),
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 2, length.out = 5),
     seed = 2402,
     assoc = c("cv_total"),
-    assoc_coefs = c(cv_total = 0.2)
+    truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.2))),
   )
 
   id_w <- seq_len(nrow(sim$dataEvent)) + 1
@@ -112,11 +109,10 @@ test_that("weighted grouping requires weights= argument (weight= rejected)", {
   sim <- simulate_joinme(
     n_id = 4,
     families = rep("gaussian", 2),
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 2, length.out = 5),
     seed = 2404,
     assoc = c("cv_total"),
-    assoc_coefs = c(cv_total = 0.2)
+    truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.2))),
   )
 
   sim$dataEvent$id_w <- runif(nrow(sim$dataEvent), 0.8, 1.2)

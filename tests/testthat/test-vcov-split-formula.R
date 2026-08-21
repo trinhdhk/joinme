@@ -41,26 +41,26 @@ test_that("one formulaVCov remains an exact shared-design shorthand", {
 })
 
 test_that("stored covariance designs retain read-only compatibility", {
-  legacy_matrix <- cbind(treatment = c(0, 1), age = c(50, 60))
-  legacy <- .stored_vcov_design(list(
+  shared_matrix <- cbind(treatment = c(0, 1), age = c(50, 60))
+  earlier <- .stored_vcov_design(list(
     K_cov = 2L,
-    Xcov = legacy_matrix,
+    Xcov = shared_matrix,
     n_id = 2L
   ))
-  expect_true(legacy$legacy)
-  expect_identical(legacy$k_sd, 2L)
-  expect_identical(legacy$k_corr, 2L)
-  expect_equal(legacy$x_sd, legacy_matrix)
-  expect_equal(legacy$x_corr, legacy_matrix)
+  expect_true(earlier$shared_format)
+  expect_identical(earlier$k_sd, 2L)
+  expect_identical(earlier$k_corr, 2L)
+  expect_equal(earlier$x_sd, shared_matrix)
+  expect_equal(earlier$x_corr, shared_matrix)
 
   current <- .stored_vcov_design(list(
     K_cov_sd = 1L,
-    Xcov_sd = legacy_matrix[, 1L, drop = FALSE],
+    Xcov_sd = shared_matrix[, 1L, drop = FALSE],
     K_cov_corr = 1L,
-    Xcov_corr = legacy_matrix[, 2L, drop = FALSE],
+    Xcov_corr = shared_matrix[, 2L, drop = FALSE],
     n_id = 2L
   ))
-  expect_false(current$legacy)
+  expect_false(current$shared_format)
   expect_identical(colnames(current$x_sd), "treatment")
   expect_identical(colnames(current$x_corr), "age")
 })
@@ -76,25 +76,23 @@ test_that("formulaVCov rejects partial or unknown component lists", {
   )
 })
 
-test_that("covariance prior blocks materialise in their documented order", {
-  priors <- .build_priors(
-    vcov_sd_prior = prior_laplace(
-      mu = c(1, 2, 3, 4),
-      scale = c(0.5, 0.6, 0.7, 0.8)
-    ),
-    vcov_corr_prior = prior_normal(mu = c(-1, -2), scale = c(1, 2))
-  )
-  stan_prior <- .materialise_joinme_prior_data(
-    priors,
-    dimensions = c(vcov_sd = 4L, vcov_corr = 2L)
+test_that("covariance prior blocks are assembled in their documented order", {
+  priors <- jm_prior(vcov = list(
+    sd = list(intercept = prior_laplace(
+      mu = c(1, 2, 3, 4), scale = c(0.5, 0.6, 0.7, 0.8)
+    )),
+    corr = list(intercept = prior_normal(mu = c(-1, -2), scale = c(1, 2)))
+  ))
+  stan_prior <- .pack_regression_priors(
+    list(
+      vcov_sd = list(roles = rep("intercept", 4L), priors = priors$vcov$sd),
+      vcov_corr = list(roles = rep("intercept", 2L), priors = priors$vcov$corr)
+    )
   )
 
-  expect_identical(stan_prior$prior_vcov_sd_family, 3L)
-  expect_equal(stan_prior$prior_vcov_sd_mu, c(1, 2, 3, 4))
-  expect_equal(stan_prior$prior_vcov_sd_scale, c(0.5, 0.6, 0.7, 0.8))
-  expect_identical(stan_prior$prior_vcov_corr_family, 2L)
-  expect_equal(stan_prior$prior_vcov_corr_mu, c(-1, -2))
-  expect_equal(stan_prior$prior_vcov_corr_scale, c(1, 2))
+  expect_equal(as.integer(stan_prior$prior_regression_family), c(rep(3L, 4L), rep(2L, 2L)))
+  expect_equal(stan_prior$prior_regression_mu, c(1, 2, 3, 4, -1, -2))
+  expect_equal(stan_prior$prior_regression_scale, c(0.5, 0.6, 0.7, 0.8, 1, 2))
 })
 
 test_that("simulation and fitting share the split covariance contract", {
@@ -115,22 +113,22 @@ test_that("simulation and fitting share the split covariance contract", {
       x_sd ~ rnorm(n_id),
       x_corr ~ rnorm(n_id)
     ),
+    truth = jm_truth(vcov = list(
+      sd = list(
+        intercept = c(-0.2, -0.1),
+        slope = as.vector(supplied_sd_beta),
+        latent = c(0.2, 0.25)
+      ),
+      corr = list(
+        intercept = 0.15,
+        slope = as.vector(supplied_corr_beta),
+        latent = 0.3
+      )
+    )),
+    vcov_diag_link = "exp",
     re_params = list(
       id = list(sd = NULL, corr = NULL),
       marker = list(sd = NULL, corr = NULL),
-      id_marker_cov = list(
-        sd = list(
-          alpha = c(-0.2, -0.1),
-          beta = supplied_sd_beta,
-          lambda = c(0.2, 0.25)
-        ),
-        corr = list(
-          alpha = 0.15,
-          beta = supplied_corr_beta,
-          lambda = 0.3
-        ),
-        diag_link = "exp"
-      ),
       dist = list()
     ),
     h0 = function(time) rep(0.02, length(time)),
@@ -195,9 +193,9 @@ test_that("simulation and fitting share the split covariance contract", {
     simulation$truth$recovery$arguments$formulaVCov,
     simulation$truth$formulaVCov
   )
-  expect_equal(
+  expect_s3_class(
     simulation$truth$recovery$arguments$priors,
-    simulation$truth$priors
+    "joinme_priors"
   )
 
   prepared <- do.call(

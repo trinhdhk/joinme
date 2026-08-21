@@ -14,11 +14,10 @@ test_that("summary.JoiNMeDynPred reports rich subject-level outputs", {
   sim <- simulate_joinme(
     n_id = 4,
     families = rep("gaussian", 2),
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 2, length.out = 5),
     seed = 431,
     assoc = c("cv_total"),
-    assoc_coefs = c(cv_total = 0.15)
+    truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.15))),
   )
 
   formulaLong <- y ~ 1 + time + x1 +

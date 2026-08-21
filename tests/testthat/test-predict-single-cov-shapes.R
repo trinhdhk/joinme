@@ -9,7 +9,6 @@ test_that("posterior_predict handles single-covariate hazard/corr shapes", {
     formulaEvent = survival::Surv(time, event) ~ x2,
     formulaVCov = ~ x1,
     families = c("gaussian", "student_t", "student_t"),
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 3, length.out = 4),
     assoc = c("cv_total", "corr"),
     seed = 1421
@@ -37,7 +36,11 @@ test_that("posterior_predict handles single-covariate hazard/corr shapes", {
   last_time <- sim$dataLong |>
     tidytable::summarize(time_start = max(time), .by = id)
 
-  ndE <- tidytable::left_join(sim$dataEvent, last_time, by = "id")
+  # Counting-process simulations already contain an event-process start time.
+  # Replace it with the subject's final longitudinal observation time instead
+  # of joining a second column with the same name and acquiring .x/.y suffixes.
+  ndE <- sim$dataEvent
+  ndE$time_start <- last_time$time_start[match(ndE$id, last_time$id)]
 
   pred <- posterior_predict(
     fit,
@@ -57,5 +60,5 @@ test_that("posterior_predict handles single-covariate hazard/corr shapes", {
   )
 
   expect_s3_class(pred, "JoiNMeDynPred")
-  expect_true(is.data.frame(pred$results$survival))
+  expect_true(is.data.frame(pred$predictions$survival))
 })

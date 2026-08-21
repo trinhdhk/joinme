@@ -16,11 +16,12 @@ test_that("vcov association fits and predicts end-to-end", {
       (0 + x1 + (1 + time | id) | marker),
     n_id = 4,
     families = c("gaussian", "gaussian"),
-    n_obs_per_marker_per_id = 3,
     times_obs = seq(0, 2, length.out = 4),
     seed = 3321,
     assoc = "vcov",
-    assoc_coefs = list(vcov = c(0.2, 0.1, 0.25)),
+    truth = jm_truth(assoc_coef = list(slope = c(
+      "vcov[1]" = 0.2, "vcov[2]" = 0.1, "vcov[3]" = 0.25
+    ))),
     transforms = joinme_tf(vcov = "identity")
   )
 
