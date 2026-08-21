@@ -24,22 +24,20 @@ articles:
 - title: Get started
   contents:
   - joinme-intro
-  - joinme-demo
-- title: Modelling
-  contents:
+  - joinme-model
   - joinme-workflow
+- title: Joint Nested Mixed-effects Model
+  contents:
+  - joinme-theory
+  - joinme-associations
+  - joinme-covariance-regression
+  - joinme-demo
+# - title: Latent progress (in construction)
+#   contents:
+#   - joinme-latent-progress-theory
+#   - joinme-latent-progress-guide
+#   - joinme-latent-progress-example
+- title: Performance and interpretation
+  contents:
   - joinme-interpretation
   - joinme-discrimination
-  - joinme-associations
-  - joinme-marker-weight-means
-  - joinme-covariance-regression
-  - joinme-model
-  - joinme-theory
-- title: Latent progress
-  contents:
-  - joinme-latent-progress-theory
-  - joinme-latent-progress-guide
-  - joinme-latent-progress-example
-  - joinme-mix-simulation-theory
-  - joinme-mix-simulation-guide
-  - joinme-mix-simulation-example

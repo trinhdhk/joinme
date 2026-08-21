@@ -50,7 +50,7 @@
 \code{"ess_tail"}, \code{"mcse_mean"}, \code{"mcse_sd"}, \code{"running_mean"}, and
 \code{"running_quantile"}. Fitted-data types are \code{"longitudinal"},
 \code{"survival"}, \code{"cumhaz"}, and \code{"association"}. \code{"mcmc"} delegates to
-\code{\link[=mcmc_plot]{mcmc_plot()}} for bayesplot-backed posterior displays. The compatibility alias
+\code{\link[brms:mcmc_plot]{mcmc_plot()}} for bayesplot-backed posterior displays. The compatibility alias
 \code{"longitudinal_heatmap"} is treated as
 \verb{type = "longitudinal", longitudinal_style = "heatmap"}.}
 

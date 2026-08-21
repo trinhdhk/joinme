@@ -43,8 +43,8 @@
 #' current-value and slope channels can supply little
 #' information about a common shift when the average centred marker trajectory
 #' is close to zero, so this location prior is substantively important. The family
-#' name `"student_t"` learns set-specific degrees of freedom; each excess above
-#' two has a `Gamma(2, 0.1)` shape--rate prior. A
+#' name `"student_t"` learns a single degrees-of-freedom value shared across all
+#' weight sets; its excess above two has a `Gamma(2, 0.1)` shape--rate prior. A
 #' `prior_student_t(df = ...)` declaration always fixes `df` instead. The
 #' family names `"constant"` and `"none"` instead use the declared offset as
 #' the complete marker weight and fit neither a common mean nor departures. The

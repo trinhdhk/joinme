@@ -16,13 +16,6 @@ Current implementation experiments with flexible association structures, covaria
 4. summarise and plot fitted effects,
 5. generate dynamic predictions and plot future trajectories or survival.
 
-Simulation uses `jm_truth()`: numeric coefficients are held fixed for one
-simulated data set, whereas `prior_*()` declarations are sampled once and then
-held fixed. Fitting uses `jm_prior()`, which accepts probability distributions
-for coefficients and rejects fixed coefficient values. Baseline-hazard truth,
-association coefficients, and ordinary random-effect covariance truths are
-declared through `basehaz`, `assoc_coef`, and `re_params` inside `jm_truth()`.
-
 ## Marker distributional parameters
 
 By default, `joinme` uses **family-shared** distributional parameters where possible, i.e.,
@@ -124,104 +117,7 @@ Posterior draws are available through a dedicated renamed-draw interface:
 - `as.array(fit)` and `as.array(pred)` return the same renamed posterior arrays
 - `mcmc_plot()` forwards those draws to `bayesplot`, imitating the behaviour of `brms`
 - `longitudinal_plot()`, `survival_plot()`, `cumhaz_plot()`,
-  `association_plot()`, and `diagnostic_plot()` provide entry points to the main `plot()` methods.
-
-### Nested longitudinal model without survival
-
-`joinme()` also fits the multivariate nested longitudinal model on its own.
-Omit both event arguments; association terms are then unavailable because
-there is no event process to associate with the marker trajectories.
-
-```r
-longitudinal_fit <- joinme(
-  formulaLong = y ~ time + (1 + time | id) +
-    (1 + time + (1 + time | id) | marker),
-  dataLong = dataLong,
-  families = rep("gaussian", 3)
-)
-```
-
-The usual longitudinal summaries, random effects, diagnostics, posterior
-prediction, and longitudinal plots remain available. Survival, cumulative
-hazard, association, concordance, and time-dependent ROC/AUC methods give a
-clear error for this model form.
-
-### Latent-progress mixtures
-
-`joinme_mix()` fits a finite mixture on selected standardised random-effect
-blocks while retaining the ordinary JoiNMe formula, likelihood, association,
-prediction and diagnostic infrastructure:
-
-```r
-sim <- simulate_joinme_mix(
-  formulaLong = formulaLong,
-  formulaEvent = formulaEvent,
-  n_id = 120,
-  families = rep("gaussian", 3),
-  n_classes = 3,
-  class_type = c("subject", "vcov"),
-  formulaClass = ~ x1 + x2,
-  class_parameters = list(
-    probability = c(0.25, 0.45, 0.30),
-    location = list(
-      subject = rbind(
-        c(-1.5, -0.7),
-        c(0, 0),
-        c(1.5, 0.7)
-      ),
-      vcov = rbind(
-        c(-0.8, -0.3),
-        c(0, 0),
-        c(0.8, 0.3)
-      )
-    ),
-    scale = 0.65
-  ),
-  seed = 701
-)
-
-mixture_fit <- joinme_mix(
-  formulaLong = formulaLong,
-  dataLong = sim$dataLong,
-  formulaEvent = formulaEvent,
-  dataEvent = sim$dataEvent,
-  n_classes = 3,
-  class_type = c("subject", "vcov"),
-  formulaClass = ~ x1 + x2,
-  priors = jm_prior(
-    class = list(
-      baseline_prob = rep(2, 3),
-      slope = prior_normal(scale = 1)
-    )
-  ),
-  assoc = c("cv_mean", "vcov")
-)
-```
-
-The first two coordinates of each selected block define the progress plane by
-default. Compatible types share one allocation, so `n_classes = 3` means three
-classes rather than nine combinations. The only supported values of
-`class_type` are `"subject"`, `"marker"`, `"corr"`, and `"vcov"`. By default,
-only the selected
-random-intercept location is ordered; slope locations remain unrestricted.
-`class_ordering` can instead order baseline class probabilities or impose no
-order. `formulaClass` may regress class probabilities on covariates that are
-constant within the relevant subject or marker, and a list of three
-formulae supplies separate predictors when `n_classes = 3`.
-
-Mixture fits inherit ordinary methods and add:
-
-- `posterior_class()` for subject or marker class probabilities;
-- mixture-aware dynamic prediction with conditional class probabilities;
-- `longitudinal_plot(..., estimand = "mean_per_class")`;
-- `longitudinal_plot(..., estimand = "marginal_per_class")`;
-- `plot(..., type = "covariance_class")`; and
-- `association_plot(..., estimand = "mean_per_class")`.
-
-Omitting both event arguments fits a longitudinal-only mixture. See the
-theory, usage and worked-example vignettes under
-`vignettes/joinme-latent-progress-*.qmd`. Dedicated simulation theory, usage
-and recovery examples are in `vignettes/joinme-mix-simulation-*.qmd`.
+  `association_plot()`, and `diagnostic_plot()` provide methods for plotting individual processes.
 
 <!--
 Summary-scale consistency:
@@ -242,7 +138,7 @@ Summary-scale consistency:
 
 library(joinme)
 
-set.seed(2026)
+set.seed(1)
 
 # Simulate a small dataset
 sim <- simulate_joinme(

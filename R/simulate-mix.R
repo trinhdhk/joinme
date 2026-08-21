@@ -39,8 +39,8 @@
 #' and direct marker departures are drawn from the centred unit-scale
 #' `truth$marker_weights$family`. No further scale multiplies those
 #' departures because the association slope already scales the weighted
-#' marker feature. The family name `"student_t"` draws one set-specific
-#' value as `2 + Gamma(2, 0.1)`. The realised values are retained in `truth`. The departure
+#' marker feature. The family name `"student_t"` draws one value shared by all
+#' weight sets as `2 + Gamma(2, 0.1)`. The realised value is retained in `truth`. The departure
 #' coordinate retains location zero and ordinary scale one. A constant family
 #' bypasses both quantities, so the effective weights equal the offsets declared
 #' in `truth$marker_weights` exactly.

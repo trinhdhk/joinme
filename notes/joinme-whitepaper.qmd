@@ -511,12 +511,12 @@ Student-$t$ has two unambiguous forms: location zero and ordinary scale one
 remain fixed, while the family name `"student_t"` fits a degrees-of-freedom parameter,
 
 \[
-\nu_s=2+u_s,\qquad u_s\sim\operatorname{Gamma}(2,0.1).
+\nu=2+u,\qquad u\sim\operatorname{Gamma}(2,0.1).
 \]
 
-The Gamma distribution is parameterised by shape and rate. Every marker in set
-$s$ informs the same $\nu_s$, while different sets have distinct tail
-parameters. Only `"student_t"` requests this fitted form.
+The Gamma distribution is parameterised by shape and rate. Every marker in
+every weight set informs the same $\nu$. Only `"student_t"` requests this
+fitted form.
 `prior_student_t()` and `prior_student_t(df = ...)`, with `df > 2`, instead fix
 the default or stated value and introduce no tail parameter. In either form, setting `mu` or
 `scale` to values other than zero and one is rejected.

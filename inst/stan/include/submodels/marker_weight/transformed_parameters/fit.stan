@@ -7,9 +7,9 @@
  * common location and a marker-specific centred unit-scale departure. No
  * additional departure scale is estimated because it would be confounded
  * with the association slope that multiplies the weighted marker aggregate.
- * Student-t weight
- * sets additionally receive fitted degrees of freedom above two only when the
- * R family declaration requests moving df. Shared terms point to the same set. Fixed weights have no
+ * All Student-t weight sets additionally share one fitted degrees-of-freedom
+ * value above two when the R family declaration requests moving df. Shared
+ * terms point to the same weight set. Fixed weights have no
  * fitted locations, departures, or degrees of freedom.
  */
   /* -------------------- marker weights (signed and partially pooled) */
@@ -23,7 +23,7 @@
   // - Keep marker-specific departures directly interpretable by adding signed
   //   standardised deviations to the supplied offset and fitted common location.
   vector[n_marker_weight_sets] marker_weight_mean = rep_vector(0.0, n_marker_weight_sets); // fitted common location of each set, zero for fixed or inactive weights
-  vector[prior_marker_weight_family == 1 && estimate_marker_weight_df == 1 ? n_marker_weight_means : 0] marker_weight_df = marker_weight_df_excess + rep_vector(2.0, prior_marker_weight_family == 1 && estimate_marker_weight_df == 1 ? n_marker_weight_means : 0); // learned Student-t degrees of freedom by active set; absent when df is fixed or another family is used
+  vector[prior_marker_weight_family == 1 && estimate_marker_weight_df == 1 && n_marker_weight_means > 0 ? 1 : 0] marker_weight_df = marker_weight_df_excess + rep_vector(2.0, prior_marker_weight_family == 1 && estimate_marker_weight_df == 1 && n_marker_weight_means > 0 ? 1 : 0); // single learned Student-t degrees of freedom shared by all active weight sets; absent when df is fixed or another family is used
   matrix[n_marker_weight_sets, D] z_marker_weight_sets = rep_matrix(0.0, n_marker_weight_sets, D); // realised marker-specific departures on the fixed unit-scale family coordinate
   vector[D * estimate_marker_weights * use_marker_weight_assoc * n_marker_weight_sets] marker_weight_prior_effect = joinme_prior_transform(
     z_marker_weights,

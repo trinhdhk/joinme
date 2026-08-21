@@ -8,7 +8,7 @@
  * marker-weight scale: the association slope already multiplies the weighted
  * marker aggregate, so a second multiplier would not be separately identified.
  * Student-t departures either use an explicitly declared fixed degrees of
- * freedom or learn one value per set under a shifted-Gamma prior. When the regularised
+ * freedom or learn one value shared by all sets under a shifted-Gamma prior. When the regularised
  * horseshoe is selected, its local, global and finite-slab hierarchy is
  * assigned here. Common weight locations are governed by the marker-weight
  * intercept role in the common coefficient programme.
@@ -22,18 +22,15 @@
    * component family, which is declared only by the mixture entry point.
    */
   // Student-t tails use either the explicitly supplied fixed degrees
-  // of freedom or one learned value per active set. In the latter case the
-  // positive excess nu_s - 2 follows Gamma(shape = 2, rate = 0.1). Adding two
+  // of freedom or one learned value shared by every active set. In the latter
+  // case the positive excess nu - 2 follows Gamma(shape = 2, rate = 0.1). Adding two
   // gives every conditional Student-t law finite variance while allowing the
-  // data from all markers in the set to inform its common tail thickness.
+  // departures from every marker and every weight set to inform one common
+  // tail thickness.
   if (prior_marker_weight_family == 1 && n_marker_weight_means > 0) {
     if (estimate_marker_weight_df == 1) {
       marker_weight_df_excess ~ gamma(2, 0.1);
-      for (s in 1:n_marker_weight_means) {
-        int start_pos = (s - 1) * D + 1; // first marker departure governed by the learned set-specific degrees of freedom
-        int end_pos = s * D; // final marker departure governed by the learned set-specific degrees of freedom
-        z_marker_weights[start_pos:end_pos] ~ student_t(marker_weight_df[s], 0, 1);
-      }
+      z_marker_weights ~ student_t(marker_weight_df[1], 0, 1); // every marker departure in every active set shares the single learned tail parameter
     } else {
       z_marker_weights ~ student_t(prior_marker_weight_df, 0, 1); // all sets use the degrees of freedom explicitly declared by the analyst
     }

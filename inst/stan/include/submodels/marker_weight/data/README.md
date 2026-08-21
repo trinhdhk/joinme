@@ -5,8 +5,9 @@
 ## Statistical purpose
 
 Defines offsets supplied through `priors$marker_weights`, sharing maps, fitted common weight locations,
-the distribution family for marker-specific departures, and whether Student-t
-degrees of freedom are explicitly fixed or learned from the markers.
+the distribution family for marker-specific departures, and whether the
+Student-t degrees of freedom shared across all weights are explicitly fixed or
+learned from the markers.
 The R families `"constant"` and `"none"` set the fitted dimensions to zero, so
 the declared offsets pass directly to the association calculation.
 

@@ -6,8 +6,8 @@
 
 Declares fitted common locations, direct unit-scale marker departures,
 optional Student-t
-degrees-of-freedom excesses, and any horseshoe auxiliaries when weights are
-learned. An excess is declared for each active set only when the family name
+degrees-of-freedom excess, and any horseshoe auxiliaries when weights are
+learned. One excess shared by all active sets is declared only when the family name
 `"student_t"` requests moving degrees of freedom; `prior_student_t()`
 introduces no such parameter.
 

@@ -25,14 +25,14 @@ association terms use one set index; unshared terms use separate sets. A common
 location for a marker-only channel can remain weakly informed when the average
 centred marker trajectory is close to zero, which makes its explicitly declared
 prior scientifically important. Under departures selected by the family name
-`"student_t"`, each set also has fitted degrees of freedom
+`"student_t"`, all sets share one fitted degrees-of-freedom value
 
 $$
-\nu_s=2+u_s,\qquad u_s\sim\operatorname{Gamma}(2,0.1),
+\nu=2+u,\qquad u\sim\operatorname{Gamma}(2,0.1),
 $$
 
-where the Gamma distribution uses shape and rate. Thus every marker in set
-$s$ informs the same moving tail parameter. A `prior_student_t()` declaration
+where the Gamma distribution uses shape and rate. Thus every marker in every
+set informs the same moving tail parameter. A `prior_student_t()` declaration
 is a fixed constant instead. The R families `"constant"` and `"none"` omit all
 fitted terms and use the offset exactly. They do not require another Stan prior
 family code: R sets every relevant parameter dimension to zero and supplies a

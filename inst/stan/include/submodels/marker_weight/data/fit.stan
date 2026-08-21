@@ -13,7 +13,7 @@
  * its tail or regularised-horseshoe hyperparameters. For Student-t
  * departures, estimate_marker_weight_df distinguishes a fixed
  * prior_student_t() declaration from the family name `student_t`, which learns
- * degrees of freedom separately for every active weight set. The public R
+ * a single degrees-of-freedom value shared by every active weight set. The public R
  * families `constant` and `none` set estimate_marker_weights to zero; the
  * offset vectors are then already the complete effective weights. No extra
  * Stan family code is needed because every marker-weight parameter dimension
@@ -35,7 +35,7 @@
   int<lower=0, upper=1> use_marker_weight_assoc; // 1 when marker-weighted assoc terms are active
   int<lower=0, upper=4> n_marker_weight_means; // number of fitted common marker-weight locations; zero for fixed or inactive weights
   int<lower=1, upper=4> prior_marker_weight_family; // family of standardised marker-specific weight departures
-  int<lower=0, upper=1> estimate_marker_weight_df; // 1 learns one Student-t degrees of freedom per active weight set; 0 uses an explicitly declared fixed value or a non-Student family
+  int<lower=0, upper=1> estimate_marker_weight_df; // 1 learns one Student-t degrees-of-freedom value shared by every active weight set; 0 uses an explicitly declared fixed value or a non-Student family
   real<lower=0> prior_marker_weight_df; // fixed Student-t degrees of freedom when declared, or local-scale degrees of freedom for the horseshoe family
   real<lower=0> prior_marker_weight_global_df; // unit-default horseshoe global degrees of freedom for marker weights
   real<lower=0> prior_marker_weight_global_scale; // configured horseshoe global shrinkage scale for marker-weight departures

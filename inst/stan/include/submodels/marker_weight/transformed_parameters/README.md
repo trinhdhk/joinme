@@ -7,8 +7,8 @@
 Combines known offsets, common fitted locations and mean-zero unit-scale marker
 departures into the weights used by association
 channels. For the family name `"student_t"`,
-it adds two to each positive Gamma-governed excess to obtain set-specific
-degrees of freedom with finite conditional variance.
+it adds two to one positive Gamma-governed excess to obtain degrees of freedom
+shared across all sets, with finite conditional variance.
 
 Effective weights and, where learned, Student-t degrees of freedom are stored
 in posterior draws.

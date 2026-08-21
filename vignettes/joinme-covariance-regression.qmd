@@ -4,7 +4,7 @@ output-dir: ../docs/articles
 format:
   html:
     toc: true
-    number-sections: true
+    number-sections: false
     code-fold: true
     embed-resources: true
     theme: cosmo
@@ -24,15 +24,10 @@ altering their dependence, whilst a baseline physiological measurement may
 alter dependence without changing marginal variability. A single covariance
 formula cannot express these hypotheses independently.
 
-JoiNMe therefore separates covariance regression into:
+`joinme` therefore separates covariance regression into:
 
 1. a standard-deviation regression, declared by `formulaVCov$sd`; and
-2. an off-diagonal partial-correlation regression, declared by
-   `formulaVCov$corr`.
-
-The same declaration is consumed by `joinme()`, `joinme_mix()`,
-`simulate_joinme()`, and `simulate_joinme_mix()`. The four entry points share
-one parser, coefficient order, and covariance reconstruction.
+2. an off-diagonal unit-lower-triangular factor regression, declared by `formulaVCov$corr`.
 
 # Formula interface
 
@@ -57,23 +52,18 @@ formulaVCov = list(
 )
 ```
 
-Both named components must be present when a list is used. Random-effect bars
-and the longitudinal time variable are excluded because covariance predictors
-are evaluated once per subject. Formula intercept columns are removed: every
-covariance coordinate already has its own explicit intercept.
+Both named components must be present when a list is used. Random-effect and the longitudinal time variable are excluded because covariance predictors are evaluated once per subject. 
 
 # Statistical model
 
 Let $Q$ be the dimension of the marker-by-subject random-effect basis. For
-subject $i$, JoiNMe reconstructs
+subject $i$, `joinme` reconstructs
 
 $$
 L_i=\operatorname{diag}(\boldsymbol\sigma_i)K_i,
 $$
 
-where $\boldsymbol\sigma_i=(\sigma_{i1},\ldots,\sigma_{iQ})^\top$ contains
-marginal standard deviations and $K_i$ is a Cholesky correlation factor. The
-marker-by-subject effect for marker $d$ is
+where $\boldsymbol{\sigma}_i=(\sigma_{i1},\ldots,\sigma_{iQ})^\top$ contains marginal standard deviations and $K_i$ is a Cholesky correlation factor. The marker-by-subject effect for marker $d$ is
 
 $$
 \boldsymbol w_{id}=L_i\boldsymbol z_{w,id},
@@ -87,8 +77,7 @@ Let $\boldsymbol x_{sd,i}$ be the design row produced from `formulaVCov$sd`.
 For coordinate $r=1,\ldots,Q$,
 
 $$
-\eta^{sd}_{ir}
-=
+\eta^{sd}_{ir} =
 \alpha^{sd}_r
 +\boldsymbol x_{sd,i}^{\top}\boldsymbol\beta^{sd}_r
 +\lambda_{m(r)}z_{L,i,m(r)}.
@@ -109,34 +98,40 @@ Let $\boldsymbol x_{corr,i}$ be the independent design row produced from
 `formulaVCov$corr`. For row-major off-diagonal coordinate $h=(r,c)$, $c<r$,
 
 $$
-\eta^{corr}_{ih}
+\eta^{K}_{ih}
 =
-\alpha^{corr}_h
-+\boldsymbol x_{corr,i}^{\top}\boldsymbol\beta^{corr}_h
+\alpha^{K}_h
++\boldsymbol x_{corr,i}^{\top}\boldsymbol\beta^{K}_h
 +\lambda_{m(h)}z_{L,i,m(h)},
 \qquad
-a_{ih}=\tanh(\eta^{corr}_{ih}).
+p_{i,rc}=\tanh(\eta^{K}_{ih}),\ c<r.
 $$
 
-The $a_{ih}$ are row-wise partial correlations. They are assembled as
+These partial correlations form one row of the Cholesky correlation factor by
 
 $$
-K_{i,rc}
-=
-\left\{\prod_{j<c}\sqrt{1-a_{i,(r,j)}^2}\right\}a_{i,(r,c)},
+K_{i,rc}=p_{i,rc}\prod_{h<c}\sqrt{1-p_{i,rh}^2},\quad c<r,
 \qquad
-K_{i,rr}
-=
-\prod_{j<r}\sqrt{1-a_{i,(r,j)}^2}.
+K_{i,rr}=\prod_{h<r}\sqrt{1-p_{i,rh}^2}.
 $$
 
-This guarantees a valid correlation matrix for every covariate profile and
-posterior draw. The off-diagonal regression is absent when the nested
-marker-by-subject term uses `||` and requests a diagonal covariance.
+The upper triangle is zero and every row has norm one.
+
+The covariance matrix is then
+
+$$
+\Sigma_i=L_iL_i^{\top}
+=\operatorname{diag}(\boldsymbol\sigma_i)K_iK_i^{\top}\operatorname{diag}(\boldsymbol\sigma_i).
+$$
+
+This is the independent regression design: the SD model sets
+$\boldsymbol\sigma_i$, and the dependence model sets row-wise partial
+correlations. The off-diagonal regression is absent when the nested
+marker-by-subject term uses `||`, signalling an iid random effect structure.
 
 ## Meaning of the latent loading
 
-There is one non-negative scalar $\lambda_m$ for each packed covariance
+There is one non-negative scalar $\lambda_m$ for each covariance
 coordinate. Collectively, $\boldsymbol\lambda_L$ is a vector, not a dense
 matrix. Its action is
 
@@ -149,41 +144,30 @@ ordinary model, $\lambda_m^2$ is the conditional residual variance of that
 untransformed predictor. It is not itself a final standard deviation,
 correlation, or covariance.
 
-# Parameter order and priors
+# Priors
 
-The lower-triangular latent vector remains packed row by row:
-
-$$
-(1,1),(2,1),(2,2),(3,1),(3,2),(3,3),\ldots.
-$$
-
-This stable order is used by `z_L`, `lambda_L`, `class_type = "vcov"`, and
-covariance associations. The observed-covariate blocks have independent
-orders:
-
-- `vcov_sd`: all $Q$ intercepts, followed by the $Q\times K_{sd}$ slope
-  matrix in row-major order;
-- `vcov_corr`: all $Q(Q-1)/2$ intercepts in `(2,1), (3,1), (3,2), ...`
-  order, followed by the correlation slope matrix in row-major order.
-
-Different formula dimensions therefore create no unused or zero-padded
-coefficients. Priors are declared independently:
+Standard-deviation and correlation regressions can have independent priors:
 
 ```{r}
 covariance_priors <- jm_prior(
-  vcov_sd = prior_normal(mu = 0, scale = 1),
-  vcov_corr = prior_horseshoe(
-    global_scale = 0.25,
-    slab_df = 4,
-    slab_scale = 1
+  vcov = list(
+    sd = list(
+      intercept = prior_normal(mu = 0, scale = 1),
+      slope = prior_normal(mu = 0, scale = 0.5)
+    ),
+    corr = list(slope = prior_horseshoe(
+      global_scale = 0.25,
+      slab_df = 4,
+      slab_scale = 1
+    ))
   )
 )
 ```
 
 Normal, fixed-degrees-of-freedom Student-$t$, Laplace, and regularised
-horseshoe families are available. A scalar location or scale is repeated only
-after the formula dimensions are known; a vector must match its packed block
-exactly. The positive `lambda_L` loadings retain a half-Student-$t_6$ prior
+horseshoe families are available. A scalar location or scale applies across
+its coefficient block; a vector must match that block exactly. The positive
+`lambda_L` loadings retain a half-Student-$t_6$ prior
 because they describe unexplained heterogeneity rather than observed-
 covariate regression coefficients.
 
@@ -206,7 +190,7 @@ fitted <- joinme(
 
 `summary(fitted)` labels SD and correlation slopes separately using their own
 model-matrix column names. Dynamic prediction evaluates both formulae for the
-new subject and applies the same row-wise reconstruction.
+new subject and applies the same unit-lower-triangular factor reconstruction.
 
 The latent-progress entry point uses precisely the same covariance syntax:
 
@@ -226,7 +210,7 @@ mixture_fit <- joinme_mix(
 )
 ```
 
-The mixture acts on selected standardised `z_L` coordinates before the SD or
+The mixture acts on selected standardised covariance coordinates before the SD or
 correlation link. It does not form a Cartesian product of class allocations
 for the two regressions. `class_type = "corr"` selects off-diagonal
 coordinates; `class_type = "vcov"` may select diagonal and off-diagonal
@@ -243,57 +227,27 @@ simulation <- simulate_joinme(
     (1 + time + (1 + time | id) | marker),
   formulaEvent = survival::Surv(event_time, event) ~ treatment,
   formulaVCov = covariance_formula,
-  priors = covariance_priors,
-  re_params = list(
-    id = list(sd = c(0.6, 0.2), corr = diag(2)),
-    marker = list(sd = c(0.4, 0.15), corr = diag(2)),
-    id_marker_cov = list(
+  truth = jm_truth(
+    vcov = list(
       sd = list(
-        alpha = c(-0.2, -0.4),
-        beta = matrix(c(0.35, -0.10, 0.20, 0.05), nrow = 2),
-        lambda = c(0.25, 0.20)
+        intercept = c(-0.2, -0.4),
+        slope = c(0.35, 0.20, -0.10, 0.05),
+        latent = c(0.25, 0.20)
       ),
-      corr = list(
-        alpha = 0.15,
-        beta = matrix(-0.30, nrow = 1),
-        lambda = 0.20
-      ),
-      diag_link = "exp"
+      corr = list(intercept = 0.15, slope = -0.30, latent = 0.20)
+    ),
+    re_params = list(
+      id = list(sd = c(0.6, 0.2), corr = diag(2)),
+      marker = list(sd = c(0.4, 0.15), corr = diag(2))
     )
-  )
+  ),
+  vcov_diag_link = "exp"
 )
 
-# Every fitting argument, including data, formulae and priors, is retained.
+# Every fitting argument, including data, formulae and fitting priors, is retained.
 recovery_fit <- do.call(
   joinme,
   c(simulation$truth$recovery$arguments, list(seed = 401))
 )
 ```
 
-The generating values are recorded separately in
-`truth$id_marker_cov_effective$sd` and
-`truth$id_marker_cov_effective$corr`. Each record contains `alpha`, `beta`,
-`lambda`, `z`, and its formula. `simulate_joinme_mix()` uses the same ordinary
-generator and adds only the class distribution; its recovery record names
-`joinme_mix` as the paired fitting entry point.
-
-For automated coefficient recovery, the same values also appear under their
-fitted names: `truth$stan_fit$alpha_L`, `beta_L_sd`, `beta_L_corr`, `lambda_L`,
-and `z_L`. Thus a study can join generating values to posterior variable names
-without reconstructing the lower-triangle or formula-specific packs itself.
-
-# Recovery assessment
-
-Recovery studies should compare like with like:
-
-1. compare SD intercepts and slopes with the `SD[id:marker]` summary rows;
-2. compare correlation intercepts and slopes with `K[id:marker]` rows;
-3. compare `lambda_L` on the unlinked predictor scale;
-4. compare reconstructed standard deviations or correlations only after
-   applying the configured link or partial-correlation recursion; and
-5. for mixture fits, condition comparisons on a resolved class-labelling rule.
-
-Exact numerical equality is expected between simulation and fitting design
-matrices and parameter order. Posterior estimates need not equal generating
-values in a finite sample; that is an inferential property rather than an
-interface translation discrepancy.

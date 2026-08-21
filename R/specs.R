@@ -329,8 +329,8 @@ make_prior_dist <- function(
 #'   Accepted stochastic values are `"student_t"`, `"normal"`, `"laplace"`, and
 #'   `"horseshoe"`. Values `"constant"` and `"none"` are synonymous: the
 #'   offset is then used exactly, with no fitted location or departure. The
-#'   family name `"student_t"` fits one degrees-of-freedom
-#'   value above two per active weight set under a shifted `Gamma(2, 0.1)`
+#'   family name `"student_t"` fits a single degrees-of-freedom
+#'   value above two shared by every active weight set under a shifted `Gamma(2, 0.1)`
 #'   prior. `prior_*()` objects are not accepted for `family` because
 #'   marker-weight departures retain location zero and ordinary scale one.
 #'   `marker_weights` itself must be a named list; bare

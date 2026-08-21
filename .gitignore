@@ -66,9 +66,10 @@ docs
 notes/
 notes/*
 notes/docs/*
-tests/*
+tests/
 tests/local/*
 
 # rstan crap
 src/
 sim/
+

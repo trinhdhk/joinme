@@ -117,8 +117,8 @@ softplus <- function(x) {
 #' @param prior A checked `joinme_prior_spec` whose location and ordinary scale
 #'   have already been fixed at zero and one.
 #' @param n_sets Number of marker-weight sets. The family name `"student_t"`
-#'   gives every set `2 + Gamma(2, 0.1)` degrees of freedom, exactly as in
-#'   Stan.
+#'   draws one `2 + Gamma(2, 0.1)` degrees-of-freedom value shared by every
+#'   set, exactly as in Stan.
 #'
 #' @return A named list containing `departure`, `raw`, and any horseshoe scales.
 #' @keywords internal
@@ -143,18 +143,13 @@ softplus <- function(x) {
   }
 
   if (identical(prior$family, "student_t")) {
-    markers_per_set <- number_departures %/% number_sets # marker count contributing information to each set-specific tail parameter
-    fitted_df <- 2 + stats::rgamma(number_sets, shape = 2, rate = 0.1) # shifted-Gamma law used for the fitted Stan distributional parameter
-    departure_matrix <- matrix(0, nrow = number_sets, ncol = markers_per_set) # set-by-marker departures aligned with effective-weight construction
-    for (set_index in seq_len(number_sets)) {
-      departure_matrix[set_index, ] <- stats::rt(markers_per_set, df = fitted_df[[set_index]])
-    }
-    departure <- as.numeric(t(departure_matrix)) # set-major order matching contiguous Stan segments for each marker-weight set
+    fitted_df <- 2 + stats::rgamma(1L, shape = 2, rate = 0.1) # shifted-Gamma law for the single tail parameter shared by all marker-weight sets in Stan
+    departure <- stats::rt(number_departures, df = fitted_df) # set-major departure vector whose entries all use the same realised degrees of freedom
     return(list(
       departure = departure,
       raw = departure,
       df = fitted_df,
-      df_was_fitted = rep(TRUE, number_sets)
+      df_was_fitted = TRUE
     ))
   }
   if (identical(prior$family, "normal")) {
@@ -938,7 +933,7 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   random simulation parameters. That field accepts a family name such as
 #'   `"student_t"`, `"normal"`, `"laplace"`, or `"horseshoe"`. The names
 #'   `"constant"` and `"none"` use the offset without a random departure. The
-#'   family name `"student_t"` draws one value per active set as
+#'   family name `"student_t"` draws one value shared by all active sets as
 #'   `2 + Gamma(2, 0.1)`, matching fitting. Departure location and ordinary scale remain zero and
 #'   one. All declarations and their realised population coefficients are
 #'   retained in the realised simulation truth.

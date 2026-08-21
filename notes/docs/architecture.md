@@ -540,14 +540,14 @@ hazard; no secondary association-scale parameter changes its declared scale.
 Marker effects and marker-weight departures are standardised blocks. Their
 location and ordinary scale are fixed to zero and one in R, although their
 families may differ. Student-t marker-weight degrees of freedom are learned as
-distributional parameters only when the family is named as `"student_t"`. For active weight set (s),
+a single distributional parameter only when the family is named as `"student_t"`. Across all active weight sets,
 
 \[
-\nu_s=2+u_s,\qquad u_s\sim\operatorname{Gamma}(2,0.1),
+\nu=2+u,\qquad u\sim\operatorname{Gamma}(2,0.1),
 \]
 
-where Gamma arguments are shape and rate. All markers in a set share its
-degrees of freedom and therefore jointly inform it. Only the family name
+where Gamma arguments are shape and rate. All markers in all weight sets share
+this degrees-of-freedom value and therefore jointly inform it. Only the family name
 `"student_t"` selects this fitted form. Marker covariance factors carry the scale of marker random
 effects. Marker-weight departures instead enter directly on their fixed
 unit-scale family coordinate, and the association slope scales their weighted

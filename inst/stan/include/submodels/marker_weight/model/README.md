@@ -5,8 +5,8 @@
 ## Statistical purpose
 
 Assigns the chosen mean-zero unit-scale distribution to marker departures and
-any family-specific auxiliaries. If the family name `"student_t"` is used, each set uses
-`nu_s = 2 + u_s`, with `u_s ~ Gamma(2, 0.1)` in shape--rate form. If `df` is
+any family-specific auxiliaries. If the family name `"student_t"` is used, all
+sets share `nu = 2 + u`, with `u ~ Gamma(2, 0.1)` in shape--rate form. If `df` is
 supplied through `prior_student_t()`, that value is fixed and no
 degrees-of-freedom parameter is sampled.
 
