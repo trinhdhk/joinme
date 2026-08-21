@@ -60,7 +60,7 @@ utils::globalVariables(c(
 }
 
 .oucru_logo_ascii <- function(){
-  readLines(system.file('etc/oucru.txt', package = 'joinme')) |>
+  readLines(system.file('etc/oucru', package = 'joinme')) |>
     paste(collapse = "\n") |>
     cat()
 }
