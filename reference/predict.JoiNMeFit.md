@@ -24,7 +24,7 @@ posterior predictive draws (includes observation noise).
 predict(
   object,
   newdataLong,
-  newdataEvent,
+  newdataEvent = NULL,
   process = c("longitudinal", "event"),
   pred_type = c("per_marker_id", "marginal_marker", "marginal_id", "marker_subject",
     "subject_marker"),
@@ -35,18 +35,19 @@ predict(
   tmax = NULL,
   ci_levels = c(0.5, 0.95),
   control = list(),
+  reuse_fitted_re = FALSE,
   seed = .Random.seed[[1]],
   ...
 )
 
 # S3 method for class 'JoiNMeFit'
-posterior_linpred(object, ...)
+posterior_linpred(object, reuse_fitted_re = FALSE, ...)
 
 # S3 method for class 'JoiNMeFit'
-posterior_epred(object, ...)
+posterior_epred(object, reuse_fitted_re = FALSE, ...)
 
 # S3 method for class 'JoiNMeFit'
-posterior_predict(object, ...)
+posterior_predict(object, reuse_fitted_re = FALSE, ...)
 ```
 
 ## Arguments
@@ -68,7 +69,9 @@ posterior_predict(object, ...)
   rows (`Surv(start, stop, status)` layout). Left- and interval-censored
   survival encodings (`type = "left"`, `type = "interval2"`) are
   accepted. When interval rows are supplied, dynamic prediction uses the
-  latest row per subject for event-side covariates.
+  latest row per subject for event-side covariates. This argument may be
+  omitted for a longitudinal-only fit; neutral event rows are then
+  constructed internally.
 
 - process:
 
@@ -187,6 +190,15 @@ posterior_predict(object, ...)
     retries that subject with a narrower random init range
     (`init = 0.1`).
 
+- reuse_fitted_re:
+
+  Logical. If `TRUE`, every identifier in the supplied data must have
+  occurred during fitting. Prediction reuses that subject's paired
+  posterior random effects and covariance draws, without estimating a
+  second set of random effects. The default, `FALSE`, conditions newly
+  sampled effects on the supplied longitudinal history for dynamic
+  prediction.
+
 - seed:
 
   Integer. Random seed for reproducibility of random effect sampling.
@@ -229,7 +241,9 @@ A list with two components:
   `longitudinal_fitted`, `survival`, `cumhaz`) and reconstructed
   subject-level random effects (`random_effects_id`,
   `random_effects_marker_id`, including marker-by-id covariance draws
-  when id-dependent covariance is active).
+  when id-dependent covariance is active). Predictions from
+  [`joinme_mix()`](https://trinhdhk.github.io/joinme/reference/joinme_mix.md)
+  additionally retain conditional allocation draws in `posterior_class`.
 
 A `JoiNMeDynPred` object with `metadata$scale = "linpred"` and
 `metadata$scales = "linpred"`.
@@ -246,8 +260,10 @@ A `JoiNMeDynPred` object with `metadata$scale = "predict"` and
 estimates subject-specific future trajectories and survival conditional
 on the longitudinal histories supplied in `newdataLong`. Use
 [`conditional_effects.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/conditional_effects.JoiNMeFit.md)
-with `make_conditions()` when the target is a population-level
-comparison across named covariate profiles.
+with
+[`make_conditions()`](https://paulbuerkner.com/brms/reference/make_conditions.html)
+when the target is a population-level comparison across named covariate
+profiles.
 
 The function uses a Bayesian approach in two draw layers:
 
@@ -269,7 +285,7 @@ The function uses a Bayesian approach in two draw layers:
 Dynamic prediction passes the fitted, draw-specific transform ordinates
 to Stan. Ordered piecewise-linear associations therefore use the same
 posterior curve as the fitted event model and never reconstruct a curve
-from legacy user-supplied `y` values.
+from earlier user-supplied `y` values.
 
 The baseline-hazard basis is likewise inherited from fitting. Prediction
 reuses the retained B-spline or natural-spline object, or the retained

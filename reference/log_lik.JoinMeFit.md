@@ -40,7 +40,7 @@ A matrix
 
 The stored pointwise likelihood is evaluated by Stan with the full
 fitted association contribution. This includes the posterior ordinates
-of every ordered piecewise-linear transform; legacy `y` values are not
+of every ordered piecewise-linear transform; earlier `y` values are not
 used.
 
 ## See also

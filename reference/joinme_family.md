@@ -1,8 +1,9 @@
 # JoiNMe longitudinal family specification
 
-Creates a family specification object for `joinme(..., families = ...)`
-with an optional custom longitudinal link (or inverse-link) per marker
-family.
+Creates a marker-specific family specification for
+`joinme(..., families = ...)`. A specification may define a custom
+longitudinal link (or inverse link) and, for the skew-Laplace family, a
+fixed quantile parameter.
 
 Character values supplied through `link` name the *forward* link
 \\g(\mu)\\. Formula values supplied through `link` are inverted
@@ -36,9 +37,9 @@ The named forward links and their inverse links are:
 ## Usage
 
 ``` r
-joinme_family(name, link = NULL, inv_link = NULL)
+joinme_family(name, link = NULL, inv_link = NULL, tau = NULL)
 
-jm_family(name, link = NULL, inv_link = NULL)
+jm_family(name, link = NULL, inv_link = NULL, tau = NULL)
 ```
 
 ## Arguments
@@ -58,10 +59,17 @@ jm_family(name, link = NULL, inv_link = NULL)
 - inv_link:
 
   Optional one-sided formula `~ ...` or expression string using `x`
-  (e.g. `~ exp(x)`, `~ inv_logit(x)`, or `~ Phi(x)`). `Phi` is the
-  standard normal CDF and is the inverse link for a probit model. In
-  contrast, `inv_Phi`, `qnorm`, and `probit` denote the standard normal
-  quantile function.
+  (e.g. `~ exp(x)`, `~ inv_logit(x)`, or `~ Phi(x)`).
+
+- tau:
+
+  Optional fixed quantile/asymmetry parameter for `"skew_laplace"` or
+  `"skew_double_exponential"`. It must be a finite scalar strictly
+  between zero and one. Under Stan's quantile parameterisation,
+  `tau = 0.5` is the symmetric Laplace distribution. Values zero and one
+  are excluded because they yield a degenerate, non-normalisable
+  limiting distribution. When omitted, `tau` is estimated from a
+  distributional regression or as a family-level parameter.
 
 ## Value
 
@@ -90,6 +98,9 @@ jm_family("poisson", link = "log")
 #> $inv_link$n_const
 #> [1] 0
 #> 
+#> 
+#> $tau
+#> [1] NA
 #> 
 #> attr(,"class")
 #> [1] "JoiNMe_family_spec"
@@ -129,6 +140,9 @@ jm_family("poisson", link = ~ log(x))
 #> [1] 0
 #> 
 #> 
+#> $tau
+#> [1] NA
+#> 
 #> attr(,"class")
 #> [1] "JoiNMe_family_spec"
 jm_family("bernoulli", inv_link = ~ inv_logit(x))
@@ -166,6 +180,9 @@ jm_family("bernoulli", inv_link = ~ inv_logit(x))
 #> $inv_link$n_iota_slope
 #> [1] 0
 #> 
+#> 
+#> $tau
+#> [1] NA
 #> 
 #> attr(,"class")
 #> [1] "JoiNMe_family_spec"
@@ -205,6 +222,9 @@ jm_family("bernoulli", link = ~ inv_Phi(x))
 #> [1] 0
 #> 
 #> 
+#> $tau
+#> [1] NA
+#> 
 #> attr(,"class")
 #> [1] "JoiNMe_family_spec"
 jm_family("bernoulli", inv_link = ~ Phi(x))
@@ -242,6 +262,35 @@ jm_family("bernoulli", inv_link = ~ Phi(x))
 #> $inv_link$n_iota_slope
 #> [1] 0
 #> 
+#> 
+#> $tau
+#> [1] NA
+#> 
+#> attr(,"class")
+#> [1] "JoiNMe_family_spec"
+jm_family("skew_laplace", tau = 0.8)
+#> $family
+#> [1] "skew_double_exponential"
+#> 
+#> $link
+#> [1] "identity"
+#> 
+#> $inv_link
+#> $inv_link$bytecode
+#> [1] 0
+#> 
+#> $inv_link$const_data
+#> numeric(0)
+#> 
+#> $inv_link$n_ops
+#> [1] 1
+#> 
+#> $inv_link$n_const
+#> [1] 0
+#> 
+#> 
+#> $tau
+#> [1] 0.8
 #> 
 #> attr(,"class")
 #> [1] "JoiNMe_family_spec"

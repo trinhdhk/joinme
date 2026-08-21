@@ -1,24 +1,20 @@
 # JoiNMe: Association Construction
 
-## 1 Purpose
+## Purpose
 
-This vignette focuses on **association term construction**, including
-transformation selection, interpretability, and practical trade-offs.
-
-It also explains how those association terms propagate into the public
-summary, draw-extraction, and plotting APIs so the same labels are used
-consistently in tables, MCMC plots, and fitted association curves.
+This vignette provides a brief explanation of **association term
+construction**, including transformation selection and interpretability.
 
 Association transforms apply to all supported longitudinal families
 (including double_exponential, skew_double_exponential, beta, and
 cumulative_logit) and to competing-risk survival models.
 
-### 1.1 Step-by-step: how association summaries are constructed
+### Association term decomposition in Joint Nested Mixed-effects models
 
 At the event time and at the default 15 Gauss-Kronrod nodes used for
-integration (configurable), the longitudinal linear predictor is
-decomposed into a mean component and a marker component. From these
-components, `JoiNMe` constructs:
+integration, the longitudinal linear predictor is decomposed into a mean
+component and a markercomponent. From these components, `joinme` (the
+package) constructs:
 
 - **CV_total**: total current value (mean + marker components).
 - **CV_mean**: current value of the mean component only.
@@ -27,47 +23,15 @@ components, `JoiNMe` constructs:
   difference and rescaled to the original time units.
 - **CS_mean**: slope of the mean component.
 - **CS_marker**: slope of the marker component.
-- **CORR**: a subject-specific variance summary of the marker-by-id
-  covariance structure, constant across time.
-- **VCOV**: a subject-specific lower-triangular summary of the
-  marker-by-id Cholesky factor `L`, also constant across time. The
-  channel uses the entries of `L` directly rather than the reconstructed
-  covariance matrix `L L'`.
+- **Corr**: a subject-specific lower-triangular matrix of the
+  correlation of the marker-by-id covariance structure, constant across
+  time.
+- **vcov**: a subject-specific lower-triangular matrix of the
+  marker-by-id Cholesky factor `L`, also constant across time.
 
-Each component can be included or excluded using the `assoc` argument.
-If `assoc` does not include a component, the corresponding coefficient
-is prior-only and does not enter the likelihood.
+## Marker-weighted CV and CS
 
-#### 1.1.1 Scale recovery and exponentiation in summaries
-
-`JoiNMe` reports association and survival-process coefficients on the
-linear predictor scale first. Any internal time normalisation used by
-the Stan model is recovered on that linear scale before exponentiation.
-
-For multiplicative interpretations:
-
-- `summary(fit)$tables$baseline_hazard` reports baseline-hazard
-  coefficients on the log scale and hazard-ratio scale. Only the
-  intercept is adjusted by `-log(tmax)`; non-intercept basis
-  coefficients are unchanged.
-- `summary(fit)$tables$survival_process` reports baseline covariate
-  coefficients and `Hazard.Ratio` interval columns from exponentiated
-  log-scale summaries.
-- `summary(fit)$tables$assoc` reports association coefficients on their
-  native linear scale (including marker-weight terms when active).
-
-The intercept-only baseline adjustment follows the proportional-hazards
-identity that internal time scaling contributes a constant offset on the
-log-hazard scale. Therefore only the intercept is shifted;
-spline/formula basis terms are kept as fitted.
-
-The CORR and VCOV components require marker-by-id random effects. If the
-marker block does not include an inner `( ... | id )` term, then
-`Q_idm = 0` and these covariance-style associations are not available.
-
-## 2 Marker-weighted CV and CS
-
-When multiple biomarkers are modelled, `JoiNMe` constructs
+When multiple biomarkers are modelled, `joinme` constructs
 marker-average association components using weights \omega_d (one per
 marker). For marker-aggregated terms (`cv_total`, `cv_marker`,
 `cs_total`, `cs_marker`), transforms are applied at the marker level
@@ -77,34 +41,63 @@ are nonlinear.
 For example, with marker-specific total current values CV\_{id}(t) and
 transform f\_{cv}:
 
-ext{cv\\total}(t) = \frac{1}{D}\sum\_{d=1}^{D} \omega_d\\
-f\_{cv}\\\left(CV\_{id}(t)\right),
+\frac{1}{D}\sum\_{d=1}^{D} \omega_d\\ f\_{cv}\\\left(CV\_{id}(t)\right),
 
 which differs from f\_{cv}(\frac{1}{D}\sum_d \omega_d CV\_{id}(t))
 unless f\_{cv} is linear.
 
 For slopes, let CS\_{id}(t) be a marker-specific slope feature and
-f\_{cs} the configured CS transform. Then
+f\_{cs} the vonfigured CS transform. Then the association is
 
-ext{cs\\total}(t) = \frac{1}{D}\sum\_{d=1}^{D} \omega_d\\
-f\_{cs}\\\left(CS\_{id}(t)\right),
+\frac{1}{D}\sum\_{d=1}^{D} \omega_d\\ f\_{cs}\\\left(CS\_{id}(t)\right),
 
 and analogously for `cs_marker`. This is intentionally not equal to
 f\_{cs}(\frac{1}{D}\sum_d \omega_d CS\_{id}(t)) unless f\_{cs} is
 linear.
 
-In practice, provide fixed weights with `marker_weights` and
-`fixed_marker_weights = TRUE`, or set `fixed_marker_weights = FALSE` to
-use signed perturbations around base weights, \omega_d =
-\omega_d^{(0)} + z_d. The `shrinkage` switch controls the standardized
-latent family in both fitting and simulation: `0` is Student-t_6(0,1),
-`1` is Laplace(0,1), and `2` is Normal(0,1). With estimated weights and
-no supplied base, \omega^{(0)}=0. The simulator stores the base, latent,
-and effective truths in `truth$marker_weights_base`,
-`truth$marker_weights_latent`, and `truth$marker_weights`; the last of
-these is the effective weight used to generate survival times.
+In practice, place the entire declaration in
+`jm_prior(marker_weights = ...)`. Use `family = "constant"` or `"none"`
+for fixed weights, or a stochastic family to fit a hierarchical
+marker-weight decomposition. For marker (d) in weight set (s),
 
-### 2.1 Plotting fitted association curves
+\omega\_{sd}=\omega^{(0)}\_{sd}+\mu\_{\omega,s}+z\_{sd}.
+
+Here \omega^{(0)}\_{sd} is the offset in `marker_weights$offset`,
+\mu\_{\omega,s} is a fitted common location, and z\_{sd} is a marker
+departure drawn directly from the selected centred unit-scale family.
+
+Every marker attached to set (s) contributes likelihood information
+about \mu\_{\omega,s}, so the common location is the marker-weight
+analogue of a population intercept. The common location uses
+`jm_prior(marker_weights = list(intercept = ...))`. The departures use
+`marker_weights$family`; their location and scale are fixed at zero and
+one.
+
+A shared weight structure has one (\_{}) and one departure vector. With
+`marker_weights$shared = FALSE`, every active weighted association term
+has its own mean and departures.
+
+With estimated weights and no supplied base, (^{(0)}=0). In
+[`simulate_joinme()`](https://trinhdhk.github.io/joinme/reference/simulate_joinme.md)
+and
+[`simulate_joinme_mix()`](https://trinhdhk.github.io/joinme/reference/simulate_joinme_mix.md),
+a numeric `truth$marker_weights$intercept` supplies the true (\_{,s}); a
+`prior_*()` declaration inside
+[`jm_truth()`](https://trinhdhk.github.io/joinme/reference/joinme_truth.md)
+draws it once for each fitted set and then holds it fixed. The simulator
+stores the base, common mean, marker-specific departure, and effective
+truths in `truth$marker_weights_offset`, `truth$marker_weight_mean`,
+`truth$marker_weights_latent`, and `truth$marker_weights`. The final
+quantity is the effective weight used to generate survival times. The
+recovery call does not pass the true common mean to fitting, because it
+is an estimand.
+
+In the log hazard, this feature is multiplied by the association slope
+(declared through `assoc$slope`). The `iota` intercept and slope belong
+to an optional affine transformation inside `tf()`; they are not the
+association multiplier.
+
+### Plotting fitted association curves
 
 Code
 
@@ -113,37 +106,37 @@ Code
 association_plot(fit)
 ```
 
-### 2.2 Posterior association extraction and covariance-style labels
+### Posterior association extraction and covariance-style labels
 
 Use `posterior_assoc(fit, summary = TRUE)` (or
 `assoc(fit, summary = TRUE)`) to extract association-specific posterior
 summaries without requiring the full model summary. Use
 `summary = FALSE` to obtain posterior draws per association term.
 
-### 2.3 Renamed posterior draws for association terms
+### Renamed posterior draws for association terms
 
 Association terms can be extracted directly on the reporting scale with
-[`draws()`](https://trinhdhk.github.io/joinme/reference/draws.md). The
-canonical posterior variables are `alpha_cv_total`, `alpha_cs_total`,
-`alpha_cv_mean`, `alpha_cs_mean`, `alpha_corr[...]`, and
-`alpha_vcov[...]`. Each is the coefficient actually used in the event
-hazard, which is also the scale reported by
+[`posterior_draws()`](https://trinhdhk.github.io/joinme/reference/posterior_draws.md).
+The canonical posterior variables are `alpha_cv_total`,
+`alpha_cs_total`, `alpha_cv_mean`, `alpha_cs_mean`, `alpha_corr[...]`,
+and `alpha_vcov[...]`. Each is the coefficient actually used in the
+event hazard, which is also the scale reported by
 [`summary()`](https://rdrr.io/r/base/summary.html) and used by
-prediction and plotting methods.
+prediction andplotting methods.
 
 Code
 
 ``` r
 
-# All association terms with reporting-friendly names
-assoc_draws <- draws(fit, variables = "^alpha_", regex = TRUE, format = "draws_df")
+# Extracting association terms
+assoc_draws <- posterior_draws(fit, variables = "^alpha_", regex = TRUE, format = "draws_df")
 head(assoc_draws)
 
 # Bayesplot visualisation with the same labels used by summary(fit)
 mcmc_plot(fit, variable = "alpha_cv_total", type = "dens_overlay")
 ```
 
-### 2.4 Conditional effects in the two joint-model processes
+### Conditional effects in the two joint-model processes
 
 Conditional effects are distinct from subject-specific dynamic
 prediction.
@@ -187,51 +180,38 @@ head(ce$event[[1]])
 plot(ce, ask = FALSE)
 ```
 
-## 3 Association coefficients and naming
+## Association coefficients and naming
 
-Internally, association coefficients are denoted with the \alpha prefix
-(e.g., `alpha_cv_total`). This follows joint-model conventions and
-avoids confusion with the linear predictor \eta used throughout the
-longitudinal and survival submodels. Total, mean, and marker
-associations use a positive non-centred parameterisation \alpha =
-z\_{\alpha} \cdot sd\_{\alpha} for stable sampling.
+Association coefficients are denoted by \alpha. This follows joint-model
+conventions and avoids confusion with the linear predictor \eta. Total,
+mean, marker, correlation, and covariance associations use the slope
+prior declared by `jm_prior(assoc = list(slope = ...))`. Its location
+and scale describe the effective coefficient entering the log hazard;
+there is no additional random association-scale multiplier.
+Marker-weight sign conventions are applied after this prior
+transformation where required for identification.
 
-When an association component is not selected in `assoc`, its
-coefficient is prior-only and does not enter the likelihood. Summaries
-only report active components to keep interpretation focused on the
-fitted association structure.
+Summaries report the selected association components so that
+interpretation remains focused on the fitted association structure.
 
-## 4 Transform modes
+## Transform modes
 
 `joinme` supports the following transformation families for association
 features:
 
 - **Identity** (`type = "identity"`): no transformation.
-- **Functional** (`type = "functional"`): a user-defined expression
-  converted into a fixed bytecode program.
+- **Functional** (`type = "functional"`): a user-defined mathematical
+  expression.
 - **Monotone I-spline** (`type = "ispline"` or `"ispline_penalised"`): a
   smooth monotone mapping.
 - **Bounded-domain monotone I-spline** (`type = "ispline_expit"` or
   `"ispline_expit_penalised"`): the same monotone spline machinery, but
   applied to `plogis(x)` rather than directly to `x`.
 - **Ordered piecewise linear** (`type = "pwlin"`): posterior
-  interpolation across fixed knots with monotone knot ordinates
-  estimated in Stan.
+  interpolation across fixed knots with estimated monotone knot
+  ordinates.
 
-Interpretation note for recovery experiments:
-
-- If you use a fixed spline (`type = "ispline"` or an expit variant with
-  explicit `coeff`), the association coefficient is interpretable on
-  that fixed transformed scale and can be checked directly in
-  simulate-fit recovery tests.
-- If you use a jointly estimated penalised spline (`*_penalised`), the
-  transform shape and the association coefficient are learned together.
-  The fitted alpha is still meaningful inside the model, but coefficient
-  recovery is typically weaker than in the fixed-transform case because
-  the data must learn both the transformed scale and the hazard weight
-  simultaneously.
-
-### 4.1 Default values and minimal parameterisations
+### Default values and minimal parameterisations
 
 - **Identity**:
   - Syntax: `list(type = "identity")`
@@ -250,8 +230,8 @@ Interpretation note for recovery experiments:
   - Syntax:
     `list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), n_knots = 6, degree = 3, lambda = 1)`
   - Defaults: `n_knots = 6`, `degree = 3`, `lambda = 1`.
-  - If `knots` are omitted in Stan-estimated mode, they are derived from
-    `x` quantiles.
+  - If `knots` are omitted when the curve is estimated, they are derived
+    from `x` quantiles.
 - **Expit-based penalised I-spline**:
   - Syntax:
     `list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), n_knots = 6, degree = 3, lambda = 1)`
@@ -263,13 +243,14 @@ Interpretation note for recovery experiments:
 - **Ordered piecewise linear**:
   - Syntax:
     `list(type = "pwlin", knots = c(-2, -1, 0, 1, 2), direction = "increasing")`.
-  - Required field: `knots` (aliases: `cutpoints` and legacy `x`).
+  - Required field: `knots` (aliases: `cutpoints` and the earlier `x`).
   - Default: `direction = "increasing"`; use `"decreasing"` for a
-    falling transform.
+    falling transform. Note that this is not important from the
+    perspective of modelling.
   - An optional non-negative `lambda` penalises second differences of
     the ordered knot ordinates; it defaults to zero.
 
-## 5 Functional Transform
+## Functional Transform
 
 Code
 
@@ -307,7 +288,7 @@ transforms <- list(
 )
 ```
 
-## 6 Monotone I-Spline
+## Monotone I-Spline
 
 For `type = "ispline"`, we specify the transform shape following
 [`splines2::iSpline()`](https://wwenjie.org/splines2/reference/iSpline.html)
@@ -355,17 +336,15 @@ transforms <- list(
 )
 ```
 
-## 7 Penalised Monotone I-Spline
+## Penalised Monotone I-Spline
 
-For `type = "ispline_penalised"`, there are now two supported modes:
+For `type = "ispline_penalised"`, there are two supported modes:
 
-- **Simulation mode**: provide `x` and `y`, and the package first learns
-  a monotone spline in R before passing fixed coefficients into Stan.
-  This is meant for the simulation but can be used in model fitting as a
-  mean to provide some prior the association curve.
-- **Modelling mode**: omit `y`, keep `knots` (or `n_knots`) plus
-  `lambda`, and Stan estimates the monotone spline coefficients jointly
-  with the rest of the model.
+- **Simulation mode**: provide `x` and `y` to define a fixed monotone
+  curve.
+- **Modelling mode**: omit `y`, retain `knots` (or `n_knots`) plus
+  `lambda`, and estimate the monotone spline jointly with the rest of
+  the model.
 
 Meaning of the arguments:
 
@@ -422,37 +401,21 @@ transforms <- list(
 )
 ```
 
-## 8 Ordered Piecewise-Linear Association
+## Ordered Piecewise-Linear Association
 
 For model fitting, the raw association feature is divided by fixed
 knots, but the association values at those knots are not supplied as an
-outcome-like `y` vector. With (K) knots, Stan estimates a (K-1) simplex
-(). The relative transform ordinate at knot (j) is
+outcome-like `y` vector. With K knots, the model estimates a K-1 simplex
+\boldsymbol{\zeta}. The relative transform ordinate at knot j is
 
 f_j = s \sum\_{r=1}^{j-1} \zeta_r, \qquad s = \begin{cases} 1, &
 \text{increasing}, \\ -1, & \text{decreasing}. \end{cases}
 
-Thus (f_1=0), (f_K=s), and every adjacent difference has the requested
-sign. Linear interpolation is used between knots and the boundary
-ordinates are held constant outside the knot range. The survival
-contribution is (f(x)): () estimates the total log-hazard span and the
-simplex estimates how that span is distributed across intervals. This
-follows the monotonic-effect separation of magnitude and simplex shape
-described in the [brms monotonic-effects
-vignette](https://paulbuerkner.com/brms/articles/brms_monotonic.html)
-and implemented by
-[`brms::mo()`](https://paulbuerkner.com/brms/reference/mo.html).
-
-The `direction` argument orders the standardised transform (f). As in
-the `brms` construction, () remains a signed magnitude parameter, so the
-direction of the realised log-hazard contribution (f(x)) also depends on
-the posterior sign of ().
-
-The zero first ordinate is an identifiability constraint. A common free
-intercept added to every ordinate cannot be distinguished from the log
-baseline hazard, so the reported products (f_j) are relative log-hazard
-contributions. `summary(fit)$tables$piecewise_ordinates` reports their
-posterior contribution and corresponding hazard ratios at every knot.
+Thus f_1=0, f_K=s, and every adjacent difference has the requested sign.
+Linear interpolation is used between knots and the boundary ordinates
+are held constant outside the knot range. The survival contribution is
+\alpha f(x): \alpha estimates the total log-hazard span and the simplex
+estimates how that span is distributed across intervals.
 
 Code
 
@@ -473,15 +436,7 @@ transforms <- list(
 )
 ```
 
-The former fitted declaration `x = ..., y = ...` remains readable for
-backwards compatibility. Its `x` values become the knots and `y` is used
-only to infer direction when direction is omitted; it does not fix or
-train the fitted association. In contrast,
-[`simulate_joinme()`](https://trinhdhk.github.io/joinme/reference/simulate_joinme.md)
-deliberately keeps the old fixed `x`/`y` interpolation so established
-simulation scenarios are unchanged.
-
-## 9 Association Diagram
+## Association Diagram
 
 Code
 
@@ -497,7 +452,7 @@ graph TD
 
 Association components mapped into the survival predictor.
 
-## 10 Hierarchical Covariance Regression
+## Hierarchical Covariance Regression
 
 Code
 
@@ -512,7 +467,7 @@ graph TD
 
 Covariance regression structure for marker-by-id effects.
 
-## 11 Fit with Custom Association
+## Fit with Custom Association
 
 Code
 

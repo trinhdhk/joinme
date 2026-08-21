@@ -1,20 +1,21 @@
 # The JoiNMe Framework: Methodology and Statistical Theory
 
-## 1 Abstract
+## Abstract
 
 The `joinme` package provides a Bayesian framework for joint analysis of
 multivariate longitudinal biomarkers and time-to-event outcomes. The
 longitudinal process is expressed through a layered random-effects
 decomposition that separates subject-level signals, marker-level
-deviations, and marker-by-subject departures. The survival component
-links risk to summaries of the longitudinal trajectories, most notably
-the current value (CV), current slope (CS), and a variance summary of
-the marker-by-subject covariance structure through correlation-style
-(`corr`) and covariance-style (`vcov`) channels. Association summaries
-can be transformed by user-defined monotone splines, ordered
-piecewise-linear rules, or functional bytecode expressions. Estimation
-is performed with Hamiltonian Monte Carlo in Stan, and the main
-likelihood is evaluated with reduce_sum for within-chain parallelism.
+deviations, and marker-by-subject departures.
+
+The survival component links risk to summaries of the longitudinal
+trajectories, most notably the current value (CV), current slope (CS),
+and a variance summary of the marker-by-subject covariance structure
+through correlation-style (`corr`) and covariance-style (`vcov`)
+channels. Association summaries can be transformed by user-defined
+mathematical expressions, monotone splines, or ordered piecewise-linear
+rules. Bayesian estimation propagates uncertainty jointly across the
+longitudinal, event and association components.
 
 In the public summaries and plotting output, covariance-style
 associations are reported on the effective hazard scale used by the
@@ -28,7 +29,7 @@ bounded-domain variant keeps the spline input inside (0, 1), which often
 yields more stable knot placement and smoother optimisation when raw
 association features are wide or heavy-tailed.
 
-## 2 Introduction
+## Introduction
 
 Joint modelling of longitudinal and survival data is a standard approach
 for analysing time-dependent covariates measured with error \[1\]. In
@@ -39,7 +40,7 @@ dropout). Standard approaches often face two limitations:
 
 1.  **Computational Scalability**: As the number of markers D increases,
     the dimension of the random effects vector grows linearly or
-    quadratically, creating a “curse of dimensionality” for numerical
+    quadratically, creating a identifiablity issue for numerical
     integration or MCMC sampling.
 2.  **Rigidity**: Models often assume Gaussian error terms and linear
     associations, limiting their applicability to skewed data or
@@ -47,12 +48,10 @@ dropout). Standard approaches often face two limitations:
 
 `JoiNMe` addresses these challenges through a structural decomposition
 of the linear predictor and a flexible distributional regression
-framework. This vignette outlines the statistical theory underpinning
-the package, using notation and narrative that are intended to be
-accessible to applied researchers without extensive prior exposure to
-joint modelling.
+framework. This vignette outlines the statistical theory governing the
+package.
 
-## 3 The Multivariate Longitudinal Submodel
+## The Multivariate Longitudinal Submodel
 
 Let \mathcal{D}\_i = \\y\_{id}(t\_{ij}) : j = 1, \dots, n\_{id}, d = 1,
 \dots, D\\ denote the observed longitudinal data for subject i, where
@@ -60,7 +59,7 @@ y\_{id}(t) is the response for marker d at time t. We assume generalised
 linear mixed models (GLMMs) for each marker, linked via a shared latent
 structure.
 
-### 3.1 Structural Decomposition of the Linear Predictor
+### Structural Decomposition of the Linear Predictor
 
 The linear predictor \eta\_{id}(t) for subject i and marker d at time t
 is decomposed into fixed effects, shared random effects, and
@@ -90,7 +89,7 @@ This hierarchical structure allows information sharing across markers
 (shrinking estimates towards the shared process \mathbf{u}\_i) while
 maintaining flexibility for individual marker dynamics.
 
-### 3.2 Distributional Assumptions
+### Distributional Assumptions
 
 The observed response y\_{id}(t) is generated from a distribution
 \mathcal{F} with location parameter linked to \eta\_{id}(t) and
@@ -106,6 +105,9 @@ y\_{id}(t) \sim \mathcal{F}\_d(\cdot \| \eta\_{id}(t),
 - **Beta**: For bounded (0,1) proportions.
 - **Bernoulli / Binomial**: For binary or count-of-success data.
 - **Poisson / Negative Binomial**: For count data.
+- **Double Exponential / Skew Double Exponential**: For continuous
+  outcomes with Laplace tails and, when required, asymmetric conditional
+  quantiles.
 - **Cumulative Logit**: For ordinal outcomes.
 
 Furthermore, distributional parameters (for example, residual scale
@@ -113,8 +115,8 @@ Furthermore, distributional parameters (for example, residual scale
 (distributional regression): \log(\sigma\_{id}(t)) =
 \mathbf{x}\_{\sigma, id}(t)^\top \boldsymbol{\beta}\_\sigma
 
-JoiNMe also supports **family-scoped** distributional regressions using
-bracket syntax on the left-hand side, e.g.
+`joinem` also supports **family-scoped** distributional regressions
+using bracket syntax on the left-hand side, e.g.
 
 - `sigma[family=student_t] ~ 1 + time`
 - `sigma[family=gaussian] ~ 1 + x1`
@@ -124,46 +126,102 @@ contribute to rows of the scoped family. Without brackets (for example,
 `sigma ~ ...`), the formula applies to all rows where the parameter
 exists.
 
-## 4 Covariance Regression
+### Fixed skew-Laplace quantiles
 
-A unique feature of `JoiNMe` is the ability to model the covariance
-structure of the marker-by-id effects \mathbf{w}\_{id}. In standard
-models, \Sigma_w is constant. In `JoiNMe`, we can allow the variance to
-depend on subject-level covariates \mathbf{x}\_{cov, i}:
+For the skew double exponential distribution, JoiNMe uses a quantile
+parameterisation. Given location \mu, scale \sigma\>0, and 0\<\tau\<1,
+its density is
 
-\Sigma\_{w, i} = \text{diag}(\boldsymbol{\tau}\_i) \\ \Omega \\
-\text{diag}(\boldsymbol{\tau}\_i) where \log(\boldsymbol{\tau}\_i) =
-\mathbf{X}\_{cov, i} \boldsymbol{\beta}\_{\tau}. This allows, for
-example, the variability in biomarker trajectories to differ between
-treatment groups or with baseline age (`formulaVCov`).
+f(y\mid\mu,\sigma,\tau) = \frac{2\tau(1-\tau)}{\sigma} \begin{cases}
+\exp\\-2(1-\tau)\|y-\mu\|/\sigma\\, & y\<\mu,\\
+\exp\\-2\tau\|y-\mu\|/\sigma\\, & y\geq\mu. \end{cases}
 
-In the Stan implementation, the subject-specific covariance matrix is
-built from its Cholesky factor L_i. Each unique lower-triangular element
-of L_i is modelled through a regression with a subject-level latent
-effect:
+Thus \mu is the conditional \tau-quantile, and \tau=0.5 recovers vthe
+symmetric Laplace distribution.
 
-\ell\_{im} = \alpha_m + \mathbf{x}\_{cov,i}^\top \boldsymbol{\beta}\_m +
-\lambda_m z\_{L,i}, \qquad z\_{L,i} \sim \mathcal{N}(0, 1).
+A marker-specific fixed value is declared as
+`jm_family("skew_laplace", tau = 0.8)`. If it is omitted, `tau` is
+estimated through a `tau ~ ...` distributional regression when present,
+or as a family-level constant otherwise. Fixed and estimated
+skew-Laplace markers may coexist, and posterior prediction selects the
+appropriate value by marker.
 
-For diagonal elements, a softplus (default) or exp transform ensures
-positivity:
+## Covariance regression
 
-L_i\[r,r\] = \log(1 + \exp(\ell\_{im}))\\\text{or}\\\exp(\ell\_{im}),
-\qquad L_i\[r,c\] = \ell\_{im} \\ (r \> c).
+JoiNMe models the marker-by-subject covariance factor as
 
-Use `control$vcov_diag_link` to select `"softplus"` (default) or
-`"exp"`.
+L_i=\operatorname{diag}(\boldsymbol\sigma_i)K_i,
 
-This construction allows both covariate-driven heterogeneity and
-subject-level latent variability in the marker-by-subject covariance
-structure.
+where \boldsymbol\sigma_i contains marginal standard deviations and K_i
+is a lower-triangular Cholesky correlation factor with unit row norms.
+The two parts may depend on different subject-level predictors:
 
-## 5 The Survival Submodel
+``` r
+
+formulaVCov = list(
+  sd = ~ treatment + age,
+  corr = ~ baseline_score
+)
+```
+
+A single formula remains shorthand for applying the same regression to
+both parts. Component intercepts are represented explicitly, so formula
+intercept columns are removed from both model matrices.
+
+For standard-deviation coordinate r,
+
+\eta^{sd}\_{ir} =\alpha^{sd}\_r +\boldsymbol
+x\_{sd,i}^\top\boldsymbol\beta^{sd}\_r +\lambda\_{m(r)}z\_{L,i,m(r)},
+\qquad \sigma\_{ir}=g\_{sd}(\eta^{sd}\_{ir}),
+
+where g\_{sd} is softplus by default and may instead be exponential. For
+an off-diagonal coordinate h=(r,c), c\<r,
+
+\eta^{K}\_{ih} =\alpha^{K}\_h +\boldsymbol
+x\_{corr,i}^\top\boldsymbol\beta^{K}\_h +\lambda\_{m(h)}z\_{L,i,m(h)},
+\qquad p\_{i,rc}=\tanh(\eta^{K}\_{ih}).
+
+The partial correlations are converted sequentially to the Cholesky row,
+K\_{i,rc}=p\_{i,rc}\prod\_{h\<c}\sqrt{1-p\_{i,rh}^2} for c\<r and
+K\_{i,rr}=\prod\_{h\<r}\sqrt{1-p\_{i,rh}^2}. Hence SD and dependence
+predictors are estimated in separate coefficient blocks and together
+determine
+\Sigma_i=\operatorname{diag}(\boldsymbol\sigma_i)K_iK_i^\top\operatorname{diag}(\boldsymbol\sigma_i).
+
+The resulting unit-row-norm property is the identification device that
+separates the two covariance regressions. If one instead fixed every
+K\_{i,rr}=1 and regressed free off-diagonals, then under
+L_i=\operatorname{diag}(\boldsymbol\sigma_i)K_i,
+\operatorname{Var}(w\_{idr}\mid\cdot)=\sigma\_{ir}^2\sum\_{c\le
+r}K\_{i,rc}^2 would vary with off-diagonal terms. Marginal variance
+would then be explained jointly by SD and correlation coefficients. The
+implemented partial- correlation recursion enforces \sum\_{c\le
+r}K\_{i,rc}^2=1, so \operatorname{Var}(w\_{idr}\mid\cdot)=\sigma\_{ir}^2
+and the scientific roles of `formulaVCov$sd` and `formulaVCov$corr`
+remain distinct.
+
+The packed lower-triangle coordinate m retains one non-negative scalar
+loading \lambda_m. Thus
+\boldsymbol\lambda_L=(\lambda_1,\ldots,\lambda\_{M\_{\mathrm{cov}}})^\top
+is a vector and its action is
+\operatorname{diag}(\boldsymbol\lambda_L)\boldsymbol z\_{L,i}, not a
+dense loading matrix. In the ordinary model, \lambda_m^2 is the
+conditional residual variance of the corresponding *untransformed*
+covariance predictor. It is not directly a standard deviation,
+correlation, or covariance in L_iL_i^\top.
+
+`jm_prior(vcov = list(sd = ..., corr = ...))` assigns independent
+intercept and slope prior families to the two blocks. Their formula
+dimensions and packed orders are shared by fitting, dynamic prediction,
+and both simulation entry points. The dedicated covariance-regression
+vignette gives the complete recursion and recovery-study syntax.
+
+## The Survival Submodel
 
 The risk of the terminal event is modelled using a proportional hazards
-structure. Let T_i^\* be the true event time and C_i the censoring time;
-we observe T_i = \min(T_i^\*, C_i) and \delta_i = \mathbb{I}(T_i^\* \le
-C_i).
+structure. The observation may identify an exact event time, establish
+survival beyond a right-censoring time, establish failure before a
+left-censoring time, or locate the event in an inspection interval.
 
 The hazard function \lambda_i(t) at time t is given by:
 
@@ -171,13 +229,41 @@ The hazard function \lambda_i(t) at time t is given by:
 \boldsymbol{\gamma} + \sum\_{k=1}^K f_k(\mathcal{H}\_{i}(t),
 \boldsymbol{\alpha}\_k) \right)
 
-### 5.1 Baseline Hazard \lambda_0(t)
+### Baseline Hazard \lambda_0(t)
 
 The baseline hazard is modelled flexibly using B-splines (or P-splines):
 \log \lambda_0(t) = \sum\_{l=1}^L \phi_l B_l(t) where B_l(t) are
 B-spline basis functions.
 
-### 5.2 Association Structure
+### Censoring contributions
+
+Let H_i(t)=\int_0^t\lambda_i(u)\\du and S_i(t)=\exp\\-H_i(t)\\.
+Conditional on the longitudinal random effects, the event likelihood
+contribution is
+
+\mathcal L\_{S,i}= \begin{cases} S_i(L_i), & T_i\>L_i \quad\text{(right
+censored)},\\ \lambda_i(t_i)S_i(t_i), & T_i=t_i \quad\text{(exact)},\\
+1-S_i(R_i), & T_i\le R_i \quad\text{(left censored)},\\
+S_i(L_i)-S_i(R_i), & L_i\<T_i\le R_i \quad\text{(interval censored)}.
+\end{cases}
+
+Thus JoiNMe evaluates a full survival likelihood, rather than a Cox
+partial likelihood. For `Surv(lower, upper, type = "interval2")`, the
+event data contain one row per subject. A proper interval (L_i,R_i\]
+contributes known survival to L_i followed by failure within (L_i,R_i\].
+The two log contributions are
+
+-H_i(L_i) +\log\left\[1-\exp\\-\[H_i(R_i)-H_i(L_i)\]\\\right\]
+=\log\\S_i(L_i)-S_i(R_i)\\.
+
+The lower inspection time is therefore not treated as delayed entry.
+Event covariates supplied on the subject’s interval2 row are held over
+the represented risk time, whilst the latent longitudinal association
+remains time-varying. Left and interval censoring presently describe one
+event type; an unobserved cause cannot be assigned a cause-specific
+failure density.
+
+### Association Structure
 
 The term \mathcal{H}\_{i}(t) = \\ \eta\_{id}(s) : s \le t, d=1\dots D \\
 represents the history of the longitudinal processes. `JoiNMe`
@@ -188,27 +274,24 @@ summarises this history using a small set of interpretable features:
 - **Current slope (CS)**: the derivative of the latent longitudinal
   linear predictor at time t.
 - **Correlation association (CORR)**: a subject-specific, time-constant
-  summary of the off-diagonal entries of the Cholesky-correlation factor
+  summar of the off-diagonal entries of the Cholesky-correlation factor
   `K_i` from the marker-by-subject covariance model.
-- **Variance-covariance association (VCOV)**: a subject-specific,
-  time-constant summary of those same off-diagonal `K_i` entries
-  together with the subject-specific standard deviations. This channel
-  therefore avoids double-counting information that would appear again
-  in `L_i L_i^\top`.
+- **Variance-covariance association (VCOV)**: a
+  subject-specific,time-constant summary of those same off-diagonal
+  `K_i` entries together with the subject-specific standard deviations.
+  This channel therefore avoids double-counting information that would
+  appear again in `L_i L_i^\top`.
 
-In implementation, CV and CS are evaluated at a default set of 15
-Gauss-Kronrod nodes on the scaled time interval \[0, 1\] (configurable).
-Only the node count is passed to Stan; the GK nodes and weights
-themselves are fixed in the Stan code and used via precomputed design
-matrices. CS is approximated by a forward finite difference with step
-size \varepsilon. These summaries can be transformed before entering the
-hazard, as described below.
+CV is the fitted latent trajectory at the event time and CS is its
+derivative per unit of original study time. These summaries can be
+transformed before entering the hazard, as described below.
 
-For covariance-style channels (`corr`, `vcov`), the fitted association
-coefficients follow a scale-times-latent form. Internally, a positive
-global scale (`s_corr` or `s_vcov`) multiplies a latent coefficient
-vector, and the reported posterior summaries correspond to the effective
-coefficients that enter the hazard.
+For covariance-style channels (`corr`, `vcov`), the declared
+`assoc$slope` prior applies directly to the effective coefficient
+entering the log hazard. The coefficient is not multiplied by a second
+random association scale. Normal, fixed-degrees-of-freedom Student-t,
+Laplace, and regularised horseshoe priors are selected independently
+through `jm_prior(assoc = list(slope = ...))`.
 
 The covariance-regression layer itself uses an identified
 parameterisation for the subject-specific Cholesky factor: each
@@ -217,7 +300,7 @@ non-negative loading \lambda_m, so \eta\_{im} = \alpha_m + x_i^\top
 \beta_m + \lambda_m z\_{im} with \lambda_m \ge 0 and z\_{im} \sim
 \mathcal{N}(0, 1).
 
-#### 5.2.1 Marker-weighted contributions (CV and CS)
+#### Marker-weighted contributions (CV and CS)
 
 When multiple markers are present, `JoiNMe` forms marker-average
 association components using weights \omega_d (one per marker). These
@@ -237,10 +320,15 @@ semantics for marker-aggregated terms.
 To make the weighting explicit, let \mathbf{v}\_d denote marker-level
 random effects and \mathbf{w}\_{id} denote marker-by-subject random
 effects. The marker-weighted summaries are formed as weighted means
-across markers with weights \omega_d. In the Stan implementation, base
-weights are treated as prior offsets and used directly. Let w^{raw}\_d =
-w^{(0)}\_d + z_d (or w^{raw}\_d = w^{(0)}\_d if fixed), and set \omega_d
-= w^{raw}\_d. The corresponding weighted means are computed as
+across markers with weights \omega_d. The prior declaration supplies
+known offsets directly.
+
+For a stochastic family, let w^{raw}\_{sd} = w^{(0)}\_{sd} +
+\mu\_{\omega,s} + \delta\_{sd}, where the common location borrows
+information across markers and \delta\_{sd} is a centred, unit-scale
+departure. With `family = "constant"` or `"none"`, both fitted terms are
+absent and w^{raw}\_{sd} = w^{(0)}\_{sd}. Set \omega\_{sd} =
+w^{raw}\_{sd}. The orresponding weighted means are computed as
 
 \bar{\mathbf{v}} = \sum\_{d=1}^D \omega_d \mathbf{v}\_d, \qquad
 \bar{\mathbf{w}}\_i = \sum\_{d=1}^D \omega_d \mathbf{w}\_{id}.
@@ -248,37 +336,40 @@ w^{(0)}\_d + z_d (or w^{raw}\_d = w^{(0)}\_d if fixed), and set \omega_d
 These weighted means are then inserted into the marker components of the
 current value and slope calculations.
 
-#### 5.2.2 Priors on marker contributions
+#### Priors on marker contributions
 
 Marker weights and CV/CS association coefficients are regularized to
 avoid overfitting when D is large.
 
-- **Marker weights**: when estimated, `JoiNMe` uses latent additive
-  perturbations \\w^{raw} = w^{(0)} + z_w with z_w \sim
-  \mathcal{N}(0, I) and uses the resulting weights directly in
-  marker-aggregated association terms.
-- **CV/CS total and marker coefficients**: non-centred priors \alpha =
-  z\_{\alpha} \cdot sd\_{\alpha} with a single sign anchor for
-  identifiability when marker-weight channels are active. Specifically,
-  only the first active latent in the order `cv_total`, `cs_total`,
-  `cv_marker`, `cs_marker` is constrained non-negative (via
+- **Marker weights**: when estimated, `joinme` uses
+  w\_{sd}=w^{(0)}\_{sd}+\mu\_{\omega,s}+z\_{sd}. The fitted common
+  location uses `marker_weights$intercept`; centred unit-scale
+  coordinates use `marker_weights$family`. Student-t degrees of freedom
+  are shared across all weight sets, and no additional scale multiplies
+  the marker departure. We may add some known contribution w^{(0)}\_{sd}
+  by declaring `marker_weights$offset`. To disable the fitting process
+  and only use these known weights, we can set `family = "constant"` or
+  `family = "none"`.
+- **Caveat: CV/CS total and marker coefficients**: role-specific priors
+  are transformed from standardised raw parameters, with a single sign
+  anchor for identifiability when marker-weight channels are active.
+  Specifically, only the first active latent in the order `cv_total`,
+  `cs_total`, `cv_marker`, `cs_marker` is constrained non-negative (via
   absolute-value mapping); remaining active channels are unconstrained.
 
 This keeps marker effects signed (positive or negative) while improving
 sampling geometry for hierarchical association parameters.
 
-Crucially, `JoiNMe` supports non-linear transformations of these terms
-via the `transforms` argument. Available transformation modes include
-identity, a functional bytecode evaluator, monotone I-splines, and
-ordered piecewise-linear rules whose knot ordinates are learned from
-simplex increments.
+`joinme` also supports non-linear transformations of these terms via the
+`transforms` argument. Available transformation modes include identity,
+a user-defined mathematical expression, monotone I-splines, and ordered
+piecewise-linear rules whose knot ordinates are learned from simplex
+increments.
 
-Within functional bytecode, the standard normal distribution function
-and its inverse are not interchangeable. Instruction 26 evaluates ((x)),
-corresponding to `Phi(x)` or `pnorm(x)`. Instruction 27 evaluates
-(^{-1}(p)), corresponding to `inv_Phi(p)`, `qnorm(p)`, or `probit(p)`. A
-named probit longitudinal link uses the latter as its forward link and
-the former as its inverse link.
+Within a functional expression, the standard Normal distribution
+function \Phi(x) and its inverse \Phi^{-1}(p) are not interchangeable. A
+probit longitudinal link uses the latter as its forward link and the
+former as its inverse link.
 
 For `corr` and `vcov`, the transformed summary is time-constant for a
 fixed subject because it depends only on that subject’s
@@ -290,78 +381,54 @@ subject, then reuses that same value in both:
 - the Gauss-Kronrod node evaluations used inside \int_0^{T_i}
   \lambda_i(s) ds.
 
-That symmetry is not just an efficiency trick; it is part of the
-statistical definition of the model. If a covariance-style term entered
-only one of those two pieces, coefficient recovery would be distorted
-even when simulation and fitting used the same raw feature definition.
-
-We use the \alpha notation for association coefficients to align with
-joint-model literature and to distinguish these coefficients from the
-linear predictor \eta.
-
-## 6 Bayesian Inference and Estimation
+## Bayesian Inference and Estimation
 
 The joint likelihood is the product of the longitudinal likelihood
-\mathcal{L}\_{Long} and the survival likelihood \mathcal{L}\_{Surv}:
+\mathcal{L}\_{Long} and the censoring-appropriate survival likelihood
+\mathcal{L}\_{Surv}:
 
-p(\theta, \mathbf{u}, \mathbf{v}, \mathbf{w} \| \mathbf{y}, \mathbf{T},
-\boldsymbol{\delta}) \propto \left\[ \prod\_{i=1}^N \prod\_{d=1}^D
+p(\theta, \mathbf{u}, \mathbf{v}, \mathbf{w} \| \mathbf{y}, \mathcal
+O_T) \propto \left\[ \prod\_{i=1}^N \prod\_{d=1}^D
 \prod\_{j=1}^{n\_{id}} p(y\_{idj} \| \mathbf{u}\_i, \mathbf{v}\_d,
-\mathbf{w}\_{id}) \right\] \times \left\[ \prod\_{i=1}^N
-\lambda_i(T_i)^{\delta_i} \exp\left(-\int_0^{T_i} \lambda_i(s) ds\right)
-\right\] \times p(\text{priors})
+\mathbf{w}\_{id}) \right\] \times \left\[ \prod\_{i=1}^N \mathcal
+L\_{S,i}(\mathcal O\_{T_i}) \right\] \times p(\text{priors})
 
-### 6.1 The Stan Implementation
+### Priors
 
-`JoiNMe` compiles this model to a Stan program. Key efficiency features
-include:
+Default priors are weakly informative:
 
-1.  **Analytic Gradient of the Log-Likelihood**: Stan’s autodiff engine
-    handles the complex chain rule derivatives required for the joint
-    likelihood.
-2.  **Multithreading via `reduce_sum`**: The likelihood calculation is
-    parallelised over subjects (“grainsize”). This allows linear scaling
-    with the number of available CPU cores.
-3.  **Gauss-Kronrod Quadrature**: The survival integral \int_0^{T_i}
-    \lambda_i(s) ds is approximated using a Gauss-Kronrod rule (default
-    15-point, configurable) for high accuracy at modest computational
-    cost.
-
-### 6.2 Priors
-
-Default priors are weakly informative and aligned with the Stan
-implementation:
-
-- **Fixed effects and distributional regressions**: regression
-  coefficients for longitudinal and survival covariates use Student-t
-  priors with 6 degrees of freedom, centred at 0, with user-specified or
-  default scales. The heavier tails stabilise inference while keeping
-  weak regularisation.
+- **Ordinary regressions**: global intercepts default to centred
+  Student-t_6 priors with scale 2, while slopes default to centred
+  Student-t_6 priors with scale 1. `longitudinal`, `survival`, `vcov`,
+  `functional`, and each `formulaDist` left-hand side may replace
+  intercept and slope roles independently. A distributional prior may
+  repeat a family scope from `formulaDist`, for example
+  `` `sigma[family='student']` ``. A marker scope is also accepted when
+  the marker uniquely identifies that family-scoped coefficient vector;
+  shared family coefficients must use the family name.
 - **Association coefficients**: CV/CS total, mean, and marker
-  coefficients use a non-centred parameterisation \alpha = z\_{\alpha}
-  \cdot sd\_{\alpha}. For marker-weight-involving channels (`cv_total`,
+  coefficients use the independently declared `assoc$slope`
+  transformation. For marker-weight-involving channels (`cv_total`,
   `cs_total`, `cv_marker`, `cs_marker`), only the first active latent is
   sign-anchored non-negative to improve identifiability; other channels
   remain free to be positive or negative.
-- **Marker weights**: when estimated, marker-weight perturbations use
-  additive latent form around user-supplied base weights.
-  `shrinkage = 0, 1, 2` selects standard Student-t_6, Laplace, or Normal
-  latents, respectively. The resulting signed weights enter
-  marker-aggregated association terms without additional normalisation.
-  [`simulate_joinme()`](https://trinhdhk.github.io/joinme/reference/simulate_joinme.md)
-  uses the identical switch and defaults to a zero base when it
-  simulates estimated weights.
-- **Random-effect scales**: subject, marker, and marker-by-subject
-  standard deviations use half-normal priors on the original scale for
-  weakly informative positivity constraints.
+- **Marker weights**: when estimated, every weight set has a fitted
+  common location and marker-specific additive departures around
+  user-supplied offsets. The common location uses the
+  `marker_weights$intercept` prior and borrows information from all
+  markers in its set. The standardised departures use the family named
+  by `marker_weights$family`; the family name `"student_t"` additionally
+  fits one shared degrees-of-freedom value with
+  \nu-2\sim\operatorname{Gamma}(2,0.1) using departures from every set.
+- **Random-effect scales**: subject and marker standard deviations use
+  exponential priors. Marker-by-subject covariance scales arise from
+  their separate SD regression and non-negative residual loadings.
 - **Random-effect correlations**: correlation matrices use an
   LKJ-Cholesky prior with concentration parameter \eta, allowing mild
   regularisation toward identity while remaining flexible.
-- **Baseline hazard**: the baseline level is encoded by the intercept
-  basis column in `bs_gamma_c` (there is no standalone
-  `log_h0_intercept` parameter). Spline coefficients are penalised via
-  second-difference priors excluding that intercept-basis column,
-  providing smoothness control for the baseline hazard.
+- **Baseline hazard**: the baseline level has an intercept prior. Spline
+  coefficients use a second-difference prior to favour a smooth baseline
+  hazard without penalising its overall level.
 - **Penalised transformations**: when `type = "ispline_penalised"`, the
   I-spline coefficients use a smoothness penalty (second differences) to
   stabilise nonlinear association transforms in sparse time regions.
@@ -369,23 +436,29 @@ implementation:
   priors, Student-t degrees of freedom use gamma priors, and skewness
   parameters on (0,1) use beta priors, matching the parameter support.
 
-## 7 Competing risks and dynamic prediction
+## Competing risks and dynamic prediction
 
-`JoiNMe` supports competing risks through the event-type indicator
+`joinme` supports competing risks through the event-type indicator
 (`event_type`) or, when available, a multi-state pair of variables
 (`stage_from`, `stage_to`) that are collapsed into a single event-type
-factor. The baseline hazard and hazard covariates are then indexed by
-event type, so the instantaneous risk becomes a cause-specific hazard.
+factor. However, it does not support directly muti-state model like
+`JMbayes2` or `INLAjoint`. The competing-risk likelihood is a product of
+cause-specific hazards, and the default prediction methods return
+overall survival across all causes. Cause-specific prediction requires a
+separate post-processing step.
+
+The baseline hazard and hazard covariates are then indexed by event
+type, so th instantaneous risk is a cause-specific hazard.
 
 In the likelihood, the cumulative hazard integrates the sum of
 cause-specific hazards, yielding an overall survival function. In
 prediction, the dynamic survival and cumulative hazard outputs
 correspond to the overall survival across all causes, conditional on
 being event-free up to the landmark time. Cause- specific prediction
-would require a separate post-processing step that is not currently
-returned by the default prediction methods.
+would require a separate post-processing step that is not returned by
+the default prediction methods.
 
-## 8 References
+## References
 
 1.  Rizopoulos D. Joint Models for Longitudinal and Time-to-Event Data:
     With Applications in R. Chapman and Hall/CRC; 2012.

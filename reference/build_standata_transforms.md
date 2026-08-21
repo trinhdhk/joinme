@@ -110,8 +110,8 @@ Each element of transform_list should be a list with:
     explicit `knots` for these transform types must therefore already be
     specified on the expit scale in `[0, 1]`.
 
-  - pwlin: knots (or cutpoints/x) and direction; legacy y is accepted
-    but does not determine the fitted ordinates
+  - pwlin: knots (or cutpoints/x) and direction; the earlier y field is
+    accepted but does not determine the fitted ordinates
 
 Defaults and minimal examples:
 

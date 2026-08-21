@@ -2,11 +2,8 @@
 
 ## 1 Purpose and Reproducibility
 
-This vignette demonstrates the usage of `joinme` with multiple
-scenarios, including **data simulation**, **model fitting**,
-**diagnostic interpretation**, **dynamic prediction**, **plotting**, and
-**threaded computation**. Each block is designed to be reproducible and
-to illustrate a specific modelling choice.
+This vignette demonstrates `joinme` through data simulation, model
+fitting, diagnostic assessment, dynamic prediction and plotting.
 
 For the methodological background, see the theory vignette in
 [joinme-theory.html](https://trinhdhk.github.io/joinme/articles/joinme-theory.md).
@@ -15,10 +12,12 @@ This demo covers mixed families (including double_exponential,
 skew_double_exponential, beta, and cumulative_logit) and competing-risk
 survival via event type columns.
 
-For skew_double_exponential, you can fix the quantile parameter with
-`control = list(tau_fixed = 0.2)` to model a specific quantile. If no
-skew_double_exponential family is present, the control is ignored with a
-warning.
+For a skew-double-exponential marker, fix its quantile parameter in the
+family declaration, for example `jm_family("skew_laplace", tau = 0.2)`.
+This is a marker-specific statistical assumption rather than a sampling
+control. The parameter must lie strictly between zero and one;
+`tau = 0.5` is symmetric, whereas the endpoints zero and one are
+degenerate limits and are rejected.
 
 Code
 
@@ -37,12 +36,13 @@ Accepted specifications include:
   controls like `basehaz`, `n_knots`)
 - **Association structure** (`assoc` plus `transforms = joinme_tf(...)`)
 - **Priors**
-  (`priors = joinme_priors(beta = ..., alpha = ..., lkj = ...)`)
-- **Computation** (`control` for sampling, and optionally threading)
-- **Posterior reporting**
+  (`priors = joinme_priors(intercept = ..., slope = ..., assoc = ..., lkj = ...)`)
+- **Sampling** (`control` for chains, iterations and diagnostic
+  thresholds)
+- **Posterior summaries**
   ([`summary()`](https://rdrr.io/r/base/summary.html),
-  [`draws()`](https://trinhdhk.github.io/joinme/reference/draws.md),
-  [`mcmc_plot()`](https://trinhdhk.github.io/joinme/reference/mcmc_plot.html),
+  [`posterior_draws()`](https://trinhdhk.github.io/joinme/reference/posterior_draws.md),
+  [`mcmc_plot()`](https://trinhdhk.github.io/joinme/reference/mcmc_plot.md),
   helper plots)
 
 ### 2.1 Family-specific links (new)
@@ -53,6 +53,27 @@ JoiNMe compiles its algebraic inverse; `inv_link` directly defines the
 inverse link. Thus `link = "log"` and `link = ~ log(x)` both apply
 `exp(eta)` on the response scale. This affects both `epred` and
 `predict` scales in dynamic prediction.
+
+The same family declaration carries a fixed skew-Laplace quantile when
+needed:
+
+Code
+
+``` r
+
+families_skew <- list(
+  jm_family("gaussian"),
+  jm_family("skew_laplace", tau = 0.8)
+)
+```
+
+When `tau` is omitted, JoiNMe estimates it from a `tau ~ ...`
+distributional regression when supplied, and otherwise estimates a
+family-level constant.
+[`simulate_joinme()`](https://trinhdhk.github.io/joinme/reference/simulate_joinme.md)
+follows the same marker-specific selection: a fixed family value takes
+precedence for that marker, while other markers retain their
+distributional regression or shared `family_params` value.
 
 For a probit model, the forward link is the standard normal quantile,
 (g()=^{-1}()), and the inverse link is the standard normal CDF,
@@ -99,9 +120,9 @@ linked through **current value (CV)**. The simulator also returns truth
 values for fixed effects and survival coefficients.
 
 For marker-aggregated terms (`cv_total`, `cv_marker`, `cs_total`,
-`cs_marker`), both simulation and Stan fit/prediction apply transforms
-at marker level before weighted averaging. This keeps nonlinear
-association terms consistent end-to-end.
+`cs_marker`), simulation, fitting and prediction apply transformations
+at marker level before weighted averaging. This gives nonlinear
+association terms one consistent statistical meaning.
 
 Code
 
@@ -110,22 +131,19 @@ Code
 sim <- simulate_joinme(
   n_id = 100,
   families = rep("student_t", 5),
-  n_obs_per_marker_per_id = 10,
   times_obs = seq(0, 8, length.out = 14),
   quadrature_nodes = 31,
   seed = 123,
   assoc = c("cv_total"),
-  assoc_coefs = c(cv_total = 0.6)
+  truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.6)))
 )
 
-# Gauss-Kronrod nodes/weights are fixed in Stan; `quadrature_nodes` selects
-# the node count used to build the design matrices in R.
+# `quadrature_nodes` controls the accuracy of cumulative-hazard integration.
 
 # Formula links are inverted symbolically; custom inverse-links can be supplied
 # directly via jm_family(..., inv_link = ~ ...).
 
-# When estimating marker weights, compare against sim$truth$marker_weights
-# because weights are used directly in Stan.
+# When estimating marker weights, compare against sim$truth$marker_weights.
 ```
 
 ### 3.2 Model specification and fit
@@ -136,8 +154,8 @@ configuration to keep runtime manageable. The nested marker block
 marker-by-id effects and the CORR association.
 
 Subject/group-weighted declarations can be made per grouping term with
-`weighted(group, weights = <column>)`, e.g.
-`(0 + x1 + (1 + time | weighted(id, weights = id_w)) | weighted(marker, weights = marker_w))`.
+`weighted(group, weights = <column>)`,
+e.g. `(0 + x1 + (1 + time | weighted(id, weights = id_w)) | weighted(marker, weights = marker_w))`.
 
 Code
 
@@ -173,9 +191,9 @@ fit <- joinme(
 ```
 
 To customise priors or the baseline hazard basis, supply
-`priors = joinme_priors(...)` and/or forward standata arguments via
-`...`. Distributional regression for parameters such as \sigma or \nu
-can be specified through `formulaDist`.
+`priors = jm_prior(...)` and the relevant model arguments.
+Distributional regression for parameters such as \sigma or \nu can be
+specified through `formulaDist`.
 
 Code
 
@@ -188,7 +206,11 @@ fit2 <- joinme(
   dataEvent = sim$dataEvent,
   assoc = c("cv_total"),
   transforms = joinme_tf(cv_total = "identity"),
-  priors = joinme_priors(beta = list(scale = 1.5), alpha = list(scale = 1.5), lkj = 2),
+  priors = joinme_priors(
+    intercept = prior_student_t(df = 6, scale = 1.5),
+    slope = prior_student_t(df = 6, scale = 1.5),
+    lkj = 2
+  ),
   basehaz = "bs",
   n_knots = 5,
   basehaz_degree = 3,
@@ -196,7 +218,7 @@ fit2 <- joinme(
 )
 ```
 
-### 3.3 Diagnostics and parameter interpretation
+### 3.3 Posterior summaries and diagnostics
 
 We extract diagnostics (R-hat, ESS, divergences) and compare posterior
 summaries to known truth values. This yields **bias** and **coverage**
@@ -248,7 +270,7 @@ if (!is.null(sum_obj$tables$assoc)) {
 }
 
 # Renamed posterior draws and MCMC visualisation
-draws(fit, variables = c("time", "alpha_cv_total"), format = "draws_df")
+posterior_draws(fit, variables = c("time", "alpha_cv_total"), format = "draws_df")
 mcmc_plot(fit, variable = c("time", "alpha_cv_total"), type = "trace")
 ```
 
@@ -334,8 +356,8 @@ longitudinal_plot(pred_ep)
 survival_plot(pred_ep)
 ```
 
-[`predict()`](https://rdrr.io/r/stats/predict.html) now accepts `scale`
-as a character vector. If omitted, all longitudinal scales are produced:
+[`predict()`](https://rdrr.io/r/stats/predict.html) accepts `scale` as a
+character vector. If omitted, all longitudinal scales are produced:
 `c("epred", "linpred", "predict")`. Use `plot(..., scale = "epred")` (or
 another available scale) to choose which trajectory scale to visualise.
 
@@ -350,8 +372,8 @@ how many draws are produced in the dynpred output object. This
 decoupling allows lightweight posterior extraction with a larger
 prediction Monte Carlo layer when needed.
 
-When `times = NULL`, you can now control the default forecast window
-with `time_horizon` (defaulting to `tmax` from the fitted model):
+When `times = NULL`, control the default forecast window with
+`time_horizon` (defaulting to `tmax` from the fitted model):
 
 Code
 
@@ -377,15 +399,13 @@ pred_ep_horizon <- posterior_epred(
 head(pred_ep_horizon$predictions$survival)
 ```
 
-Prediction enforces marker-level consistency: `newdataLong$marker` must
-use only levels seen during fitting. Internally, dynamic prediction
-outputs are stabilised by averaging over dynpred posterior rows for each
-indexed draw before constructing quantile summaries.
+Prediction requires `newdataLong$marker` to use marker levels
+representedduring fitting.
 
 #### 3.5.1 Diagnostics and random-effects extraction
 
-`JoiNMe` now uses the same diagnostics table schema for fitted and
-predicted objects.
+`JoiNMe` uses the same diagnostics table schema for fitted and predicted
+objects.
 
 Code
 
@@ -440,11 +460,10 @@ Code
 sim_comp <- simulate_joinme(
   n_id = 40,
   families = rep("student_t", 3),
-  n_obs_per_marker_per_id = 6,
   times_obs = seq(0, 8, length.out = 12),
   seed = 444,
   assoc = c("cv_total"),
-  assoc_coefs = c(cv_total = 0.6)
+  truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.6)))
 )
 
 # Simulate cause-specific event times and derive event_type from the minimum time.
@@ -605,7 +624,6 @@ Code
 
 sim_mixed <- simulate_joinme(
   n_id = 20,
-  n_obs_per_marker_per_id = 5,
   families = c("gaussian", "bernoulli", "poisson"),
   times_obs = seq(0, 4, length.out = 5),
   seed = 101
@@ -629,8 +647,8 @@ transforms <- joinme_tf(
 # Notes on spline arguments:
 # - type = "ispline": provide knots + coeff directly (no x/y/lambda fitting).
 # - type = "ispline_penalised": provide knots (or n_knots) plus lambda.
-#   Supplying y uses the legacy (x, y) plug-in fit; omitting y lets Stan
-#   estimate the monotone spline jointly.
+#   Supplying y defines a fixed curve; omitting y estimates the monotone spline
+#   jointly.
 ```
 
 ### 5.1 Optional: distributional regression
@@ -686,96 +704,3 @@ if (!is.null(sum_mixed$tables$fixef)) {
   knitr::kable(fixef_mixed, digits = 3, caption = "Fixed effects summary (scenario B).")
 }
 ```
-
-## 6 Scenario D: Thread-capable Fit and Prediction
-
-Threading is useful when the longitudinal dimension is large. `JoiNMe`
-now always uses the threaded Stan programs internally;
-`threads_per_chain = 1` keeps that same kernel serial, while larger
-values enable parallel `reduce_sum` execution. This example shows the
-same public workflow with two threads.
-
-Code
-
-``` r
-
-sim_thread <- simulate_joinme(
-  n_id = 60,
-  families = rep("student_t", 6),
-  n_obs_per_marker_per_id = 6,
-  times_obs = seq(0, 8, length.out = 12),
-  seed = 202,
-  assoc = c("cv_total"),
-  assoc_coefs = c(cv_total = 0.6)
-)
-
-fit_thread <- joinme(
-  formulaLong = formulaLong,
-  dataLong = sim_thread$dataLong,
-  formulaEvent = formulaEvent,
-  dataEvent = sim_thread$dataEvent,
-  assoc = c("cv_total"),
-  transforms = joinme_tf(cv_total = "identity"),
-  control = list(
-    parallel_chains = 1,
-    iter_warmup = 200,
-    iter_sampling = 200,
-    seed = 202,
-    refresh = 0,
-    threads_per_chain = 2,
-    adapt_delta = 0.9
-  )
-)
-
-ndL_thread <- sim_thread$dataLong[sim_thread$dataLong$id %in% c(1, 2), ]
-ndE_thread <- sim_thread$dataEvent[sim_thread$dataEvent$id %in% c(1, 2), ]
-
-pred_thread <- posterior_epred(
-  fit_thread,
-  newdataLong = ndL_thread,
-  newdataEvent = ndE_thread,
-  time_start = max(ndL_thread$time),
-  times = seq(0, max(ndL_thread$time) + 2, length.out = 60),
-  control = list(
-    n_samples = 100,
-    threads_per_chain = 2,
-    chains = 1,
-    iter_warmup = 100,
-    iter_sampling = 1,
-    seed = 202,
-    refresh = 0
-  )
-)
-
-plot(pred_thread, type = "longitudinal")
-plot(pred_thread, type = "survival")
-```
-
-When requesting multiple outcomes with `combined = TRUE`, the method
-returns:
-
-- one combined object for a single subject when `patchwork`/`cowplot` is
-  available,
-- a named list of combined objects (one per subject) for multiple
-  subjects,
-- and, if combiner backends are unavailable, a per-subject fallback to
-  the regular nested outcome list.
-
-## 7 Discussion and Reporting Guidance
-
-These scenarios illustrate how model assumptions and association choices
-influence interpretation. In a report or manuscript, we recommend:
-
-- Reporting **R-hat**, **ESS**, and divergences as primary convergence
-  diagnostics.
-- Presenting **bias and coverage** for simulated truth when validation
-  is possible.
-- Summarizing **association parameters** alongside the transform used
-  (functional, spline, piecewise).
-- Including **dynamic prediction plots** to show how uncertainty evolves
-  beyond the observed history.
-- Stating whether **threading** was used and the number of threads per
-  chain.
-
-This structure provides a reproducible, interpretable workflow that can
-be adapted to substantive scientific questions.

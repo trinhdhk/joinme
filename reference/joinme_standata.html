@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">joinme</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2608</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.2</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -59,15 +59,9 @@
 <span>  assoc <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"cv_mean"</span><span class="op">)</span>,</span>
 <span>  families <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  transforms <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  beta_prior <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  alpha_prior <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  iota_prior <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  lkj_prior <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  prior_specification <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  allow_marker_crosscorr <span class="op">=</span> <span class="fl">1L</span>,</span>
 <span>  shrinkage <span class="op">=</span> <span class="fl">0L</span>,</span>
-<span>  marker_weights <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  fixed_marker_weights <span class="op">=</span> <span class="cn">FALSE</span>,</span>
-<span>  shared_marker_weights <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  basehaz <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"bs"</span>, <span class="st">"ns"</span>, <span class="st">"formula"</span><span class="op">)</span>,</span>
 <span>  basehaz_n_knots <span class="op">=</span> <span class="fl">5L</span>,</span>
 <span>  basehaz_knots <span class="op">=</span> <span class="cn">NULL</span>,</span>
@@ -76,7 +70,8 @@
 <span>  tau_spline <span class="op">=</span> <span class="fl">0.4</span>,</span>
 <span>  quadrature_nodes <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  vcov_diag_link <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"softplus"</span>, <span class="st">"exp"</span><span class="op">)</span>,</span>
-<span>  tau_fixed <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  mixture <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  include_survival <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  seed <span class="op">=</span> <span class="va">.Random.seed</span><span class="op">[[</span><span class="fl">1</span><span class="op">]</span><span class="op">]</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
@@ -108,7 +103,12 @@ Supported LHS forms are:</p><ul><li><p><code>survival::Surv(time, status)</code>
 <li><p><code>survival::Surv(start, stop, status)</code></p></li>
 <li><p><code>survival::Surv(time, status, type = "left")</code></p></li>
 <li><p><code>survival::Surv(time1, time2, type = "interval2")</code>
-The legacy <code>type = "interval"</code> form is intentionally rejected.</p></li>
+The former <code>type = "interval"</code> form is intentionally rejected.
+For an interval-censored event in \((L,R]\), the prepared data contain
+an event-free row from zero to \(L\) and a failure-within-interval row
+from \(L\) to \(R\). Their log-likelihood contributions sum to
+\(\log\{S(L)-S(R)\}\). This is a full event likelihood, not a Cox
+partial likelihood.</p></li>
 </ul></dd>
 
 
@@ -116,11 +116,16 @@ The legacy <code>type = "interval"</code> form is intentionally rejected.</p></l
 <dd><p>Event-process data with either one row per id
 (<code>Surv(time, status)</code>) or multiple time-split rows per id
 (<code>Surv(start, stop, status)</code>).
-Covariates referenced in <code>formulaEvent</code> may vary by interval in the split form.</p></dd>
+Covariates referenced in <code>formulaEvent</code> may vary by interval in the split
+form. Left- and interval-censored responses require one row per id and
+presently describe one event type.</p></dd>
 
 
 <dt id="arg-formulavcov">formulaVCov<a class="anchor" aria-label="anchor" href="#arg-formulavcov"></a></dt>
-<dd><p>Covariance regression formula for id-specific marker-by-id effects.
+<dd><p>Covariance regression specification for id-specific
+marker-by-id effects. A formula applies the same observed covariates to
+both components. A named list, <code>list(sd = ~ ..., corr = ~ ...)</code>, regresses
+standard deviations and off-diagonal partial correlations independently.
 If the marker block omits the inner <code>( ... | id )</code>, then marker-by-id effects
 are absent and covariance-style associations (<code>corr</code>, <code>vcov</code>) are not allowed.
 Downstream, <code>corr</code> uses the off-diagonal entries of the subject-specific
@@ -180,7 +185,10 @@ and <code>exp</code>; <code><a href="joinme_family.html">jm_family()</a></code> 
 directly specified inverse-link formula. In formula syntax,
 <code>inv_Phi</code>/<code>qnorm</code>/<code>probit</code> denote the standard normal quantile and
 <code>Phi</code>/<code>pnorm</code> denote the standard normal CDF. Thus a probit forward link
-is inverted to <code>Phi</code> before Stan data are constructed.</p></dd>
+is inverted to <code>Phi</code> before Stan data are constructed. A skew-Laplace
+marker may additionally fix its quantile/asymmetry parameter with
+<code>jm_family("skew_laplace", tau = 0.8)</code>. Fixed values must lie strictly
+between zero and one and are carried separately for each marker.</p></dd>
 
 
 <dt id="arg-transforms">transforms<a class="anchor" aria-label="anchor" href="#arg-transforms"></a></dt>
@@ -194,25 +202,24 @@ Functional transforms may request fit-only affine-shift parameters through
 Ordered piecewise-linear fits use
 <code>list(type = "pwlin", knots = ..., direction = "increasing")</code> (or
 <code>"decreasing"</code>). Their knot ordinates are estimated from simplex
-increments; legacy <code>x</code> is accepted as an alias for <code>knots</code>, while
-legacy <code>y</code> no longer fixes the fitted curve.</p></dd>
+increments; the earlier <code>x</code> field is accepted as an alias for <code>knots</code>, while
+the earlier <code>y</code> field no longer fixes the fitted curve.</p></dd>
 
 
-<dt id="arg-beta-prior">beta_prior<a class="anchor" aria-label="anchor" href="#arg-beta-prior"></a></dt>
-<dd><p>Prior specification for longitudinal fixed effects.</p></dd>
-
-
-<dt id="arg-alpha-prior">alpha_prior<a class="anchor" aria-label="anchor" href="#arg-alpha-prior"></a></dt>
-<dd><p>Prior specification for association parameters.</p></dd>
-
-
-<dt id="arg-iota-prior">iota_prior<a class="anchor" aria-label="anchor" href="#arg-iota-prior"></a></dt>
-<dd><p>Prior specification for fit-only affine-shift intercept and
-slope parameters used by functional association transforms.</p></dd>
-
-
-<dt id="arg-lkj-prior">lkj_prior<a class="anchor" aria-label="anchor" href="#arg-lkj-prior"></a></dt>
-<dd><p>Prior specification for correlation structures.</p></dd>
+<dt id="arg-prior-specification">prior_specification<a class="anchor" aria-label="anchor" href="#arg-prior-specification"></a></dt>
+<dd><p>A component-based <code><a href="joinme_priors.html">jm_prior()</a></code> declaration.
+Global <code>intercept</code> and <code>slope</code> declarations are inherited unless a
+scientific component supplies the corresponding role explicitly.
+Marker-weighted associations are governed entirely by its
+<code>marker_weights</code> component. <code>marker_weights$offset</code> is a wholly named or
+wholly unnamed numeric vector; with term-specific weights it may instead
+be a named collection indexed by <code>cv_total</code>, <code>cs_total</code>, <code>cv_marker</code>, or
+<code>cs_marker</code>. <code>marker_weights$family = "constant"</code> (or <code>"none"</code>) uses the
+offset exactly and fits no marker-weight coefficient. A stochastic family
+fits <code>offset + common location + unit-scale marker departure</code>, with the
+common-location fitting prior in <code>marker_weights$intercept</code>. It does not
+supply a population value to simulation. The association slope
+supplies the multiplier for the completed weighted marker feature.</p></dd>
 
 
 <dt id="arg-allow-marker-crosscorr">allow_marker_crosscorr<a class="anchor" aria-label="anchor" href="#arg-allow-marker-crosscorr"></a></dt>
@@ -220,34 +227,10 @@ slope parameters used by functional association transforms.</p></dd>
 
 
 <dt id="arg-shrinkage">shrinkage<a class="anchor" aria-label="anchor" href="#arg-shrinkage"></a></dt>
-<dd><p>Integer flag controlling shrinkage behaviour for marker-by-id effects.
-0 = student_t(6, 0, 1), 1 = double_exponential(0, 1), 2 = std_normal();</p></dd>
-
-
-<dt id="arg-marker-weights">marker_weights<a class="anchor" aria-label="anchor" href="#arg-marker-weights"></a></dt>
-<dd><p>Optional base weights for marker-specific association
-components. If <code>shared_marker_weights = TRUE</code>, provide one numeric vector of
-length D (or one named numeric vector keyed by marker level) that is shared
-across all active weighted association terms. If
-<code>shared_marker_weights = FALSE</code>, you may instead provide a named list with
-entries <code>cv_total</code>, <code>cs_total</code>, <code>cv_marker</code>, and <code>cs_marker</code>. Each supplied
-entry is aligned to marker order and used only for the matching active
-weighted association term.</p></dd>
-
-
-<dt id="arg-fixed-marker-weights">fixed_marker_weights<a class="anchor" aria-label="anchor" href="#arg-fixed-marker-weights"></a></dt>
-<dd><p>Logical; if TRUE, marker weights are kept fixed
-at <code>marker_weights</code> (no perturbation). If FALSE, marker weights are estimated
-via signed additive perturbations,
-<code>marker_weights + z_marker_weights</code>. The standardized latent family is
-selected by <code>shrinkage</code>: Student-t(6), Laplace, or Normal for 0, 1, or 2.</p></dd>
-
-
-<dt id="arg-shared-marker-weights">shared_marker_weights<a class="anchor" aria-label="anchor" href="#arg-shared-marker-weights"></a></dt>
-<dd><p>Logical; if TRUE, all active weighted
-marker-based association terms share one marker-weight structure. If FALSE,
-each active weighted marker-based association term gets its own marker-weight
-structure.</p></dd>
+<dd><p>Compatibility flag used by latent-class component
+distributions and simulation: 0 = Student-t(6), 1 = Laplace, and
+2 = Normal. Ordinary coefficient and marker priors are declared separately
+through <code><a href="joinme_priors.html">jm_prior()</a></code>.</p></dd>
 
 
 <dt id="arg-basehaz">basehaz<a class="anchor" aria-label="anchor" href="#arg-basehaz"></a></dt>
@@ -276,8 +259,7 @@ structure.</p></dd>
 
 <dt id="arg-quadrature-nodes">quadrature_nodes<a class="anchor" aria-label="anchor" href="#arg-quadrature-nodes"></a></dt>
 <dd><p>Optional positive integer target for total quadrature
-points. Allowed values are exactly <code>7</code>, <code>15</code>, <code>31</code>, <code>41</code>, <code>51</code>, and <code>61</code>.
-Only the node count is passed to Stan; GK nodes/weights are fixed in Stan.</p></dd>
+points. Allowed values are exactly <code>7</code>, <code>15</code>, <code>31</code>, <code>41</code>, <code>51</code>, and <code>61</code>.</p></dd>
 
 
 <dt id="arg-vcov-diag-link">vcov_diag_link<a class="anchor" aria-label="anchor" href="#arg-vcov-diag-link"></a></dt>
@@ -285,11 +267,17 @@ Only the node count is passed to Stan; GK nodes/weights are fixed in Stan.</p></
 "softplus" or "exp".</p></dd>
 
 
-<dt id="arg-tau-fixed">tau_fixed<a class="anchor" aria-label="anchor" href="#arg-tau-fixed"></a></dt>
-<dd><p>Optional fixed quantile/asymmetry parameter for the skew
-double exponential family. It must lie strictly between zero and one; the
-value \(0.5\) gives the symmetric double exponential distribution. It
-cannot be combined with a <code>tau</code> distributional regression.</p></dd>
+<dt id="arg-mixture">mixture<a class="anchor" aria-label="anchor" href="#arg-mixture"></a></dt>
+<dd><p>Internal latent-progress mixture specification. The public
+interface is <code><a href="joinme_mix.html">joinme_mix()</a></code>; ordinary <code><a href="joinme.html">joinme()</a></code> calls leave this as
+<code>NULL</code>, which contributes no mixture parameters or mixture prior.</p></dd>
+
+
+<dt id="arg-include-survival">include_survival<a class="anchor" aria-label="anchor" href="#arg-include-survival"></a></dt>
+<dd><p>Logical indicator that the supplied event rows
+represent an observed survival process. The fitting entry points set this
+to <code>FALSE</code> only when they have constructed an internal likelihood-neutral
+scaffold for a longitudinal-only analysis.</p></dd>
 
 
 <dt id="arg-seed">seed<a class="anchor" aria-label="anchor" href="#arg-seed"></a></dt>
@@ -302,15 +290,10 @@ cannot be combined with a <code>tau</code> distributional regression.</p></dd>
 </dl></div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
-    <p>This builder performs three key steps:</p><ol><li><p>Constructs fixed-effect and random-effect design matrices on a scaled time axis.</p></li>
+    <p>This builder performs three key steps:</p><ol><li><p>Constructs fixed-effect and random-effect design matrices.</p></li>
 <li><p>Creates distributional regression matrices (including optional random effects).</p></li>
-<li><p>Assembles spline bases and Gauss-Kronrod nodes for survival integration.
-Only the node count is passed to Stan; nodes/weights are hardcoded in the
-Stan functions that evaluate the cumulative hazard.</p></li>
-</ol><p>Time is scaled internally as <code>t_scaled = t/t_max</code> for numerical stability; indices
-are recorded to rescale time-associated coefficients back to the original units
-inside Stan.</p>
-    </div>
+<li><p>Assembles spline bases and Gauss-Kronrod nodes for survival integration.</p></li>
+</ol></div>
 
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
     </nav></aside></div>

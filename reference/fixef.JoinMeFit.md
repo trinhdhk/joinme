@@ -5,6 +5,15 @@ Extract fixed effects
 ## Usage
 
 ``` r
+.summarise_fixed_effect_posterior(
+  object,
+  draws = NULL,
+  seed = 1,
+  digits = 3,
+  summary = TRUE,
+  ...
+)
+
 # S3 method for class 'JoiNMeFit'
 fixef(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...)
 ```
@@ -39,5 +48,10 @@ fixef(object, draws = NULL, seed = 1, digits = 3, summary = TRUE, ...)
 
 ## Value
 
-When `summary = TRUE`, a data.frame of posterior summaries. When
-`summary = FALSE`, a draws-by-term matrix.
+When `summary = TRUE`, a data frame containing longitudinal population
+coefficients, event-process coefficients, and fitted common
+marker-weight locations. The `component`, `event`, and `assoc_term`
+columns identify their statistical roles; `assoc_term` is particularly
+important when marker-weight sets are not shared. When
+`summary = FALSE`, a draws-by-term matrix is returned, with event and
+term-specific marker-weight identities included in the column labels.

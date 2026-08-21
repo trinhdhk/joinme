@@ -23,7 +23,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">joinme</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2608</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.2</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -74,10 +74,10 @@
     <section class="section level2" data-number="1"><h2 data-number="1" id="purpose-and-reproducibility">
 <span class="header-section-number">1</span> Purpose and Reproducibility<a class="anchor" aria-label="anchor" href="#purpose-and-reproducibility"></a>
 </h2>
-<p>This vignette demonstrates the usage of <code>joinme</code> with multiple scenarios, including <strong>data simulation</strong>, <strong>model fitting</strong>, <strong>diagnostic interpretation</strong>, <strong>dynamic prediction</strong>, <strong>plotting</strong>, and <strong>threaded computation</strong>. Each block is designed to be reproducible and to illustrate a specific modelling choice.</p>
+<p>This vignette demonstrates <code>joinme</code> through data simulation, model fitting, diagnostic assessment, dynamic prediction and plotting.</p>
 <p>For the methodological background, see the theory vignette in <a href="joinme-theory.html">joinme-theory.html</a>.</p>
 <p>This demo covers mixed families (including double_exponential, skew_double_exponential, beta, and cumulative_logit) and competing-risk survival via event type columns.</p>
-<p>For skew_double_exponential, you can fix the quantile parameter with <code>control = list(tau_fixed = 0.2)</code> to model a specific quantile. If no skew_double_exponential family is present, the control is ignored with a warning.</p>
+<p>For a skew-double-exponential marker, fix its quantile parameter in the family declaration, for example <code>jm_family("skew_laplace", tau = 0.2)</code>. This is a marker-specific statistical assumption rather than a sampling control. The parameter must lie strictly between zero and one; <code>tau = 0.5</code> is symmetric, whereas the endpoints zero and one are degenerate limits and are rejected.</p>
 <div class="cell">
 <details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb1"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/Random.html" class="external-link">set.seed</a></span><span class="op">(</span><span class="fl">123</span><span class="op">)</span></span></code></pre></div>
@@ -95,26 +95,36 @@
 <li>
 <strong>Association structure</strong> (<code>assoc</code> plus <code>transforms = joinme_tf(...)</code>)</li>
 <li>
-<strong>Priors</strong> (<code>priors = joinme_priors(beta = ..., alpha = ..., lkj = ...)</code>)</li>
+<strong>Priors</strong> (<code>priors = joinme_priors(intercept = ..., slope = ..., assoc = ..., lkj = ...)</code>)</li>
 <li>
-<strong>Computation</strong> (<code>control</code> for sampling, and optionally threading)</li>
+<strong>Sampling</strong> (<code>control</code> for chains, iterations and diagnostic thresholds)</li>
 <li>
-<strong>Posterior reporting</strong> (<code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code>, <code><a href="../reference/draws.html">draws()</a></code>, <code><a href="https://trinhdhk.github.io/joinme/reference/mcmc_plot.html">mcmc_plot()</a></code>, helper plots)</li>
+<strong>Posterior summaries</strong> (<code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code>, <code><a href="../reference/posterior_draws.html">posterior_draws()</a></code>, <code><a href="../reference/mcmc_plot.html">mcmc_plot()</a></code>, helper plots)</li>
 </ul>
 <section class="level2" data-number="2.1"><h3 data-number="2.1" id="family-specific-links-new">
 <span class="header-section-number">2.1</span> Family-specific links (new)<a class="anchor" aria-label="anchor" href="#family-specific-links-new"></a>
 </h3>
 <p>Longitudinal families can carry per-marker links with <code>jm_family(...)</code>. A character or formula supplied to <code>link</code> defines the forward link and JoiNMe compiles its algebraic inverse; <code>inv_link</code> directly defines the inverse link. Thus <code>link = "log"</code> and <code>link = ~ log(x)</code> both apply <code>exp(eta)</code> on the response scale. This affects both <code>epred</code> and <code>predict</code> scales in dynamic prediction.</p>
-<p>For a probit model, the forward link is the standard normal quantile, (g()=^{-1}()), and the inverse link is the standard normal CDF, (g^{-1}()=()). Formula names follow these mathematical directions: <code>inv_Phi(x)</code>, <code>qnorm(x)</code>, and <code>probit(x)</code> are quantile expressions, whereas <code>Phi(x)</code> and <code>pnorm(x)</code> are CDF expressions. Consequently the following three declarations describe the same family:</p>
+<p>The same family declaration carries a fixed skew-Laplace quantile when needed:</p>
 <div class="cell">
 <details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb2"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">families_skew</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span></span>
+<span>  <span class="fu"><a href="../reference/joinme_family.html">jm_family</a></span><span class="op">(</span><span class="st">"gaussian"</span><span class="op">)</span>,</span>
+<span>  <span class="fu"><a href="../reference/joinme_family.html">jm_family</a></span><span class="op">(</span><span class="st">"skew_laplace"</span>, tau <span class="op">=</span> <span class="fl">0.8</span><span class="op">)</span></span>
+<span><span class="op">)</span></span></code></pre></div>
+</details>
+</div>
+<p>When <code>tau</code> is omitted, JoiNMe estimates it from a <code>tau ~ ...</code> distributional regression when supplied, and otherwise estimates a family-level constant. <code><a href="../reference/simulate_joinme.html">simulate_joinme()</a></code> follows the same marker-specific selection: a fixed family value takes precedence for that marker, while other markers retain their distributional regression or shared <code>family_params</code> value.</p>
+<p>For a probit model, the forward link is the standard normal quantile, (g()=^{-1}()), and the inverse link is the standard normal CDF, (g^{-1}()=()). Formula names follow these mathematical directions: <code>inv_Phi(x)</code>, <code>qnorm(x)</code>, and <code>probit(x)</code> are quantile expressions, whereas <code>Phi(x)</code> and <code>pnorm(x)</code> are CDF expressions. Consequently the following three declarations describe the same family:</p>
+<div class="cell">
+<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb3"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/joinme_family.html">jm_family</a></span><span class="op">(</span><span class="st">"bernoulli"</span>, link <span class="op">=</span> <span class="st">"probit"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="../reference/joinme_family.html">jm_family</a></span><span class="op">(</span><span class="st">"bernoulli"</span>, link <span class="op">=</span> <span class="op">~</span> <span class="fu">inv_Phi</span><span class="op">(</span><span class="va">x</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="fu"><a href="../reference/joinme_family.html">jm_family</a></span><span class="op">(</span><span class="st">"bernoulli"</span>, inv_link <span class="op">=</span> <span class="op">~</span> <span class="fu">Phi</span><span class="op">(</span><span class="va">x</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
 </details>
 </div>
 <div class="cell">
-<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb3"><pre class="downlit sourceCode r">
+<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb4"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">families_linked</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span></span>
 <span>  <span class="fu"><a href="../reference/joinme_family.html">jm_family</a></span><span class="op">(</span><span class="st">"student_t"</span>, link <span class="op">=</span> <span class="st">"identity"</span><span class="op">)</span>,</span>
 <span>  <span class="fu"><a href="../reference/joinme_family.html">jm_family</a></span><span class="op">(</span><span class="st">"bernoulli"</span>, link <span class="op">=</span> <span class="st">"probit"</span><span class="op">)</span>,</span>
@@ -138,37 +148,34 @@
 <span class="header-section-number">3.1</span> Data simulation<a class="anchor" aria-label="anchor" href="#data-simulation"></a>
 </h3>
 <p>We simulate a multi-marker longitudinal dataset with a survival process linked through <strong>current value (CV)</strong>. The simulator also returns truth values for fixed effects and survival coefficients.</p>
-<p>For marker-aggregated terms (<code>cv_total</code>, <code>cv_marker</code>, <code>cs_total</code>, <code>cs_marker</code>), both simulation and Stan fit/prediction apply transforms at marker level before weighted averaging. This keeps nonlinear association terms consistent end-to-end.</p>
+<p>For marker-aggregated terms (<code>cv_total</code>, <code>cv_marker</code>, <code>cs_total</code>, <code>cs_marker</code>), simulation, fitting and prediction apply transformations at marker level before weighted averaging. This gives nonlinear association terms one consistent statistical meaning.</p>
 <div class="cell">
-<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb4"><pre class="downlit sourceCode r">
+<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb5"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">sim</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/simulate_joinme.html">simulate_joinme</a></span><span class="op">(</span></span>
 <span>  n_id <span class="op">=</span> <span class="fl">100</span>,</span>
 <span>  families <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/rep.html" class="external-link">rep</a></span><span class="op">(</span><span class="st">"student_t"</span>, <span class="fl">5</span><span class="op">)</span>,</span>
-<span>  n_obs_per_marker_per_id <span class="op">=</span> <span class="fl">10</span>,</span>
 <span>  times_obs <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/seq.html" class="external-link">seq</a></span><span class="op">(</span><span class="fl">0</span>, <span class="fl">8</span>, length.out <span class="op">=</span> <span class="fl">14</span><span class="op">)</span>,</span>
 <span>  quadrature_nodes <span class="op">=</span> <span class="fl">31</span>,</span>
 <span>  seed <span class="op">=</span> <span class="fl">123</span>,</span>
 <span>  assoc <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"cv_total"</span><span class="op">)</span>,</span>
-<span>  assoc_coefs <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>cv_total <span class="op">=</span> <span class="fl">0.6</span><span class="op">)</span></span>
+<span>  truth <span class="op">=</span> <span class="fu"><a href="../reference/joinme_truth.html">jm_truth</a></span><span class="op">(</span>assoc_coef <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>slope <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>cv_total <span class="op">=</span> <span class="fl">0.6</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="op">)</span></span>
 <span></span>
-<span><span class="co"># Gauss-Kronrod nodes/weights are fixed in Stan; `quadrature_nodes` selects</span></span>
-<span><span class="co"># the node count used to build the design matrices in R.</span></span>
+<span><span class="co"># `quadrature_nodes` controls the accuracy of cumulative-hazard integration.</span></span>
 <span></span>
 <span><span class="co"># Formula links are inverted symbolically; custom inverse-links can be supplied</span></span>
 <span><span class="co"># directly via jm_family(..., inv_link = ~ ...).</span></span>
 <span></span>
-<span><span class="co"># When estimating marker weights, compare against sim$truth$marker_weights</span></span>
-<span><span class="co"># because weights are used directly in Stan.</span></span></code></pre></div>
+<span><span class="co"># When estimating marker weights, compare against sim$truth$marker_weights.</span></span></code></pre></div>
 </details>
 </div>
 </section><section class="level2" data-number="3.2"><h3 data-number="3.2" id="model-specification-and-fit">
 <span class="header-section-number">3.2</span> Model specification and fit<a class="anchor" aria-label="anchor" href="#model-specification-and-fit"></a>
 </h3>
 <p>We start with identity transforms and a conservative sampling configuration to keep runtime manageable. The nested marker block <code>( ... | marker )</code> supports an inner <code>( ... | id )</code> term; this enables marker-by-id effects and the CORR association.</p>
-<p>Subject/group-weighted declarations can be made per grouping term with <code>weighted(group, weights = &lt;column&gt;)</code>, e.g. <code>(0 + x1 + (1 + time | weighted(id, weights = id_w)) | weighted(marker, weights = marker_w))</code>.</p>
+<p>Subject/group-weighted declarations can be made per grouping term with <code>weighted(group, weights = &lt;column&gt;)</code>, e.g. <code>(0 + x1 + (1 + time | weighted(id, weights = id_w)) | weighted(marker, weights = marker_w))</code>.</p>
 <div class="cell">
-<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb5"><pre class="downlit sourceCode r">
+<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb6"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">formulaLong</span> <span class="op">&lt;-</span> <span class="va">y</span> <span class="op">~</span> <span class="fl">1</span> <span class="op">+</span> <span class="va">time</span> <span class="op">+</span> <span class="va">x1</span> <span class="op">+</span></span>
 <span>  <span class="op">(</span><span class="fl">1</span> <span class="op">+</span> <span class="va">time</span> <span class="op">||</span> <span class="va">id</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="op">(</span><span class="fl">0</span> <span class="op">+</span> <span class="va">x1</span> <span class="op">+</span> <span class="op">(</span><span class="fl">1</span> <span class="op">+</span> <span class="va">time</span> <span class="op">||</span> <span class="va">id</span><span class="op">)</span> <span class="op">||</span> <span class="va">marker</span><span class="op">)</span></span>
@@ -198,9 +205,9 @@
 <span><span class="op">)</span></span></code></pre></div>
 </details>
 </div>
-<p>To customise priors or the baseline hazard basis, supply <code>priors = joinme_priors(...)</code> and/or forward standata arguments via <code>...</code>. Distributional regression for parameters such as <span class="math inline">\sigma</span> or <span class="math inline">\nu</span> can be specified through <code>formulaDist</code>.</p>
+<p>To customise priors or the baseline hazard basis, supply <code>priors = jm_prior(...)</code> and the relevant model arguments. Distributional regression for parameters such as <span class="math inline">\sigma</span> or <span class="math inline">\nu</span> can be specified through <code>formulaDist</code>.</p>
 <div class="cell">
-<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb6"><pre class="downlit sourceCode r">
+<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb7"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">fit2</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/joinme.html">joinme</a></span><span class="op">(</span></span>
 <span>  formulaLong <span class="op">=</span> <span class="va">formulaLong</span>,</span>
 <span>  dataLong <span class="op">=</span> <span class="va">sim</span><span class="op">$</span><span class="va">dataLong</span>,</span>
@@ -208,7 +215,11 @@
 <span>  dataEvent <span class="op">=</span> <span class="va">sim</span><span class="op">$</span><span class="va">dataEvent</span>,</span>
 <span>  assoc <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"cv_total"</span><span class="op">)</span>,</span>
 <span>  transforms <span class="op">=</span> <span class="fu"><a href="../reference/joinme_tf.html">joinme_tf</a></span><span class="op">(</span>cv_total <span class="op">=</span> <span class="st">"identity"</span><span class="op">)</span>,</span>
-<span>  priors <span class="op">=</span> <span class="fu"><a href="../reference/joinme_priors.html">joinme_priors</a></span><span class="op">(</span>beta <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>scale <span class="op">=</span> <span class="fl">1.5</span><span class="op">)</span>, alpha <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>scale <span class="op">=</span> <span class="fl">1.5</span><span class="op">)</span>, lkj <span class="op">=</span> <span class="fl">2</span><span class="op">)</span>,</span>
+<span>  priors <span class="op">=</span> <span class="fu"><a href="../reference/joinme_priors.html">joinme_priors</a></span><span class="op">(</span></span>
+<span>    intercept <span class="op">=</span> <span class="fu"><a href="../reference/prior_student_t.html">prior_student_t</a></span><span class="op">(</span>df <span class="op">=</span> <span class="fl">6</span>, scale <span class="op">=</span> <span class="fl">1.5</span><span class="op">)</span>,</span>
+<span>    slope <span class="op">=</span> <span class="fu"><a href="../reference/prior_student_t.html">prior_student_t</a></span><span class="op">(</span>df <span class="op">=</span> <span class="fl">6</span>, scale <span class="op">=</span> <span class="fl">1.5</span><span class="op">)</span>,</span>
+<span>    lkj <span class="op">=</span> <span class="fl">2</span></span>
+<span>  <span class="op">)</span>,</span>
 <span>  basehaz <span class="op">=</span> <span class="st">"bs"</span>,</span>
 <span>  n_knots <span class="op">=</span> <span class="fl">5</span>,</span>
 <span>  basehaz_degree <span class="op">=</span> <span class="fl">3</span>,</span>
@@ -216,12 +227,12 @@
 <span><span class="op">)</span></span></code></pre></div>
 </details>
 </div>
-</section><section class="level2" data-number="3.3"><h3 data-number="3.3" id="diagnostics-and-parameter-interpretation">
-<span class="header-section-number">3.3</span> Diagnostics and parameter interpretation<a class="anchor" aria-label="anchor" href="#diagnostics-and-parameter-interpretation"></a>
+</section><section class="level2" data-number="3.3"><h3 data-number="3.3" id="posterior-summaries-and-diagnostics">
+<span class="header-section-number">3.3</span> Posterior summaries and diagnostics<a class="anchor" aria-label="anchor" href="#posterior-summaries-and-diagnostics"></a>
 </h3>
 <p>We extract diagnostics (R-hat, ESS, divergences) and compare posterior summaries to known truth values. This yields <strong>bias</strong> and <strong>coverage</strong> diagnostics for fixed effects and survival coefficients.</p>
 <div class="cell">
-<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb7"><pre class="downlit sourceCode r">
+<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb8"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">sum_obj</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="va">sum_obj</span><span class="op">)</span></span>
 <span></span>
@@ -264,8 +275,8 @@
 <span><span class="op">}</span></span>
 <span></span>
 <span><span class="co"># Renamed posterior draws and MCMC visualisation</span></span>
-<span><span class="fu"><a href="../reference/draws.html">draws</a></span><span class="op">(</span><span class="va">fit</span>, variables <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"time"</span>, <span class="st">"alpha_cv_total"</span><span class="op">)</span>, format <span class="op">=</span> <span class="st">"draws_df"</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://trinhdhk.github.io/joinme/reference/mcmc_plot.html">mcmc_plot</a></span><span class="op">(</span><span class="va">fit</span>, variable <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"time"</span>, <span class="st">"alpha_cv_total"</span><span class="op">)</span>, type <span class="op">=</span> <span class="st">"trace"</span><span class="op">)</span></span></code></pre></div>
+<span><span class="fu"><a href="../reference/posterior_draws.html">posterior_draws</a></span><span class="op">(</span><span class="va">fit</span>, variables <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"time"</span>, <span class="st">"alpha_cv_total"</span><span class="op">)</span>, format <span class="op">=</span> <span class="st">"draws_df"</span><span class="op">)</span></span>
+<span><span class="fu"><a href="../reference/mcmc_plot.html">mcmc_plot</a></span><span class="op">(</span><span class="va">fit</span>, variable <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"time"</span>, <span class="st">"alpha_cv_total"</span><span class="op">)</span>, type <span class="op">=</span> <span class="st">"trace"</span><span class="op">)</span></span></code></pre></div>
 </details>
 </div>
 </section><section class="level2" data-number="3.4"><h3 data-number="3.4" id="residual-sum-of-squares-for-fitted-trajectories">
@@ -273,7 +284,7 @@
 </h3>
 <p>The <code>JoiNMeDynPred</code> object includes fitted values for observed history. We compute a <strong>residual sum of squares</strong> (RSS) on the expected-response scale (<code>epred</code>).</p>
 <div class="cell">
-<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb8"><pre class="downlit sourceCode r">
+<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb9"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">pred_fit</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://mc-stan.org/rstantools/reference/posterior_epred.html" class="external-link">posterior_epred</a></span><span class="op">(</span></span>
 <span>  <span class="va">fit</span>,</span>
 <span>  newdataLong <span class="op">=</span> <span class="va">sim</span><span class="op">$</span><span class="va">dataLong</span>,</span>
@@ -313,7 +324,7 @@
 </h3>
 <p>We generate a future prediction for one subject and plot longitudinal and survival outputs.</p>
 <div class="cell">
-<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb9"><pre class="downlit sourceCode r">
+<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb10"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">id</span> <span class="op">&lt;-</span> <span class="fl">1</span></span>
 <span><span class="va">ndL</span> <span class="op">&lt;-</span> <span class="va">sim</span><span class="op">$</span><span class="va">dataLong</span><span class="op">[</span><span class="va">sim</span><span class="op">$</span><span class="va">dataLong</span><span class="op">$</span><span class="va">id</span> <span class="op">==</span> <span class="va">id</span>, <span class="op">]</span></span>
 <span><span class="va">ndE</span> <span class="op">&lt;-</span> <span class="va">sim</span><span class="op">$</span><span class="va">dataEvent</span><span class="op">[</span><span class="va">sim</span><span class="op">$</span><span class="va">dataEvent</span><span class="op">$</span><span class="va">id</span> <span class="op">==</span> <span class="va">id</span>, <span class="op">]</span></span>
@@ -339,16 +350,16 @@
 <span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">pred_ep</span>, type <span class="op">=</span> <span class="st">"longitudinal"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">pred_ep</span>, type <span class="op">=</span> <span class="st">"survival"</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://trinhdhk.github.io/joinme/reference/longitudinal_plot.html">longitudinal_plot</a></span><span class="op">(</span><span class="va">pred_ep</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://trinhdhk.github.io/joinme/reference/plot_helpers.html">survival_plot</a></span><span class="op">(</span><span class="va">pred_ep</span><span class="op">)</span></span></code></pre></div>
+<span><span class="fu"><a href="../reference/longitudinal_plot.html">longitudinal_plot</a></span><span class="op">(</span><span class="va">pred_ep</span><span class="op">)</span></span>
+<span><span class="fu"><a href="../reference/survival_plot.html">survival_plot</a></span><span class="op">(</span><span class="va">pred_ep</span><span class="op">)</span></span></code></pre></div>
 </details>
 </div>
-<p><code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> now accepts <code>scale</code> as a character vector. If omitted, all longitudinal scales are produced: <code>c("epred", "linpred", "predict")</code>. Use <code>plot(..., scale = "epred")</code> (or another available scale) to choose which trajectory scale to visualise.</p>
+<p><code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> accepts <code>scale</code> as a character vector. If omitted, all longitudinal scales are produced: <code>c("epred", "linpred", "predict")</code>. Use <code>plot(..., scale = "epred")</code> (or another available scale) to choose which trajectory scale to visualise.</p>
 <p>Dynamic prediction is conditional on observed history up to <code>time_start</code> and (by construction) survival up to that landmark; the survival plot corresponds to <span class="math inline">\Pr(T &gt; t \mid T &gt; T_{start}, \mathcal{H}(T_{start}))</span>.</p>
 <p><code>control$n_samples</code> controls how many posterior parameter draws are extracted from the fitted model, while <code>control$n_pred_draws</code> controls how many draws are produced in the dynpred output object. This decoupling allows lightweight posterior extraction with a larger prediction Monte Carlo layer when needed.</p>
-<p>When <code>times = NULL</code>, you can now control the default forecast window with <code>time_horizon</code> (defaulting to <code>tmax</code> from the fitted model):</p>
+<p>When <code>times = NULL</code>, control the default forecast window with <code>time_horizon</code> (defaulting to <code>tmax</code> from the fitted model):</p>
 <div class="cell">
-<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb10"><pre class="downlit sourceCode r">
+<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb11"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">pred_ep_horizon</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://mc-stan.org/rstantools/reference/posterior_epred.html" class="external-link">posterior_epred</a></span><span class="op">(</span></span>
 <span>  <span class="va">fit</span>,</span>
 <span>  newdataLong <span class="op">=</span> <span class="va">ndL</span>,</span>
@@ -369,20 +380,20 @@
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">pred_ep_horizon</span><span class="op">$</span><span class="va">predictions</span><span class="op">$</span><span class="va">survival</span><span class="op">)</span></span></code></pre></div>
 </details>
 </div>
-<p>Prediction enforces marker-level consistency: <code>newdataLong$marker</code> must use only levels seen during fitting. Internally, dynamic prediction outputs are stabilised by averaging over dynpred posterior rows for each indexed draw before constructing quantile summaries.</p>
+<p>Prediction requires <code>newdataLong$marker</code> to use marker levels representedduring fitting.</p>
 <section class="level3" data-number="3.5.1"><h4 data-number="3.5.1" id="diagnostics-and-random-effects-extraction">
 <span class="header-section-number">3.5.1</span> Diagnostics and random-effects extraction<a class="anchor" aria-label="anchor" href="#diagnostics-and-random-effects-extraction"></a>
 </h4>
-<p><code>JoiNMe</code> now uses the same diagnostics table schema for fitted and predicted objects.</p>
+<p><code>JoiNMe</code> uses the same diagnostics table schema for fitted and predicted objects.</p>
 <div class="cell">
-<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb11"><pre class="downlit sourceCode r">
+<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb12"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/diagnosis.html">diagnosis</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span>
 <span><span class="fu"><a href="../reference/diagnosis.html">diagnosis</a></span><span class="op">(</span><span class="va">pred_ep</span><span class="op">)</span></span></code></pre></div>
 </details>
 </div>
 <p>For fitted models, <code><a href="https://rdrr.io/pkg/nlme/man/random.effects.html" class="external-link">ranef()</a></code>, <code><a href="https://rdrr.io/r/stats/coef.html" class="external-link">coef()</a></code>, and <code><a href="https://rdrr.io/r/stats/vcov.html" class="external-link">vcov()</a></code> are nested by <code>formulaLong</code> and <code>formulaDist</code>:</p>
 <div class="cell">
-<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb12"><pre class="downlit sourceCode r">
+<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb13"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">re_fit</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/pkg/nlme/man/random.effects.html" class="external-link">ranef</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span>
 <span><span class="va">cf_fit</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/stats/coef.html" class="external-link">coef</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span>
 <span><span class="va">vc_fit</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/stats/vcov.html" class="external-link">vcov</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span>
@@ -395,7 +406,7 @@
 </div>
 <p>For dynamic prediction, marker-by-id random effects and covariance are exposed only when marker covariance depends on id:</p>
 <div class="cell">
-<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb13"><pre class="downlit sourceCode r">
+<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb14"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/Logic.html" class="external-link">isTRUE</a></span><span class="op">(</span><span class="va">pred_ep</span><span class="op">$</span><span class="va">metadata</span><span class="op">$</span><span class="va">marker_corr_depends_on_id</span><span class="op">)</span><span class="op">)</span> <span class="op">{</span></span>
 <span>  <span class="fu"><a href="https://rdrr.io/pkg/nlme/man/random.effects.html" class="external-link">ranef</a></span><span class="op">(</span><span class="va">pred_ep</span><span class="op">)</span></span>
 <span>  <span class="fu"><a href="https://rdrr.io/r/stats/vcov.html" class="external-link">vcov</a></span><span class="op">(</span><span class="va">pred_ep</span><span class="op">)</span></span>
@@ -407,15 +418,14 @@
 </h2>
 <p>This example adds a competing-risk indicator via <code>event_type</code>. The dynamic survival output corresponds to overall survival across causes.</p>
 <div class="cell">
-<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb14"><pre class="downlit sourceCode r">
+<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb15"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">sim_comp</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/simulate_joinme.html">simulate_joinme</a></span><span class="op">(</span></span>
 <span>  n_id <span class="op">=</span> <span class="fl">40</span>,</span>
 <span>  families <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/rep.html" class="external-link">rep</a></span><span class="op">(</span><span class="st">"student_t"</span>, <span class="fl">3</span><span class="op">)</span>,</span>
-<span>  n_obs_per_marker_per_id <span class="op">=</span> <span class="fl">6</span>,</span>
 <span>  times_obs <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/seq.html" class="external-link">seq</a></span><span class="op">(</span><span class="fl">0</span>, <span class="fl">8</span>, length.out <span class="op">=</span> <span class="fl">12</span><span class="op">)</span>,</span>
 <span>  seed <span class="op">=</span> <span class="fl">444</span>,</span>
 <span>  assoc <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"cv_total"</span><span class="op">)</span>,</span>
-<span>  assoc_coefs <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>cv_total <span class="op">=</span> <span class="fl">0.6</span><span class="op">)</span></span>
+<span>  truth <span class="op">=</span> <span class="fu"><a href="../reference/joinme_truth.html">jm_truth</a></span><span class="op">(</span>assoc_coef <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>slope <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>cv_total <span class="op">=</span> <span class="fl">0.6</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># Simulate cause-specific event times and derive event_type from the minimum time.</span></span>
@@ -496,7 +506,7 @@
 </details>
 </div>
 <div class="cell">
-<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb15"><pre class="downlit sourceCode r">
+<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb16"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">formulaLong_comp</span> <span class="op">&lt;-</span> <span class="va">y</span> <span class="op">~</span> <span class="fl">1</span> <span class="op">+</span> <span class="va">time</span> <span class="op">+</span> <span class="va">x1</span> <span class="op">+</span></span>
 <span>  <span class="op">(</span><span class="fl">1</span> <span class="op">+</span> <span class="va">time</span> <span class="op">||</span> <span class="va">id</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="op">(</span><span class="fl">0</span> <span class="op">+</span> <span class="va">x1</span> <span class="op">+</span> <span class="op">(</span><span class="fl">1</span> <span class="op">+</span> <span class="va">time</span> <span class="op">||</span> <span class="va">id</span><span class="op">)</span> <span class="op">||</span> <span class="va">marker</span><span class="op">)</span></span>
@@ -528,7 +538,7 @@
 </div>
 <p>Prediction is shown below but left unevaluated during rendering. Set <code>eval = TRUE</code> once CmdStan is configured for dynamic prediction.</p>
 <div class="cell">
-<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb16"><pre class="downlit sourceCode r">
+<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb17"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">id_comp</span> <span class="op">&lt;-</span> <span class="fl">1</span></span>
 <span><span class="va">ndL_comp</span> <span class="op">&lt;-</span> <span class="va">sim_comp</span><span class="op">$</span><span class="va">dataLong</span><span class="op">[</span><span class="va">sim_comp</span><span class="op">$</span><span class="va">dataLong</span><span class="op">$</span><span class="va">id</span> <span class="op">==</span> <span class="va">id_comp</span>, <span class="op">]</span></span>
 <span><span class="va">ndE_comp</span> <span class="op">&lt;-</span> <span class="va">sim_comp</span><span class="op">$</span><span class="va">dataEvent</span><span class="op">[</span><span class="va">sim_comp</span><span class="op">$</span><span class="va">dataEvent</span><span class="op">$</span><span class="va">id</span> <span class="op">==</span> <span class="va">id_comp</span>, <span class="op">]</span></span>
@@ -562,10 +572,9 @@
 </h2>
 <p>This example uses <strong>mixed families</strong> and a <strong>nonlinear association transform</strong> to illustrate interpretability when markers live on distinct scales. The goal is to show how different distributional families can coexist within a single joint model.</p>
 <div class="cell">
-<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb17"><pre class="downlit sourceCode r">
+<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb18"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">sim_mixed</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/simulate_joinme.html">simulate_joinme</a></span><span class="op">(</span></span>
 <span>  n_id <span class="op">=</span> <span class="fl">20</span>,</span>
-<span>  n_obs_per_marker_per_id <span class="op">=</span> <span class="fl">5</span>,</span>
 <span>  families <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"gaussian"</span>, <span class="st">"bernoulli"</span>, <span class="st">"poisson"</span><span class="op">)</span>,</span>
 <span>  times_obs <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/seq.html" class="external-link">seq</a></span><span class="op">(</span><span class="fl">0</span>, <span class="fl">4</span>, length.out <span class="op">=</span> <span class="fl">5</span><span class="op">)</span>,</span>
 <span>  seed <span class="op">=</span> <span class="fl">101</span></span>
@@ -589,8 +598,8 @@
 <span><span class="co"># Notes on spline arguments:</span></span>
 <span><span class="co"># - type = "ispline": provide knots + coeff directly (no x/y/lambda fitting).</span></span>
 <span><span class="co"># - type = "ispline_penalised": provide knots (or n_knots) plus lambda.</span></span>
-<span><span class="co">#   Supplying y uses the legacy (x, y) plug-in fit; omitting y lets Stan</span></span>
-<span><span class="co">#   estimate the monotone spline jointly.</span></span></code></pre></div>
+<span><span class="co">#   Supplying y defines a fixed curve; omitting y estimates the monotone spline</span></span>
+<span><span class="co">#   jointly.</span></span></code></pre></div>
 </details>
 </div>
 <section class="level2" data-number="5.1"><h3 data-number="5.1" id="optional-distributional-regression">
@@ -598,7 +607,7 @@
 </h3>
 <p>If a marker family supports additional parameters, you can model these via <code>formulaDist</code>. <code>nu</code> denotes Student-<span class="math inline">t</span> degrees of freedom, <code>kappa</code> denotes the positive Beta sample size (with shapes <span class="math inline">\mu\kappa</span> and <span class="math inline">(1-\mu)\kappa</span>), and <code>tau</code> denotes the skew-double-exponential quantile/asymmetry parameter. For example, the following model allows a heteroscedastic longitudinal scale:</p>
 <div class="cell">
-<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb18"><pre class="downlit sourceCode r">
+<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb19"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">fit_dist</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/joinme.html">joinme</a></span><span class="op">(</span></span>
 <span>  formulaLong <span class="op">=</span> <span class="va">formulaLong</span>,</span>
 <span>  dataLong <span class="op">=</span> <span class="va">sim</span><span class="op">$</span><span class="va">dataLong</span>,</span>
@@ -640,82 +649,7 @@
 <span><span class="op">}</span></span></code></pre></div>
 </details>
 </div>
-</section></section><section class="section level2" data-number="6"><h2 data-number="6" id="scenario-d-thread-capable-fit-and-prediction">
-<span class="header-section-number">6</span> Scenario D: Thread-capable Fit and Prediction<a class="anchor" aria-label="anchor" href="#scenario-d-thread-capable-fit-and-prediction"></a>
-</h2>
-<p>Threading is useful when the longitudinal dimension is large. <code>JoiNMe</code> now always uses the threaded Stan programs internally; <code>threads_per_chain = 1</code> keeps that same kernel serial, while larger values enable parallel <code>reduce_sum</code> execution. This example shows the same public workflow with two threads.</p>
-<div class="cell">
-<details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb19"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">sim_thread</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/simulate_joinme.html">simulate_joinme</a></span><span class="op">(</span></span>
-<span>  n_id <span class="op">=</span> <span class="fl">60</span>,</span>
-<span>  families <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/rep.html" class="external-link">rep</a></span><span class="op">(</span><span class="st">"student_t"</span>, <span class="fl">6</span><span class="op">)</span>,</span>
-<span>  n_obs_per_marker_per_id <span class="op">=</span> <span class="fl">6</span>,</span>
-<span>  times_obs <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/seq.html" class="external-link">seq</a></span><span class="op">(</span><span class="fl">0</span>, <span class="fl">8</span>, length.out <span class="op">=</span> <span class="fl">12</span><span class="op">)</span>,</span>
-<span>  seed <span class="op">=</span> <span class="fl">202</span>,</span>
-<span>  assoc <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"cv_total"</span><span class="op">)</span>,</span>
-<span>  assoc_coefs <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>cv_total <span class="op">=</span> <span class="fl">0.6</span><span class="op">)</span></span>
-<span><span class="op">)</span></span>
-<span></span>
-<span><span class="va">fit_thread</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/joinme.html">joinme</a></span><span class="op">(</span></span>
-<span>  formulaLong <span class="op">=</span> <span class="va">formulaLong</span>,</span>
-<span>  dataLong <span class="op">=</span> <span class="va">sim_thread</span><span class="op">$</span><span class="va">dataLong</span>,</span>
-<span>  formulaEvent <span class="op">=</span> <span class="va">formulaEvent</span>,</span>
-<span>  dataEvent <span class="op">=</span> <span class="va">sim_thread</span><span class="op">$</span><span class="va">dataEvent</span>,</span>
-<span>  assoc <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"cv_total"</span><span class="op">)</span>,</span>
-<span>  transforms <span class="op">=</span> <span class="fu"><a href="../reference/joinme_tf.html">joinme_tf</a></span><span class="op">(</span>cv_total <span class="op">=</span> <span class="st">"identity"</span><span class="op">)</span>,</span>
-<span>  control <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span></span>
-<span>    parallel_chains <span class="op">=</span> <span class="fl">1</span>,</span>
-<span>    iter_warmup <span class="op">=</span> <span class="fl">200</span>,</span>
-<span>    iter_sampling <span class="op">=</span> <span class="fl">200</span>,</span>
-<span>    seed <span class="op">=</span> <span class="fl">202</span>,</span>
-<span>    refresh <span class="op">=</span> <span class="fl">0</span>,</span>
-<span>    threads_per_chain <span class="op">=</span> <span class="fl">2</span>,</span>
-<span>    adapt_delta <span class="op">=</span> <span class="fl">0.9</span></span>
-<span>  <span class="op">)</span></span>
-<span><span class="op">)</span></span>
-<span></span>
-<span><span class="va">ndL_thread</span> <span class="op">&lt;-</span> <span class="va">sim_thread</span><span class="op">$</span><span class="va">dataLong</span><span class="op">[</span><span class="va">sim_thread</span><span class="op">$</span><span class="va">dataLong</span><span class="op">$</span><span class="va">id</span> <span class="op"><a href="https://rdrr.io/r/base/match.html" class="external-link">%in%</a></span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">1</span>, <span class="fl">2</span><span class="op">)</span>, <span class="op">]</span></span>
-<span><span class="va">ndE_thread</span> <span class="op">&lt;-</span> <span class="va">sim_thread</span><span class="op">$</span><span class="va">dataEvent</span><span class="op">[</span><span class="va">sim_thread</span><span class="op">$</span><span class="va">dataEvent</span><span class="op">$</span><span class="va">id</span> <span class="op"><a href="https://rdrr.io/r/base/match.html" class="external-link">%in%</a></span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">1</span>, <span class="fl">2</span><span class="op">)</span>, <span class="op">]</span></span>
-<span></span>
-<span><span class="va">pred_thread</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://mc-stan.org/rstantools/reference/posterior_epred.html" class="external-link">posterior_epred</a></span><span class="op">(</span></span>
-<span>  <span class="va">fit_thread</span>,</span>
-<span>  newdataLong <span class="op">=</span> <span class="va">ndL_thread</span>,</span>
-<span>  newdataEvent <span class="op">=</span> <span class="va">ndE_thread</span>,</span>
-<span>  time_start <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/Extremes.html" class="external-link">max</a></span><span class="op">(</span><span class="va">ndL_thread</span><span class="op">$</span><span class="va">time</span><span class="op">)</span>,</span>
-<span>  times <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/seq.html" class="external-link">seq</a></span><span class="op">(</span><span class="fl">0</span>, <span class="fu"><a href="https://rdrr.io/r/base/Extremes.html" class="external-link">max</a></span><span class="op">(</span><span class="va">ndL_thread</span><span class="op">$</span><span class="va">time</span><span class="op">)</span> <span class="op">+</span> <span class="fl">2</span>, length.out <span class="op">=</span> <span class="fl">60</span><span class="op">)</span>,</span>
-<span>  control <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span></span>
-<span>    n_samples <span class="op">=</span> <span class="fl">100</span>,</span>
-<span>    threads_per_chain <span class="op">=</span> <span class="fl">2</span>,</span>
-<span>    chains <span class="op">=</span> <span class="fl">1</span>,</span>
-<span>    iter_warmup <span class="op">=</span> <span class="fl">100</span>,</span>
-<span>    iter_sampling <span class="op">=</span> <span class="fl">1</span>,</span>
-<span>    seed <span class="op">=</span> <span class="fl">202</span>,</span>
-<span>    refresh <span class="op">=</span> <span class="fl">0</span></span>
-<span>  <span class="op">)</span></span>
-<span><span class="op">)</span></span>
-<span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">pred_thread</span>, type <span class="op">=</span> <span class="st">"longitudinal"</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">pred_thread</span>, type <span class="op">=</span> <span class="st">"survival"</span><span class="op">)</span></span></code></pre></div>
-</details>
-</div>
-<p>When requesting multiple outcomes with <code>combined = TRUE</code>, the method returns:</p>
-<ul>
-<li>one combined object for a single subject when <code>patchwork</code>/<code>cowplot</code> is available,</li>
-<li>a named list of combined objects (one per subject) for multiple subjects,</li>
-<li>and, if combiner backends are unavailable, a per-subject fallback to the regular nested outcome list.</li>
-</ul></section><section class="section level2" data-number="7"><h2 data-number="7" id="discussion-and-reporting-guidance">
-<span class="header-section-number">7</span> Discussion and Reporting Guidance<a class="anchor" aria-label="anchor" href="#discussion-and-reporting-guidance"></a>
-</h2>
-<p>These scenarios illustrate how model assumptions and association choices influence interpretation. In a report or manuscript, we recommend:</p>
-<ul>
-<li>Reporting <strong>R-hat</strong>, <strong>ESS</strong>, and divergences as primary convergence diagnostics.</li>
-<li>Presenting <strong>bias and coverage</strong> for simulated truth when validation is possible.</li>
-<li>Summarizing <strong>association parameters</strong> alongside the transform used (functional, spline, piecewise).</li>
-<li>Including <strong>dynamic prediction plots</strong> to show how uncertainty evolves beyond the observed history.</li>
-<li>Stating whether <strong>threading</strong> was used and the number of threads per chain.</li>
-</ul>
-<p>This structure provides a reproducible, interpretable workflow that can be adapted to substantive scientific questions.</p>
-</section><script id="quarto-html-after-body" type="application/javascript">
+</section></section><script id="quarto-html-after-body" type="application/javascript">
   window.document.addEventListener("DOMContentLoaded", function (event) {
       var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
       var mailtoRegex = new RegExp(/^mailto:/);

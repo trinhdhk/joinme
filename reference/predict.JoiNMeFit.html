@@ -23,7 +23,7 @@ predictive draws (includes observation noise)."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">joinme</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2608</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.2</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -73,7 +73,7 @@ predictive draws (includes observation noise).</p>
 <span><span class="fu"><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict</a></span><span class="op">(</span></span>
 <span>  <span class="va">object</span>,</span>
 <span>  <span class="va">newdataLong</span>,</span>
-<span>  <span class="va">newdataEvent</span>,</span>
+<span>  newdataEvent <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  process <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"longitudinal"</span>, <span class="st">"event"</span><span class="op">)</span>,</span>
 <span>  pred_type <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"per_marker_id"</span>, <span class="st">"marginal_marker"</span>, <span class="st">"marginal_id"</span>, <span class="st">"marker_subject"</span>,</span>
 <span>    <span class="st">"subject_marker"</span><span class="op">)</span>,</span>
@@ -84,18 +84,19 @@ predictive draws (includes observation noise).</p>
 <span>  tmax <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  ci_levels <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">0.5</span>, <span class="fl">0.95</span><span class="op">)</span>,</span>
 <span>  control <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span><span class="op">)</span>,</span>
+<span>  reuse_fitted_re <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  seed <span class="op">=</span> <span class="va">.Random.seed</span><span class="op">[[</span><span class="fl">1</span><span class="op">]</span><span class="op">]</span>,</span>
 <span>  <span class="va">...</span></span>
 <span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># S3 method for class 'JoiNMeFit'</span></span>
-<span><span class="fu"><a href="https://mc-stan.org/rstantools/reference/posterior_linpred.html" class="external-link">posterior_linpred</a></span><span class="op">(</span><span class="va">object</span>, <span class="va">...</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://mc-stan.org/rstantools/reference/posterior_linpred.html" class="external-link">posterior_linpred</a></span><span class="op">(</span><span class="va">object</span>, reuse_fitted_re <span class="op">=</span> <span class="cn">FALSE</span>, <span class="va">...</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># S3 method for class 'JoiNMeFit'</span></span>
-<span><span class="fu"><a href="https://mc-stan.org/rstantools/reference/posterior_epred.html" class="external-link">posterior_epred</a></span><span class="op">(</span><span class="va">object</span>, <span class="va">...</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://mc-stan.org/rstantools/reference/posterior_epred.html" class="external-link">posterior_epred</a></span><span class="op">(</span><span class="va">object</span>, reuse_fitted_re <span class="op">=</span> <span class="cn">FALSE</span>, <span class="va">...</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># S3 method for class 'JoiNMeFit'</span></span>
-<span><span class="fu"><a href="https://mc-stan.org/rstantools/reference/posterior_predict.html" class="external-link">posterior_predict</a></span><span class="op">(</span><span class="va">object</span>, <span class="va">...</span><span class="op">)</span></span></code></pre></div>
+<span><span class="fu"><a href="https://mc-stan.org/rstantools/reference/posterior_predict.html" class="external-link">posterior_predict</a></span><span class="op">(</span><span class="va">object</span>, reuse_fitted_re <span class="op">=</span> <span class="cn">FALSE</span>, <span class="va">...</span><span class="op">)</span></span></code></pre></div>
     </div>
 
     <div class="section level2">
@@ -117,7 +118,8 @@ in the survival model. It may contain one row per subject or interval-split
 rows (<code>Surv(start, stop, status)</code> layout). Left- and interval-censored
 survival encodings (<code>type = "left"</code>, <code>type = "interval2"</code>) are accepted.
 When interval rows are supplied, dynamic prediction uses the latest row per
-subject for event-side covariates.</p></dd>
+subject for event-side covariates. This argument may be omitted for a
+longitudinal-only fit; neutral event rows are then constructed internally.</p></dd>
 
 
 <dt id="arg-process">process<a class="anchor" aria-label="anchor" href="#arg-process"></a></dt>
@@ -209,6 +211,14 @@ with a narrower random init range (<code>init = 0.1</code>).</p></li>
 </ul></dd>
 
 
+<dt id="arg-reuse-fitted-re">reuse_fitted_re<a class="anchor" aria-label="anchor" href="#arg-reuse-fitted-re"></a></dt>
+<dd><p>Logical. If <code>TRUE</code>, every identifier in the supplied
+data must have occurred during fitting. Prediction reuses that subject's
+paired posterior random effects and covariance draws, without estimating a
+second set of random effects. The default, <code>FALSE</code>, conditions newly sampled
+effects on the supplied longitudinal history for dynamic prediction.</p></dd>
+
+
 <dt id="arg-seed">seed<a class="anchor" aria-label="anchor" href="#arg-seed"></a></dt>
 <dd><p>Integer. Random seed for reproducibility of random effect sampling.</p></dd>
 
@@ -233,7 +243,12 @@ with a narrower random init range (<code>init = 0.1</code>).</p></li>
 <dd><p>A data.frame containing conditional cumulative hazards H(t|time_start). Columns: id, time, Cumhaz, Median, Est.Error, L95, U95.</p></dd>
 
 <dt>draws</dt>
-<dd><p>A list containing raw posterior draws (<code>longitudinal</code>, <code>longitudinal_fitted</code>, <code>survival</code>, <code>cumhaz</code>) and reconstructed subject-level random effects (<code>random_effects_id</code>, <code>random_effects_marker_id</code>, including marker-by-id covariance draws when id-dependent covariance is active).</p></dd>
+<dd><p>A list containing raw posterior draws (<code>longitudinal</code>,
+<code>longitudinal_fitted</code>, <code>survival</code>, <code>cumhaz</code>) and reconstructed subject-level
+random effects (<code>random_effects_id</code>, <code>random_effects_marker_id</code>, including
+marker-by-id covariance draws when id-dependent covariance is active).
+Predictions from <code><a href="joinme_mix.html">joinme_mix()</a></code> additionally retain conditional allocation
+draws in <code>posterior_class</code>.</p></dd>
 
 
 </dl><p>A <code>JoiNMeDynPred</code> object with <code>metadata$scale = "linpred"</code> and
@@ -248,7 +263,7 @@ with a narrower random init range (<code>init = 0.1</code>).</p></li>
     <p><code>predict.JoiNMeFit()</code> does not accept a <code>condition</code> argument. It estimates
 subject-specific future trajectories and survival conditional on the
 longitudinal histories supplied in <code>newdataLong</code>. Use
-<code><a href="conditional_effects.JoiNMeFit.html">conditional_effects.JoiNMeFit()</a></code> with <code>make_conditions()</code> when the target is
+<code><a href="conditional_effects.JoiNMeFit.html">conditional_effects.JoiNMeFit()</a></code> with <code><a href="https://paulbuerkner.com/brms/reference/make_conditions.html" class="external-link">make_conditions()</a></code> when the target is
 a population-level comparison across named covariate profiles.</p>
 <p>The function uses a Bayesian approach in two draw layers:</p><ol><li><p>Extract posterior parameter draws from the fitted object (<code>n_samples</code>).</p></li>
 <li><p>Re-index those draws to the dynpred draw count (<code>control$n_pred_draws</code>),
@@ -259,7 +274,7 @@ allowing independent control of prediction Monte Carlo size.</p></li>
 <li><p>Pool draws to form marginal predictive summaries and intervals.</p></li>
 </ol><p>Dynamic prediction passes the fitted, draw-specific transform ordinates to
 Stan. Ordered piecewise-linear associations therefore use the same posterior
-curve as the fitted event model and never reconstruct a curve from legacy
+curve as the fitted event model and never reconstruct a curve from earlier
 user-supplied <code>y</code> values.</p>
 <p>The baseline-hazard basis is likewise inherited from fitting.  Prediction
 reuses the retained B-spline or natural-spline object, or the retained

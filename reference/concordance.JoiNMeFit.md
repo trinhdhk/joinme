@@ -119,6 +119,7 @@ discrimination index for survival data. *Statistics in Medicine*, 24,
 
 ## See also
 
-[`auc.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/auc.md),
+[`tvROC.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/tvROC.md),
+[`tvAUC.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/tvROC.md),
 [`predict.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/predict.JoiNMeFit.md),
 [`survival::concordance()`](https://rdrr.io/pkg/survival/man/concordance.html)

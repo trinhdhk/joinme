@@ -1,0 +1,138 @@
+# Posterior draws for JoiNMe objects
+
+Returns posterior draws in `posterior`-compatible formats with
+user-facing parameter names.
+
+Compared with
+[`extract()`](https://trinhdhk.github.io/joinme/reference/extract.md),
+`posterior_draws()` is the convenience layer for downstream posterior
+workflows. It is designed for tasks such as `posterior` summarisation,
+`bayesplot` visualisation, regex-based variable selection, and any
+workflow that expects a standard draws object.
+
+For fitted `JoiNMe` models, known Stan variables are relabelled from raw
+fit object to friendly parameter names. For dynamic prediction objects,
+stored draw blocks are flattened into a single draws object with
+explicit id, scale, marker, and time labels.
+
+Fitted-object draw arrays are cached inside the underlying R6 container
+after the first request so later summaries, diagnostics, and plotting
+methods can reuse the same renamed draw collection without re-reading
+the backend fit.
+
+Use `posterior_draws()` when you want:
+
+- one posterior object containing renamed variables,
+
+- [`posterior::subset_draws()`](https://mc-stan.org/posterior/reference/subset_draws.html)
+  and regex-style variable filtering,
+
+- `bayesplot` directly, similar to
+  [`mcmc_plot()`](https://paulbuerkner.com/brms/reference/mcmc_plot.brmsfit.html),
+
+- a standard draws array/matrix/data frame rather than a
+  component-specific extraction result.
+
+- `as.array` is a shorthand for
+  `posterior_draws(format = "draws_array")`.
+
+Use
+[`extract()`](https://trinhdhk.github.io/joinme/reference/extract.md)
+instead when you want:
+
+- one model component at a time (`"fixef"`, `"assoc"`, `"gamma_w"`,
+  `"basehaz"`, etc.),
+
+- the explicit `term_map` telling you how user-facing labels map back to
+  raw Stan variables,
+
+- special structured results such as `what = "association_plot"`,
+
+- prediction draw blocks separated by semantic role before flattening.
+
+## Usage
+
+``` r
+posterior_draws(object, ...)
+
+# S3 method for class 'JoiNMeFit'
+posterior_draws(
+  object,
+  variables = NULL,
+  regex = FALSE,
+  draws = NULL,
+  seed = 1,
+  what = c("all", "basehaz", "baseline_hazard"),
+  format = c("draws_array", "draws_matrix", "draws_df"),
+  ...
+)
+
+# S3 method for class 'JoiNMeDynPred'
+posterior_draws(
+  object,
+  variables = NULL,
+  regex = FALSE,
+  draws = NULL,
+  seed = 1,
+  format = c("draws_array", "draws_matrix", "draws_df"),
+  ...
+)
+
+# S3 method for class 'JoiNMeFit'
+as.array(x, ...)
+
+# S3 method for class 'JoiNMeDynPred'
+as.array(x, ...)
+```
+
+## Arguments
+
+- object:
+
+  A supported JoiNMe object.
+
+- ...:
+
+  Additional arguments forwarded from
+  [`as.array()`](https://rdrr.io/r/base/array.html) to
+  `posterior_draws()`; otherwise unused.
+
+- variables:
+
+  Optional character vector selecting variables after relabelling.
+
+- regex:
+
+  Logical; if `TRUE`, interpret `variables` as regular expressions.
+
+- draws:
+
+  Optional number of posterior draws to retain.
+
+- seed:
+
+  Integer seed used when subsetting draws.
+
+- what:
+
+  For `JoiNMeFit` objects, either `"all"` (default renamed posterior
+  variables), `"basehaz"`, or `"baseline_hazard"`.
+
+- format:
+
+  Output format. Supported values are `"draws_array"`, `"draws_matrix"`,
+  and `"draws_df"`.
+
+- x:
+
+  A fitted `JoiNMeFit` or dynamic-prediction `JoiNMeDynPred` object
+  passed to the corresponding
+  [`as.array()`](https://rdrr.io/r/base/array.html) method.
+
+## Value
+
+A posterior draw object in the requested format. The result is a
+`posterior`-compatible object with renamed variables, suitable for
+[`posterior::summarise_draws()`](https://mc-stan.org/posterior/reference/draws_summary.html),
+[`posterior::subset_draws()`](https://mc-stan.org/posterior/reference/subset_draws.html),
+and `bayesplot`-style visualisation.

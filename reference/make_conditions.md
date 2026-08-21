@@ -3,8 +3,11 @@
 `make_conditions()` is a thin wrapper around
 [`brms::make_conditions()`](https://paulbuerkner.com/brms/reference/make_conditions.html)
 so the resulting labelled condition tables can be passed directly to
-[`conditional_effects.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/conditional_effects.JoiNMeFit.md).
-Conditioning belongs to the conditional- effects estimand; neither
+[`conditional_effects.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/conditional_effects.JoiNMeFit.md)
+or
+[`conditional_contrast()`](https://trinhdhk.github.io/joinme/reference/conditional_contrast.md).
+Conditioning belongs to the conditional-effects or conditional-contrast
+estimand; neither
 [`predict.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/predict.JoiNMeFit.md)
 nor
 [`plot.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/plot.JoinMeFit.md)
@@ -36,4 +39,5 @@ containing the profile labels used in conditional-effects facets.
 ## See also
 
 [`conditional_effects.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/conditional_effects.JoiNMeFit.md),
+[`conditional_contrast()`](https://trinhdhk.github.io/joinme/reference/conditional_contrast.md),
 [`brms::make_conditions()`](https://paulbuerkner.com/brms/reference/make_conditions.html)

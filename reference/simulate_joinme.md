@@ -18,6 +18,12 @@ The implementation is model-matrix based end-to-end, so every simulated
 component is generated from the same formula machinery used during
 fitting.
 
+Population coefficients are declared through `truth`. A `prior_*()`
+object generates one population coefficient vector and a finite numeric
+vector fixes that vector exactly. Every realised coefficient is stored
+in `truth`. Random effects, marker-weight departures, observations and
+event times remain conditional random realisations.
+
 ## Usage
 
 ``` r
@@ -28,6 +34,7 @@ simulate_joinme(
   formulaDist = NULL,
   formulaAssoc = NULL,
   transforms = NULL,
+  truth = joinme_truth(),
   n_id = 50,
   families = c("gaussian", "student_t", "binomial"),
   marker_levels = NULL,
@@ -36,30 +43,16 @@ simulate_joinme(
   censor_longitudinal_after_event = TRUE,
   left_truncation_max = 0,
   truncate_longitudinal_before_entry = TRUE,
-  ...,
   seed = .Random.seed[[1]],
   covariate_formulas = list(x1 ~ rnorm(n_id), x2 ~ rnorm(n_id)),
-  marker_weights = NULL,
-  shared_marker_weights = TRUE,
-  fixed_marker_weights = FALSE,
   shrinkage = 0L,
   assoc = c("cv_total"),
-  assoc_coefs = c(cv_total = 0.6),
-  beta_long = NULL,
-  beta_event = NULL,
-  dist_coefs = list(),
-  re_params = list(id = list(sd = NULL, corr = NULL), marker = list(sd = NULL, corr =
-    NULL), id_marker_cov = list(latent = list(sd = NULL, corr = NULL), alpha = NULL, beta
-    = NULL, lambda = NULL, diag_link = "softplus"), dist = list()),
+  vcov_diag_link = "softplus",
   family_params = list(gaussian = list(sigma = 1), student_t = list(sigma = 1.5, nu = 4),
     bernoulli = list(), binomial = list(trials = 10), poisson = list(), negbin2 =
     list(phi = 2), skew_normal = list(sigma = 1, alpha = 0), double_exponential =
     list(sigma = 1), skew_double_exponential = list(sigma = 1, tau = 0.5), beta =
     list(kappa = 10), cumulative_logit = list(cutpoints = c(-1, 1))),
-  h0 = NULL,
-  baseline_hazard = list(type = "weibull", shape = 1.4, scale = 6),
-  formulaBasehaz = NULL,
-  beta_basehaz = NULL,
   time_cens = 8,
   eps_cs = 0.001,
   integration_control = list(rel.tol = 1e-06, subdivisions = 2000L, stop.on.error = TRUE),
@@ -72,7 +65,8 @@ simulate_joinme(
   time_var = "time",
   y_var = "y",
   event_time_var = "time",
-  event_var = "event"
+  event_var = "event",
+  .mixture_specification = NULL
 )
 ```
 
@@ -93,20 +87,29 @@ simulate_joinme(
 
   Event/survival formula (same role as in
   [`joinme()`](https://trinhdhk.github.io/joinme/reference/joinme.md)).
+  Set this to `NULL` to simulate only the nested longitudinal process.
+  In that case `dataEvent` is `NULL`, the complete scheduled
+  longitudinal history is retained, and `assoc` and `formulaAssoc` must
+  be absent.
 
 - formulaVCov:
 
-  Optional covariance-regression formula for the id-specific
-  marker-by-id covariance factor (same role as in
-  [`joinme_standata()`](https://trinhdhk.github.io/joinme/reference/joinme_standata.md)).
-  This formula is evaluated on event-level covariates (one row per
+  Optional covariance-regression specification for the id-specific
+  marker-by-id covariance factor. A formula is shared by both covariance
+  components; `list(sd = ~ ..., corr = ~ ...)` supplies independent
+  observed-covariate regressions with exactly the same syntax as
+  [`joinme()`](https://trinhdhk.github.io/joinme/reference/joinme.md)
+  and
+  [`joinme_mix()`](https://trinhdhk.github.io/joinme/reference/joinme_mix.md).
+  Each formula is evaluated on event-level covariates (one row per
   subject), must not include random-effect bars `( ... | ... )`, and
   must not include the longitudinal time variable.
 
-  Internally, this formula drives subject-specific standard deviations
-  and Cholesky-correlation-factor rows used to build `L_i = SD_i * K_i`;
-  see `re_params$id_marker_cov`. The default `~ 1` is supported and
-  gives an intercept-only covariance regression.
+  The `sd` formula drives subject-specific standard deviations and the
+  `corr` formula drives Cholesky-correlation-factor rows used to build
+  `L_i = SD_i * K_i`; their population intercepts, slopes and latent
+  loadings are declared under `truth$vcov`. The default `~ 1` gives
+  intercept-only regressions for both components.
 
 - formulaDist:
 
@@ -162,7 +165,7 @@ simulate_joinme(
     supplied on the expit scale.
 
   - `list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), y = seq(0.02, 0.98, length.out = 50)^0.8, n_knots = 6, degree = 3, lambda = 1)`:
-    penalised monotone I-spline on `plogis(x)` in legacy plug-in mode.
+    penalised monotone I-spline on `plogis(x)` in plug-in mode.
 
   - `list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))`:
     piecewise-linear transform; `x` and `y` are required. Simulation
@@ -191,8 +194,32 @@ simulate_joinme(
     are specified on that bounded expit scale. This is useful when the
     raw association feature has long tails or steep nonlinear effects.
 
-  In other words, simulation currently uses the legacy plug-in spline
-  mode; it does not estimate spline coefficients jointly inside Stan.
+- truth:
+
+  A
+  [`jm_truth()`](https://trinhdhk.github.io/joinme/reference/joinme_truth.md)
+  declaration for population generation. A numeric intercept or slope
+  fixes its population coefficient vector; a `prior_*()` declaration
+  draws that vector once. This applies to `longitudinal`, `survival`,
+  `baseline`, `assoc_coef`, `vcov`, `functional`, and named
+  `formulaDist` components. Its `marker_weights$offset` component
+  supplies the marker-specific constant contribution and its
+  `marker_weights$family` component generates centred marker-specific
+  weight departures, because those departures are otherwise random
+  simulation parameters. That field accepts a family name such as
+  `"student_t"`, `"normal"`, `"laplace"`, or `"horseshoe"`. The names
+  `"constant"` and `"none"` use the offset without a random departure.
+  The family name `"student_t"` draws one value per active set as
+  `2 + Gamma(2, 0.1)`, matching fitting. Departure location and ordinary
+  scale remain zero and one. All declarations and their realised
+  population coefficients are retained in the realised simulation truth.
+  Set `marker_weights$family` to `"constant"` or `"none"` when the
+  declared offset is the complete marker weight. No common location or
+  marker-specific departure is then drawn. Under a stochastic family,
+  the effective weight is `offset + marker_weight_mean + departure`,
+  where the departure is drawn directly from the declared centred
+  unit-scale family. No additional marker-weight scale is used: the
+  survival association slope already scales the weighted marker feature.
 
 - n_id:
 
@@ -200,14 +227,17 @@ simulate_joinme(
 
 - families:
 
-  Marker-specific family names. Use
+  Marker-specific family names or
   [`jm_family()`](https://trinhdhk.github.io/joinme/reference/joinme_family.md)
-  entries to supply custom `link`/`inv_link` expressions. A named probit
-  link applies `Phi` as its inverse link. In formula expressions,
-  `Phi`/`pnorm` are the standard normal CDF and
-  `inv_Phi`/`qnorm`/`probit` are the standard normal quantile.
-  Simulation evaluates the same bytecode instructions as fitting and
-  prediction.
+  declarations. Use
+  [`jm_family()`](https://trinhdhk.github.io/joinme/reference/joinme_family.md)
+  entries to supply custom `link`/`inv_link` expressions or to fix the
+  skew-Laplace quantile for a marker, for example
+  `jm_family("skew_laplace", tau = 0.8)`. A named probit link applies
+  `Phi` as its inverse link. In formula expressions, `Phi`/`pnorm` are
+  the standard normal CDF and `inv_Phi`/`qnorm`/`probit` are the
+  standard normal quantile. Simulation evaluates the same bytecode
+  instructions and fixed-quantile selection as fitting and prediction.
 
 - marker_levels:
 
@@ -242,10 +272,6 @@ simulate_joinme(
   (`left_truncation_max > 0`), longitudinal rows observed before the
   sampled entry time are removed.
 
-- ...:
-
-  Additional arguments passed to fun.
-
 - seed:
 
   RNG seed.
@@ -261,39 +287,14 @@ simulate_joinme(
   In this mode, each id receives stepwise periods over `[0, time_cens]`,
   and each period value is sampled from `fun`.
 
-- marker_weights:
-
-  Optional base marker weights used for association aggregation. If
-  `shared_marker_weights = TRUE`, supply one numeric vector to be shared
-  across all active weighted marker-based association terms. If
-  `shared_marker_weights = FALSE`, you may instead supply a named list
-  with entries `cv_total`, `cs_total`, `cv_marker`, and `cs_marker`.
-
-- shared_marker_weights:
-
-  Logical. If `TRUE`, all active weighted marker-based association terms
-  share one marker-weight structure. If `FALSE`, each active weighted
-  marker-based association term uses its own marker-weight structure.
-
-- fixed_marker_weights:
-
-  Logical. This has the same meaning as in
-  [`joinme()`](https://trinhdhk.github.io/joinme/reference/joinme.md).
-  If `TRUE`, `marker_weights` are the effective weights and no latent
-  perturbation is drawn. If `FALSE` (the default), `marker_weights` are
-  base weights and the effective weights are
-  `marker_weights + z_marker_weights`. When base weights are omitted
-  they default to zero, exactly as they do in
-  [`joinme()`](https://trinhdhk.github.io/joinme/reference/joinme.md)
-  when marker weights are estimated.
-
 - shrinkage:
 
-  Integer selecting the distribution of each standardized latent
-  marker-weight perturbation when `fixed_marker_weights = FALSE`: `0`
-  draws Student-t with 6 degrees of freedom, `1` draws standard Laplace,
-  and `2` draws standard Normal. This is the same switch used by the
-  Stan priors. It does not change explicitly supplied fixed weights.
+  Integer selecting the random-effect component distribution: `0`
+  denotes Student-t with 6 degrees of freedom, `1` Laplace, and `2`
+  Normal. Marker-weight departures no longer use this switch; their
+  family is declared by
+  `truth = jm_truth(marker_weights = list(family = "normal"))` or
+  another supported family name.
 
 - assoc:
 
@@ -313,110 +314,10 @@ simulate_joinme(
     subject-specific standard deviations.
 
   You can also provide `formulaAssoc = ~ ...` to select channels; when
-  present, it overrides `assoc`.
-
-- assoc_coefs:
-
-  Association coefficients for hazard terms. Non-`corr`/`vcov` terms
-  accept scalar values. The `corr` term accepts a vector of off-diagonal
-  `K` coefficients ordered as `(2,1), (3,1), (3,2), ...` in
-  lower-triangular row-major order of the marker-by-id random-effect
-  covariance dimension. The `vcov` term accepts the same off-diagonal
-  `K` entries followed by the subject-specific standard deviations,
-  `(2,1), (3,1), (3,2), ..., sd_1, sd_2, ...`; when `||` is used in the
-  marker-by-id random-effects block, only the standard deviation entries
-  are used.
-
-  Accepted input forms:
-
-  - named numeric vector, e.g. `c(cv_total = 0.4, cs_mean = -0.2)`,
-
-  - named list, e.g.
-    `list(cv_total = 0.4, corr = c(0.2, -0.1), vcov = c(0.4, 0.1, 0.5))`.
-    Missing channels default to 0.
-
-- beta_long:
-
-  Fixed-effect coefficients for `formulaLong` fixed part. If NULL,
-  coefficients are randomly generated and named by model-matrix columns.
-
-- beta_event:
-
-  Survival baseline-covariate coefficients for non-intercept terms in
-  `formulaEvent` RHS. If NULL, coefficients are randomly generated.
-
-- dist_coefs:
-
-  Distributional fixed-effect coefficients for `formulaDist` parameters
-  (`sigma`, `nu`, `phi`, `alpha`, `kappa`, `tau`).
-
-  For each parameter, coefficients can be:
-
-  - an unnamed numeric vector (matched by column order),
-
-  - a named numeric vector (matched by model-matrix column names),
-
-  - for family-scoped formulas, a named list with per-scope entries.
-
-  Family-scoped list syntax examples:
-
-  - `dist_coefs = list(sigma = list(default = c("(Intercept)" = -0.3), gaussian = c(...), student_t = c(...)))`
-
-  - alias keys like `"sigma[family='student_t']"` are also recognised
-    and mapped to the matching family scope.
-
-- re_params:
-
-  Random-effects simulation controls.
-
-  Structure:
-
-  - `id`: controls id-level random effects from `( ... | id)` in
-    `formulaLong`.
-
-  - `marker`: controls marker-level random effects from marker-only
-    terms.
-
-  - `id_marker_cov`: controls subject-specific covariance-regression for
-    marker-by-id latent effects.
-
-  - `dist`: controls random effects for distributional regressions in
-    `formulaDist`.
-
-  For `id` and `marker`, each block is a list:
-
-  - `sd`: scalar or length-K vector of random-effect standard
-    deviations,
-
-  - `corr`: KxK correlation matrix.
-
-  `id_marker_cov` fields:
-
-  - `latent`: deprecated compatibility input. If supplied, its implied
-    lower-triangular factor is folded into the baseline `alpha`
-    intercepts before simulation. Marker-by-id latent seeds are still
-    drawn as iid standard normal values. Prefer setting `alpha` directly
-    in new code.
-
-  - `alpha`: baseline linear predictors for the subject-specific
-    covariance regression entries. Diagonal positions control standard
-    deviations; off-diagonal positions control the row-wise
-    correlation-factor regression, on the tanh scale.
-
-  - `beta`: covariate effects from `formulaVCov` design matrix
-    (systematic subject-to-subject covariance shifts by observed
-    covariates),
-
-  - `lambda`: non-negative loading on an iid standard-normal subject
-    latent perturbation; if a negative value is supplied, the simulator
-    folds the sign into the latent draw so the effective model remains
-    unchanged but follows the identified convention used during fitting,
-
-  - `diag_link`: link for the subject-specific standard deviations
-    (`"softplus"` or `"exp"`).
-
-  Element-wise covariance-regression form is:
-  `eta_{im} = alpha_m + x_i^T beta_m + lambda_m z_{im}`, with
+  present, it overrides `assoc`. Covariance-regression population values
+  belong to `truth$vcov`. Its `sd` and `corr` components each accept
+  `intercept`, `slope`, and `latent` declarations. Their element-wise
+  form is `eta_{im} = alpha_m + x_i^T beta_m + lambda_m z_{im}`, with
   `lambda_m >= 0` and `z_{im} ~ Normal(0, 1)`. Diagonal entries apply
   `diag_link` to give positive subject-specific standard deviations.
   Off-diagonal entries are mapped through `tanh` and then assembled row
@@ -425,7 +326,17 @@ simulate_joinme(
   Marker-by-id latent seeds are sampled as iid standard normal values
   and the final marker-by-id effects are obtained as `b_id = L_i z_id`.
 
-  Dimension rules for `id_marker_cov` entries follow marker-by-id
+  In the ordinary non-mixture model, \\\lambda_m\\ is the conditional
+  standard deviation of the unexplained subject heterogeneity on
+  covariance-predictor coordinate \\m\\, before applying `diag_link` or
+  `tanh`. It is not itself an entry of `L_i`, a covariance, or a
+  correlation. With `class_type = "corr"` or `"vcov"`, the selected
+  `z_{im}` has a class-specific location and scale. Conditional on class
+  \\g\\, its contribution to `eta_{im}` consequently has location
+  `lambda_m * mix_location[g, m]` and distributional scale
+  `lambda_m * mix_scale[g, m]`.
+
+  The covariance-regression dimension follows the marker-by-id
   random-effect dimension `Q_idm`:
 
   - if covariance is full: `M = Q_idm * (Q_idm + 1) / 2` lower-tri
@@ -442,6 +353,11 @@ simulate_joinme(
   - `re_params$dist[[param]]$terms[[j]]` optionally sets term-specific
     controls (same `sd`/`corr` fields as above).
 
+- vcov_diag_link:
+
+  Link applied to covariance-regression scale predictors; either
+  `"softplus"` or `"exp"`.
+
 - family_params:
 
   Family-specific constants used when the corresponding parameter has no
@@ -450,31 +366,11 @@ simulate_joinme(
   double exponential model with
   `skew_double_exponential = list(sigma = ..., tau = ...)`. `kappa` must
   be positive. `tau` must lie in \\(0,1)\\, with \\0.5\\ giving the
-  symmetric double exponential distribution.
-
-- h0:
-
-  Optional baseline hazard function `h0(t)` If supplied, it takes
-  precedence over `baseline_hazard`/`formulaBasehaz`.
-
-- baseline_hazard:
-
-  Optional baseline hazard specification. Supported forms:
-
-  - character: one of `"constant"`, `"linear"`, `"piecewise"`,
-    `"weibull"`, `"spline"`.
-
-  - named list: `list(type = ..., ...)` with mode-specific parameters.
-
-- formulaBasehaz:
-
-  Optional formula-based baseline hazard model on time, e.g.
-  `~ 1 + time + I(time^2)`.
-
-- beta_basehaz:
-
-  Optional coefficients for `formulaBasehaz` (aligned by model-matrix
-  column names). If NULL, coefficients are generated.
+  symmetric double exponential distribution. A marker-specific `tau` in
+  [`jm_family()`](https://trinhdhk.github.io/joinme/reference/joinme_family.md)
+  takes precedence over this shared family constant and over a `tau`
+  distributional regression for that marker, matching the fitted
+  likelihood.
 
 - time_cens:
 
@@ -514,9 +410,21 @@ simulate_joinme(
   [`joinme_standata()`](https://trinhdhk.github.io/joinme/reference/joinme_standata.md)
   defaults.
 
+- .mixture_specification:
+
+  Private latent-progress simulation specification assembled by
+  [`simulate_joinme_mix()`](https://trinhdhk.github.io/joinme/reference/simulate_joinme_mix.md).
+  Users should call
+  [`simulate_joinme_mix()`](https://trinhdhk.github.io/joinme/reference/simulate_joinme_mix.md)
+  rather than supplying this argument directly.
+
 - fun:
 
   Function to apply.
+
+- ...:
+
+  Additional arguments passed to fun.
 
 - x:
 
@@ -528,15 +436,23 @@ simulate_joinme(
 
 ## Value
 
-A list containing `dataLong`, `dataEvent`, `truth` (also available as
-`true_params`), `marker_info`, `helpers`, and `tmax`. Marker-weight
-truth distinguishes base, latent, and effective values. Baseline-hazard
-truth is stored in `truth$baseline_hazard`; when a log-linear
-representation exists, its resolved coefficients are also in
-`truth$stan_fit$bs_gamma_c`. Hazard-scale association coefficients are
-stored as `alpha_cv_total`, `alpha_cs_total`, `alpha_cv_mean`,
-`alpha_cs_mean`, `alpha_corr`, and `alpha_vcov`, matching the fitted
-posterior output names.
+A list containing `dataLong`, `dataEvent`, `truth`, `marker_info`,
+`helpers`, and `tmax`. Marker-weight truth distinguishes base,
+common-location, departure, and effective values. Baseline-hazard truth
+is stored in `truth$baseline_hazard`; when a log-linear representation
+exists, its resolved coefficients are also in
+`truth$stan_fit$bs_gamma_c`. Marker-specific fixed skew-Laplace
+quantiles are recorded in `truth$stan_fit$use_tau_fixed` and
+`truth$stan_fit$tau_fixed`; realised row-specific quantiles are recorded
+in `truth$distributional$rowwise$tau`. Hazard-scale association
+coefficients are stored as `alpha_cv_total`, `alpha_cs_total`,
+`alpha_cv_mean`, `alpha_cs_mean`, `alpha_corr`, and `alpha_vcov`,
+matching the fitted posterior output names. `truth$recovery` contains
+the paired fitting entry-point name and a directly reusable argument
+list. Thus
+`do.call(joinme, c(sim$truth$recovery$arguments, list(seed = 1)))`
+recreates the full fitted specification without retyping formulae,
+priors, association controls, or covariance settings.
 
 List of results.
 

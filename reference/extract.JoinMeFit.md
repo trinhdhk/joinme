@@ -4,8 +4,8 @@ Extracts one fitted-model component at a time and returns both the
 draw-level values and the mapping that produced them.
 
 This differs from
-[`draws()`](https://trinhdhk.github.io/joinme/reference/draws.md) in two
-important ways:
+[`posterior_draws()`](https://trinhdhk.github.io/joinme/reference/posterior_draws.md)
+in two important ways:
 
 - [`extract()`](https://trinhdhk.github.io/joinme/reference/extract.md)
   keeps the request scoped to one semantic component such as fixed
@@ -13,15 +13,16 @@ important ways:
   terms, or likelihood-scale parameters.
 
 - [`extract()`](https://trinhdhk.github.io/joinme/reference/extract.md)
-  returns a structured list with `draws` plus `term_map` (and for
-  `what = "association_plot"`, additional plotting support data) instead
-  of a single `posterior` draws object.
+  returns a structured list with `posterior_draws` plus `term_map` (and
+  for `what = "association_plot"`, additional plotting support data)
+  instead of a single `posterior` draws object.
 
 In short, use
 [`extract()`](https://trinhdhk.github.io/joinme/reference/extract.md)
 when you need component-aware extraction and use
-[`draws()`](https://trinhdhk.github.io/joinme/reference/draws.md) when
-you need one renamed posterior object for general downstream analysis.
+[`posterior_draws()`](https://trinhdhk.github.io/joinme/reference/posterior_draws.md)
+when you need one renamed posterior object for general downstream
+analysis.
 
 ## Usage
 
@@ -29,7 +30,8 @@ you need one renamed posterior object for general downstream analysis.
 # S3 method for class 'JoiNMeFit'
 extract(
   object,
-  what = c("fixef", "gamma_w", "basehaz", "baseline_hazard", "assoc", "association_plot",
+  what = c("fixed_effects", "random_effects", "coefficients", "marker_weights", "fixef",
+    "gamma_w", "basehaz", "baseline_hazard", "assoc", "association_plot",
     "distributional", "distributional_regression", "likelihood_scale", "raw"),
   term = NULL,
   variable = NULL,
@@ -48,10 +50,11 @@ extract(
 
 - what:
 
-  Character component selector. One of `"fixef"`, `"gamma_w"`,
-  `"basehaz"`, `"baseline_hazard"`, `"assoc"`, `"association_plot"`,
-  `"distributional"`, `"distributional_regression"`,
-  `"likelihood_scale"`, or `"raw"`.
+  Character component selector. One of `"fixed_effects"`,
+  `"random_effects"`, `"coefficients"`, `"marker_weights"`, `"fixef"`,
+  `"gamma_w"`, `"basehaz"`, `"baseline_hazard"`, `"assoc"`,
+  `"association_plot"`, `"distributional"`,
+  `"distributional_regression"`, `"likelihood_scale"`, or `"raw"`.
 
 - term:
 
@@ -82,10 +85,10 @@ extract(
 
 A list with fields:
 
-- `draws`: numeric array when `keep_chains = TRUE` (iteration x chain x
-  term), otherwise a numeric matrix (rows = draws, cols = requested
-  terms). For `what = "association_plot"`, this is a named list of
-  compact draw matrices keyed by association term.
+- `posterior_draws`: numeric array when `keep_chains = TRUE` (iteration
+  x chain x term), otherwise a numeric matrix (rows = draws, cols =
+  requested terms). For `what = "association_plot"`, this is a named
+  list of compact draw matrices keyed by association term.
 
 - `term_map`: data.frame mapping `term` to Stan `variable`
 
@@ -98,5 +101,5 @@ A list with fields:
 
 ## See also
 
-[`draws()`](https://trinhdhk.github.io/joinme/reference/draws.md) for a
-higher-level interface that returns a single `posterior`
+[`posterior_draws()`](https://trinhdhk.github.io/joinme/reference/posterior_draws.md)
+for a higher-level interface that returns a single `posterior`

@@ -13,11 +13,12 @@ expected response, the event relative hazard, or both. Longitudinal
 effects may contain only the fixed-effect contribution, add the fitted
 marker-level deviation, or average marker-specific predictions over the
 selected markers. Subject- and marker-by-subject deviations are excluded
-from all three longitudinal estimands. Event effects describe the
-proportional-hazards multiplier `exp(W gamma)` (or its logarithm), with
-the baseline hazard and longitudinal association contribution held
-fixed. Consequently, event contrasts isolate the part of the event
-process attributable to covariates in `formulaEvent`.
+from all three longitudinal estimands unless `reuse_fitted_re = TRUE`
+explicitly selects a subject represented in the fitted model. Event
+effects describe the proportional-hazards multiplier `exp(W gamma)` (or
+its logarithm), with the baseline hazard and longitudinal association
+contribution held fixed. Consequently, event contrasts isolate the part
+of the event process attributable to covariates in `formulaEvent`.
 
 The returned data follow the `brms` conditional-effects convention. Each
 effect table contains `estimate__`, `se__`, `lower__`, `upper__`, and
@@ -46,6 +47,8 @@ conditional_effects(
   surface = FALSE,
   markers = NULL,
   draws = NULL,
+  summary = TRUE,
+  reuse_fitted_re = FALSE,
   seed = 1,
   plot = TRUE,
   ...
@@ -72,7 +75,8 @@ conditional_effects(
   Optional data frame containing values of predictors on which to
   condition. One set of effects is evaluated for every row.
   `conditions$cond__`, when supplied, provides the facet label;
-  otherwise row names are used. Tables returned by `make_conditions()`
+  otherwise row names are used. Tables returned by
+  [`make_conditions()`](https://paulbuerkner.com/brms/reference/make_conditions.html)
   can be supplied directly.
 
 - int_conditions:
@@ -110,14 +114,14 @@ conditional_effects(
 
   Longitudinal quantity to evaluate. `"population"` uses only the
   fixed-effect contribution, corresponding to exclusion of group-level
-  effects in `brms`. `"marker"` adds the fitted marker-level deviation
-  but excludes subject and marker-by-subject deviations.
-  `"marginal_marker"` first calculates each selected marker's posterior
-  prediction, including its marker-level deviation and fitted inverse
-  link, and then takes an equally weighted mean across markers within
-  every posterior draw. Thus, on the expected-response scale it
-  estimates an average of marker responses rather than the response
-  obtained from an averaged linear predictor.
+  effects in `brms`, and averages the selected marker trajectories
+  within each posterior draw. `"marker"` adds the fitted marker-level
+  deviation and retains a separate trajectory for every selected marker.
+  `"marginal_marker"` also adds the marker-level deviation but then
+  takes an equally weighted mean across selected markers within every
+  draw. Marker-specific inverse links are applied before either marker
+  average. Subject and marker-by-subject deviations are excluded unless
+  `reuse_fitted_re = TRUE`.
 
 - event_scale:
 
@@ -140,13 +144,29 @@ conditional_effects(
 
   Optional character vector restricting longitudinal results to selected
   marker levels. By default all fitted markers are used. For
-  `longitudinal_estimand = "marginal_marker"`, this argument defines the
-  markers entering the equally weighted posterior average.
+  `longitudinal_estimand = "population"` or `"marginal_marker"`, this
+  argument defines the markers entering the equally weighted posterior
+  average.
 
 - draws:
 
   Optional positive integer limiting the posterior draws used in the
   calculation. `NULL` uses all available draws.
+
+- summary:
+
+  Logical. If `TRUE`, return posterior centres, standard errors, and
+  credible intervals. If `FALSE`, return a tidy draw-level data frame.
+  Each row contains one posterior value, its `.draw` index, its
+  `.value`, and the complete condition and estimand description.
+  Draw-level results are returned without plotting.
+
+- reuse_fitted_re:
+
+  Logical. If `TRUE`, `conditions` must contain the fitted subject
+  identifier. Subject and marker-by-subject posterior effects for those
+  identifiers are added draw by draw, avoiding a separate dynamic
+  random-effect fit. All identifiers must have occurred during fitting.
 
 - seed:
 
@@ -154,26 +174,32 @@ conditional_effects(
 
 - plot:
 
-  Logical. If `TRUE`, construct and display conditional-effects plots.
-  If `FALSE`, return the underlying `JoiNMeConditionalEffects` data
-  object. The data object can subsequently be plotted with
-  [`plot()`](https://rdrr.io/r/graphics/plot.default.html).
+  Logical. If `TRUE` and `summary = TRUE`, construct and display
+  conditional-effects plots. If `FALSE`, return the underlying
+  `JoiNMeConditionalEffects` object. `summary = FALSE` always returns
+  the draw-level object without plotting.
 
 - ...:
 
   Additional arguments passed to the plotting method when `plot = TRUE`,
-  for example `points`, `rug`, `stype`, or `theme`; see
-  [`brms::conditional_effects()`](https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html)
-  for the corresponding graphical arguments.
+  for example `points`, `rug`, `stype`, `theme`, or the conditional-plot
+  arrangement arguments; see
+  [`plot.JoiNMeConditionalEffects()`](https://trinhdhk.github.io/joinme/reference/plot.JoiNMeConditionalEffects.md)
+  and
+  [`brms::conditional_effects()`](https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html).
 
 ## Value
 
-If `plot = FALSE`, a `JoiNMeConditionalEffects` object: a named list
-with one component per requested process. Each process component is a
-`brms_conditional_effects`-compatible named list containing one data
-frame per effect. Longitudinal tables identify their estimand in
-`longitudinal_estimand__`. If `plot = TRUE`, a similarly nested named
-list of `ggplot` objects is returned invisibly after plotting.
+If `summary = TRUE` and `plot = FALSE`, a `JoiNMeConditionalEffects`
+object: a named list with one component per requested process. Each
+process component is a `brms_conditional_effects`-compatible named list
+containing one data frame per effect. Longitudinal tables identify their
+estimand in `longitudinal_estimand__`. With `summary = FALSE`, each
+effect is a tidy data frame with one row per posterior draw and
+estimand, identified by `.draw`, `.value`, and `estimand__`. If
+`summary = TRUE` and `plot = TRUE`, the plotting method invisibly
+returns either the similarly nested named list of `ggplot` objects or an
+arranged `patchwork` display.
 
 ## Details
 
@@ -182,9 +208,13 @@ mean; factors are held at their first level. Values supplied in
 `conditions` override those defaults. Group-level subject deviations are
 excluded, as in the default `re_formula = NA` behavior of
 [`brms::conditional_effects()`](https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html).
-Marker-level deviations are also excluded for the `"population"`
-estimand, retained for the `"marker"` estimand, and integrated by finite
-averaging for the `"marginal_marker"` estimand.
+Marker-level deviations are excluded for the `"population"` estimand,
+retained separately for the `"marker"` estimand, and integrated by
+finite averaging for the `"marginal_marker"` estimand. Population and
+marker-marginal results each contain one trajectory per condition
+because their selected marker trajectories are averaged draw by draw.
+When fitted random effects are reused, the selected subject and
+marker-by-subject deviations enter all three estimands.
 
 The event result is a relative-hazard effect rather than a dynamic
 survival prediction. Dynamic survival probabilities depend on a
@@ -198,7 +228,7 @@ prediction.
 ## See also
 
 [`brms::conditional_effects()`](https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html),
-`make_conditions()`,
+[`make_conditions()`](https://paulbuerkner.com/brms/reference/make_conditions.html),
 [`predict.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/predict.JoiNMeFit.md)
 
 ## Examples
@@ -218,7 +248,7 @@ cond_eff <- conditional_effects(
   process = c("longitudinal", "event"),
   plot = FALSE
 )
-plot(cond_eff, ask = FALSE)
+plot(cond_eff, arrange = "grid", ncol = 2, guides = "collect")
 
 # Request marker-specific longitudinal expected responses.
 conditional_effects(

@@ -23,7 +23,7 @@
 
     <a class="navbar-brand me-2" href="index.html">joinme</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2608</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.2</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -58,7 +58,7 @@
   <main id="main" class="col-md-9"><div class="section level1">
 <div class="page-header"><h1 id="bayesian-joint-mixed-effects-joinme-model-using-stan">Bayesian joint mixed-effects (JoiNMe) model using Stan<a class="anchor" aria-label="anchor" href="#bayesian-joint-mixed-effects-joinme-model-using-stan"></a>
 </h1></div>
-<p><code>JoiNMe</code> (with package name styled as <code>joinme</code> for deliberate ambiguity) fits Bayesian joint mixed-effects models for multivariate longitudinal markers and time-to-event outcomes. It supports multiple outcome families (Gaussian, Student-t, binary, count, beta, ordinal, skewed families), irregular measurement schedule.</p>
+<p><code>JoiNMe</code> (with package name styled as <code>joinme</code> for deliberate ambiguity) fits Bayesian nested mixed-effects models for multivariate longitudinal markers, either alone or jointly with time-to-event outcomes. It supports multiple outcome families (Gaussian, Student-t, binary, count, beta, ordinal, skewed families) and irregular measurement schedules.</p>
 <p>Current implementation experiments with flexible association structures, covariance regression, transform-based modelling for nonlinear effects, and dynamic prediction.</p>
 <p><code>joinme</code> works with CmdStanR and RStan. The package is designed with recipes for:</p>
 <ol style="list-style-type: decimal">
@@ -111,8 +111,7 @@
 <code>kappa</code>: the positive Beta sample size, giving shape parameters <code>mu * kappa</code> and <code>(1 - mu) * kappa</code>
 </li>
 <li>
-<code>tau</code>: the skew-double-exponential asymmetry parameter in <code>(0, 1)</code>. This is different from fixing it via <code>tau_fixed</code>
-</li>
+<code>tau</code>: the skew-double-exponential quantile/asymmetry parameter in <code>(0, 1)</code>. It may be modelled with <code>formulaDist</code>, or fixed for one marker with <code>jm_family("skew_laplace", tau = 0.8)</code>.</li>
 </ul>
 <p>Example:</p>
 <div class="sourceCode" id="cb1"><pre class="downlit sourceCode r">
@@ -125,21 +124,29 @@
 <span>  <span class="va">kappa</span><span class="op">[</span>family<span class="op">=</span><span class="va">beta</span><span class="op">]</span> <span class="op">~</span> <span class="fl">1</span>,</span>
 <span>  <span class="va">tau</span><span class="op">[</span>family<span class="op">=</span><span class="va">skew_double_exponential</span><span class="op">]</span> <span class="op">~</span> <span class="fl">1</span></span>
 <span><span class="op">)</span></span></code></pre></div>
+<p>For a fixed skew-Laplace quantile, place the constant in the corresponding marker family rather than in <code>control</code>:</p>
+<div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">families</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span></span>
+<span>  <span class="fu"><a href="reference/joinme_family.html">jm_family</a></span><span class="op">(</span><span class="st">"gaussian"</span><span class="op">)</span>,</span>
+<span>  <span class="fu"><a href="reference/joinme_family.html">jm_family</a></span><span class="op">(</span><span class="st">"skew_laplace"</span>, tau <span class="op">=</span> <span class="fl">0.8</span><span class="op">)</span></span>
+<span><span class="op">)</span></span></code></pre></div>
+<p>The same <code>families</code> declaration can be passed to <code><a href="reference/simulate_joinme.html">simulate_joinme()</a></code>. The simulator uses the marker-specific constant to generate outcomes and records it in the returned distributional truth.</p>
+<p>Here <code>tau = 0.5</code> gives the symmetric Laplace distribution. Both endpoints are excluded: <code>tau = 0</code> and <code>tau = 1</code> are degenerate limits rather than valid skew-Laplace distributions.</p>
 </div>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
 </h2>
-<div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># install.packages("remotes")</span></span>
 <span><span class="co"># remotes::install_github("trinhdhk/joinme")</span></span></code></pre></div>
 <p><code>joinme</code> is compatible to run with CmdStanR, but it needs compilation.</p>
-<div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># Preferred: CmdStanR backend</span></span>
 <span><span class="co"># install.packages("cmdstanr", repos = c("https://stan-dev.r-universe.dev", getOption("repos")))</span></span>
 <span><span class="co"># cmdstanr::install_cmdstan()</span></span>
 <span><span class="co"># precompile_cmdstanr_models()</span></span></code></pre></div>
 <div class="section level3">
-<h3 id="backend-behaviour-and-threading">Backend behaviour and threading<a class="anchor" aria-label="anchor" href="#backend-behaviour-and-threading"></a>
+<h3 id="backend-and-threading">Backend and threading<a class="anchor" aria-label="anchor" href="#backend-and-threading"></a>
 </h3>
 <ul>
 <li>At runtime, <code>joinme</code> prefers CmdStanR when CmdStan is installed.</li>
@@ -152,14 +159,14 @@
 <p>Posterior draws are available through a dedicated renamed-draw interface:</p>
 <ul>
 <li>
-<code>draws(fit, ...)</code> and <code>draws(pred, ...)</code> return <code>posterior</code>-compatible draws</li>
+<code>posterior_draws(fit, ...)</code> and <code>posterior_draws(pred, ...)</code> return <code>posterior</code>-compatible draws</li>
 <li>
 <code>as.array(fit)</code> and <code>as.array(pred)</code> return the same renamed posterior arrays</li>
 <li>
-<code><a href="https://trinhdhk.github.io/joinme/reference/mcmc_plot.html">mcmc_plot()</a></code> forwards those draws to <code>bayesplot</code>, imitating the behaviour of <code>brms</code>
+<code><a href="reference/mcmc_plot.html">mcmc_plot()</a></code> forwards those draws to <code>bayesplot</code>, imitating the behaviour of <code>brms</code>
 </li>
 <li>
-<code><a href="https://trinhdhk.github.io/joinme/reference/longitudinal_plot.html">longitudinal_plot()</a></code>, <code><a href="https://trinhdhk.github.io/joinme/reference/plot_helpers.html">survival_plot()</a></code>, <code><a href="https://trinhdhk.github.io/joinme/reference/cumhaz_plot.html">cumhaz_plot()</a></code>, <code><a href="https://trinhdhk.github.io/joinme/reference/association_plot.html">association_plot()</a></code>, and <code><a href="https://trinhdhk.github.io/joinme/reference/diagnostic_plot.html">diagnostic_plot()</a></code> provide entry points to the main <code><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot()</a></code> methods.</li>
+<code><a href="reference/longitudinal_plot.html">longitudinal_plot()</a></code>, <code><a href="reference/survival_plot.html">survival_plot()</a></code>, <code><a href="reference/cumhaz_plot.html">cumhaz_plot()</a></code>, <code><a href="reference/association_plot.html">association_plot()</a></code>, and <code><a href="reference/diagnostic_plot.html">diagnostic_plot()</a></code> provide methods for plotting individual processes.</li>
 </ul>
 <!--
 Summary-scale consistency:
@@ -178,11 +185,11 @@ Summary-scale consistency:
 <div class="section level2">
 <h2 id="quick-example">Quick example<a class="anchor" aria-label="anchor" href="#quick-example"></a>
 </h2>
-<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span></span>
 <span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://trinhdhk.github.io/joinme">joinme</a></span><span class="op">)</span></span>
 <span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/Random.html" class="external-link">set.seed</a></span><span class="op">(</span><span class="fl">2026</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/Random.html" class="external-link">set.seed</a></span><span class="op">(</span><span class="fl">1</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># Simulate a small dataset</span></span>
 <span><span class="va">sim</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/simulate_joinme.html">simulate_joinme</a></span><span class="op">(</span></span>
@@ -191,12 +198,11 @@ Summary-scale consistency:
 <span>    <span class="fu"><a href="reference/joinme_family.html">jm_family</a></span><span class="op">(</span><span class="st">"student_t"</span><span class="op">)</span>,</span>
 <span>    <span class="fu"><a href="reference/joinme_family.html">jm_family</a></span><span class="op">(</span><span class="st">"student_t"</span>, inv_link <span class="op">=</span> <span class="op">~</span> <span class="fu">inv_logit</span><span class="op">(</span><span class="va">x</span> <span class="op">/</span> <span class="fl">2</span><span class="op">)</span><span class="op">)</span></span>
 <span>  <span class="op">)</span>,</span>
-<span>  n_obs_per_marker_per_id <span class="op">=</span> <span class="fl">4</span>,</span>
 <span>  times_obs <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/seq.html" class="external-link">seq</a></span><span class="op">(</span><span class="fl">0</span>, <span class="fl">5</span>, length.out <span class="op">=</span> <span class="fl">8</span><span class="op">)</span>,</span>
 <span>  quadrature_nodes <span class="op">=</span> <span class="fl">31</span>,</span>
 <span>  seed <span class="op">=</span> <span class="fl">2026</span>,</span>
 <span>  assoc <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"cv_total"</span><span class="op">)</span>,</span>
-<span>  assoc_coefs <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>cv_total <span class="op">=</span> <span class="fl">0.6</span><span class="op">)</span></span>
+<span>  truth <span class="op">=</span> <span class="fu"><a href="reference/joinme_truth.html">jm_truth</a></span><span class="op">(</span>assoc_coef <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>slope <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>cv_total <span class="op">=</span> <span class="fl">0.6</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># Note: when estimating marker weights, compare to sim$truth$marker_weights</span></span>
@@ -238,10 +244,10 @@ Summary-scale consistency:
 <span><span class="fu"><a href="https://rdrr.io/r/stats/coef.html" class="external-link">coef</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># Renamed posterior draws</span></span>
-<span><span class="fu"><a href="reference/draws.html">draws</a></span><span class="op">(</span><span class="va">fit</span>, variables <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"time"</span>, <span class="st">"alpha_cv_total"</span><span class="op">)</span>, format <span class="op">=</span> <span class="st">"draws_df"</span><span class="op">)</span></span>
+<span><span class="fu"><a href="reference/posterior_draws.html">posterior_draws</a></span><span class="op">(</span><span class="va">fit</span>, variables <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"time"</span>, <span class="st">"alpha_cv_total"</span><span class="op">)</span>, format <span class="op">=</span> <span class="st">"draws_df"</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># Bayesplot-backed posterior display with renamed variables</span></span>
-<span><span class="fu"><a href="https://trinhdhk.github.io/joinme/reference/mcmc_plot.html">mcmc_plot</a></span><span class="op">(</span><span class="va">fit</span>, variable <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"time"</span>, <span class="st">"alpha_cv_total"</span><span class="op">)</span>, type <span class="op">=</span> <span class="st">"trace"</span><span class="op">)</span></span>
+<span><span class="fu"><a href="reference/mcmc_plot.html">mcmc_plot</a></span><span class="op">(</span><span class="va">fit</span>, variable <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"time"</span>, <span class="st">"alpha_cv_total"</span><span class="op">)</span>, type <span class="op">=</span> <span class="st">"trace"</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># Conditional effects for either joint-model process</span></span>
 <span><span class="va">profiles</span> <span class="op">&lt;-</span> <span class="fu">make_conditions</span><span class="op">(</span><span class="va">sim</span><span class="op">$</span><span class="va">dataEvent</span>, vars <span class="op">=</span> <span class="st">"x1"</span><span class="op">)</span></span>
@@ -262,6 +268,23 @@ Summary-scale consistency:
 <span>  longitudinal_estimand <span class="op">=</span> <span class="st">"marginal_marker"</span>,</span>
 <span>  plot <span class="op">=</span> <span class="cn">FALSE</span></span>
 <span><span class="op">)</span></span>
+<span></span>
+<span><span class="co"># Paired posterior contrast between two covariate profiles</span></span>
+<span><span class="va">contrast_profiles</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span></span>
+<span>  time <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/seq.html" class="external-link">seq</a></span><span class="op">(</span><span class="fl">0</span>, <span class="fl">5</span>, length.out <span class="op">=</span> <span class="fl">40</span><span class="op">)</span>,</span>
+<span>  x2 <span class="op">=</span> <span class="fl">0</span>,</span>
+<span>  cond__ <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="st">"time="</span>, <span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/seq.html" class="external-link">seq</a></span><span class="op">(</span><span class="fl">0</span>, <span class="fl">5</span>, length.out <span class="op">=</span> <span class="fl">40</span><span class="op">)</span>, <span class="fl">2</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="op">)</span></span>
+<span><span class="va">cc</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/conditional_contrast.html">conditional_contrast</a></span><span class="op">(</span></span>
+<span>  <span class="va">fit</span>,</span>
+<span>  groupA <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>x1 <span class="op">=</span> <span class="fl">1</span><span class="op">)</span>,</span>
+<span>  groupB <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>x1 <span class="op">=</span> <span class="op">-</span><span class="fl">1</span><span class="op">)</span>,</span>
+<span>  conditions <span class="op">=</span> <span class="va">contrast_profiles</span>,</span>
+<span>  process <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"longitudinal"</span>, <span class="st">"event"</span><span class="op">)</span>,</span>
+<span>  longitudinal_estimand <span class="op">=</span> <span class="st">"marginal_marker"</span>,</span>
+<span>  plot <span class="op">=</span> <span class="cn">FALSE</span></span>
+<span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">cc</span>, condition_variable <span class="op">=</span> <span class="st">"time"</span>, ask <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># Random effects / covariance / combined coefficients (nested by formula block)</span></span>
 <span><span class="va">re_fit</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/pkg/nlme/man/random.effects.html" class="external-link">ranef</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span>
@@ -300,8 +323,8 @@ Summary-scale consistency:
 <span></span>
 <span><span class="co"># Plot longitudinal and survival predictions</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">pred</span>, type <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"longitudinal"</span>, <span class="st">"survival"</span><span class="op">)</span>, combined <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://trinhdhk.github.io/joinme/reference/longitudinal_plot.html">longitudinal_plot</a></span><span class="op">(</span><span class="va">pred</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://trinhdhk.github.io/joinme/reference/plot_helpers.html">survival_plot</a></span><span class="op">(</span><span class="va">pred</span><span class="op">)</span></span>
+<span><span class="fu"><a href="reference/longitudinal_plot.html">longitudinal_plot</a></span><span class="op">(</span><span class="va">pred</span><span class="op">)</span></span>
+<span><span class="fu"><a href="reference/survival_plot.html">survival_plot</a></span><span class="op">(</span><span class="va">pred</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># Alternative longitudinal display: posterior mean change heatmap</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span></span>
@@ -314,14 +337,20 @@ Summary-scale consistency:
 <span></span>
 <span><span class="co"># Posterior summary/extraction helpers</span></span>
 <span><span class="fu"><a href="https://paulbuerkner.com/brms/reference/posterior_summary.html" class="external-link">posterior_summary</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span>
-<span><span class="fu"><a href="reference/posterior_fixef.html">posterior_fixef</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span>
-<span><span class="fu"><a href="reference/posterior_ranef.html">posterior_ranef</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span>
-<span><span class="fu"><a href="reference/posterior_coef.html">posterior_coef</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/assoc.html">posterior_assoc</a></span><span class="op">(</span><span class="va">fit</span>, summary <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span></span>
+<span><span class="co"># Conventional coefficient interfaces use posterior_summary() for reporting</span></span>
+<span><span class="co"># and extract() for their draw-level inputs.</span></span>
+<span><span class="fu"><a href="https://rdrr.io/pkg/nlme/man/fixed.effects.html" class="external-link">fixef</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/pkg/nlme/man/random.effects.html" class="external-link">ranef</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/stats/coef.html" class="external-link">coef</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span>
+<span><span class="fu"><a href="reference/extract.html">extract</a></span><span class="op">(</span><span class="va">fit</span>, what <span class="op">=</span> <span class="st">"fixed_effects"</span><span class="op">)</span></span>
+<span><span class="fu"><a href="reference/extract.html">extract</a></span><span class="op">(</span><span class="va">fit</span>, what <span class="op">=</span> <span class="st">"random_effects"</span><span class="op">)</span></span>
+<span><span class="fu"><a href="reference/extract.html">extract</a></span><span class="op">(</span><span class="va">fit</span>, what <span class="op">=</span> <span class="st">"coefficients"</span><span class="op">)</span></span>
+<span></span>
 <span><span class="co"># Explicit fitted-object plot helpers</span></span>
-<span><span class="fu"><a href="https://trinhdhk.github.io/joinme/reference/association_plot.html">association_plot</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://trinhdhk.github.io/joinme/reference/diagnostic_plot.html">diagnostic_plot</a></span><span class="op">(</span><span class="va">fit</span>, type <span class="op">=</span> <span class="st">"rhat"</span><span class="op">)</span></span>
+<span><span class="fu"><a href="reference/association_plot.html">association_plot</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span>
+<span><span class="fu"><a href="reference/diagnostic_plot.html">diagnostic_plot</a></span><span class="op">(</span><span class="va">fit</span>, type <span class="op">=</span> <span class="st">"rhat"</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># All coefficient extractors support summary = TRUE/FALSE</span></span>
 <span><span class="fu"><a href="https://rdrr.io/pkg/nlme/man/fixed.effects.html" class="external-link">fixef</a></span><span class="op">(</span><span class="va">fit</span>, summary <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>

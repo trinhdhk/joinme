@@ -3,15 +3,15 @@
 Extracts stored prediction draw blocks without flattening them first.
 
 This is the structured companion to
-[`draws.JoiNMeDynPred()`](https://trinhdhk.github.io/joinme/reference/draws.md).
+[`posterior_draws.JoiNMeDynPred()`](https://trinhdhk.github.io/joinme/reference/posterior_draws.md).
 Use
 [`extract()`](https://trinhdhk.github.io/joinme/reference/extract.md)
 when you want to keep the original prediction block semantics
 (`longitudinal`, `survival`, `cumhaz`, random effects, and scale/id
 filters). Use
-[`draws()`](https://trinhdhk.github.io/joinme/reference/draws.md) when
-you want those blocks flattened into one `posterior`-compatible draw
-object with composite variable labels.
+[`posterior_draws()`](https://trinhdhk.github.io/joinme/reference/posterior_draws.md)
+when you want those blocks flattened into one `posterior`-compatible
+draw object with composite variable labels.
 
 ## Usage
 
@@ -52,6 +52,6 @@ extract(
 
 A list with fields:
 
-- `draws`: numeric matrix or list of matrices
+- `posterior_draws`: numeric matrix or list of matrices
 
 - `meta`: extraction metadata

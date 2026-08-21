@@ -10,11 +10,12 @@ expected response, the event relative hazard, or both. Longitudinal effects
 may contain only the fixed-effect contribution, add the fitted marker-level
 deviation, or average marker-specific predictions over the selected markers.
 Subject- and marker-by-subject deviations are excluded from all three
-longitudinal estimands. Event effects describe the proportional-hazards
-multiplier exp(W gamma) (or its logarithm), with the baseline hazard and
-longitudinal association contribution held fixed. Consequently, event
-contrasts isolate the part of the event process attributable to covariates
-in formulaEvent.
+longitudinal estimands unless reuse_fitted_re = TRUE explicitly selects a
+subject represented in the fitted model. Event effects describe the
+proportional-hazards multiplier exp(W gamma) (or its logarithm), with the
+baseline hazard and longitudinal association contribution held fixed.
+Consequently, event contrasts isolate the part of the event process
+attributable to covariates in formulaEvent.
 The returned data follow the brms conditional-effects convention. Each
 effect table contains estimate__, se__, lower__, upper__, and
 cond__, plus effect1__ and, for two-predictor effects, effect2__.
@@ -32,11 +33,12 @@ expected response, the event relative hazard, or both. Longitudinal effects
 may contain only the fixed-effect contribution, add the fitted marker-level
 deviation, or average marker-specific predictions over the selected markers.
 Subject- and marker-by-subject deviations are excluded from all three
-longitudinal estimands. Event effects describe the proportional-hazards
-multiplier exp(W gamma) (or its logarithm), with the baseline hazard and
-longitudinal association contribution held fixed. Consequently, event
-contrasts isolate the part of the event process attributable to covariates
-in formulaEvent.
+longitudinal estimands unless reuse_fitted_re = TRUE explicitly selects a
+subject represented in the fitted model. Event effects describe the
+proportional-hazards multiplier exp(W gamma) (or its logarithm), with the
+baseline hazard and longitudinal association contribution held fixed.
+Consequently, event contrasts isolate the part of the event process
+attributable to covariates in formulaEvent.
 The returned data follow the brms conditional-effects convention. Each
 effect table contains estimate__, se__, lower__, upper__, and
 cond__, plus effect1__ and, for two-predictor effects, effect2__.
@@ -51,7 +53,7 @@ maintaining a second plotting grammar."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">joinme</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2608</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.2</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -95,11 +97,12 @@ expected response, the event relative hazard, or both. Longitudinal effects
 may contain only the fixed-effect contribution, add the fitted marker-level
 deviation, or average marker-specific predictions over the selected markers.
 Subject- and marker-by-subject deviations are excluded from all three
-longitudinal estimands. Event effects describe the proportional-hazards
-multiplier <code>exp(W gamma)</code> (or its logarithm), with the baseline hazard and
-longitudinal association contribution held fixed. Consequently, event
-contrasts isolate the part of the event process attributable to covariates
-in <code>formulaEvent</code>.</p>
+longitudinal estimands unless <code>reuse_fitted_re = TRUE</code> explicitly selects a
+subject represented in the fitted model. Event effects describe the
+proportional-hazards multiplier <code>exp(W gamma)</code> (or its logarithm), with the
+baseline hazard and longitudinal association contribution held fixed.
+Consequently, event contrasts isolate the part of the event process
+attributable to covariates in <code>formulaEvent</code>.</p>
 <p>The returned data follow the <code>brms</code> conditional-effects convention. Each
 effect table contains <code>estimate__</code>, <code>se__</code>, <code>lower__</code>, <code>upper__</code>, and
 <code>cond__</code>, plus <code>effect1__</code> and, for two-predictor effects, <code>effect2__</code>.
@@ -127,6 +130,8 @@ maintaining a second plotting grammar.</p>
 <span>  surface <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  markers <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  draws <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  summary <span class="op">=</span> <span class="cn">TRUE</span>,</span>
+<span>  reuse_fitted_re <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  seed <span class="op">=</span> <span class="fl">1</span>,</span>
 <span>  plot <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  <span class="va">...</span></span>
@@ -153,7 +158,7 @@ If <code>NULL</code>, all model predictors and fitted two-way interactions are u
 <dd><p>Optional data frame containing values of predictors on
 which to condition. One set of effects is evaluated for every row.
 <code>conditions$cond__</code>, when supplied, provides the facet label; otherwise row
-names are used. Tables returned by <code>make_conditions()</code> can be supplied
+names are used. Tables returned by <code><a href="https://paulbuerkner.com/brms/reference/make_conditions.html" class="external-link">make_conditions()</a></code> can be supplied
 directly.</p></dd>
 
 
@@ -191,14 +196,14 @@ controlled separately by <code>event_scale</code>.</p></dd>
 <dt id="arg-longitudinal-estimand">longitudinal_estimand<a class="anchor" aria-label="anchor" href="#arg-longitudinal-estimand"></a></dt>
 <dd><p>Longitudinal quantity to evaluate.
 <code>"population"</code> uses only the fixed-effect contribution, corresponding to
-exclusion of group-level effects in <code>brms</code>. <code>"marker"</code> adds the fitted
-marker-level deviation but excludes subject and marker-by-subject
-deviations. <code>"marginal_marker"</code> first calculates each selected marker's
-posterior prediction, including its marker-level deviation and fitted
-inverse link, and then takes an equally weighted mean across markers within
-every posterior draw. Thus, on the expected-response scale it estimates an
-average of marker responses rather than the response obtained from an
-averaged linear predictor.</p></dd>
+exclusion of group-level effects in <code>brms</code>, and averages the selected
+marker trajectories within each posterior draw. <code>"marker"</code> adds the fitted
+marker-level deviation and retains a separate trajectory for every selected
+marker. <code>"marginal_marker"</code> also adds the marker-level deviation but then
+takes an equally weighted mean across selected markers within every draw.
+Marker-specific inverse links are applied before either marker average.
+Subject and marker-by-subject deviations are excluded unless
+<code>reuse_fitted_re = TRUE</code>.</p></dd>
 
 
 <dt id="arg-event-scale">event_scale<a class="anchor" aria-label="anchor" href="#arg-event-scale"></a></dt>
@@ -221,8 +226,9 @@ represented by a small set of conditioning curves.</p></dd>
 <dt id="arg-markers">markers<a class="anchor" aria-label="anchor" href="#arg-markers"></a></dt>
 <dd><p>Optional character vector restricting longitudinal results to
 selected marker levels. By default all fitted markers are used. For
-<code>longitudinal_estimand = "marginal_marker"</code>, this argument defines the
-markers entering the equally weighted posterior average.</p></dd>
+<code>longitudinal_estimand = "population"</code> or <code>"marginal_marker"</code>, this
+argument defines the markers entering the equally weighted posterior
+average.</p></dd>
 
 
 <dt id="arg-draws">draws<a class="anchor" aria-label="anchor" href="#arg-draws"></a></dt>
@@ -230,30 +236,51 @@ markers entering the equally weighted posterior average.</p></dd>
 the calculation. <code>NULL</code> uses all available draws.</p></dd>
 
 
+<dt id="arg-summary">summary<a class="anchor" aria-label="anchor" href="#arg-summary"></a></dt>
+<dd><p>Logical. If <code>TRUE</code>, return posterior centres, standard errors,
+and credible intervals. If <code>FALSE</code>, return a tidy draw-level data frame.
+Each row contains one posterior value, its <code>.draw</code> index, its <code>.value</code>, and
+the complete condition and estimand description. Draw-level results are
+returned without plotting.</p></dd>
+
+
+<dt id="arg-reuse-fitted-re">reuse_fitted_re<a class="anchor" aria-label="anchor" href="#arg-reuse-fitted-re"></a></dt>
+<dd><p>Logical. If <code>TRUE</code>, <code>conditions</code> must contain the
+fitted subject identifier. Subject and marker-by-subject posterior effects
+for those identifiers are added draw by draw, avoiding a separate dynamic
+random-effect fit. All identifiers must have occurred during fitting.</p></dd>
+
+
 <dt id="arg-seed">seed<a class="anchor" aria-label="anchor" href="#arg-seed"></a></dt>
 <dd><p>Integer seed used when posterior draws are subsampled.</p></dd>
 
 
 <dt id="arg-plot">plot<a class="anchor" aria-label="anchor" href="#arg-plot"></a></dt>
-<dd><p>Logical. If <code>TRUE</code>, construct and display conditional-effects
-plots. If <code>FALSE</code>, return the underlying <code>JoiNMeConditionalEffects</code> data
-object. The data object can subsequently be plotted with <code><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot()</a></code>.</p></dd>
+<dd><p>Logical. If <code>TRUE</code> and <code>summary = TRUE</code>, construct and display
+conditional-effects plots. If <code>FALSE</code>, return the underlying
+<code>JoiNMeConditionalEffects</code> object. <code>summary = FALSE</code> always returns the
+draw-level object without plotting.</p></dd>
 
 
 <dt id="arg--">...<a class="anchor" aria-label="anchor" href="#arg--"></a></dt>
 <dd><p>Additional arguments passed to the plotting method when
-<code>plot = TRUE</code>, for example <code>points</code>, <code>rug</code>, <code>stype</code>, or <code>theme</code>; see
-<code><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">brms::conditional_effects()</a></code> for the corresponding graphical arguments.</p></dd>
+<code>plot = TRUE</code>, for example <code>points</code>, <code>rug</code>, <code>stype</code>, <code>theme</code>, or the
+conditional-plot arrangement arguments; see
+<code><a href="plot.JoiNMeConditionalEffects.html">plot.JoiNMeConditionalEffects()</a></code> and <code><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">brms::conditional_effects()</a></code>.</p></dd>
 
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p>If <code>plot = FALSE</code>, a <code>JoiNMeConditionalEffects</code> object: a named list
+    <p>If <code>summary = TRUE</code> and <code>plot = FALSE</code>, a
+<code>JoiNMeConditionalEffects</code> object: a named list
 with one component per requested process. Each process component is a
 <code>brms_conditional_effects</code>-compatible named list containing one data frame
 per effect. Longitudinal tables identify their estimand in
-<code>longitudinal_estimand__</code>. If <code>plot = TRUE</code>, a similarly nested named list
-of <code>ggplot</code> objects is returned invisibly after plotting.</p>
+<code>longitudinal_estimand__</code>. With <code>summary = FALSE</code>, each effect is a tidy
+data frame with one row per posterior draw and estimand, identified by
+<code>.draw</code>, <code>.value</code>, and <code>estimand__</code>. If <code>summary = TRUE</code> and <code>plot = TRUE</code>,
+the plotting method invisibly returns either the similarly nested named
+list of <code>ggplot</code> objects or an arranged <code>patchwork</code> display.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
@@ -261,9 +288,13 @@ of <code>ggplot</code> objects is returned invisibly after plotting.</p>
 factors are held at their first level. Values supplied in <code>conditions</code>
 override those defaults. Group-level subject deviations are excluded, as in
 the default <code>re_formula = NA</code> behavior of <code><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">brms::conditional_effects()</a></code>.
-Marker-level deviations are also excluded for the <code>"population"</code> estimand,
-retained for the <code>"marker"</code> estimand, and integrated by finite averaging for
-the <code>"marginal_marker"</code> estimand.</p>
+Marker-level deviations are excluded for the <code>"population"</code> estimand,
+retained separately for the <code>"marker"</code> estimand, and integrated by finite
+averaging for the <code>"marginal_marker"</code> estimand. Population and
+marker-marginal results each contain one trajectory per condition because
+their selected marker trajectories are averaged draw by draw. When fitted
+random effects are reused, the selected subject and marker-by-subject
+deviations enter all three estimands.</p>
 <p>The event result is a relative-hazard effect rather than a dynamic survival
 prediction. Dynamic survival probabilities depend on a subject's observed
 marker history and conditioning time and therefore remain the estimand of
@@ -273,7 +304,7 @@ dynamic prediction.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
-    <div class="dont-index"><p><code><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">brms::conditional_effects()</a></code>, <code>make_conditions()</code>,
+    <div class="dont-index"><p><code><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">brms::conditional_effects()</a></code>, <code><a href="https://paulbuerkner.com/brms/reference/make_conditions.html" class="external-link">make_conditions()</a></code>,
 <code><a href="predict.JoiNMeFit.html">predict.JoiNMeFit()</a></code></p></div>
     </div>
 
@@ -293,7 +324,7 @@ dynamic prediction.</p>
 <span class="r-in"><span>  process <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"longitudinal"</span>, <span class="st">"event"</span><span class="op">)</span>,</span></span>
 <span class="r-in"><span>  plot <span class="op">=</span> <span class="cn">FALSE</span></span></span>
 <span class="r-in"><span><span class="op">)</span></span></span>
-<span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">cond_eff</span>, ask <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">cond_eff</span>, arrange <span class="op">=</span> <span class="st">"grid"</span>, ncol <span class="op">=</span> <span class="fl">2</span>, guides <span class="op">=</span> <span class="st">"collect"</span><span class="op">)</span></span></span>
 <span class="r-in"><span></span></span>
 <span class="r-in"><span><span class="co"># Request marker-specific longitudinal expected responses.</span></span></span>
 <span class="r-in"><span><span class="fu"><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">conditional_effects</a></span><span class="op">(</span></span></span>

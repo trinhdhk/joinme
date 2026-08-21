@@ -4,13 +4,13 @@ Fits a monotone I-spline transformation with a smoothness penalty and
 returns a transform specification compatible with
 [`build_standata_transforms()`](https://trinhdhk.github.io/joinme/reference/build_standata_transforms.md).
 
-This helper is the legacy plug-in constructor for
-`type = "ispline_penalised"`. Its defaults are `n_knots = 6`,
-`degree = 3`, `lambda = 1.0`, `weights = NULL` (equal weights), and
-`diff_order = 2`. Returned coefficients follow the same anchored
-convention as the Stan- estimated path: increasing splines run from `0`
-to `1`, decreasing splines run from `1` to `0`, and interior
-coefficients stay monotone in the chosen direction. Example:
+This helper is the plug-in constructor for `type = "ispline_penalised"`.
+Its defaults are `n_knots = 6`, `degree = 3`, `lambda = 1.0`,
+`weights = NULL` (equal weights), and `diff_order = 2`. Returned
+coefficients follow the same anchored convention as the Stan- estimated
+path: increasing splines run from `0` to `1`, decreasing splines run
+from `1` to `0`, and interior coefficients stay monotone in the chosen
+direction. Example:
 `penalised_ispline_transform(x = seq(-2, 2, length.out = 50), y = exp(seq(-2, 2, length.out = 50)))`
 
 ## Usage

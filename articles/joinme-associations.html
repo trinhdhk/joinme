@@ -24,7 +24,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">joinme</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2608</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.2</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -72,16 +72,13 @@
 
 
 
-    <section class="section level2" data-number="1"><h2 data-number="1" id="purpose">
-<span class="header-section-number">1</span> Purpose<a class="anchor" aria-label="anchor" href="#purpose"></a>
+    <section class="section level2"><h2 id="purpose">Purpose<a class="anchor" aria-label="anchor" href="#purpose"></a>
 </h2>
-<p>This vignette focuses on <strong>association term construction</strong>, including transformation selection, interpretability, and practical trade-offs.</p>
-<p>It also explains how those association terms propagate into the public summary, draw-extraction, and plotting APIs so the same labels are used consistently in tables, MCMC plots, and fitted association curves.</p>
+<p>This vignette provides a brief explanation of <strong>association term construction</strong>, including transformation selection and interpretability.</p>
 <p>Association transforms apply to all supported longitudinal families (including double_exponential, skew_double_exponential, beta, and cumulative_logit) and to competing-risk survival models.</p>
-<section class="level2" data-number="1.1"><h3 data-number="1.1" id="step-by-step-how-association-summaries-are-constructed">
-<span class="header-section-number">1.1</span> Step-by-step: how association summaries are constructed<a class="anchor" aria-label="anchor" href="#step-by-step-how-association-summaries-are-constructed"></a>
+<section class="level2"><h3 id="association-term-decomposition-in-joint-nested-mixed-effects-models">Association term decomposition in Joint Nested Mixed-effects models<a class="anchor" aria-label="anchor" href="#association-term-decomposition-in-joint-nested-mixed-effects-models"></a>
 </h3>
-<p>At the event time and at the default 15 Gauss-Kronrod nodes used for integration (configurable), the longitudinal linear predictor is decomposed into a mean component and a marker component. From these components, <code>JoiNMe</code> constructs:</p>
+<p>At the event time and at the default 15 Gauss-Kronrod nodes used for integration, the longitudinal linear predictor is decomposed into a mean component and a markercomponent. From these components, <code>joinme</code> (the package) constructs:</p>
 <ul>
 <li>
 <strong>CV_total</strong>: total current value (mean + marker components).</li>
@@ -96,69 +93,55 @@
 <li>
 <strong>CS_marker</strong>: slope of the marker component.</li>
 <li>
-<strong>CORR</strong>: a subject-specific variance summary of the marker-by-id covariance structure, constant across time.</li>
+<strong>Corr</strong>: a subject-specific lower-triangular matrix of the correlation of the marker-by-id covariance structure, constant across time.</li>
 <li>
-<strong>VCOV</strong>: a subject-specific lower-triangular summary of the marker-by-id Cholesky factor <code>L</code>, also constant across time. The channel uses the entries of <code>L</code> directly rather than the reconstructed covariance matrix <code>L L'</code>.</li>
-</ul>
-<p>Each component can be included or excluded using the <code>assoc</code> argument. If <code>assoc</code> does not include a component, the corresponding coefficient is prior-only and does not enter the likelihood.</p>
-<section class="level3" data-number="1.1.1"><h4 data-number="1.1.1" id="scale-recovery-and-exponentiation-in-summaries">
-<span class="header-section-number">1.1.1</span> Scale recovery and exponentiation in summaries<a class="anchor" aria-label="anchor" href="#scale-recovery-and-exponentiation-in-summaries"></a>
-</h4>
-<p><code>JoiNMe</code> reports association and survival-process coefficients on the linear predictor scale first. Any internal time normalisation used by the Stan model is recovered on that linear scale before exponentiation.</p>
-<p>For multiplicative interpretations:</p>
-<ul>
-<li>
-<code>summary(fit)$tables$baseline_hazard</code> reports baseline-hazard coefficients on the log scale and hazard-ratio scale. Only the intercept is adjusted by <code>-log(tmax)</code>; non-intercept basis coefficients are unchanged.</li>
-<li>
-<code>summary(fit)$tables$survival_process</code> reports baseline covariate coefficients and <code>Hazard.Ratio</code> interval columns from exponentiated log-scale summaries.</li>
-<li>
-<code>summary(fit)$tables$assoc</code> reports association coefficients on their native linear scale (including marker-weight terms when active).</li>
-</ul>
-<p>The intercept-only baseline adjustment follows the proportional-hazards identity that internal time scaling contributes a constant offset on the log-hazard scale. Therefore only the intercept is shifted; spline/formula basis terms are kept as fitted.</p>
-<p>The CORR and VCOV components require marker-by-id random effects. If the marker block does not include an inner <code>( ... | id )</code> term, then <code>Q_idm = 0</code> and these covariance-style associations are not available.</p>
-</section></section></section><section class="section level2" data-number="2"><h2 data-number="2" id="marker-weighted-cv-and-cs">
-<span class="header-section-number">2</span> Marker-weighted CV and CS<a class="anchor" aria-label="anchor" href="#marker-weighted-cv-and-cs"></a>
+<strong>vcov</strong>: a subject-specific lower-triangular matrix of the marker-by-id Cholesky factor <code>L</code>, also constant across time.</li>
+</ul></section></section><section class="section level2"><h2 id="marker-weighted-cv-and-cs">Marker-weighted CV and CS<a class="anchor" aria-label="anchor" href="#marker-weighted-cv-and-cs"></a>
 </h2>
-<p>When multiple biomarkers are modelled, <code>JoiNMe</code> constructs marker-average association components using weights <span class="math inline">\omega_d</span> (one per marker). For marker-aggregated terms (<code>cv_total</code>, <code>cv_marker</code>, <code>cs_total</code>, <code>cs_marker</code>), transforms are applied at the marker level first and then averaged with weights. This matters whenever transforms are nonlinear.</p>
+<p>When multiple biomarkers are modelled, <code>joinme</code> constructs marker-average association components using weights <span class="math inline">\omega_d</span> (one per marker). For marker-aggregated terms (<code>cv_total</code>, <code>cv_marker</code>, <code>cs_total</code>, <code>cs_marker</code>), transforms are applied at the marker level first and then averaged with weights. This matters whenever transforms are nonlinear.</p>
 <p>For example, with marker-specific total current values <span class="math inline">CV_{id}(t)</span> and transform <span class="math inline">f_{cv}</span>:</p>
 <p><span class="math display">
-    ext{cv\_total}(t) = \frac{1}{D}\sum_{d=1}^{D} \omega_d\, f_{cv}\!\left(CV_{id}(t)\right),
+\frac{1}{D}\sum_{d=1}^{D} \omega_d\, f_{cv}\!\left(CV_{id}(t)\right),
 </span></p>
 <p>which differs from <span class="math inline">f_{cv}(\frac{1}{D}\sum_d \omega_d CV_{id}(t))</span> unless <span class="math inline">f_{cv}</span> is linear.</p>
-<p>For slopes, let <span class="math inline">CS_{id}(t)</span> be a marker-specific slope feature and <span class="math inline">f_{cs}</span> the configured CS transform. Then</p>
+<p>For slopes, let <span class="math inline">CS_{id}(t)</span> be a marker-specific slope feature and <span class="math inline">f_{cs}</span> the vonfigured CS transform. Then the association is</p>
 <p><span class="math display">
-    ext{cs\_total}(t) = \frac{1}{D}\sum_{d=1}^{D} \omega_d\, f_{cs}\!\left(CS_{id}(t)\right),
+\frac{1}{D}\sum_{d=1}^{D} \omega_d\, f_{cs}\!\left(CS_{id}(t)\right),
 </span></p>
 <p>and analogously for <code>cs_marker</code>. This is intentionally not equal to <span class="math inline">f_{cs}(\frac{1}{D}\sum_d \omega_d CS_{id}(t))</span> unless <span class="math inline">f_{cs}</span> is linear.</p>
-<p>In practice, provide fixed weights with <code>marker_weights</code> and <code>fixed_marker_weights = TRUE</code>, or set <code>fixed_marker_weights = FALSE</code> to use signed perturbations around base weights, <span class="math inline">\omega_d = \omega_d^{(0)} + z_d</span>. The <code>shrinkage</code> switch controls the standardized latent family in both fitting and simulation: <code>0</code> is Student-<span class="math inline">t_6(0,1)</span>, <code>1</code> is Laplace<span class="math inline">(0,1)</span>, and <code>2</code> is Normal<span class="math inline">(0,1)</span>. With estimated weights and no supplied base, <span class="math inline">\omega^{(0)}=0</span>. The simulator stores the base, latent, and effective truths in <code>truth$marker_weights_base</code>, <code>truth$marker_weights_latent</code>, and <code>truth$marker_weights</code>; the last of these is the effective weight used to generate survival times.</p>
-<section class="level2" data-number="2.1"><h3 data-number="2.1" id="plotting-fitted-association-curves">
-<span class="header-section-number">2.1</span> Plotting fitted association curves<a class="anchor" aria-label="anchor" href="#plotting-fitted-association-curves"></a>
+<p>In practice, place the entire declaration in <code>jm_prior(marker_weights = ...)</code>. Use <code>family = "constant"</code> or <code>"none"</code> for fixed weights, or a stochastic family to fit a hierarchical marker-weight decomposition. For marker (d) in weight set (s),</p>
+<p><span class="math display">
+\omega_{sd}=\omega^{(0)}_{sd}+\mu_{\omega,s}+z_{sd}.
+</span></p>
+<p>Here <span class="math inline">\omega^{(0)}_{sd}</span> is the offset in <code>marker_weights$offset</code>, <span class="math inline">\mu_{\omega,s}</span> is a fitted common location, and <span class="math inline">z_{sd}</span> is a marker departure drawn directly from the selected centred unit-scale family.</p>
+<p>Every marker attached to set (s) contributes likelihood information about <span class="math inline">\mu_{\omega,s}</span>, so the common location is the marker-weight analogue of a population intercept. The common location uses <code>jm_prior(marker_weights = list(intercept = ...))</code>. The departures use <code>marker_weights$family</code>; their location and scale are fixed at zero and one.</p>
+<p>A shared weight structure has one (_{}) and one departure vector. With <code>marker_weights$shared = FALSE</code>, every active weighted association term has its own mean and departures.</p>
+<p>With estimated weights and no supplied base, (^{(0)}=0). In <code><a href="../reference/simulate_joinme.html">simulate_joinme()</a></code> and <code><a href="../reference/simulate_joinme_mix.html">simulate_joinme_mix()</a></code>, a numeric <code>truth$marker_weights$intercept</code> supplies the true (_{,s}); a <code>prior_*()</code> declaration inside <code><a href="../reference/joinme_truth.html">jm_truth()</a></code> draws it once for each fitted set and then holds it fixed. The simulator stores the base, common mean, marker-specific departure, and effective truths in <code>truth$marker_weights_offset</code>, <code>truth$marker_weight_mean</code>, <code>truth$marker_weights_latent</code>, and <code>truth$marker_weights</code>. The final quantity is the effective weight used to generate survival times. The recovery call does not pass the true common mean to fitting, because it is an estimand.</p>
+<p>In the log hazard, this feature is multiplied by the association slope (declared through <code>assoc$slope</code>). The <code>iota</code> intercept and slope belong to an optional affine transformation inside <code>tf()</code>; they are not the association multiplier.</p>
+<section class="level2"><h3 id="plotting-fitted-association-curves">Plotting fitted association curves<a class="anchor" aria-label="anchor" href="#plotting-fitted-association-curves"></a>
 </h3>
 <div class="cell">
 <details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb1"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="fu"><a href="https://trinhdhk.github.io/joinme/reference/association_plot.html">association_plot</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span></code></pre></div>
+<code class="sourceCode R"><span><span class="fu"><a href="../reference/association_plot.html">association_plot</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span></code></pre></div>
 </details>
 </div>
-</section><section class="level2" data-number="2.2"><h3 data-number="2.2" id="posterior-association-extraction-and-covariance-style-labels">
-<span class="header-section-number">2.2</span> Posterior association extraction and covariance-style labels<a class="anchor" aria-label="anchor" href="#posterior-association-extraction-and-covariance-style-labels"></a>
+</section><section class="level2"><h3 id="posterior-association-extraction-and-covariance-style-labels">Posterior association extraction and covariance-style labels<a class="anchor" aria-label="anchor" href="#posterior-association-extraction-and-covariance-style-labels"></a>
 </h3>
 <p>Use <code>posterior_assoc(fit, summary = TRUE)</code> (or <code>assoc(fit, summary = TRUE)</code>) to extract association-specific posterior summaries without requiring the full model summary. Use <code>summary = FALSE</code> to obtain posterior draws per association term.</p>
-</section><section class="level2" data-number="2.3"><h3 data-number="2.3" id="renamed-posterior-draws-for-association-terms">
-<span class="header-section-number">2.3</span> Renamed posterior draws for association terms<a class="anchor" aria-label="anchor" href="#renamed-posterior-draws-for-association-terms"></a>
+</section><section class="level2"><h3 id="renamed-posterior-draws-for-association-terms">Renamed posterior draws for association terms<a class="anchor" aria-label="anchor" href="#renamed-posterior-draws-for-association-terms"></a>
 </h3>
-<p>Association terms can be extracted directly on the reporting scale with <code><a href="../reference/draws.html">draws()</a></code>. The canonical posterior variables are <code>alpha_cv_total</code>, <code>alpha_cs_total</code>, <code>alpha_cv_mean</code>, <code>alpha_cs_mean</code>, <code>alpha_corr[...]</code>, and <code>alpha_vcov[...]</code>. Each is the coefficient actually used in the event hazard, which is also the scale reported by <code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code> and used by prediction and plotting methods.</p>
+<p>Association terms can be extracted directly on the reporting scale with <code><a href="../reference/posterior_draws.html">posterior_draws()</a></code>. The canonical posterior variables are <code>alpha_cv_total</code>, <code>alpha_cs_total</code>, <code>alpha_cv_mean</code>, <code>alpha_cs_mean</code>, <code>alpha_corr[...]</code>, and <code>alpha_vcov[...]</code>. Each is the coefficient actually used in the event hazard, which is also the scale reported by <code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code> and used by prediction andplotting methods.</p>
 <div class="cell">
 <details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb2"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="co"># All association terms with reporting-friendly names</span></span>
-<span><span class="va">assoc_draws</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/draws.html">draws</a></span><span class="op">(</span><span class="va">fit</span>, variables <span class="op">=</span> <span class="st">"^alpha_"</span>, regex <span class="op">=</span> <span class="cn">TRUE</span>, format <span class="op">=</span> <span class="st">"draws_df"</span><span class="op">)</span></span>
+<code class="sourceCode R"><span><span class="co"># Extracting association terms</span></span>
+<span><span class="va">assoc_draws</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/posterior_draws.html">posterior_draws</a></span><span class="op">(</span><span class="va">fit</span>, variables <span class="op">=</span> <span class="st">"^alpha_"</span>, regex <span class="op">=</span> <span class="cn">TRUE</span>, format <span class="op">=</span> <span class="st">"draws_df"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">assoc_draws</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># Bayesplot visualisation with the same labels used by summary(fit)</span></span>
-<span><span class="fu"><a href="https://trinhdhk.github.io/joinme/reference/mcmc_plot.html">mcmc_plot</a></span><span class="op">(</span><span class="va">fit</span>, variable <span class="op">=</span> <span class="st">"alpha_cv_total"</span>, type <span class="op">=</span> <span class="st">"dens_overlay"</span><span class="op">)</span></span></code></pre></div>
+<span><span class="fu"><a href="../reference/mcmc_plot.html">mcmc_plot</a></span><span class="op">(</span><span class="va">fit</span>, variable <span class="op">=</span> <span class="st">"alpha_cv_total"</span>, type <span class="op">=</span> <span class="st">"dens_overlay"</span><span class="op">)</span></span></code></pre></div>
 </details>
 </div>
-</section><section class="level2" data-number="2.4"><h3 data-number="2.4" id="conditional-effects-in-the-two-joint-model-processes">
-<span class="header-section-number">2.4</span> Conditional effects in the two joint-model processes<a class="anchor" aria-label="anchor" href="#conditional-effects-in-the-two-joint-model-processes"></a>
+</section><section class="level2"><h3 id="conditional-effects-in-the-two-joint-model-processes">Conditional effects in the two joint-model processes<a class="anchor" aria-label="anchor" href="#conditional-effects-in-the-two-joint-model-processes"></a>
 </h3>
 <p>Conditional effects are distinct from subject-specific dynamic prediction. <code><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">conditional_effects()</a></code> varies named predictors while holding other predictors at explicit profile values and can return the longitudinal process, the event process, or both. The longitudinal estimand is the population-level expected marker response by default. Set <code>longitudinal_estimand = "marker"</code> to retain the fitted marker-level deviation, or <code>"marginal_marker"</code> to average the marker-specific predictions within each posterior draw. Because marker averaging occurs after each inverse-link transformation, it targets an average expected response rather than an expected response at an average marker effect.</p>
 <p>The event estimand is the direct relative-hazard component <code>exp(W * gamma)</code>; the baseline hazard and longitudinal association contribution are held fixed when making event-covariate comparisons.</p>
@@ -185,34 +168,26 @@
 <span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">ce</span>, ask <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span></code></pre></div>
 </details>
 </div>
-</section></section><section class="section level2" data-number="3"><h2 data-number="3" id="association-coefficients-and-naming">
-<span class="header-section-number">3</span> Association coefficients and naming<a class="anchor" aria-label="anchor" href="#association-coefficients-and-naming"></a>
+</section></section><section class="section level2"><h2 id="association-coefficients-and-naming">Association coefficients and naming<a class="anchor" aria-label="anchor" href="#association-coefficients-and-naming"></a>
 </h2>
-<p>Internally, association coefficients are denoted with the <span class="math inline">\alpha</span> prefix (e.g., <code>alpha_cv_total</code>). This follows joint-model conventions and avoids confusion with the linear predictor <span class="math inline">\eta</span> used throughout the longitudinal and survival submodels. Total, mean, and marker associations use a positive non-centred parameterisation <span class="math inline">\alpha = z_{\alpha} \cdot sd_{\alpha}</span> for stable sampling.</p>
-<p>When an association component is not selected in <code>assoc</code>, its coefficient is prior-only and does not enter the likelihood. Summaries only report active components to keep interpretation focused on the fitted association structure.</p>
-</section><section class="section level2" data-number="4"><h2 data-number="4" id="transform-modes">
-<span class="header-section-number">4</span> Transform modes<a class="anchor" aria-label="anchor" href="#transform-modes"></a>
+<p>Association coefficients are denoted by <span class="math inline">\alpha</span>. This follows joint-model conventions and avoids confusion with the linear predictor <span class="math inline">\eta</span>. Total, mean, marker, correlation, and covariance associations use the slope prior declared by <code>jm_prior(assoc = list(slope = ...))</code>. Its location and scale describe the effective coefficient entering the log hazard; there is no additional random association-scale multiplier. Marker-weight sign conventions are applied after this prior transformation where required for identification.</p>
+<p>Summaries report the selected association components so that interpretation remains focused on the fitted association structure.</p>
+</section><section class="section level2"><h2 id="transform-modes">Transform modes<a class="anchor" aria-label="anchor" href="#transform-modes"></a>
 </h2>
 <p><code>joinme</code> supports the following transformation families for association features:</p>
 <ul>
 <li>
 <strong>Identity</strong> (<code>type = "identity"</code>): no transformation.</li>
 <li>
-<strong>Functional</strong> (<code>type = "functional"</code>): a user-defined expression converted into a fixed bytecode program.</li>
+<strong>Functional</strong> (<code>type = "functional"</code>): a user-defined mathematical expression.</li>
 <li>
 <strong>Monotone I-spline</strong> (<code>type = "ispline"</code> or <code>"ispline_penalised"</code>): a smooth monotone mapping.</li>
 <li>
 <strong>Bounded-domain monotone I-spline</strong> (<code>type = "ispline_expit"</code> or <code>"ispline_expit_penalised"</code>): the same monotone spline machinery, but applied to <code>plogis(x)</code> rather than directly to <code>x</code>.</li>
 <li>
-<strong>Ordered piecewise linear</strong> (<code>type = "pwlin"</code>): posterior interpolation across fixed knots with monotone knot ordinates estimated in Stan.</li>
+<strong>Ordered piecewise linear</strong> (<code>type = "pwlin"</code>): posterior interpolation across fixed knots with estimated monotone knot ordinates.</li>
 </ul>
-<p>Interpretation note for recovery experiments:</p>
-<ul>
-<li>If you use a fixed spline (<code>type = "ispline"</code> or an expit variant with explicit <code>coeff</code>), the association coefficient is interpretable on that fixed transformed scale and can be checked directly in simulate-fit recovery tests.</li>
-<li>If you use a jointly estimated penalised spline (<code>*_penalised</code>), the transform shape and the association coefficient are learned together. The fitted alpha is still meaningful inside the model, but coefficient recovery is typically weaker than in the fixed-transform case because the data must learn both the transformed scale and the hazard weight simultaneously.</li>
-</ul>
-<section class="level2" data-number="4.1"><h3 data-number="4.1" id="default-values-and-minimal-parameterisations">
-<span class="header-section-number">4.1</span> Default values and minimal parameterisations<a class="anchor" aria-label="anchor" href="#default-values-and-minimal-parameterisations"></a>
+<section class="level2"><h3 id="default-values-and-minimal-parameterisations">Default values and minimal parameterisations<a class="anchor" aria-label="anchor" href="#default-values-and-minimal-parameterisations"></a>
 </h3>
 <ul>
 <li>
@@ -248,7 +223,7 @@
 <li>Syntax: <code>list(type = "ispline_penalised", x = seq(-2, 2, length.out = 50), n_knots = 6, degree = 3, lambda = 1)</code>
 </li>
 <li>Defaults: <code>n_knots = 6</code>, <code>degree = 3</code>, <code>lambda = 1</code>.</li>
-<li>If <code>knots</code> are omitted in Stan-estimated mode, they are derived from <code>x</code> quantiles.</li>
+<li>If <code>knots</code> are omitted when the curve is estimated, they are derived from <code>x</code> quantiles.</li>
 </ul>
 </li>
 <li>
@@ -264,13 +239,12 @@
 <strong>Ordered piecewise linear</strong>:
 <ul>
 <li>Syntax: <code>list(type = "pwlin", knots = c(-2, -1, 0, 1, 2), direction = "increasing")</code>.</li>
-<li>Required field: <code>knots</code> (aliases: <code>cutpoints</code> and legacy <code>x</code>).</li>
-<li>Default: <code>direction = "increasing"</code>; use <code>"decreasing"</code> for a falling transform.</li>
+<li>Required field: <code>knots</code> (aliases: <code>cutpoints</code> and the earlier <code>x</code>).</li>
+<li>Default: <code>direction = "increasing"</code>; use <code>"decreasing"</code> for a falling transform. Note that this is not important from the perspective of modelling.</li>
 <li>An optional non-negative <code>lambda</code> penalises second differences of the ordered knot ordinates; it defaults to zero.</li>
 </ul>
 </li>
-</ul></section></section><section class="section level2" data-number="5"><h2 data-number="5" id="functional-transform">
-<span class="header-section-number">5</span> Functional Transform<a class="anchor" aria-label="anchor" href="#functional-transform"></a>
+</ul></section></section><section class="section level2"><h2 id="functional-transform">Functional Transform<a class="anchor" aria-label="anchor" href="#functional-transform"></a>
 </h2>
 <div class="cell">
 <details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb4"><pre class="downlit sourceCode r">
@@ -300,8 +274,7 @@
 <span><span class="op">)</span></span></code></pre></div>
 </details>
 </div>
-</section><section class="section level2" data-number="6"><h2 data-number="6" id="monotone-i-spline">
-<span class="header-section-number">6</span> Monotone I-Spline<a class="anchor" aria-label="anchor" href="#monotone-i-spline"></a>
+</section><section class="section level2"><h2 id="monotone-i-spline">Monotone I-Spline<a class="anchor" aria-label="anchor" href="#monotone-i-spline"></a>
 </h2>
 <p>For <code>type = "ispline"</code>, we specify the transform shape following <code><a href="https://wwenjie.org/splines2/reference/iSpline.html" class="external-link">splines2::iSpline()</a></code> convention:</p>
 <ul>
@@ -339,15 +312,14 @@
 <span><span class="op">)</span></span></code></pre></div>
 </details>
 </div>
-</section><section class="section level2" data-number="7"><h2 data-number="7" id="penalised-monotone-i-spline">
-<span class="header-section-number">7</span> Penalised Monotone I-Spline<a class="anchor" aria-label="anchor" href="#penalised-monotone-i-spline"></a>
+</section><section class="section level2"><h2 id="penalised-monotone-i-spline">Penalised Monotone I-Spline<a class="anchor" aria-label="anchor" href="#penalised-monotone-i-spline"></a>
 </h2>
-<p>For <code>type = "ispline_penalised"</code>, there are now two supported modes:</p>
+<p>For <code>type = "ispline_penalised"</code>, there are two supported modes:</p>
 <ul>
 <li>
-<strong>Simulation mode</strong>: provide <code>x</code> and <code>y</code>, and the package first learns a monotone spline in R before passing fixed coefficients into Stan. This is meant for the simulation but can be used in model fitting as a mean to provide some prior the association curve.</li>
+<strong>Simulation mode</strong>: provide <code>x</code> and <code>y</code> to define a fixed monotone curve.</li>
 <li>
-<strong>Modelling mode</strong>: omit <code>y</code>, keep <code>knots</code> (or <code>n_knots</code>) plus <code>lambda</code>, and Stan estimates the monotone spline coefficients jointly with the rest of the model.</li>
+<strong>Modelling mode</strong>: omit <code>y</code>, retain <code>knots</code> (or <code>n_knots</code>) plus <code>lambda</code>, and estimate the monotone spline jointly with the rest of the model.</li>
 </ul>
 <p>Meaning of the arguments:</p>
 <ul>
@@ -401,10 +373,9 @@
 <span><span class="op">)</span></span></code></pre></div>
 </details>
 </div>
-</section><section class="section level2" data-number="8"><h2 data-number="8" id="ordered-piecewise-linear-association">
-<span class="header-section-number">8</span> Ordered Piecewise-Linear Association<a class="anchor" aria-label="anchor" href="#ordered-piecewise-linear-association"></a>
+</section><section class="section level2"><h2 id="ordered-piecewise-linear-association">Ordered Piecewise-Linear Association<a class="anchor" aria-label="anchor" href="#ordered-piecewise-linear-association"></a>
 </h2>
-<p>For model fitting, the raw association feature is divided by fixed knots, but the association values at those knots are not supplied as an outcome-like <code>y</code> vector. With (K) knots, Stan estimates a (K-1) simplex (). The relative transform ordinate at knot (j) is</p>
+<p>For model fitting, the raw association feature is divided by fixed knots, but the association values at those knots are not supplied as an outcome-like <code>y</code> vector. With <span class="math inline">K</span> knots, the model estimates a <span class="math inline">K-1</span> simplex <span class="math inline">\boldsymbol{\zeta}</span>. The relative transform ordinate at knot <span class="math inline">j</span> is</p>
 <p><span class="math display">
 f_j = s \sum_{r=1}^{j-1} \zeta_r, \qquad
 s =
@@ -413,9 +384,7 @@ s =
   -1, &amp; \text{decreasing}.
 \end{cases}
 </span></p>
-<p>Thus (f_1=0), (f_K=s), and every adjacent difference has the requested sign. Linear interpolation is used between knots and the boundary ordinates are held constant outside the knot range. The survival contribution is (f(x)): () estimates the total log-hazard span and the simplex estimates how that span is distributed across intervals. This follows the monotonic-effect separation of magnitude and simplex shape described in the <a href="https://paulbuerkner.com/brms/articles/brms_monotonic.html" class="external-link">brms monotonic-effects vignette</a> and implemented by <code><a href="https://paulbuerkner.com/brms/reference/mo.html" class="external-link">brms::mo()</a></code>.</p>
-<p>The <code>direction</code> argument orders the standardised transform (f). As in the <code>brms</code> construction, () remains a signed magnitude parameter, so the direction of the realised log-hazard contribution (f(x)) also depends on the posterior sign of ().</p>
-<p>The zero first ordinate is an identifiability constraint. A common free intercept added to every ordinate cannot be distinguished from the log baseline hazard, so the reported products (f_j) are relative log-hazard contributions. <code>summary(fit)$tables$piecewise_ordinates</code> reports their posterior contribution and corresponding hazard ratios at every knot.</p>
+<p>Thus <span class="math inline">f_1=0</span>, <span class="math inline">f_K=s</span>, and every adjacent difference has the requested sign. Linear interpolation is used between knots and the boundary ordinates are held constant outside the knot range. The survival contribution is <span class="math inline">\alpha f(x)</span>: <span class="math inline">\alpha</span> estimates the total log-hazard span and the simplex estimates how that span is distributed across intervals.</p>
 <div class="cell">
 <details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb9"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">transforms</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span></span>
@@ -433,9 +402,7 @@ s =
 <span><span class="op">)</span></span></code></pre></div>
 </details>
 </div>
-<p>The former fitted declaration <code>x = ..., y = ...</code> remains readable for backwards compatibility. Its <code>x</code> values become the knots and <code>y</code> is used only to infer direction when direction is omitted; it does not fix or train the fitted association. In contrast, <code><a href="../reference/simulate_joinme.html">simulate_joinme()</a></code> deliberately keeps the old fixed <code>x</code>/<code>y</code> interpolation so established simulation scenarios are unchanged.</p>
-</section><section class="section level2" data-number="9"><h2 data-number="9" id="association-diagram">
-<span class="header-section-number">9</span> Association Diagram<a class="anchor" aria-label="anchor" href="#association-diagram"></a>
+</section><section class="section level2"><h2 id="association-diagram">Association Diagram<a class="anchor" aria-label="anchor" href="#association-diagram"></a>
 </h2>
 <div class="cell" data-layout-align="default">
 <details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb10"><pre class="sourceCode default"><code class="sourceCode default"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a>graph TD</span>
@@ -457,8 +424,7 @@ s =
 </div>
 </div>
 </div>
-</section><section class="section level2" data-number="10"><h2 data-number="10" id="hierarchical-covariance-regression">
-<span class="header-section-number">10</span> Hierarchical Covariance Regression<a class="anchor" aria-label="anchor" href="#hierarchical-covariance-regression"></a>
+</section><section class="section level2"><h2 id="hierarchical-covariance-regression">Hierarchical Covariance Regression<a class="anchor" aria-label="anchor" href="#hierarchical-covariance-regression"></a>
 </h2>
 <div class="cell" data-layout-align="default">
 <details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb11"><pre class="sourceCode default"><code class="sourceCode default"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a>graph TD</span>
@@ -479,8 +445,7 @@ s =
 </div>
 </div>
 </div>
-</section><section class="section level2" data-number="11"><h2 data-number="11" id="fit-with-custom-association">
-<span class="header-section-number">11</span> Fit with Custom Association<a class="anchor" aria-label="anchor" href="#fit-with-custom-association"></a>
+</section><section class="section level2"><h2 id="fit-with-custom-association">Fit with Custom Association<a class="anchor" aria-label="anchor" href="#fit-with-custom-association"></a>
 </h2>
 <div class="cell">
 <details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb12"><pre class="downlit sourceCode r">

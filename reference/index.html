@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">joinme</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2608</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.2</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -49,6 +49,13 @@
 
       <dl><dt>
 
+          <code><a href="assoc.JoiNMeMixFit.html">assoc(<i>&lt;JoiNMeMixFit&gt;</i>)</a></code>
+
+        </dt>
+        <dd>Posterior associations from a latent-progress mixture</dd>
+
+        <dt>
+
           <code><a href="assoc.html">assoc()</a></code> <code><a href="assoc.html">posterior_assoc()</a></code>
 
         </dt>
@@ -60,13 +67,6 @@
 
         </dt>
         <dd>Plot fitted association curves from a JoiNMe fit</dd>
-
-        <dt>
-
-          <code><a href="auc.html">auc()</a></code>
-
-        </dt>
-        <dd>Time-dependent area under the ROC curve</dd>
 
         <dt>
 
@@ -84,17 +84,24 @@
 
         <dt>
 
-          <code><a href="coef.JoinMeFit.html">coef(<i>&lt;JoiNMeFit&gt;</i>)</a></code>
-
-        </dt>
-        <dd>Combined posterior coefficients for fitted JoiNMe models</dd>
-
-        <dt>
-
           <code><a href="concordance.JoiNMeFit.html">concordance(<i>&lt;JoiNMeFit&gt;</i>)</a></code>
 
         </dt>
         <dd>Concordance of conditional survival predictions</dd>
+
+        <dt>
+
+          <code><a href="concordance.JoiNMeMixFit.html">concordance(<i>&lt;JoiNMeMixFit&gt;</i>)</a></code>
+
+        </dt>
+        <dd>Event discrimination for latent-progress mixtures</dd>
+
+        <dt>
+
+          <code><a href="conditional_contrast.html">conditional_contrast()</a></code>
+
+        </dt>
+        <dd>Conditional contrasts for fitted JoiNMe models</dd>
 
         <dt>
 
@@ -112,6 +119,13 @@
 
         <dt>
 
+          <code><a href="diagnosis.JoiNMeMixFit.html">diagnosis(<i>&lt;JoiNMeMixFit&gt;</i>)</a></code>
+
+        </dt>
+        <dd>Diagnostic summary for a latent-progress mixture</dd>
+
+        <dt>
+
           <code><a href="diagnosis.html">diagnosis()</a></code>
 
         </dt>
@@ -123,13 +137,6 @@
 
         </dt>
         <dd>Plot posterior diagnostics from a JoiNMe fit</dd>
-
-        <dt>
-
-          <code><a href="draws.html">draws()</a></code> <code><a href="draws.html">as.array(<i>&lt;JoiNMeFit&gt;</i>)</a></code> <code><a href="draws.html">as.array(<i>&lt;JoiNMeDynPred&gt;</i>)</a></code>
-
-        </dt>
-        <dd>Posterior draws for JoiNMe objects</dd>
 
         <dt>
 
@@ -165,20 +172,6 @@
 
         </dt>
         <dd>Extract posterior draws from JoiNMe objects</dd>
-
-        <dt>
-
-          <code><a href="family_utils.html">family_utils</a></code>
-
-        </dt>
-        <dd>Family and Transformation Utilities for Mixed-Family Joint Models</dd>
-
-        <dt>
-
-          <code><a href="fixef.JoinMeFit.html">fixef(<i>&lt;JoiNMeFit&gt;</i>)</a></code>
-
-        </dt>
-        <dd>Extract fixed effects</dd>
 
         <dt>
 
@@ -224,17 +217,17 @@
 
         <dt>
 
-          <code><a href="joinme_posterior_generics.html">posterior_predict()</a></code> <code><a href="joinme_posterior_generics.html">posterior_epred()</a></code> <code><a href="joinme_posterior_generics.html">posterior_linpred()</a></code> <code><a href="joinme_posterior_generics.html">log_lik()</a></code>
+          <code><a href="joinme_mix.html">joinme_mix()</a></code>
 
         </dt>
-        <dd>Posterior and log-likelihood generics for JoiNMe objects</dd>
+        <dd>Latent-progress mixtures for nested multivariate joint models</dd>
 
         <dt>
 
-          <code><a href="joinme_priors.html">joinme_priors()</a></code> <code><a href="joinme_priors.html">jm_priors()</a></code>
+          <code><a href="joinme_priors.html">joinme_priors()</a></code> <code><a href="joinme_priors.html">jm_priors()</a></code> <code><a href="joinme_priors.html">jm_prior()</a></code> <code><a href="joinme_priors.html">joinme_prior()</a></code>
 
         </dt>
-        <dd>Declare priors with validation</dd>
+        <dd>Declare priors by scientific model component</dd>
 
         <dt>
 
@@ -252,6 +245,13 @@
 
         <dt>
 
+          <code><a href="joinme_truth.html">joinme_truth()</a></code> <code><a href="joinme_truth.html">jm_truth()</a></code>
+
+        </dt>
+        <dd>Declare population truths for JoiNMe simulation</dd>
+
+        <dt>
+
           <code><a href="log_lik.JoinMeFit.html">log_lik(<i>&lt;JoiNMeFit&gt;</i>)</a></code>
 
         </dt>
@@ -259,10 +259,10 @@
 
         <dt>
 
-          <code><a href="plot_helpers.html">longitudinal_plot()</a></code> <code><a href="plot_helpers.html">survival_plot()</a></code> <code><a href="plot_helpers.html">cumhaz_plot()</a></code> <code><a href="plot_helpers.html">association_plot()</a></code> <code><a href="plot_helpers.html">diagnostic_plot()</a></code> <code><a href="plot_helpers.html">mcmc_plot()</a></code>
+          <code><a href="longitudinal_plot.html">longitudinal_plot()</a></code>
 
         </dt>
-        <dd>Convenience plot helpers for JoiNMe objects</dd>
+        <dd>Plot longitudinal trajectories from JoiNMe objects</dd>
 
         <dt>
 
@@ -277,6 +277,13 @@
 
         </dt>
         <dd>Build named conditional-effects profiles</dd>
+
+        <dt>
+
+          <code><a href="marker_weights.html">marker_weights()</a></code>
+
+        </dt>
+        <dd>Extract individual marker weights</dd>
 
         <dt>
 
@@ -301,10 +308,31 @@
 
         <dt>
 
+          <code><a href="plot.JoiNMeConditionalContrasts.html">plot(<i>&lt;JoiNMeConditionalContrasts&gt;</i>)</a></code>
+
+        </dt>
+        <dd>Plot JoiNMe conditional contrasts</dd>
+
+        <dt>
+
           <code><a href="plot.JoiNMeConditionalEffects.html">plot(<i>&lt;JoiNMeConditionalEffects&gt;</i>)</a></code>
 
         </dt>
         <dd>Plot JoiNMe conditional effects</dd>
+
+        <dt>
+
+          <code><a href="plot.JoiNMeMixFit.html">plot(<i>&lt;JoiNMeMixFit&gt;</i>)</a></code>
+
+        </dt>
+        <dd>Plot class-specific latent-progress summaries</dd>
+
+        <dt>
+
+          <code><a href="plot.JoiNMePosteriorClass.html">plot(<i>&lt;JoiNMePosteriorClass&gt;</i>)</a></code>
+
+        </dt>
+        <dd>Plot posterior class probabilities</dd>
 
         <dt>
 
@@ -322,24 +350,52 @@
 
         <dt>
 
-          <code><a href="posterior_coef.html">posterior_coef()</a></code>
+          <code><a href="plot.PosteriorAssoc.html">plot(<i>&lt;PosteriorAssoc&gt;</i>)</a></code>
 
         </dt>
-        <dd>Posterior coefficient alias for fitted JoiNMe models</dd>
+        <dd>Plot posterior association output from a latent-progress fit</dd>
 
         <dt>
 
-          <code><a href="posterior_fixef.html">posterior_fixef()</a></code>
+          <code><a href="posterior_class.JoiNMeMixDynPred.html">posterior_class(<i>&lt;JoiNMeMixDynPred&gt;</i>)</a></code>
 
         </dt>
-        <dd>Posterior fixed-effect alias for fitted JoiNMe models</dd>
+        <dd>Conditional class membership after dynamic prediction</dd>
 
         <dt>
 
-          <code><a href="posterior_ranef.html">posterior_ranef()</a></code>
+          <code><a href="posterior_class.html">posterior_class()</a></code>
 
         </dt>
-        <dd>Posterior random-effect alias for fitted JoiNMe models</dd>
+        <dd>Posterior class membership for a latent-progress fit</dd>
+
+        <dt>
+
+          <code><a href="posterior_draws.html">posterior_draws()</a></code> <code><a href="posterior_draws.html">as.array(<i>&lt;JoiNMeFit&gt;</i>)</a></code> <code><a href="posterior_draws.html">as.array(<i>&lt;JoiNMeDynPred&gt;</i>)</a></code>
+
+        </dt>
+        <dd>Posterior draws for JoiNMe objects</dd>
+
+        <dt>
+
+          <code><a href="posterior_interval.JoiNMeDynPred.html">posterior_interval(<i>&lt;JoiNMeDynPred&gt;</i>)</a></code>
+
+        </dt>
+        <dd>Central posterior credible intervals for dynamic predictions</dd>
+
+        <dt>
+
+          <code><a href="posterior_interval.JoiNMeFit.html">posterior_interval(<i>&lt;JoiNMeFit&gt;</i>)</a></code>
+
+        </dt>
+        <dd>Central posterior credible intervals for JoiNMe models</dd>
+
+        <dt>
+
+          <code><a href="posterior_marker_weights.html">posterior_marker_weights()</a></code>
+
+        </dt>
+        <dd>Posterior individual marker-weight alias</dd>
 
         <dt>
 
@@ -357,10 +413,31 @@
 
         <dt>
 
+          <code><a href="predict.JoiNMeMixFit.html">predict(<i>&lt;JoiNMeMixFit&gt;</i>)</a></code>
+
+        </dt>
+        <dd>Predict from a latent-progress mixture</dd>
+
+        <dt>
+
+          <code><a href="print.JoiNMeConditionalContrasts.html">print(<i>&lt;JoiNMeConditionalContrasts&gt;</i>)</a></code>
+
+        </dt>
+        <dd>Print a JoiNMe conditional-contrast object</dd>
+
+        <dt>
+
           <code><a href="print.JoiNMeConditionalEffects.html">print(<i>&lt;JoiNMeConditionalEffects&gt;</i>)</a></code>
 
         </dt>
         <dd>Print a JoiNMe conditional-effects data object</dd>
+
+        <dt>
+
+          <code><a href="print.JoiNMePosteriorClass.html">print(<i>&lt;JoiNMePosteriorClass&gt;</i>)</a></code>
+
+        </dt>
+        <dd>Print posterior class probabilities</dd>
 
         <dt>
 
@@ -385,6 +462,13 @@
 
         <dt>
 
+          <code><a href="print.joinme_truth.html">print(<i>&lt;joinme_truth&gt;</i>)</a></code>
+
+        </dt>
+        <dd>Print a JoiNMe simulation-truth declaration</dd>
+
+        <dt>
+
           <code><a href="print.summary_JoinMeFit.html">print(<i>&lt;summary_JoiNMeFit&gt;</i>)</a></code>
 
         </dt>
@@ -392,17 +476,45 @@
 
         <dt>
 
+          <code><a href="prior_horseshoe.html">prior_horseshoe()</a></code>
+
+        </dt>
+        <dd>Declare a regularised horseshoe prior</dd>
+
+        <dt>
+
+          <code><a href="prior_laplace.html">prior_laplace()</a></code>
+
+        </dt>
+        <dd>Declare a Laplace coefficient prior</dd>
+
+        <dt>
+
+          <code><a href="prior_lkj.html">prior_lkj()</a></code>
+
+        </dt>
+        <dd>Declare an LKJ correlation prior</dd>
+
+        <dt>
+
+          <code><a href="prior_normal.html">prior_normal()</a></code>
+
+        </dt>
+        <dd>Declare a Normal coefficient prior</dd>
+
+        <dt>
+
+          <code><a href="prior_student_t.html">prior_student_t()</a></code>
+
+        </dt>
+        <dd>Declare a Student-t coefficient prior</dd>
+
+        <dt>
+
           <code><a href="ranef.JoinMeDynPred.html">ranef(<i>&lt;JoiNMeDynPred&gt;</i>)</a></code>
 
         </dt>
         <dd>Extract predicted random effects from dynamic predictions</dd>
-
-        <dt>
-
-          <code><a href="ranef.JoinMeFit.html">ranef(<i>&lt;JoiNMeFit&gt;</i>)</a></code>
-
-        </dt>
-        <dd>Extract random effects</dd>
 
         <dt>
 
@@ -420,6 +532,13 @@
 
         <dt>
 
+          <code><a href="simulate_joinme_mix.html">simulate_joinme_mix()</a></code>
+
+        </dt>
+        <dd>Simulate data from a latent-progress JoiNMe model</dd>
+
+        <dt>
+
           <code><a href="softplus.html">softplus()</a></code>
 
         </dt>
@@ -431,6 +550,13 @@
 
         </dt>
         <dd>Stan diagnostics for JoiNMe models</dd>
+
+        <dt>
+
+          <code><a href="summary.JoiNMeMixFit.html">summary(<i>&lt;JoiNMeMixFit&gt;</i>)</a></code>
+
+        </dt>
+        <dd>Summarise a latent-progress mixture fit</dd>
 
         <dt>
 
@@ -459,6 +585,13 @@
 
         </dt>
         <dd>Declare a time-varying simulation covariate generator</dd>
+
+        <dt>
+
+          <code><a href="tvROC.html">tvROC()</a></code> <code><a href="tvROC.html">tvAUC()</a></code>
+
+        </dt>
+        <dd>Time-dependent ROC curves and areas</dd>
 
         <dt>
 

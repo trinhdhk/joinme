@@ -3,13 +3,15 @@ pkgdown: 2.2.1
 pkgdown_sha: ~
 articles:
   joinme-associations: joinme-associations.html
+  joinme-covariance-regression: joinme-covariance-regression.html
   joinme-demo: joinme-demo.html
   joinme-discrimination: joinme-discrimination.html
+  joinme-interpretation: joinme-interpretation.html
   joinme-intro: joinme-intro.html
   joinme-model: joinme-model.html
   joinme-theory: joinme-theory.html
   joinme-workflow: joinme-workflow.html
-last_built: 2026-07-29T14:21Z
+last_built: 2026-08-21T22:59Z
 urls:
   reference: https://trinhdhk.github.io/joinme/reference
   article: https://trinhdhk.github.io/joinme/articles

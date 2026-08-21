@@ -23,7 +23,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">joinme</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2608</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.2</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -88,7 +88,7 @@
 </h2>
 </section><section class="level2"><h2 id="conceptual-overview">Conceptual overview<a class="anchor" aria-label="anchor" href="#conceptual-overview"></a>
 </h2>
-<p>The <code>JoiNMe</code> model links two components:</p>
+<p>The <code>joinme</code> model links two components:</p>
 <ol type="1">
 <li>A multivariate longitudinal model for repeated biomarker measurements.</li>
 <li>A survival model whose hazard depends on summaries of the longitudinal process at time <span class="math inline">t</span>.</li>
@@ -104,8 +104,7 @@
 <p>Each association term can be left on its original scale or transformed using a functional expression, a monotone I-spline, or an ordered piecewise-linear mapping.</p>
 </section><section class="level2"><h2 id="family-shared-distributional-semantics">Family-shared distributional semantics<a class="anchor" aria-label="anchor" href="#family-shared-distributional-semantics"></a>
 </h2>
-<p>For mixed longitudinal families, <code>JoiNMe</code> treats distributional parameters as <strong>shared by family</strong> when no distributional regression is supplied.</p>
-<p>Concretely:</p>
+<p>For mixed longitudinal families, <code>joinme</code> treats distributional parameters as <strong>shared by family</strong> when no distributional regression is supplied. In brief,</p>
 <ul>
 <li>Markers with the same family share one latent baseline process for each applicable distributional parameter.</li>
 <li>Markers from different families do not share those baselines.</li>
@@ -117,7 +116,7 @@
 </ul>
 <section class="level3"><h3 id="what-changes-when-formuladist-is-provided">What changes when <code>formulaDist</code> is provided?<a class="anchor" aria-label="anchor" href="#what-changes-when-formuladist-is-provided"></a>
 </h3>
-<p>Supplying a distributional regression (for example <code>sigma ~ 1 + time</code>) switches that parameter from a family-level constant baseline to a regression-driven process. In that mode, summaries report distributional regression coefficients (<code>(Intercept)</code>, covariate effects, and random-effect SD terms when present) rather than only baseline family constants.</p>
+<p>Supplying a distributional regression (for example <code>sigma ~ 1 + time</code>) regresses the parameter from a family-level constant baseline to a regression-driven process. Summaries report distributional regression coefficients (<code>(Intercept)</code>, covariate effects, and random-effect SD terms when present) rather than only baseline family constants.</p>
 <p>Illustrative <code>formulaDist</code> specification:</p>
 <div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">formulaDist</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span></span>
@@ -131,82 +130,64 @@
 <li>
 <code>nu</code> is regression-driven with an intercept-only structure,</li>
 <li>other distributional parameters without formulas continue using family-shared baselines when applicable.</li>
-</ul></section></section><section class="level2"><h2 id="data-requirements-minimal">Data requirements (minimal)<a class="anchor" aria-label="anchor" href="#data-requirements-minimal"></a>
+</ul></section></section><section class="level2"><h2 id="data">Data<a class="anchor" aria-label="anchor" href="#data"></a>
 </h2>
 <p>You need two data frames:</p>
 <ul>
 <li>
 <code>dataLong</code>: long-format longitudinal data with columns for subject id, marker id, time, outcome, and covariates.</li>
 <li>
-<code>dataEvent</code>: one row per subject with event/censoring time, event indicator, and baseline covariates.</li>
+<code>dataEvent</code>: one row per subject for an ordinary right-, left- or interval-censored outcome, or ordered risk intervals for a counting-process outcome, together with the event covariates.</li>
 </ul>
-<p>Time is internally scaled to <span class="math inline">[0, 1]</span> for numerical stability. The model returns coefficients on the original time scale.</p>
-<section class="level3"><h3 id="step-1-load-packages-and-set-a-reproducible-seed">Step 1: Load packages and set a reproducible seed<a class="anchor" aria-label="anchor" href="#step-1-load-packages-and-set-a-reproducible-seed"></a>
-</h3>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb4"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="kw">if</span> <span class="op">(</span><span class="op">!</span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">require</a></span><span class="op">(</span><span class="st"><a href="https://trinhdhk.github.io/joinme">'joinme'</a></span>, quietly <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span><span class="op">)</span> <span class="op">{</span></span>
-<span>  <span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/ns-load.html" class="external-link">requireNamespace</a></span><span class="op">(</span><span class="st">"devtools"</span>, quietly <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span> <span class="op">&amp;&amp;</span> <span class="fu"><a href="https://rdrr.io/r/base/files.html" class="external-link">file.exists</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="va">repo_root</span>, <span class="st">"DESCRIPTION"</span><span class="op">)</span><span class="op">)</span><span class="op">)</span> <span class="op">{</span></span>
-<span>    <span class="fu">devtools</span><span class="fu">::</span><span class="fu"><a href="https://devtools.r-lib.org/reference/load_all.html" class="external-link">load_all</a></span><span class="op">(</span><span class="va">repo_root</span>, quiet <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
-<span>  <span class="op">}</span> <span class="kw">else</span> <span class="op">{</span></span>
-<span>    <span class="kw"><a href="https://rdrr.io/r/base/try.html" class="external-link">try</a></span><span class="op">(</span><span class="fu">base</span><span class="fu">::</span><span class="fu"><a href="https://rdrr.io/r/base/ns-load.html" class="external-link">attachNamespace</a></span><span class="op">(</span><span class="st">"joinme"</span><span class="op">)</span>, silent <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
-<span>  <span class="op">}</span></span>
-<span><span class="op">}</span></span>
-<span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://github.com/therneau/survival" class="external-link">survival</a></span><span class="op">)</span></span>
-<span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/Random.html" class="external-link">set.seed</a></span><span class="op">(</span><span class="fl">2026</span><span class="op">)</span></span></code></pre></div>
-</div>
-</section><section class="level3"><h3 id="step-2-simulate-a-small-dataset">Step 2: Simulate a small dataset<a class="anchor" aria-label="anchor" href="#step-2-simulate-a-small-dataset"></a>
+<p>The event formula accepts <code>Surv(time, status)</code>, <code>Surv(start, stop, status)</code>, <code>Surv(time, status, type = "left")</code>, and <code>Surv(lower, upper, type = "interval2")</code>. An interval-censored event in ((L,R]) contributes (S(L)-S(R)) to the full event likelihood. Its lower inspection limit is not interpreted as delayed entry. See <a href="joinme-interpretation.html">Interpreting a fitted JoiNMe model</a> for the censoring equations and worked interpretation of conditional effects and contrasts.</p>
+<p>Formulae and reported coefficients use the original study-time scale.</p>
+<section class="level3"><h3 id="simulation-example">Simulation example<a class="anchor" aria-label="anchor" href="#simulation-example"></a>
 </h3>
 <p>We generate a modest dataset so the workflow runs quickly while still containing both longitudinal and survival information.</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb5"><pre class="downlit sourceCode r">
+<div class="sourceCode cell-code" id="cb4"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">sim</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/simulate_joinme.html">simulate_joinme</a></span><span class="op">(</span></span>
 <span>  n_id <span class="op">=</span> <span class="fl">10</span>,</span>
 <span>  families <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span></span>
 <span>    <span class="fu"><a href="../reference/joinme_family.html">jm_family</a></span><span class="op">(</span><span class="st">"student_t"</span><span class="op">)</span>,</span>
 <span>    <span class="fu"><a href="../reference/joinme_family.html">jm_family</a></span><span class="op">(</span><span class="st">"student_t"</span><span class="op">)</span></span>
 <span>  <span class="op">)</span>,</span>
-<span>  n_obs_per_marker_per_id <span class="op">=</span> <span class="fl">4</span>,</span>
 <span>  times_obs <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/seq.html" class="external-link">seq</a></span><span class="op">(</span><span class="fl">0</span>, <span class="fl">5</span>, length.out <span class="op">=</span> <span class="fl">8</span><span class="op">)</span>,</span>
-<span>  baseline_hazard <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>type<span class="op">=</span><span class="st">'weibull'</span>, shape <span class="op">=</span> <span class="fl">2</span>, scale <span class="op">=</span> <span class="fl">20</span><span class="op">)</span>,</span>
 <span>  quadrature_nodes <span class="op">=</span> <span class="fl">31</span>,</span>
-<span>  seed <span class="op">=</span> <span class="fl">2026</span>,</span>
+<span>  seed <span class="op">=</span> <span class="fl">1</span>,</span>
 <span>  assoc <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"cv_total"</span><span class="op">)</span>,</span>
-<span>  assoc_coefs <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>cv_total <span class="op">=</span> <span class="fl">0.6</span><span class="op">)</span></span>
+<span>  truth <span class="op">=</span> <span class="fu"><a href="../reference/joinme_truth.html">jm_truth</a></span><span class="op">(</span></span>
+<span>    assoc_coef <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>slope <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>cv_total <span class="op">=</span> <span class="fl">0.6</span><span class="op">)</span><span class="op">)</span>,</span>
+<span>    basehaz <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>type <span class="op">=</span> <span class="st">"weibull"</span>, shape <span class="op">=</span> <span class="fl">2</span>, scale <span class="op">=</span> <span class="fl">8</span><span class="op">)</span></span>
+<span>  <span class="op">)</span></span>
 <span><span class="op">)</span></span>
-<span></span>
-<span><span class="co"># Gauss-Kronrod nodes/weights are fixed in Stan; `quadrature_nodes` selects</span></span>
-<span><span class="co"># the node count used to build the design matrices in R.</span></span>
 <span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">sim</span><span class="op">$</span><span class="va">dataLong</span><span class="op">)</span></span></code></pre></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>  id marker      time        x1         x2           y
-1  1     m1 0.0000000 0.5205891 -0.4082147  1.48029644
-2  1     m1 0.7142857 0.5205891 -0.4082147  0.07483799
-3  1     m1 1.4285714 0.5205891 -0.4082147  3.03390024
-4  1     m1 2.1428571 0.5205891 -0.4082147 -0.51783329
-5  1     m1 2.8571429 0.5205891 -0.4082147  2.91889528
-6  1     m1 3.5714286 0.5205891 -0.4082147  3.55619061</code></pre>
+<pre><code>  id marker      time         x1       x2          y
+1  1     m1 0.0000000 -0.6264538 1.511781  4.6351130
+2  1     m1 0.7142857 -0.6264538 1.511781  1.0454417
+3  1     m1 1.4285714 -0.6264538 1.511781 -0.6578417
+4  1     m1 2.1428571 -0.6264538 1.511781  2.6007495
+5  1     m1 2.8571429 -0.6264538 1.511781  3.3550153
+6  1     m1 3.5714286 -0.6264538 1.511781  1.5404495</code></pre>
 </div>
-<div class="sourceCode cell-code" id="cb7"><pre class="downlit sourceCode r">
+<div class="sourceCode cell-code" id="cb6"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">sim</span><span class="op">$</span><span class="va">dataEvent</span><span class="op">)</span></span></code></pre></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>  id          x1         x2     time event time_start time_stop
-1  1  0.52058907 -0.4082147 4.511976     1          0  4.511976
-2  2 -1.07969076 -0.7304333 3.123275     1          0  3.123275
-3  3  0.13923812 -0.2214366 8.000000     0          0  8.000000
-4  4 -0.08474878 -0.2258165 3.676778     1          0  3.676778
-5  5 -0.66663962 -2.5468814 8.000000     0          0  8.000000
-6  6 -2.51608903  1.3470015 8.000000     0          0  8.000000</code></pre>
+<pre><code>  id         x1          x2 time event time_start time_stop
+1  1 -0.6264538  1.51178117    8     0          0         8
+2  2  0.1836433  0.38984324    8     0          0         8
+3  3 -0.8356286 -0.62124058    8     0          0         8
+4  4  1.5952808 -2.21469989    8     0          0         8
+5  5  0.3295078  1.12493092    8     0          0         8
+6  6 -0.8204684 -0.04493361    8     0          0         8</code></pre>
 </div>
 </div>
-</section><section class="level3"><h3 id="step-3-specify-longitudinal-and-survival-models">Step 3: Specify longitudinal and survival models<a class="anchor" aria-label="anchor" href="#step-3-specify-longitudinal-and-survival-models"></a>
-</h3>
 <p>The longitudinal formula defines fixed effects and random effects. The survival formula defines baseline covariates in the hazard model.</p>
 <p>Formula-scoped weighting can be declared directly in grouping terms via <code>weighted(group, weights = &lt;column&gt;)</code>, including marker-level grouping declarations.</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb9"><pre class="downlit sourceCode r">
+<div class="sourceCode cell-code" id="cb8"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">formulaLong</span> <span class="op">&lt;-</span> <span class="va">y</span> <span class="op">~</span> <span class="fl">1</span> <span class="op">+</span> <span class="va">time</span> <span class="op">+</span> <span class="va">x1</span> <span class="op">+</span></span>
 <span>  <span class="op">(</span><span class="fl">1</span> <span class="op">+</span> <span class="va">time</span> <span class="op">||</span> <span class="va">id</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="op">(</span><span class="fl">0</span> <span class="op">+</span> <span class="va">x1</span> <span class="op">+</span> <span class="op">(</span><span class="fl">1</span> <span class="op">+</span> <span class="va">time</span> <span class="op">||</span> <span class="va">id</span><span class="op">)</span> <span class="op">||</span> <span class="va">marker</span><span class="op">)</span></span>
@@ -214,16 +195,14 @@
 <span><span class="va">formulaEvent</span> <span class="op">&lt;-</span> <span class="fu">survival</span><span class="fu">::</span><span class="fu"><a href="https://rdrr.io/pkg/survival/man/Surv.html" class="external-link">Surv</a></span><span class="op">(</span><span class="va">time</span>, <span class="va">event</span><span class="op">)</span> <span class="op">~</span> <span class="fl">1</span> <span class="op">+</span> <span class="va">x1</span> <span class="op">+</span> <span class="va">x2</span></span></code></pre></div>
 </div>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb10"><pre class="downlit sourceCode r">
+<div class="sourceCode cell-code" id="cb9"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">formulaLong_weighted</span> <span class="op">&lt;-</span> <span class="va">y</span> <span class="op">~</span> <span class="fl">1</span> <span class="op">+</span> <span class="va">time</span> <span class="op">+</span> <span class="va">x1</span> <span class="op">+</span></span>
 <span>  <span class="op">(</span><span class="fl">1</span> <span class="op">+</span> <span class="va">time</span> <span class="op">|</span> <span class="fu">weighted</span><span class="op">(</span><span class="va">id</span>, weights <span class="op">=</span> <span class="va">id_w</span><span class="op">)</span><span class="op">)</span> <span class="op">+</span></span>
 <span>  <span class="op">(</span><span class="fl">0</span> <span class="op">+</span> <span class="va">x1</span> <span class="op">+</span> <span class="op">(</span><span class="fl">1</span> <span class="op">+</span> <span class="va">time</span> <span class="op">|</span> <span class="fu">weighted</span><span class="op">(</span><span class="va">id</span>, weights <span class="op">=</span> <span class="va">id_w</span><span class="op">)</span><span class="op">)</span> <span class="op">|</span> <span class="fu">weighted</span><span class="op">(</span><span class="va">marker</span>, weights <span class="op">=</span> <span class="va">marker_w</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
 </div>
-</section><section class="level3"><h3 id="step-4-fit-the-joint-model">Step 4: Fit the joint model<a class="anchor" aria-label="anchor" href="#step-4-fit-the-joint-model"></a>
-</h3>
 <p>We link the survival hazard to the current value (CV) of the longitudinal process using an identity transformation.</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb11"><pre class="downlit sourceCode r">
+<div class="sourceCode cell-code" id="cb10"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">fit</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/joinme.html">joinme</a></span><span class="op">(</span></span>
 <span>  formulaLong <span class="op">=</span> <span class="va">formulaLong</span>,</span>
 <span>  dataLong <span class="op">=</span> <span class="va">sim</span><span class="op">$</span><span class="va">dataLong</span>,</span>
@@ -239,40 +218,51 @@
 <span>    parallel_chains <span class="op">=</span> <span class="fl">1</span>,</span>
 <span>    iter_warmup <span class="op">=</span> <span class="fl">500</span>,</span>
 <span>    iter_sampling <span class="op">=</span> <span class="fl">500</span>,</span>
-<span>    seed <span class="op">=</span> <span class="fl">2026</span>,</span>
+<span>    seed <span class="op">=</span> <span class="fl">1</span>,</span>
 <span>    refresh <span class="op">=</span> <span class="fl">0</span>,</span>
 <span>    adapt_delta <span class="op">=</span> <span class="fl">0.85</span></span>
 <span>  <span class="op">)</span></span>
 <span><span class="op">)</span></span></code></pre></div>
 </div>
-</section><section class="level3"><h3 id="step-5-summarise-fixed-effects-and-associations">Step 5: Summarise fixed effects and associations<a class="anchor" aria-label="anchor" href="#step-5-summarise-fixed-effects-and-associations"></a>
-</h3>
+<p>To fit only the multivariate nested longitudinal process, omit both event arguments. The formula continues to define population, subject, marker, and subject-by-marker effects, but no survival likelihood or association coefficient is introduced.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb11"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">longitudinal_fit</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/joinme.html">joinme</a></span><span class="op">(</span></span>
+<span>  formulaLong <span class="op">=</span> <span class="va">formulaLong</span>,</span>
+<span>  dataLong <span class="op">=</span> <span class="va">sim</span><span class="op">$</span><span class="va">dataLong</span>,</span>
+<span>  families <span class="op">=</span> <span class="st">"student_t"</span>,</span>
+<span>  control <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>engine <span class="op">=</span> <span class="st">"cmdstanr"</span><span class="op">)</span></span>
+<span><span class="op">)</span></span></code></pre></div>
+</div>
+<p>Longitudinal summaries, posterior predictions and trajectory plots retain their ordinary interpretation. Event prediction, survival plots, concordance, and time-dependent ROC/AUC are deliberately unavailable because no event outcome contributed to the likelihood.</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb12"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span> <span class="co"># or posterior_summary(fit)fixef(fit)</span></span></code></pre></div>
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span> <span class="co"># or posterior_summary(fit)</span></span></code></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>
 Joint mixed effects model summary
-• Call: joinme(formulaLong = formulaLong, dataLong = sim$dataLong, formulaEvent = formulaEvent, dataEvent = sim$dataEvent, control = list(engine = "rstan", chains = 1, parallel_chains = 1, iter_warmup = 500, iter_sampling = 500, seed = 2026, refresh = 0, adapt_delta = 0.85), families = "student_t", transforms = joinme_tf(cv_total = "identity"), basehaz = joinme_basehaz("bs"), assoc = c("cv_total"))
+• Call: joinme(formulaLong = formulaLong, dataLong = sim$dataLong, formulaEvent = formulaEvent, dataEvent = sim$dataEvent, control = list(engine = "rstan", chains = 1, parallel_chains = 1, iter_warmup = 500, iter_sampling = 500, seed = 1, refresh = 0, adapt_delta = 0.85), families = "student_t", transforms = joinme_tf(cv_total = "identity"), basehaz = joinme_basehaz("bs"), assoc = c("cv_total"))
 • Family: student_t, student_t
+• Event process: joint longitudinal-survival
 • Baseline hazard type: bs
 • tmax: 8
+• Marker-weight offsets [shared]: m1=0, m2=0
 
 Sampler diagnostics
 # A tibble: 11 × 2
    metric               value
    &lt;chr&gt;                &lt;chr&gt;
  1 draws                500
- 2 divergences          2
+ 2 divergences          11
  3 treedepth_hits       0
- 4 ebfmi_min            0.815
- 5 max_rhat             1.02
- 6 min_ess_bulk         82.17
- 7 min_ess_tail         88.515
+ 4 ebfmi_min            0.865
+ 5 max_rhat             1.027
+ 6 min_ess_bulk         131.299
+ 7 min_ess_tail         118.267
  8 n_terms_total        28
- 9 n_terms_bad_rhat     4
-10 n_terms_low_ess_bulk 4
-11 n_terms_low_ess_tail 2
+ 9 n_terms_bad_rhat     2
+10 n_terms_low_ess_bulk 0
+11 n_terms_low_ess_tail 0
 
 Transformations
 # A tibble: 1 × 2
@@ -284,239 +274,261 @@ Fixed effects (beta)
 # A tibble: 3 × 8
   term        Estimate Est.Error   Q2.5 Q97.5  Rhat ess_bulk ess_tail
   &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;
-1 (Intercept)    1.25      0.744 -0.229 2.75  1.02      174.     142.
-2 time           0.038     0.139 -0.228 0.328 1.01      214.     232.
-3 x1            -0.264     0.679 -1.48  0.996 0.999     150.     188.
+1 (Intercept)    1.81      0.668  0.408 2.84  0.998     356.     188.
+2 time           0.188     0.286 -0.369 0.739 1.00      286.     272.
+3 x1             0.81      0.529 -0.367 1.73  1.00      402.     320.
 
 Baseline hazard coefficients
-# A tibble: 8 × 11
-  term  Estimate Hazard.Ratio Est.Error   Q2.5  Q97.5 HR.Q2.5 HR.Q97.5  Rhat
-  &lt;chr&gt;    &lt;dbl&gt;        &lt;dbl&gt;     &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;   &lt;dbl&gt;    &lt;dbl&gt; &lt;dbl&gt;
-1 1       -7.70         0         3.01  -13.9  -2.23    0        0.107 0.999
-2 2       -0.949        0.387     1.13   -3.34  0.989   0.036    2.69  0.999
-3 3       -0.672        0.511     0.935  -2.88  0.874   0.056    2.40  1.00
-4 4       -0.394        0.674     0.86   -2.13  1.14    0.119    3.13  0.999
-5 5       -0.111        0.895     0.83   -1.89  1.38    0.151    3.96  1.00
-6 6        0.218        1.24      0.839  -1.55  1.70    0.212    5.48  1.00
-7 7        0.548        1.73      0.929  -1.26  2.24    0.285    9.41  1.00
-8 8        0.894        2.44      1.17   -1.16  3.22    0.314   25.0   1.02
+# A tibble: 6 × 11
+  term    Estimate Hazard.Ratio Est.Error    Q2.5 Q97.5 HR.Q2.5 HR.Q97.5  Rhat
+  &lt;chr&gt;      &lt;dbl&gt;        &lt;dbl&gt;     &lt;dbl&gt;   &lt;dbl&gt; &lt;dbl&gt;   &lt;dbl&gt;    &lt;dbl&gt; &lt;dbl&gt;
+1 basis_1   -5.79         0.003     3.48  -13.2   0.776   0         2.17 1.00
+2 basis_2   -0.588        0.555     0.915  -2.63  1.02    0.072     2.78 1.00
+3 basis_3   -0.303        0.739     0.631  -1.66  0.797   0.191     2.22 1.00
+4 basis_4   -0.039        0.962     0.537  -1.01  1.04    0.364     2.83 1.01
+5 basis_5    0.195        1.22      0.657  -0.983 1.43    0.374     4.19 0.999
+6 basis_6    0.416        1.52      0.97   -1.36  2.51    0.256    12.3  1.01
   ess_bulk ess_tail
      &lt;dbl&gt;    &lt;dbl&gt;
-1    468.     313.
-2    158.      88.5
-3    111.     120.
-4     89.4    110.
-5     85.2    184.
-6     91.7     98.1
-7    123.     103.
-8    226.     369.
+1     530.     339.
+2     267.     154.
+3     256.     118.
+4     296.     143.
+5     385.     306.
+6     395.     247.
 
 Survival process (non-association covariates)
 # A tibble: 2 × 11
-  term  Estimate Hazard.Ratio Est.Error   Q2.5 Q97.5 HR.Q2.5 HR.Q97.5  Rhat
-  &lt;chr&gt;    &lt;dbl&gt;        &lt;dbl&gt;     &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;   &lt;dbl&gt;    &lt;dbl&gt; &lt;dbl&gt;
-1 x1       1.22          3.37     0.703  0.085  2.68   1.09     14.6  0.999
-2 x2       0.366         1.44     0.561 -0.614  1.60   0.541     4.95 1
+  term  Estimate Hazard.Ratio Est.Error  Q2.5 Q97.5 HR.Q2.5 HR.Q97.5  Rhat
+  &lt;chr&gt;    &lt;dbl&gt;        &lt;dbl&gt;     &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;   &lt;dbl&gt;    &lt;dbl&gt; &lt;dbl&gt;
+1 x1      -0.052        0.949     0.829 -1.59  1.49   0.203     4.43  1.02
+2 x2      -0.205        0.815     0.94  -2.09  1.53   0.123     4.62  1.00
   ess_bulk ess_tail
      &lt;dbl&gt;    &lt;dbl&gt;
-1     505.     385.
-2     478.     372.
+1     855.     315.
+2     436.     348.
 
 Association parameters
-# A tibble: 5 × 8
-  term       Estimate Est.Error   Q2.5 Q97.5  Rhat ess_bulk ess_tail
-  &lt;chr&gt;         &lt;dbl&gt;     &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;
-1 cv_total      0.362     0.493  0.005  1.54 0.999     293.     471.
-2 weight: m1    0.241     0.953 -1.70   2.03 1.01      492.     369.
-3 weight: m2    0.267     0.888 -1.61   1.88 1.00      534.     313.
-4 weight: m1    0.241     0.953 -1.70   2.03 1.01      492.     369.
-5 weight: m2    0.267     0.888 -1.61   1.88 1.00      534.     313.
+# A tibble: 1 × 8
+  term     Estimate Est.Error  Q2.5 Q97.5  Rhat ess_bulk ess_tail
+  &lt;chr&gt;       &lt;dbl&gt;     &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;
+1 cv_total     1.02     0.574 0.191  2.51  1.01     227.     193.
+
+Marker-weight distribution
+# A tibble: 2 × 8
+  term        Estimate Est.Error   Q2.5 Q97.5  Rhat ess_bulk ess_tail
+  &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;
+1 mean weight    -1.60     1.40  -4.90  0.365 1         268.     129.
+2 SD weight       1.03     0.536  0.263 2.26  0.998     258.     248.
 
 Distributional parameters
 # A tibble: 2 × 8
   term                  Estimate Est.Error  Q2.5 Q97.5  Rhat ess_bulk ess_tail
   &lt;chr&gt;                    &lt;dbl&gt;     &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;
-1 sigma[family=student]     1.40     0.156  1.12  1.71  1.01     299.     352.
-2 nu[family=student]        3.32     0.943  2.10  5.82  1.01     393.     328.
+1 sigma[family=student]     1.48     0.153  1.20  1.78  1.00     333.     472.
+2 nu[family=student]        2.61     0.503  2.02  3.77  1.01     256.     172.
 
 Covariance summaries (diagonal entries are variances)
 
 id
-# A tibble: 2 × 10
-  block row         col         Estimate Est.Error     Q2.5 Q97.5  Rhat ess_bulk
-  &lt;chr&gt; &lt;chr&gt;       &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;    &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;
-1 id    (Intercept) (Intercept)   0.360      0.479 0.000278 1.61   1.01     189.
-2 id    time        time          0.0947     0.119 0.000217 0.409  1.01     203.
-  ess_tail
-     &lt;dbl&gt;
-1     173.
-2     295.
-
-marker
-# A tibble: 2 × 10
-  block  row         col         Estimate Est.Error     Q2.5 Q97.5  Rhat
-  &lt;chr&gt;  &lt;chr&gt;       &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;    &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
-1 marker x1          x1             0.603      1.39 0.000420  4.25 0.998
-2 marker (Intercept) (Intercept)    0.739      1.41 0.000172  4.56 1.02
+# A tibble: 4 × 10
+  block row         col         Estimate Est.Error     Q2.5 Q97.5   Rhat
+  &lt;chr&gt; &lt;chr&gt;       &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;    &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt;
+1 id    (Intercept) (Intercept)    0.190     0.312 0.000233  1.10  0.999
+2 id    (Intercept) time           0         0     0         0    NA
+3 id    time        (Intercept)    0         0     0         0    NA
+4 id    time        time           0.624     0.505 0.0479    1.97  1.00
   ess_bulk ess_tail
      &lt;dbl&gt;    &lt;dbl&gt;
-1     154.     202.
-2     259.     188.
+1     349.     333.
+2      NA       NA
+3      NA       NA
+4     243.     162.
+
+marker
+# A tibble: 4 × 10
+  block  row         col         Estimate Est.Error     Q2.5 Q97.5   Rhat
+  &lt;chr&gt;  &lt;chr&gt;       &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;    &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt;
+1 marker x1          x1             0.608      1.30 0.000119  4.55  1.00
+2 marker x1          (Intercept)    0          0    0         0    NA
+3 marker (Intercept) x1             0          0    0         0    NA
+4 marker (Intercept) (Intercept)    0.731      2.14 0.000169  6.32  1.000
+  ess_bulk ess_tail
+     &lt;dbl&gt;    &lt;dbl&gt;
+1     459.     203.
+2      NA       NA
+3      NA       NA
+4     310.     214.
 
 id:marker covariance parameters
 
 covariance regression coefficients
 # A tibble: 4 × 11
-  block         row         col         term        Estimate Est.Error   Q2.5
-  &lt;chr&gt;         &lt;chr&gt;       &lt;chr&gt;       &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;  &lt;dbl&gt;
-1 SD[id:marker] (Intercept) (Intercept) (Intercept)    0.388     0.615 -0.909
-2 SD[id:marker] time        time        (Intercept)   -1.38      0.795 -3.28
-3 SD[id:marker] (Intercept) (Intercept) lambda         0.592     0.515  0.024
-4 SD[id:marker] time        time        lambda         0.68      0.553  0.028
-   Q97.5  Rhat ess_bulk ess_tail
-   &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;
-1  1.53   1.02    188.      253.
-2 -0.197  1.00     82.2     140.
-3  1.76   1.00    225.      220.
-4  2.10   1.01    143.      272.</code></pre>
+  block         row         col         term               Estimate Est.Error
+  &lt;chr&gt;         &lt;chr&gt;       &lt;chr&gt;       &lt;chr&gt;                 &lt;dbl&gt;     &lt;dbl&gt;
+1 SD[id:marker] (Intercept) (Intercept) (Intercept)          -1.87      1.59
+2 SD[id:marker] time        time        (Intercept)          -0.039     0.494
+3 SD[id:marker] (Intercept) (Intercept) latent SD (lambda)    0.74      0.636
+4 SD[id:marker] time        time        latent SD (lambda)    0.514     0.403
+    Q2.5 Q97.5  Rhat ess_bulk ess_tail
+   &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;
+1 -5.42  0.458 1.00      282.     310.
+2 -0.998 0.962 0.999     159.     350.
+3  0.036 2.52  1.00      443.     316.
+4  0.017 1.49  1.00      323.     292.</code></pre>
 </div>
 <div class="sourceCode cell-code" id="cb14"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/pkg/nlme/man/fixed.effects.html" class="external-link">fixef</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>      component event assoc_term        term Estimate Est.Error   Q2.5 Q97.5
+1  longitudinal  &lt;NA&gt;       &lt;NA&gt; (Intercept)    1.811     0.668  0.408 2.837
+2  longitudinal  &lt;NA&gt;       &lt;NA&gt;        time    0.188     0.286 -0.369 0.739
+3  longitudinal  &lt;NA&gt;       &lt;NA&gt;          x1    0.810     0.529 -0.367 1.728
+4         event event       &lt;NA&gt;          x1   -0.052     0.829 -1.593 1.489
+5         event event       &lt;NA&gt;          x2   -0.205     0.940 -2.094 1.531
+6 marker_weight  &lt;NA&gt;     shared mean weight   -1.605     1.396 -4.899 0.365
+   Rhat ess_bulk ess_tail
+1 0.998 355.9659 188.4075
+2 1.002 286.0901 271.6760
+3 1.005 401.7544 320.4063
+4 1.022 855.3959 314.6455
+5 1.001 436.1793 347.6246
+6 1.000 268.2684 128.6597</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb16"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/stats/coef.html" class="external-link">coef</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span></code></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>$formulaLong
 $formulaLong$id
    id        term Estimate Est.Error   Q2.5 Q97.5  Rhat ess_bulk ess_tail
-1   1 (Intercept)    1.538     0.859 -0.015 3.235 0.999 161.4827 228.3575
-2   1        time    0.224     0.272 -0.233 0.867 1.009 221.3702 353.1196
-3  10 (Intercept)    1.137     0.833 -0.475 2.781 1.006 181.6464 166.2512
-4  10        time   -0.043     0.201 -0.462 0.310 0.998 268.0764 428.3560
-5   2 (Intercept)    1.562     0.911 -0.061 3.440 1.003 159.6310 195.6196
-6   2        time    0.140     0.263 -0.329 0.712 1.003 303.7589 337.3771
-7   3 (Intercept)    0.915     0.923 -1.142 2.600 1.007 165.9566 155.6664
-8   3        time   -0.052     0.234 -0.513 0.460 1.004 234.8977 235.5922
-9   4 (Intercept)    1.458     0.914 -0.432 3.294 1.000 156.9213 175.5777
-10  4        time    0.155     0.274 -0.354 0.768 1.000 433.2132 374.3784
-11  5 (Intercept)    1.085     0.887 -0.521 2.828 1.022 162.1541 144.4543
-12  5        time    0.103     0.215 -0.318 0.530 1.005 318.6891 352.1886
-13  6 (Intercept)    1.259     0.929 -0.531 3.137 1.016 194.3037 170.7974
-14  6        time   -0.243     0.292 -0.827 0.254 1.000 119.0005 328.3563
-15  7 (Intercept)    1.246     0.818 -0.310 2.873 1.013 169.2585 141.0987
-16  7        time    0.028     0.207 -0.388 0.447 1.002 316.8034 272.1877
-17  8 (Intercept)    1.284     0.830 -0.316 3.043 1.000 182.3833 176.2787
-18  8        time   -0.120     0.250 -0.652 0.311 1.000 281.7043 381.4196
-19  9 (Intercept)    1.053     0.857 -0.580 2.794 1.015 195.5996 148.4858
-20  9        time    0.149     0.241 -0.238 0.749 1.024 226.5911 200.3026
+1   1 (Intercept)    1.857     0.700  0.451 2.954 0.999 230.9204 193.2691
+2   1        time    0.404     0.494 -0.476 1.361 1.005 292.2982 372.0344
+3  10 (Intercept)    1.769     0.726  0.275 2.917 0.999 215.7018 169.7796
+4  10        time   -0.542     0.587 -1.724 0.672 1.006 240.9057 280.6671
+5   2 (Intercept)    1.767     0.705 -0.084 2.825 1.000 238.7136 208.2397
+6   2        time    0.085     0.443 -0.842 0.895 1.008 276.1880 247.7924
+7   3 (Intercept)    1.911     0.739  0.434 3.257 0.999 198.6921 164.1739
+8   3        time    0.591     0.434 -0.298 1.379 1.015 314.9444 356.0969
+9   4 (Intercept)    1.831     0.756  0.179 3.153 1.004 222.8757 180.6438
+10  4        time    0.808     0.486 -0.130 1.777 0.999 257.5783 329.3857
+11  5 (Intercept)    1.787     0.746  0.155 2.896 0.998 212.2547 216.9369
+12  5        time    0.918     0.622 -0.316 2.187 0.998 273.2440 350.3450
+13  6 (Intercept)    1.664     0.723  0.155 2.772 1.000 178.8404 178.2656
+14  6        time    0.172     0.410 -0.639 0.959 1.004 338.2438 356.0969
+15  7 (Intercept)    1.930     0.717  0.458 3.220 1.000 195.4408 193.4196
+16  7        time   -0.459     0.564 -1.504 0.653 1.005 210.6477 370.1080
+17  8 (Intercept)    1.972     0.717  0.384 3.210 1.000 215.0235 186.6017
+18  8        time   -0.413     0.454 -1.230 0.569 1.011 244.7537 326.7148
+19  9 (Intercept)    1.726     0.733  0.314 2.870 1.000 191.3919 191.9124
+20  9        time    0.564     0.488 -0.377 1.610 1.000 306.1700 457.7611
 
 $formulaLong$marker
   marker        term Estimate Est.Error   Q2.5 Q97.5  Rhat ess_bulk ess_tail
-1     m1 (Intercept)    1.388     0.569  0.332 2.445 1.004 267.0664 291.1889
-2     m1          x1   -0.336     0.547 -1.378 0.716 1.011 248.0292 258.2404
-3     m2 (Intercept)    1.200     0.533  0.154 2.187 1.004 253.1809 271.2551
-4     m2          x1   -0.271     0.567 -1.487 0.834 0.998 243.7600 327.9930
+1     m1 (Intercept)    2.001     0.415  1.156 2.788 0.998 619.3644 361.2798
+2     m1          x1    0.961     0.522 -0.171 2.023 0.999 606.0756 265.3052
+3     m2 (Intercept)    1.909     0.394  1.128 2.641 1.000 659.7722 390.3540
+4     m2          x1    0.944     0.454  0.136 1.810 1.002 544.6139 445.2679
 
 $formulaLong$marker_by_id
    id marker        term Estimate Est.Error   Q2.5 Q97.5  Rhat ess_bulk
-1   1     m1 (Intercept)    1.304     1.001 -0.648 3.373 1.009 209.4971
-2   1     m1        time    0.229     0.320 -0.290 0.939 0.998 130.1531
-3   1     m2 (Intercept)    2.311     1.055  0.452 4.530 1.018 145.4490
-4   1     m2        time    0.098     0.284 -0.396 0.713 1.000 303.7502
-5  10     m1 (Intercept)    1.356     0.903 -0.534 3.014 1.006 179.2048
-6  10     m1        time   -0.062     0.227 -0.558 0.357 1.006 275.1311
-7  10     m2 (Intercept)    0.692     0.973 -1.275 2.411 1.013 206.7226
-8  10     m2        time    0.040     0.211 -0.343 0.483 1.001 446.7727
-9   2     m1 (Intercept)    1.971     1.031  0.017 4.188 1.010 231.3699
-10  2     m1        time    0.116     0.303 -0.394 0.830 1.000 224.3538
-11  2     m2 (Intercept)    1.730     1.096 -0.290 4.085 1.004 217.0188
-12  2     m2        time    0.082     0.294 -0.400 0.796 1.000 319.1456
-13  3     m1 (Intercept)    1.294     0.953 -0.589 3.312 0.999 205.8007
-14  3     m1        time   -0.033     0.236 -0.547 0.412 1.021 194.2019
-15  3     m2 (Intercept)    0.068     1.066 -2.002 2.157 1.001 172.2744
-16  3     m2        time   -0.036     0.243 -0.531 0.418 0.999 236.8587
-17  4     m1 (Intercept)    1.730     1.013 -0.262 3.786 1.001 251.2587
-18  4     m1        time    0.167     0.307 -0.340 0.830 0.998 178.2526
-19  4     m2 (Intercept)    1.629     0.965 -0.163 3.679 1.011 235.8572
-20  4     m2        time    0.016     0.283 -0.540 0.559 1.022 210.9368
-21  5     m1 (Intercept)    0.422     0.995 -1.680 2.247 1.001 200.2079
-22  5     m1        time    0.037     0.229 -0.405 0.507 1.000 267.2137
-23  5     m2 (Intercept)    1.515     1.057 -0.456 3.599 1.003 239.8867
-24  5     m2        time    0.113     0.228 -0.315 0.602 0.999 249.9795
-25  6     m1 (Intercept)    0.773     1.252 -2.140 3.038 1.014 207.8545
-26  6     m1        time   -0.200     0.309 -0.877 0.280 1.010 166.7081
-27  6     m2 (Intercept)    1.769     1.288 -0.678 4.533 1.002 240.7974
-28  6     m2        time   -0.205     0.341 -0.949 0.360 1.017 137.6401
-29  7     m1 (Intercept)    2.210     1.068  0.215 4.301 1.024 252.8865
-30  7     m1        time    0.126     0.274 -0.343 0.727 0.998 303.4779
-31  7     m2 (Intercept)    0.139     1.017 -2.215 2.195 1.010 200.0527
-32  7     m2        time   -0.032     0.241 -0.533 0.438 0.999 305.0333
-33  8     m1 (Intercept)    1.654     1.070 -0.569 3.845 1.001 216.2919
-34  8     m1        time    0.233     0.333 -0.270 0.975 0.998 286.1377
-35  8     m2 (Intercept)    0.817     1.036 -1.271 2.695 1.006 168.4718
-36  8     m2        time   -0.437     0.366 -1.145 0.176 1.005 115.7220
-37  9     m1 (Intercept)    0.450     1.112 -1.768 2.443 1.009 173.3685
-38  9     m1        time    0.181     0.295 -0.311 0.883 1.000 223.2111
-39  9     m2 (Intercept)    1.445     0.855 -0.177 3.219 1.022 228.7602
-40  9     m2        time    0.061     0.230 -0.376 0.561 0.999 299.0908
+1   1     m1 (Intercept)    1.836     0.738  0.247 3.041 1.002 195.3303
+2   1     m1        time   -0.147     0.514 -1.125 0.805 1.004 353.9033
+3   1     m2 (Intercept)    1.832     0.761  0.416 3.163 1.000 199.2666
+4   1     m2        time    0.832     0.527 -0.205 1.881 1.019 387.2622
+5  10     m1 (Intercept)    1.858     0.749  0.253 3.074 0.999 208.4218
+6  10     m1        time    0.087     0.634 -1.201 1.315 1.001 271.2302
+7  10     m2 (Intercept)    1.723     0.737  0.203 2.893 0.999 235.9054
+8  10     m2        time   -0.565     0.672 -2.004 0.662 1.003 247.3512
+9   2     m1 (Intercept)    1.696     0.723  0.109 2.835 0.998 223.4939
+10  2     m1        time   -0.208     0.514 -1.257 0.759 1.004 305.0752
+11  2     m2 (Intercept)    1.916     0.772  0.276 3.338 1.001 193.2944
+12  2     m2        time    0.483     0.527 -0.580 1.552 1.003 366.9827
+13  3     m1 (Intercept)    1.853     0.800  0.128 3.416 0.999 172.5930
+14  3     m1        time    0.620     0.480 -0.345 1.546 1.000 420.5334
+15  3     m2 (Intercept)    1.826     0.737  0.216 2.992 0.999 186.0429
+16  3     m2        time    0.153     0.463 -0.767 1.064 0.999 436.6906
+17  4     m1 (Intercept)    1.927     0.855  0.194 3.570 1.004 179.7751
+18  4     m1        time    0.288     0.528 -0.746 1.261 1.003 282.3756
+19  4     m2 (Intercept)    1.740     0.785  0.053 3.020 0.998 229.9107
+20  4     m2        time    0.642     0.537 -0.382 1.632 1.007 304.1326
+21  5     m1 (Intercept)    1.869     0.762  0.380 3.204 1.002 220.2330
+22  5     m1        time    1.627     0.665  0.422 2.909 0.999 258.0237
+23  5     m2 (Intercept)    1.705     0.720  0.004 2.858 0.998 169.2496
+24  5     m2        time    0.079     0.641 -1.110 1.256 0.999 317.9872
+25  6     m1 (Intercept)    1.765     0.768 -0.044 3.151 1.001 175.0023
+26  6     m1        time   -0.100     0.485 -1.052 0.863 1.010 399.8949
+27  6     m2 (Intercept)    1.717     0.703  0.056 2.717 1.001 168.4039
+28  6     m2        time    0.468     0.468 -0.425 1.402 0.999 408.3611
+29  7     m1 (Intercept)    1.851     0.782  0.138 3.276 0.999 208.5633
+30  7     m1        time   -0.870     0.639 -2.165 0.384 1.000 249.6671
+31  7     m2 (Intercept)    1.919     0.785  0.494 3.331 0.998 189.3267
+32  7     m2        time    0.229     0.605 -0.941 1.485 1.002 237.9042
+33  8     m1 (Intercept)    1.893     0.740  0.371 3.231 0.999 198.1855
+34  8     m1        time    0.073     0.466 -0.865 1.046 1.002 252.4152
+35  8     m2 (Intercept)    1.927     0.756  0.448 3.300 1.001 187.8563
+36  8     m2        time   -0.266     0.483 -1.226 0.607 1.000 265.3006
+37  9     m1 (Intercept)    1.695     0.760 -0.124 2.804 0.999 191.4044
+38  9     m1        time    0.017     0.508 -1.068 0.920 0.999 322.6817
+39  9     m2 (Intercept)    1.836     0.778  0.294 3.228 0.999 203.2314
+40  9     m2        time    0.727     0.586 -0.371 1.843 1.001 286.5473
    ess_tail
-1  220.3563
-2  213.0757
-3  175.9566
-4  257.7729
-5  217.7673
-6  360.8120
-7  245.8280
-8  473.9927
-9  187.0602
-10 305.5157
-11 256.6771
-12 348.3075
-13 157.7336
-14 323.4567
-15 252.4778
-16 314.8640
-17 232.2358
-18 239.4328
-19 213.8236
-20 348.4754
-21 181.8886
-22 273.7265
-23 231.1912
-24 297.7492
-25 217.3698
-26 371.1017
-27 213.8236
-28 242.5881
-29 198.0070
-30 415.8921
-31 196.0713
-32 313.4341
-33 245.2622
-34 352.1886
-35 249.5239
-36 202.3624
-37 192.7907
-38 302.2125
-39 122.4135
-40 363.5387
+1  150.1085
+2  411.9569
+3  177.2075
+4  358.8392
+5  180.9275
+6  229.4178
+7  254.4247
+8  376.8660
+9  225.1493
+10 259.3056
+11 170.5551
+12 311.3205
+13 175.5882
+14 343.4290
+15 213.3680
+16 452.7353
+17 194.5557
+18 298.8751
+19 228.3575
+20 307.6760
+21 158.1732
+22 412.2037
+23 174.5643
+24 461.2318
+25 174.5643
+26 370.7469
+27 204.5691
+28 360.4133
+29 180.9275
+30 295.5926
+31 179.4603
+32 279.1936
+33 150.4984
+34 327.3183
+35 180.9275
+36 261.4892
+37 219.6419
+38 212.3503
+39 170.3290
+40 408.3394
 
-$formulaLong$assoc_weight
-        term Estimate Est.Error   Q2.5 Q97.5  Rhat ess_bulk ess_tail
-1 weight: m1    0.241     0.953 -1.697 2.030 1.007 484.3536 369.4218
-2 weight: m2    0.267     0.888 -1.614 1.885 1.003 485.1652 312.7750
 
-$formulaLong$population
-         term Estimate Est.Error   Q2.5 Q97.5  Rhat ess_bulk ess_tail
-1 (Intercept)    1.253     0.744 -0.229 2.750 1.016 151.5226 142.4771
-2        time    0.038     0.139 -0.228 0.328 1.006 212.0773 232.3288
-3          x1   -0.264     0.679 -1.482 0.996 0.999 133.5771 188.0771
-
+$assoc
+  assoc_term term Estimate Est.Error   Q2.5  Q97.5  Rhat ess_bulk ess_tail
+1     shared   m1   -1.179     1.281 -4.604  0.191 0.999 308.4560 158.4132
+2     shared   m2   -2.507     1.337 -5.835 -0.653 1.004 364.2494 161.3811
+          group
+1 marker_weight
+2 marker_weight
 
 $formulaEvent
   event term Estimate Est.Error   Q2.5 Q97.5  Rhat ess_bulk ess_tail
-1 event   x1    1.215     0.703  0.085 2.678 0.999 503.0121 385.4308
-2 event   x2    0.366     0.561 -0.614 1.599 1.000 452.4316 372.0591
+1 event   x1   -0.052     0.829 -1.593 1.489 1.022 814.5392 314.6455
+2 event   x2   -0.205     0.940 -2.094 1.531 1.001 426.9095 347.6246
   Hazard.Ratio HR.Q2.5 HR.Q97.5
-1        3.370   1.089   14.556
-2        1.442   0.541    4.948
+1        0.949   0.203    4.433
+2        0.815   0.123    4.623
 
 $formulaDist
 list()
@@ -527,49 +539,49 @@ NULL
 
 $formulaVCov$id
    id         block row col        term Estimate Est.Error   Q2.5 Q97.5  Rhat
-1   1 SD[id:marker]   1   1 (Intercept)    0.077     0.746 -1.423 1.376 1.001
-2   1 SD[id:marker]   2   2 (Intercept)   -0.105     0.724 -1.724 1.333 1.006
-3  10 SD[id:marker]   1   1 (Intercept)   -0.157     0.710 -2.066 1.075 0.999
-4  10 SD[id:marker]   2   2 (Intercept)   -0.300     0.771 -2.703 0.707 1.006
-5   2 SD[id:marker]   1   1 (Intercept)   -0.047     0.701 -1.574 1.425 1.001
-6   2 SD[id:marker]   2   2 (Intercept)   -0.157     0.969 -2.477 1.494 1.000
-7   3 SD[id:marker]   1   1 (Intercept)    0.072     0.614 -1.266 1.348 1.001
-8   3 SD[id:marker]   2   2 (Intercept)   -0.206     0.847 -2.222 1.256 1.000
-9   4 SD[id:marker]   1   1 (Intercept)   -0.040     0.743 -1.800 1.298 0.998
-10  4 SD[id:marker]   2   2 (Intercept)   -0.115     0.729 -1.842 1.276 1.000
-11  5 SD[id:marker]   1   1 (Intercept)    0.014     0.702 -1.606 1.529 0.998
-12  5 SD[id:marker]   2   2 (Intercept)   -0.160     0.770 -1.935 1.127 1.006
-13  6 SD[id:marker]   1   1 (Intercept)    0.036     0.824 -1.510 1.714 1.010
-14  6 SD[id:marker]   2   2 (Intercept)    0.010     0.778 -1.700 1.623 0.998
-15  7 SD[id:marker]   1   1 (Intercept)    0.206     0.748 -0.790 1.836 0.999
-16  7 SD[id:marker]   2   2 (Intercept)   -0.166     0.750 -1.986 1.157 1.007
-17  8 SD[id:marker]   1   1 (Intercept)   -0.116     0.754 -2.084 1.291 0.999
-18  8 SD[id:marker]   2   2 (Intercept)    0.307     0.769 -1.112 2.194 1.017
-19  9 SD[id:marker]   1   1 (Intercept)    0.011     0.715 -1.518 1.535 1.004
-20  9 SD[id:marker]   2   2 (Intercept)   -0.134     0.819 -2.034 1.426 1.009
+1   1 SD[id:marker]   1   1 (Intercept)   -0.123     0.966 -2.330 1.551 1.000
+2   1 SD[id:marker]   2   2 (Intercept)    0.038     0.624 -1.023 1.737 1.018
+3  10 SD[id:marker]   1   1 (Intercept)    0.009     0.921 -1.888 2.004 1.000
+4  10 SD[id:marker]   2   2 (Intercept)    0.025     0.617 -1.484 1.359 1.003
+5   2 SD[id:marker]   1   1 (Intercept)   -0.033     0.991 -2.463 2.105 1.005
+6   2 SD[id:marker]   2   2 (Intercept)   -0.039     0.552 -1.253 1.157 1.002
+7   3 SD[id:marker]   1   1 (Intercept)   -0.091     1.029 -2.835 2.084 1.003
+8   3 SD[id:marker]   2   2 (Intercept)   -0.117     0.578 -1.729 0.966 0.999
+9   4 SD[id:marker]   1   1 (Intercept)   -0.007     0.879 -1.925 1.991 1.003
+10  4 SD[id:marker]   2   2 (Intercept)   -0.132     0.626 -1.585 1.103 1.003
+11  5 SD[id:marker]   1   1 (Intercept)    0.072     0.904 -1.971 2.018 1.010
+12  5 SD[id:marker]   2   2 (Intercept)    0.368     0.589 -0.456 1.764 1.002
+13  6 SD[id:marker]   1   1 (Intercept)   -0.051     0.865 -1.972 1.648 0.999
+14  6 SD[id:marker]   2   2 (Intercept)   -0.150     0.641 -1.624 0.983 1.000
+15  7 SD[id:marker]   1   1 (Intercept)   -0.068     0.943 -2.163 1.624 1.003
+16  7 SD[id:marker]   2   2 (Intercept)    0.229     0.598 -0.855 1.755 0.998
+17  8 SD[id:marker]   1   1 (Intercept)   -0.037     0.868 -2.153 1.452 1.013
+18  8 SD[id:marker]   2   2 (Intercept)   -0.187     0.687 -1.968 0.956 1.001
+19  9 SD[id:marker]   1   1 (Intercept)   -0.073     0.987 -2.623 1.949 1.004
+20  9 SD[id:marker]   2   2 (Intercept)   -0.001     0.578 -1.301 1.231 1.005
    ess_bulk ess_tail
-1  280.6438 295.3432
-2  247.7043 270.4578
-3  329.5843 320.4628
-4  325.2404 333.2991
-5  355.6453 301.1448
-6  292.0231 268.6386
-7  315.3967 382.0824
-8  432.6058 343.0167
-9  533.0388 326.9978
-10 289.8052 353.1196
-11 433.1850 194.7111
-12 465.8460 310.2606
-13 385.8720 312.4465
-14 292.1161 323.0160
-15 242.2406 374.1132
-16 366.0293 365.0928
-17 414.7238 399.8404
-18 179.3260 232.3136
-19 356.7070 387.1280
-20 361.7987 374.3784</code></pre>
+1  445.9349 424.3182
+2  395.1673 357.6137
+3  357.3181 234.7502
+4  444.8508 330.4114
+5  573.4763 465.4078
+6  279.0113 292.2525
+7  619.5966 427.9046
+8  441.7741 451.1299
+9  425.2130 255.6396
+10 436.2357 334.5920
+11 469.7286 312.9874
+12 240.9191 245.8280
+13 416.2875 311.3205
+14 386.6729 266.8336
+15 519.7571 398.0777
+16 292.6329 188.5822
+17 585.0811 473.4051
+18 377.5392 450.4360
+19 286.4082 199.5485
+20 414.0917 431.8954</code></pre>
 </div>
-<div class="sourceCode cell-code" id="cb16"><pre class="downlit sourceCode r">
+<div class="sourceCode cell-code" id="cb18"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/assoc.html">posterior_assoc</a></span><span class="op">(</span><span class="va">fit</span>, summary <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></code></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>
@@ -577,18 +589,19 @@ Posterior association effects
 
 Association term: cv_total
 # A tibble: 2 × 8
-  term  Estimate Est.Error   Q2.5 Q97.5  Rhat ess_bulk ess_tail
-  &lt;chr&gt;    &lt;dbl&gt;     &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;
-1 m1       0.04      0.148 -0.228 0.375 0.999     334.     331.
-2 m2       0.064     0.183 -0.174 0.605 0.999     339.     347.</code></pre>
+  term  Estimate Est.Error  Q2.5  Q97.5  Rhat ess_bulk ess_tail
+  &lt;chr&gt;    &lt;dbl&gt;     &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;
+1 m1      -0.434     0.388 -1.47  0.125 1.00      395.     193.
+2 m2      -1.11      0.708 -2.66 -0.302 0.999     366.     332.</code></pre>
 </div>
 </div>
-<p><code><a href="https://paulbuerkner.com/brms/reference/posterior_summary.html" class="external-link">posterior_summary()</a></code> is an alias for <code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code>. <code><a href="../reference/assoc.html">posterior_assoc()</a></code> returns association-specific posterior output in a format that stays close to the main summary tables. For covariance-style channels (<code>corr</code>, <code>vcov</code>), the printed and tabular output now uses readable matrix labels instead of raw numeric indices. <code><a href="https://rdrr.io/r/stats/coef.html" class="external-link">coef()</a></code> returns coefficients on the model-matrix scale after adding the population-level contribution and the matching group-level deviation. As with <code><a href="https://rdrr.io/pkg/nlme/man/fixed.effects.html" class="external-link">fixef()</a></code> and <code><a href="https://rdrr.io/pkg/nlme/man/random.effects.html" class="external-link">ranef()</a></code>, use <code>summary = FALSE</code> to retrieve posterior draws instead of posterior summaries.</p>
-</section><section class="level3"><h3 id="step-6-dynamic-prediction-for-one-subject">Step 6: Dynamic prediction for one subject<a class="anchor" aria-label="anchor" href="#step-6-dynamic-prediction-for-one-subject"></a>
-</h3>
+<p><code>posterior_summary(what = "model")</code> returns the same model summary as <code><a href="https://rdrr.io/r/base/summary.html" class="external-link">summary()</a></code>. Its <code>fixef</code>, <code>ranef</code>, and <code>coef</code> views form the common summary layer used by those three conventional methods. <code><a href="../reference/assoc.html">posterior_assoc()</a></code> returns association-specific posterior output in a format that stays close to the main summary tables.</p>
+<p>For covariance-style channels (<code>corr</code>, <code>vcov</code>), the printed and tabular output uses readable matrix labels instead of raw numeric indices. <code><a href="https://rdrr.io/r/stats/coef.html" class="external-link">coef()</a></code> returns coefficients on the model-matrix scale after adding the population-level contribution and the matching group-level deviation. Use <code>summary = FALSE</code> to retrieve posterior draws instead of posterior summaries.</p>
+</section></section><section class="level2"><h2 id="dynamic-prediction">Dynamic prediction<a class="anchor" aria-label="anchor" href="#dynamic-prediction"></a>
+</h2>
 <p>We condition on the observed history up to the last measurement for subject 1 and obtain predictive summaries beyond that time.</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb18"><pre class="downlit sourceCode r">
+<div class="sourceCode cell-code" id="cb20"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">ndL</span> <span class="op">&lt;-</span> <span class="va">sim</span><span class="op">$</span><span class="va">dataLong</span><span class="op">[</span><span class="va">sim</span><span class="op">$</span><span class="va">dataLong</span><span class="op">$</span><span class="va">id</span> <span class="op">==</span> <span class="fl">1</span>, <span class="op">]</span></span>
 <span><span class="va">ndE</span> <span class="op">&lt;-</span> <span class="va">sim</span><span class="op">$</span><span class="va">dataEvent</span><span class="op">[</span><span class="va">sim</span><span class="op">$</span><span class="va">dataEvent</span><span class="op">$</span><span class="va">id</span> <span class="op">==</span> <span class="fl">1</span>, <span class="op">]</span></span>
 <span><span class="va">time_start</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/Extremes.html" class="external-link">max</a></span><span class="op">(</span><span class="va">ndL</span><span class="op">$</span><span class="va">time</span><span class="op">)</span></span>
@@ -617,17 +630,15 @@ Association term: cv_total
   |
   |============================================================| 100%</code></pre>
 </div>
-<div class="sourceCode cell-code" id="cb21"><pre class="downlit sourceCode r">
+<div class="sourceCode cell-code" id="cb23"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># control$n_samples: extracted posterior parameter draws</span></span>
 <span><span class="co"># control$n_pred_draws: dynpred output draw count</span></span>
 <span></span>
 <span><span class="co"># use predict(..., scale = c("epred", "linpred", "predict"))</span></span>
 <span><span class="co"># to return multiple longitudinal scales in one call (default = all scales)</span></span></code></pre></div>
 </div>
-</section><section class="level3"><h3 id="step-7-plot-longitudinal-and-survival-predictions">Step 7: Plot longitudinal and survival predictions<a class="anchor" aria-label="anchor" href="#step-7-plot-longitudinal-and-survival-predictions"></a>
-</h3>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb22"><pre class="downlit sourceCode r">
+<div class="sourceCode cell-code" id="cb24"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">pred</span>, type <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"longitudinal"</span>, <span class="st">"survival"</span><span class="op">)</span>, combined <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></code></pre></div>
 <div class="cell-output-display">
 <div>
@@ -636,11 +647,10 @@ Association term: cv_total
 </div>
 </div>
 </div>
-<p>If <code>patchwork</code>/<code>cowplot</code> is unavailable, <code>combined = TRUE</code> falls back to the standard per-subject structured return (grouped by subject and outcome) instead of any flattened helper list.</p>
 <p>The heatmap is an alternative to the usual separated marker curves. It orders markers by the magnitude of posterior mean change and makes tiles transparent when the posterior sign certainty does not exceed <code>1 - threshold</code>.</p>
 <p><code>plot(fit, ...)</code> uses fitted posterior samples directly and has no conditioning argument. Conditional covariate profiles are evaluated with <code><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">conditional_effects()</a></code>, while <code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> remains reserved for dynamic subject-specific forecasts given observed longitudinal history.</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb23"><pre class="downlit sourceCode r">
+<div class="sourceCode cell-code" id="cb25"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">profiles</span> <span class="op">&lt;-</span> <span class="fu">make_conditions</span><span class="op">(</span><span class="va">sim</span><span class="op">$</span><span class="va">dataEvent</span>, vars <span class="op">=</span> <span class="st">"x1"</span><span class="op">)</span></span>
 <span></span>
 <span><span class="va">effects_data</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">conditional_effects</a></span><span class="op">(</span></span>
@@ -655,10 +665,34 @@ Association term: cv_total
 <span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">effects_data</span>, ask <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span></code></pre></div>
 </div>
 <p>For the longitudinal process, set <code>longitudinal_estimand = "marker"</code> to add the fitted marker-level deviation, or use <code>"marginal_marker"</code> to average marker-specific predictions within each posterior draw. This latter estimand applies each marker’s inverse link before averaging, so it represents the average expected marker response rather than the response of an average marker.</p>
-</section><section class="level3"><h3 id="step-8-diagnostics-and-extraction-helpers">Step 8: Diagnostics and extraction helpers<a class="anchor" aria-label="anchor" href="#step-8-diagnostics-and-extraction-helpers"></a>
+<p><code><a href="../reference/conditional_contrast.html">conditional_contrast()</a></code> compares two complete or partial covariate profiles. The two predictions are evaluated against the same posterior draw and are contrasted before the posterior centre and interval are calculated. Hence the reported uncertainty retains posterior dependence between the profiles. The longitudinal result is group A minus group B on the chosen response or linear-predictor scale. The event result is the hazard ratio of A relative to B, or its logarithm when <code>event_scale = "log_hazard_ratio"</code>.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb26"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">contrast_conditions</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span></span>
+<span>  time <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/seq.html" class="external-link">seq</a></span><span class="op">(</span><span class="fl">0</span>, <span class="fu"><a href="https://rdrr.io/r/base/Extremes.html" class="external-link">max</a></span><span class="op">(</span><span class="va">sim</span><span class="op">$</span><span class="va">dataLong</span><span class="op">$</span><span class="va">time</span><span class="op">)</span>, length.out <span class="op">=</span> <span class="fl">50</span><span class="op">)</span>,</span>
+<span>  x2 <span class="op">=</span> <span class="fl">0</span>,</span>
+<span>  cond__ <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="st">"time="</span>, <span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/seq.html" class="external-link">seq</a></span><span class="op">(</span><span class="fl">0</span>, <span class="fu"><a href="https://rdrr.io/r/base/Extremes.html" class="external-link">max</a></span><span class="op">(</span><span class="va">sim</span><span class="op">$</span><span class="va">dataLong</span><span class="op">$</span><span class="va">time</span><span class="op">)</span>, length.out <span class="op">=</span> <span class="fl">50</span><span class="op">)</span>, <span class="fl">2</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="op">)</span></span>
+<span></span>
+<span><span class="va">contrast_data</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/conditional_contrast.html">conditional_contrast</a></span><span class="op">(</span></span>
+<span>  <span class="va">fit</span>,</span>
+<span>  groupA <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>x1 <span class="op">=</span> <span class="fl">1</span><span class="op">)</span>,</span>
+<span>  groupB <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>x1 <span class="op">=</span> <span class="op">-</span><span class="fl">1</span><span class="op">)</span>,</span>
+<span>  conditions <span class="op">=</span> <span class="va">contrast_conditions</span>,</span>
+<span>  process <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"longitudinal"</span>, <span class="st">"event"</span><span class="op">)</span>,</span>
+<span>  method <span class="op">=</span> <span class="st">"posterior_epred"</span>,</span>
+<span>  longitudinal_estimand <span class="op">=</span> <span class="st">"marginal_marker"</span>,</span>
+<span>  event_scale <span class="op">=</span> <span class="st">"hazard_ratio"</span>,</span>
+<span>  plot <span class="op">=</span> <span class="cn">FALSE</span></span>
+<span><span class="op">)</span></span>
+<span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">contrast_data</span>, condition_variable <span class="op">=</span> <span class="st">"time"</span>, ask <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span></code></pre></div>
+</div>
+<p>Each row of <code>conditions</code> supplies covariates common to the two groups. Undeclared predictors are represented by their mean in the fitting data for a numeric predictor and by their first fitted level for a categorical predictor. For the event process, the contrast concerns the direct covariate component of <code>formulaEvent</code>; the baseline hazard and longitudinal association contribution are common to the two profiles.</p>
+<section class="level3"><h3 id="step-8-diagnostics-and-extraction-helpers">Step 8: Diagnostics and extraction helpers<a class="anchor" aria-label="anchor" href="#step-8-diagnostics-and-extraction-helpers"></a>
 </h3>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb24"><pre class="downlit sourceCode r">
+<div class="sourceCode cell-code" id="cb27"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/diagnosis.html">diagnosis</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span></code></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>
@@ -667,90 +701,106 @@ Diagnostics Summary
    metric               value
    &lt;chr&gt;                &lt;chr&gt;
  1 draws                500
- 2 divergences          2
+ 2 divergences          11
  3 treedepth_hits       0
- 4 ebfmi_min            0.815
- 5 max_rhat             1.02
- 6 min_ess_bulk         82.17
- 7 min_ess_tail         88.515
+ 4 ebfmi_min            0.865
+ 5 max_rhat             1.027
+ 6 min_ess_bulk         131.299
+ 7 min_ess_tail         118.267
  8 n_terms_total        28
- 9 n_terms_bad_rhat     4
-10 n_terms_low_ess_bulk 4
-11 n_terms_low_ess_tail 2
+ 9 n_terms_bad_rhat     2
+10 n_terms_low_ess_bulk 0
+11 n_terms_low_ess_tail 0
 
 Per-Parameter Diagnostics
-# A tibble: 20 × 14
-   section          subsection parameter_label       term
-   &lt;chr&gt;            &lt;chr&gt;      &lt;chr&gt;                 &lt;chr&gt;
- 1 fixef            &lt;NA&gt;       (Intercept)           (Intercept)
- 2 fixef            &lt;NA&gt;       time                  time
- 3 fixef            &lt;NA&gt;       x1                    x1
- 4 baseline_hazard  &lt;NA&gt;       1                     1
- 5 baseline_hazard  &lt;NA&gt;       2                     2
- 6 baseline_hazard  &lt;NA&gt;       3                     3
- 7 baseline_hazard  &lt;NA&gt;       4                     4
- 8 baseline_hazard  &lt;NA&gt;       5                     5
- 9 baseline_hazard  &lt;NA&gt;       6                     6
-10 baseline_hazard  &lt;NA&gt;       7                     7
-11 baseline_hazard  &lt;NA&gt;       8                     8
-12 survival_process &lt;NA&gt;       x1                    x1
-13 survival_process &lt;NA&gt;       x2                    x2
-14 assoc            &lt;NA&gt;       cv_total              cv_total
-15 assoc            &lt;NA&gt;       weight: m1            weight: m1
-16 assoc            &lt;NA&gt;       weight: m2            weight: m2
-17 assoc            &lt;NA&gt;       weight: m1            weight: m1
-18 assoc            &lt;NA&gt;       weight: m2            weight: m2
-19 distributional   &lt;NA&gt;       sigma[family=student] sigma[family=student]
-20 distributional   &lt;NA&gt;       nu[family=student]    nu[family=student]
-   Estimate Est.Error    Q2.5  Q97.5  Rhat ess_bulk ess_tail block row   col
-      &lt;dbl&gt;     &lt;dbl&gt;   &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt; &lt;chr&gt; &lt;chr&gt; &lt;chr&gt;
- 1    1.25      0.744  -0.229  2.75  1.02     174.     142.  &lt;NA&gt;  &lt;NA&gt;  &lt;NA&gt;
- 2    0.038     0.139  -0.228  0.328 1.01     214.     232.  &lt;NA&gt;  &lt;NA&gt;  &lt;NA&gt;
- 3   -0.264     0.679  -1.48   0.996 0.999    150.     188.  &lt;NA&gt;  &lt;NA&gt;  &lt;NA&gt;
- 4   -7.70      3.01  -13.9   -2.23  0.999    468.     313.  &lt;NA&gt;  &lt;NA&gt;  &lt;NA&gt;
- 5   -0.949     1.13   -3.34   0.989 0.999    158.      88.5 &lt;NA&gt;  &lt;NA&gt;  &lt;NA&gt;
- 6   -0.672     0.935  -2.88   0.874 1.00     111.     120.  &lt;NA&gt;  &lt;NA&gt;  &lt;NA&gt;
- 7   -0.394     0.86   -2.13   1.14  0.999     89.4    110.  &lt;NA&gt;  &lt;NA&gt;  &lt;NA&gt;
- 8   -0.111     0.83   -1.89   1.38  1.00      85.2    184.  &lt;NA&gt;  &lt;NA&gt;  &lt;NA&gt;
- 9    0.218     0.839  -1.55   1.70  1.00      91.7     98.1 &lt;NA&gt;  &lt;NA&gt;  &lt;NA&gt;
-10    0.548     0.929  -1.26   2.24  1.00     123.     103.  &lt;NA&gt;  &lt;NA&gt;  &lt;NA&gt;
-11    0.894     1.17   -1.16   3.22  1.02     226.     369.  &lt;NA&gt;  &lt;NA&gt;  &lt;NA&gt;
-12    1.22      0.703   0.085  2.68  0.999    505.     385.  &lt;NA&gt;  &lt;NA&gt;  &lt;NA&gt;
-13    0.366     0.561  -0.614  1.60  1        478.     372.  &lt;NA&gt;  &lt;NA&gt;  &lt;NA&gt;
-14    0.362     0.493   0.005  1.54  0.999    293.     471.  &lt;NA&gt;  &lt;NA&gt;  &lt;NA&gt;
-15    0.241     0.953  -1.70   2.03  1.01     492.     369.  &lt;NA&gt;  &lt;NA&gt;  &lt;NA&gt;
-16    0.267     0.888  -1.61   1.88  1.00     534.     313.  &lt;NA&gt;  &lt;NA&gt;  &lt;NA&gt;
-17    0.241     0.953  -1.70   2.03  1.01     492.     369.  &lt;NA&gt;  &lt;NA&gt;  &lt;NA&gt;
-18    0.267     0.888  -1.61   1.88  1.00     534.     313.  &lt;NA&gt;  &lt;NA&gt;  &lt;NA&gt;
-19    1.40      0.156   1.12   1.71  1.01     299.     352.  &lt;NA&gt;  &lt;NA&gt;  &lt;NA&gt;
-20    3.32      0.943   2.10   5.82  1.01     393.     328.  &lt;NA&gt;  &lt;NA&gt;  &lt;NA&gt;
+# A tibble: 20 × 13
+   family           parameter             term                  Estimate
+   &lt;chr&gt;            &lt;chr&gt;                 &lt;chr&gt;                    &lt;dbl&gt;
+ 1 fixef            (Intercept)           (Intercept)              1.81
+ 2 fixef            time                  time                     0.188
+ 3 fixef            x1                    x1                       0.81
+ 4 baseline_hazard  basis_1               basis_1                 -5.79
+ 5 baseline_hazard  basis_2               basis_2                 -0.588
+ 6 baseline_hazard  basis_3               basis_3                 -0.303
+ 7 baseline_hazard  basis_4               basis_4                 -0.039
+ 8 baseline_hazard  basis_5               basis_5                  0.195
+ 9 baseline_hazard  basis_6               basis_6                  0.416
+10 survival_process x1                    x1                      -0.052
+11 survival_process x2                    x2                      -0.205
+12 assoc            cv_total              cv_total                 1.02
+13 marker_weights   mean weight           mean weight             -1.60
+14 marker_weights   SD weight             SD weight                1.03
+15 distributional   sigma[family=student] sigma[family=student]    1.48
+16 distributional   nu[family=student]    nu[family=student]       2.61
+17 corr             id                    &lt;NA&gt;                     0.190
+18 corr             id                    &lt;NA&gt;                     0
+19 corr             id                    &lt;NA&gt;                     0
+20 corr             id                    &lt;NA&gt;                     0.624
+   Est.Error       Q2.5 Q97.5   Rhat ess_bulk ess_tail block row
+       &lt;dbl&gt;      &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt; &lt;chr&gt; &lt;chr&gt;
+ 1     0.668   0.408    2.84   0.998     356.     188. &lt;NA&gt;  &lt;NA&gt;
+ 2     0.286  -0.369    0.739  1.00      286.     272. &lt;NA&gt;  &lt;NA&gt;
+ 3     0.529  -0.367    1.73   1.00      402.     320. &lt;NA&gt;  &lt;NA&gt;
+ 4     3.48  -13.2      0.776  1.00      530.     339. &lt;NA&gt;  &lt;NA&gt;
+ 5     0.915  -2.63     1.02   1.00      267.     154. &lt;NA&gt;  &lt;NA&gt;
+ 6     0.631  -1.66     0.797  1.00      256.     118. &lt;NA&gt;  &lt;NA&gt;
+ 7     0.537  -1.01     1.04   1.01      296.     143. &lt;NA&gt;  &lt;NA&gt;
+ 8     0.657  -0.983    1.43   0.999     385.     306. &lt;NA&gt;  &lt;NA&gt;
+ 9     0.97   -1.36     2.51   1.01      395.     247. &lt;NA&gt;  &lt;NA&gt;
+10     0.829  -1.59     1.49   1.02      855.     315. &lt;NA&gt;  &lt;NA&gt;
+11     0.94   -2.09     1.53   1.00      436.     348. &lt;NA&gt;  &lt;NA&gt;
+12     0.574   0.191    2.51   1.01      227.     193. &lt;NA&gt;  &lt;NA&gt;
+13     1.40   -4.90     0.365  1         268.     129. &lt;NA&gt;  &lt;NA&gt;
+14     0.536   0.263    2.26   0.998     258.     248. &lt;NA&gt;  &lt;NA&gt;
+15     0.153   1.20     1.78   1.00      333.     472. &lt;NA&gt;  &lt;NA&gt;
+16     0.503   2.02     3.77   1.01      256.     172. &lt;NA&gt;  &lt;NA&gt;
+17     0.312   0.000233 1.10   0.999     349.     333. id    (Intercept)
+18     0       0        0     NA          NA       NA  id    (Intercept)
+19     0       0        0     NA          NA       NA  id    time
+20     0.505   0.0479   1.97   1.00      243.     162. id    time
+   col
+   &lt;chr&gt;
+ 1 &lt;NA&gt;
+ 2 &lt;NA&gt;
+ 3 &lt;NA&gt;
+ 4 &lt;NA&gt;
+ 5 &lt;NA&gt;
+ 6 &lt;NA&gt;
+ 7 &lt;NA&gt;
+ 8 &lt;NA&gt;
+ 9 &lt;NA&gt;
+10 &lt;NA&gt;
+11 &lt;NA&gt;
+12 &lt;NA&gt;
+13 &lt;NA&gt;
+14 &lt;NA&gt;
+15 &lt;NA&gt;
+16 &lt;NA&gt;
+17 (Intercept)
+18 time
+19 (Intercept)
+20 time
 ... truncated to 20 rows; inspect $by_parameter for the full table.</code></pre>
 </div>
-<div class="sourceCode cell-code" id="cb26"><pre class="downlit sourceCode r">
+<div class="sourceCode cell-code" id="cb29"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/diagnosis.html">diagnosis</a></span><span class="op">(</span><span class="va">pred</span><span class="op">)</span></span></code></pre></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>                 metric        value
-1                 draws 1000.0000000
-2           divergences    0.0000000
-3        treedepth_hits    0.0000000
-4             ebfmi_min    0.8622911
-5              max_rhat    1.0514296
-6          min_ess_bulk   45.8329455
-7          min_ess_tail   13.8009786
-8         n_terms_total    7.0000000
-9      n_terms_bad_rhat    4.0000000
-10 n_terms_low_ess_bulk    2.0000000
-11 n_terms_low_ess_tail    4.0000000</code></pre>
+<pre><code>                 metric       value
+1                 draws 1000.000000
+2           divergences    0.000000
+3        treedepth_hits    0.000000
+4             ebfmi_min    1.450653
+5              max_rhat    1.051430
+6          min_ess_bulk   16.105405
+7          min_ess_tail   11.647129
+8         n_terms_total    7.000000
+9      n_terms_bad_rhat    4.000000
+10 n_terms_low_ess_bulk    2.000000
+11 n_terms_low_ess_tail    4.000000</code></pre>
 </div>
 </div>
-<p><code>ranef(fit)</code>, <code>coef(fit)</code>, and <code>vcov(fit)</code> are nested by <code>formulaLong</code> and <code>formulaDist</code>. The posterior aliases <code><a href="../reference/posterior_fixef.html">posterior_fixef()</a></code>, <code><a href="../reference/posterior_ranef.html">posterior_ranef()</a></code>, and <code><a href="../reference/posterior_coef.html">posterior_coef()</a></code> are short forms for requesting the draw-level output of those extractors. For prediction objects, <code>ranef(pred)</code> and <code>vcov(pred)</code> are available only when marker covariance is configured to depend on id.</p>
-</section></section><section class="level2"><h2 id="next-steps">Next steps<a class="anchor" aria-label="anchor" href="#next-steps"></a>
-</h2>
-<ul>
-<li>See the modelling workflow in <code>JoiNMe-workflow</code>.</li>
-<li>Explore association structures in <code>JoiNMe-associations</code>.</li>
-<li>Review the statistical details in <code>JoiNMe-model</code> and <code>JoiNMe-theory</code>.</li>
-</ul></section><script id="quarto-html-after-body" type="application/javascript">
+<p><code>ranef(fit)</code>, <code>coef(fit)</code>, and <code>vcov(fit)</code> are nested by <code>formulaLong</code> and <code>formulaDist</code>. Set <code>summary = FALSE</code> in <code><a href="https://rdrr.io/pkg/nlme/man/fixed.effects.html" class="external-link">fixef()</a></code>, <code><a href="https://rdrr.io/pkg/nlme/man/random.effects.html" class="external-link">ranef()</a></code>, or <code><a href="https://rdrr.io/r/stats/coef.html" class="external-link">coef()</a></code> for draw-level output. The same views are available one layer lower through <code>posterior_summary(what = ..., summary = FALSE)</code> and through the corresponding structured selectors in <code><a href="../reference/extract.html">extract()</a></code>. For prediction objects, <code>ranef(pred)</code> and <code>vcov(pred)</code> are available only when marker covariance depends on id.</p>
+</section></section><script id="quarto-html-after-body" type="application/javascript">
   window.document.addEventListener("DOMContentLoaded", function (event) {
       var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
       var mailtoRegex = new RegExp(/^mailto:/);

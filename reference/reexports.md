@@ -28,5 +28,6 @@ to see their documentation.
 
   [`log_lik()`](https://mc-stan.org/rstantools/reference/log_lik.html),
   [`posterior_epred()`](https://mc-stan.org/rstantools/reference/posterior_epred.html),
+  [`posterior_interval()`](https://mc-stan.org/rstantools/reference/posterior_interval.html),
   [`posterior_linpred()`](https://mc-stan.org/rstantools/reference/posterior_linpred.html),
   [`posterior_predict()`](https://mc-stan.org/rstantools/reference/posterior_predict.html)

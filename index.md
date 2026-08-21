@@ -1,10 +1,10 @@
 # Bayesian joint mixed-effects (JoiNMe) model using Stan
 
 `JoiNMe` (with package name styled as `joinme` for deliberate ambiguity)
-fits Bayesian joint mixed-effects models for multivariate longitudinal
-markers and time-to-event outcomes. It supports multiple outcome
-families (Gaussian, Student-t, binary, count, beta, ordinal, skewed
-families), irregular measurement schedule.
+fits Bayesian nested mixed-effects models for multivariate longitudinal
+markers, either alone or jointly with time-to-event outcomes. It
+supports multiple outcome families (Gaussian, Student-t, binary, count,
+beta, ordinal, skewed families) and irregular measurement schedules.
 
 Current implementation experiments with flexible association structures,
 covariance regression, transform-based modelling for nonlinear effects,
@@ -58,8 +58,9 @@ Allowed distributional parameters:
 - `alpha` (aliases: `alpha_skew`, `skew`)
 - `kappa`: the positive Beta sample size, giving shape parameters
   `mu * kappa` and `(1 - mu) * kappa`
-- `tau`: the skew-double-exponential asymmetry parameter in `(0, 1)`.
-  This is different from fixing it via `tau_fixed`
+- `tau`: the skew-double-exponential quantile/asymmetry parameter in
+  `(0, 1)`. It may be modelled with `formulaDist`, or fixed for one
+  marker with `jm_family("skew_laplace", tau = 0.8)`.
 
 Example:
 
@@ -75,6 +76,26 @@ formulaDist <- list(
   tau[family=skew_double_exponential] ~ 1
 )
 ```
+
+For a fixed skew-Laplace quantile, place the constant in the
+corresponding marker family rather than in `control`:
+
+``` r
+
+families <- list(
+  jm_family("gaussian"),
+  jm_family("skew_laplace", tau = 0.8)
+)
+```
+
+The same `families` declaration can be passed to
+[`simulate_joinme()`](https://trinhdhk.github.io/joinme/reference/simulate_joinme.md).
+The simulator uses the marker-specific constant to generate outcomes and
+records it in the returned distributional truth.
+
+Here `tau = 0.5` gives the symmetric Laplace distribution. Both
+endpoints are excluded: `tau = 0` and `tau = 1` are degenerate limits
+rather than valid skew-Laplace distributions.
 
 ## Installation
 
@@ -94,7 +115,7 @@ formulaDist <- list(
 # precompile_cmdstanr_models()
 ```
 
-### Backend behaviour and threading
+### Backend and threading
 
 - At runtime, `joinme` prefers CmdStanR when CmdStan is installed.
 - If the preferred backend is unavailable in the current session,
@@ -105,20 +126,19 @@ formulaDist <- list(
 Posterior draws are available through a dedicated renamed-draw
 interface:
 
-- `draws(fit, ...)` and `draws(pred, ...)` return `posterior`-compatible
-  draws
+- `posterior_draws(fit, ...)` and `posterior_draws(pred, ...)` return
+  `posterior`-compatible draws
 - `as.array(fit)` and `as.array(pred)` return the same renamed posterior
   arrays
-- [`mcmc_plot()`](https://trinhdhk.github.io/joinme/reference/mcmc_plot.html)
+- [`mcmc_plot()`](https://trinhdhk.github.io/joinme/reference/mcmc_plot.md)
   forwards those draws to `bayesplot`, imitating the behaviour of `brms`
-- [`longitudinal_plot()`](https://trinhdhk.github.io/joinme/reference/longitudinal_plot.html),
-  [`survival_plot()`](https://trinhdhk.github.io/joinme/reference/plot_helpers.html),
-  [`cumhaz_plot()`](https://trinhdhk.github.io/joinme/reference/cumhaz_plot.html),
-  [`association_plot()`](https://trinhdhk.github.io/joinme/reference/association_plot.html),
+- [`longitudinal_plot()`](https://trinhdhk.github.io/joinme/reference/longitudinal_plot.md),
+  [`survival_plot()`](https://trinhdhk.github.io/joinme/reference/survival_plot.md),
+  [`cumhaz_plot()`](https://trinhdhk.github.io/joinme/reference/cumhaz_plot.md),
+  [`association_plot()`](https://trinhdhk.github.io/joinme/reference/association_plot.md),
   and
-  [`diagnostic_plot()`](https://trinhdhk.github.io/joinme/reference/diagnostic_plot.html)
-  provide entry points to the main
-  [`plot()`](https://rdrr.io/r/graphics/plot.default.html) methods.
+  [`diagnostic_plot()`](https://trinhdhk.github.io/joinme/reference/diagnostic_plot.md)
+  provide methods for plotting individual processes.
 
 ## Quick example
 
@@ -127,7 +147,7 @@ interface:
 
 library(joinme)
 
-set.seed(2026)
+set.seed(1)
 
 # Simulate a small dataset
 sim <- simulate_joinme(
@@ -136,12 +156,11 @@ sim <- simulate_joinme(
     jm_family("student_t"),
     jm_family("student_t", inv_link = ~ inv_logit(x / 2))
   ),
-  n_obs_per_marker_per_id = 4,
   times_obs = seq(0, 5, length.out = 8),
   quadrature_nodes = 31,
   seed = 2026,
   assoc = c("cv_total"),
-  assoc_coefs = c(cv_total = 0.6)
+  truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.6)))
 )
 
 # Note: when estimating marker weights, compare to sim$truth$marker_weights
@@ -183,7 +202,7 @@ fixef(fit)
 coef(fit)
 
 # Renamed posterior draws
-draws(fit, variables = c("time", "alpha_cv_total"), format = "draws_df")
+posterior_draws(fit, variables = c("time", "alpha_cv_total"), format = "draws_df")
 
 # Bayesplot-backed posterior display with renamed variables
 mcmc_plot(fit, variable = c("time", "alpha_cv_total"), type = "trace")
@@ -207,6 +226,23 @@ ce_average_marker <- conditional_effects(
   longitudinal_estimand = "marginal_marker",
   plot = FALSE
 )
+
+# Paired posterior contrast between two covariate profiles
+contrast_profiles <- data.frame(
+  time = seq(0, 5, length.out = 40),
+  x2 = 0,
+  cond__ = paste0("time=", round(seq(0, 5, length.out = 40), 2))
+)
+cc <- conditional_contrast(
+  fit,
+  groupA = c(x1 = 1),
+  groupB = c(x1 = -1),
+  conditions = contrast_profiles,
+  process = c("longitudinal", "event"),
+  longitudinal_estimand = "marginal_marker",
+  plot = FALSE
+)
+plot(cc, condition_variable = "time", ask = FALSE)
 
 # Random effects / covariance / combined coefficients (nested by formula block)
 re_fit <- ranef(fit)
@@ -259,10 +295,16 @@ plot(
 
 # Posterior summary/extraction helpers
 posterior_summary(fit)
-posterior_fixef(fit)
-posterior_ranef(fit)
-posterior_coef(fit)
 posterior_assoc(fit, summary = TRUE)
+
+# Conventional coefficient interfaces use posterior_summary() for reporting
+# and extract() for their draw-level inputs.
+fixef(fit)
+ranef(fit)
+coef(fit)
+extract(fit, what = "fixed_effects")
+extract(fit, what = "random_effects")
+extract(fit, what = "coefficients")
 
 # Explicit fitted-object plot helpers
 association_plot(fit)

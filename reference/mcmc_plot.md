@@ -3,8 +3,8 @@
 Provides a JoiNMe-friendly wrapper around `bayesplot::mcmc_*` functions.
 The posterior draws are first relabelled with user-facing parameter
 names via
-[`draws()`](https://trinhdhk.github.io/joinme/reference/draws.md), after
-which the selected bayesplot geometry is applied.
+[`posterior_draws()`](https://trinhdhk.github.io/joinme/reference/posterior_draws.md),
+after which the selected bayesplot geometry is applied.
 
 ## Usage
 

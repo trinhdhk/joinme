@@ -9,7 +9,7 @@ data, and control arguments."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">joinme</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2608</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.2</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -93,7 +93,11 @@ data, and control arguments.</p>
 
 
 <dt id="arg-formulavcov">formulaVCov<a class="anchor" aria-label="anchor" href="#arg-formulavcov"></a></dt>
-<dd><p>Optional updated covariance formula (full or update form).</p></dd>
+<dd><p>Optional updated covariance regression. Supply one formula
+to update both components, or <code>list(sd = ~ ..., corr = ~ ...)</code> to update
+the standard-deviation and off-diagonal correlation regressions
+independently. Update formulae containing <code>.</code> are supported within each
+component.</p></dd>
 
 
 <dt id="arg-formuladist">formulaDist<a class="anchor" aria-label="anchor" href="#arg-formuladist"></a></dt>
@@ -127,12 +131,15 @@ If NULL, the parent frame is used. When failed, the environment of the original 
 
 
 <dt id="arg--">...<a class="anchor" aria-label="anchor" href="#arg--"></a></dt>
-<dd><p>Additional arguments passed to <code><a href="joinme.html">joinme()</a></code>.</p></dd>
+<dd><p>Additional arguments passed to <code><a href="joinme.html">joinme()</a></code>, or to <code><a href="joinme_mix.html">joinme_mix()</a></code>
+when <code>object</code> is a latent-progress mixture.</p></dd>
 
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p>A refitted JoiNMe object.</p>
+    <p>A refitted JoiNMe object. Mixture fits retain their mixture entry
+point and class specification. Any longitudinal-only fit remains
+longitudinal only unless new event inputs are supplied explicitly.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>

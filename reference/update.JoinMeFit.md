@@ -50,7 +50,11 @@ update(
 
 - formulaVCov:
 
-  Optional updated covariance formula (full or update form).
+  Optional updated covariance regression. Supply one formula to update
+  both components, or `list(sd = ~ ..., corr = ~ ...)` to update the
+  standard-deviation and off-diagonal correlation regressions
+  independently. Update formulae containing `.` are supported within
+  each component.
 
 - formulaDist:
 
@@ -86,11 +90,16 @@ update(
 - ...:
 
   Additional arguments passed to
-  [`joinme()`](https://trinhdhk.github.io/joinme/reference/joinme.md).
+  [`joinme()`](https://trinhdhk.github.io/joinme/reference/joinme.md),
+  or to
+  [`joinme_mix()`](https://trinhdhk.github.io/joinme/reference/joinme_mix.md)
+  when `object` is a latent-progress mixture.
 
 ## Value
 
-A refitted JoiNMe object.
+A refitted JoiNMe object. Mixture fits retain their mixture entry point
+and class specification. Any longitudinal-only fit remains longitudinal
+only unless new event inputs are supplied explicitly.
 
 ## See also
 

@@ -20,15 +20,9 @@ joinme_standata(
   assoc = c("cv_mean"),
   families = NULL,
   transforms = NULL,
-  beta_prior = NULL,
-  alpha_prior = NULL,
-  iota_prior = NULL,
-  lkj_prior = NULL,
+  prior_specification = NULL,
   allow_marker_crosscorr = 1L,
   shrinkage = 0L,
-  marker_weights = NULL,
-  fixed_marker_weights = FALSE,
-  shared_marker_weights = TRUE,
   basehaz = c("bs", "ns", "formula"),
   basehaz_n_knots = 5L,
   basehaz_knots = NULL,
@@ -37,7 +31,8 @@ joinme_standata(
   tau_spline = 0.4,
   quadrature_nodes = NULL,
   vcov_diag_link = c("softplus", "exp"),
-  tau_fixed = NULL,
+  mixture = NULL,
+  include_survival = TRUE,
   seed = .Random.seed[[1]]
 )
 ```
@@ -73,28 +68,37 @@ joinme_standata(
 
   - `survival::Surv(time, status, type = "left")`
 
-  - `survival::Surv(time1, time2, type = "interval2")` The legacy
-    `type = "interval"` form is intentionally rejected.
+  - `survival::Surv(time1, time2, type = "interval2")` The former
+    `type = "interval"` form is intentionally rejected. For an
+    interval-censored event in \\(L,R\]\\, the prepared data contain an
+    event-free row from zero to \\L\\ and a failure-within-interval row
+    from \\L\\ to \\R\\. Their log-likelihood contributions sum to
+    \\\log\\S(L)-S(R)\\\\. This is a full event likelihood, not a Cox
+    partial likelihood.
 
 - dataEvent:
 
   Event-process data with either one row per id (`Surv(time, status)`)
   or multiple time-split rows per id (`Surv(start, stop, status)`).
   Covariates referenced in `formulaEvent` may vary by interval in the
-  split form.
+  split form. Left- and interval-censored responses require one row per
+  id and presently describe one event type.
 
 - formulaVCov:
 
-  Covariance regression formula for id-specific marker-by-id effects. If
-  the marker block omits the inner `( ... | id )`, then marker-by-id
-  effects are absent and covariance-style associations (`corr`, `vcov`)
-  are not allowed. Downstream, `corr` uses the off-diagonal entries of
-  the subject-specific Cholesky-correlation factor `K`, whereas `vcov`
-  uses those off-diagonal `K` entries together with the subject-specific
-  standard deviations. If both `corr` and `vcov` are requested, `vcov`
-  is kept and `corr` is ignored with a warning. The default `~ 1` is
-  valid and yields an intercept-only covariance regression with no
-  subject-level slope columns.
+  Covariance regression specification for id-specific marker-by-id
+  effects. A formula applies the same observed covariates to both
+  components. A named list, `list(sd = ~ ..., corr = ~ ...)`, regresses
+  standard deviations and off-diagonal partial correlations
+  independently. If the marker block omits the inner `( ... | id )`,
+  then marker-by-id effects are absent and covariance-style associations
+  (`corr`, `vcov`) are not allowed. Downstream, `corr` uses the
+  off-diagonal entries of the subject-specific Cholesky-correlation
+  factor `K`, whereas `vcov` uses those off-diagonal `K` entries
+  together with the subject-specific standard deviations. If both `corr`
+  and `vcov` are requested, `vcov` is kept and `corr` is ignored with a
+  warning. The default `~ 1` is valid and yields an intercept-only
+  covariance regression with no subject-level slope columns.
 
 - formulaDist:
 
@@ -151,7 +155,10 @@ joinme_standata(
   inverse-link formula. In formula syntax, `inv_Phi`/`qnorm`/`probit`
   denote the standard normal quantile and `Phi`/`pnorm` denote the
   standard normal CDF. Thus a probit forward link is inverted to `Phi`
-  before Stan data are constructed.
+  before Stan data are constructed. A skew-Laplace marker may
+  additionally fix its quantile/asymmetry parameter with
+  `jm_family("skew_laplace", tau = 0.8)`. Fixed values must lie strictly
+  between zero and one and are carried separately for each marker.
 
 - transforms:
 
@@ -167,25 +174,26 @@ joinme_standata(
   piecewise-linear fits use
   `list(type = "pwlin", knots = ..., direction = "increasing")` (or
   `"decreasing"`). Their knot ordinates are estimated from simplex
-  increments; legacy `x` is accepted as an alias for `knots`, while
-  legacy `y` no longer fixes the fitted curve.
+  increments; the earlier `x` field is accepted as an alias for `knots`,
+  while the earlier `y` field no longer fixes the fitted curve.
 
-- beta_prior:
+- prior_specification:
 
-  Prior specification for longitudinal fixed effects.
-
-- alpha_prior:
-
-  Prior specification for association parameters.
-
-- iota_prior:
-
-  Prior specification for fit-only affine-shift intercept and slope
-  parameters used by functional association transforms.
-
-- lkj_prior:
-
-  Prior specification for correlation structures.
+  A component-based
+  [`jm_prior()`](https://trinhdhk.github.io/joinme/reference/joinme_priors.md)
+  declaration. Global `intercept` and `slope` declarations are inherited
+  unless a scientific component supplies the corresponding role
+  explicitly. Marker-weighted associations are governed entirely by its
+  `marker_weights` component. `marker_weights$offset` is a wholly named
+  or wholly unnamed numeric vector; with term-specific weights it may
+  instead be a named collection indexed by `cv_total`, `cs_total`,
+  `cv_marker`, or `cs_marker`. `marker_weights$family = "constant"` (or
+  `"none"`) uses the offset exactly and fits no marker-weight
+  coefficient. A stochastic family fits
+  `offset + common location + unit-scale marker departure`, with the
+  common-location fitting prior in `marker_weights$intercept`. It does
+  not supply a population value to simulation. The association slope
+  supplies the multiplier for the completed weighted marker feature.
 
 - allow_marker_crosscorr:
 
@@ -193,34 +201,10 @@ joinme_standata(
 
 - shrinkage:
 
-  Integer flag controlling shrinkage behaviour for marker-by-id effects.
-  0 = student_t(6, 0, 1), 1 = double_exponential(0, 1), 2 =
-  std_normal();
-
-- marker_weights:
-
-  Optional base weights for marker-specific association components. If
-  `shared_marker_weights = TRUE`, provide one numeric vector of length D
-  (or one named numeric vector keyed by marker level) that is shared
-  across all active weighted association terms. If
-  `shared_marker_weights = FALSE`, you may instead provide a named list
-  with entries `cv_total`, `cs_total`, `cv_marker`, and `cs_marker`.
-  Each supplied entry is aligned to marker order and used only for the
-  matching active weighted association term.
-
-- fixed_marker_weights:
-
-  Logical; if TRUE, marker weights are kept fixed at `marker_weights`
-  (no perturbation). If FALSE, marker weights are estimated via signed
-  additive perturbations, `marker_weights + z_marker_weights`. The
-  standardized latent family is selected by `shrinkage`: Student-t(6),
-  Laplace, or Normal for 0, 1, or 2.
-
-- shared_marker_weights:
-
-  Logical; if TRUE, all active weighted marker-based association terms
-  share one marker-weight structure. If FALSE, each active weighted
-  marker-based association term gets its own marker-weight structure.
+  Compatibility flag used by latent-class component distributions and
+  simulation: 0 = Student-t(6), 1 = Laplace, and 2 = Normal. Ordinary
+  coefficient and marker priors are declared separately through
+  [`jm_prior()`](https://trinhdhk.github.io/joinme/reference/joinme_priors.md).
 
 - basehaz:
 
@@ -249,20 +233,29 @@ joinme_standata(
 - quadrature_nodes:
 
   Optional positive integer target for total quadrature points. Allowed
-  values are exactly `7`, `15`, `31`, `41`, `51`, and `61`. Only the
-  node count is passed to Stan; GK nodes/weights are fixed in Stan.
+  values are exactly `7`, `15`, `31`, `41`, `51`, and `61`.
 
 - vcov_diag_link:
 
   Link for the subject-specific standard deviation regression:
   "softplus" or "exp".
 
-- tau_fixed:
+- mixture:
 
-  Optional fixed quantile/asymmetry parameter for the skew double
-  exponential family. It must lie strictly between zero and one; the
-  value \\0.5\\ gives the symmetric double exponential distribution. It
-  cannot be combined with a `tau` distributional regression.
+  Internal latent-progress mixture specification. The public interface
+  is
+  [`joinme_mix()`](https://trinhdhk.github.io/joinme/reference/joinme_mix.md);
+  ordinary
+  [`joinme()`](https://trinhdhk.github.io/joinme/reference/joinme.md)
+  calls leave this as `NULL`, which contributes no mixture parameters or
+  mixture prior.
+
+- include_survival:
+
+  Logical indicator that the supplied event rows represent an observed
+  survival process. The fitting entry points set this to `FALSE` only
+  when they have constructed an internal likelihood-neutral scaffold for
+  a longitudinal-only analysis.
 
 - seed:
 
@@ -276,17 +269,10 @@ joinme_standata(
 
 This builder performs three key steps:
 
-1.  Constructs fixed-effect and random-effect design matrices on a
-    scaled time axis.
+1.  Constructs fixed-effect and random-effect design matrices.
 
 2.  Creates distributional regression matrices (including optional
     random effects).
 
 3.  Assembles spline bases and Gauss-Kronrod nodes for survival
-    integration. Only the node count is passed to Stan; nodes/weights
-    are hardcoded in the Stan functions that evaluate the cumulative
-    hazard.
-
-Time is scaled internally as `t_scaled = t/t_max` for numerical
-stability; indices are recorded to rescale time-associated coefficients
-back to the original units inside Stan.
+    integration.

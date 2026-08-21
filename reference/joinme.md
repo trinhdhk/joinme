@@ -11,8 +11,8 @@ control\$engine.
 joinme(
   formulaLong,
   dataLong,
-  formulaEvent,
-  dataEvent,
+  formulaEvent = NULL,
+  dataEvent = NULL,
   formulaVCov = ~1,
   formulaDist = NULL,
   control = list(),
@@ -20,8 +20,6 @@ joinme(
   families = NULL,
   transforms = NULL,
   priors = joinme_priors(),
-  fixed_marker_weights = FALSE,
-  shared_marker_weights = TRUE,
   basehaz = joinme_basehaz(),
   fit = TRUE,
   seed = NULL,
@@ -50,31 +48,45 @@ joinme(
 
 - formulaEvent:
 
-  Survival formula for baseline covariates and event model. Supported
-  LHS forms are `survival::Surv(time, status)`,
-  `survival::Surv(start, stop, status)`,
+  Optional survival formula for baseline covariates and the event model.
+  Supply it together with `dataEvent`, or leave both `NULL` to fit only
+  the nested longitudinal mixed model. Supported LHS forms are
+  `survival::Surv(time, status)`, `survival::Surv(start, stop, status)`,
   `survival::Surv(time, status, type = "left")`, and
-  `survival::Surv(time1, time2, type = "interval2")`. The legacy
-  `type = "interval"` representation is not supported.
+  `survival::Surv(time1, time2, type = "interval2")`. The former
+  `type = "interval"` representation is not supported. An `interval2`
+  response must contain one row per id and presently describes one event
+  type. Its full likelihood is evaluated as \\S(L)-S(R)\\ for \\L\<T\le
+  R\\; the lower inspection limit is not treated as delayed entry. The
+  event covariates on that row are held over the represented risk time,
+  whilst longitudinal association terms remain time-varying. See the
+  model-interpretation vignette for all four censoring contributions.
 
 - dataEvent:
 
-  Event-process data with either one row per id (`Surv(time, status)`)
-  or multiple interval rows per id (`Surv(start, stop, status)`).
-  Covariates in `formulaEvent` may vary by interval.
+  Optional event-process data with either one row per id
+  (`Surv(time, status)`) or multiple interval rows per id
+  (`Surv(start, stop, status)`). Covariates in `formulaEvent` may vary
+  by interval for a counting-process response. Left- and
+  interval-censored responses require one row per id. Leave this and
+  `formulaEvent` as `NULL` for longitudinal-only fitting.
 
 - formulaVCov:
 
-  Covariance regression formula for id-specific marker-by-id effects. If
-  the marker block omits the inner `( ... | id )`, marker-by-id effects
-  are absent and covariance-style associations (`corr`, `vcov`) are not
-  allowed. When present, `corr` associations use the off-diagonal
-  entries of the subject-specific Cholesky-correlation factor `K`,
-  whereas `vcov` associations use those same off-diagonal `K` entries
-  together with the subject-specific standard deviations. If both `corr`
-  and `vcov` are requested, `vcov` is kept and `corr` is ignored with a
-  warning. The default `~ 1` remains a supported intercept-only
-  covariance regression.
+  Covariance regression specification for id-specific marker-by-id
+  effects. Supply one formula to share its observed covariates, or
+  `list(sd = ~ ..., corr = ~ ...)` to model standard deviations and
+  off-diagonal partial correlations independently. Intercepts are always
+  component-specific parameters and are not duplicated in either design.
+  If the marker block omits the inner `( ... | id )`, marker-by-id
+  effects are absent and covariance-style associations (`corr`, `vcov`)
+  are not allowed. When present, `corr` associations use the
+  off-diagonal entries of the subject-specific Cholesky-correlation
+  factor `K`, whereas `vcov` associations use those same off-diagonal
+  `K` entries together with the subject-specific standard deviations. If
+  both `corr` and `vcov` are requested, `vcov` is kept and `corr` is
+  ignored with a warning. The default `~ 1` remains a supported
+  intercept-only covariance regression.
 
 - formulaDist:
 
@@ -146,15 +158,9 @@ joinme(
 
   - quadrature_nodes: optional positive integer total node target for
     survival integration. Allowed values are exactly 7/15/31/41/51/61.
-    Only the node count is passed to Stan; GK nodes/weights are fixed in
-    the Stan code.
 
   - vcov_diag_link: "softplus" or "exp" for covariance regression
     diagonals.
-
-  - `tau_fixed`: optional fixed `tau` in \\(0,1)\\ for the skew double
-    exponential distribution. It cannot be combined with a `tau`
-    distributional regression.
 
 - draws:
 
@@ -164,8 +170,11 @@ joinme(
 
   Marker-specific family specification (optional). Can be a character
   vector of family names aligned to marker order, or a list of
-  `jm_family(...)` entries with per-marker links. Supported named
-  forward links are `identity`, `log`, `logit`, `probit`, and `exp`;
+  `jm_family(...)` entries with per-marker links. A skew-Laplace marker
+  may fix its quantile/asymmetry parameter through
+  `jm_family("skew_laplace", tau = 0.8)`; otherwise `tau` is estimated.
+  Supported named forward links are `identity`, `log`, `logit`,
+  `probit`, and `exp`;
   [`jm_family()`](https://trinhdhk.github.io/joinme/reference/joinme_family.md)
   also accepts an invertible formula link or a directly specified
   inverse-link formula. In formula syntax, `inv_Phi`/`qnorm`/`probit`
@@ -184,23 +193,21 @@ joinme(
 
 - priors:
 
-  Prior declaration. Prefer `joinme_priors(...)`; raw named lists with
-  components `beta`, `alpha`, `iota`, and `lkj` remain supported.
-
-- fixed_marker_weights:
-
-  Logical; if TRUE, marker weights are fixed at the supplied base
-  values. If FALSE, marker-weight perturbations are estimated using the
-  family selected by `shrinkage` (0 = Student-t(6), 1 = Laplace, 2 =
-  Normal).
-
-- shared_marker_weights:
-
-  Logical; if TRUE, all weighted marker-based association terms share
-  one marker-weight structure. If FALSE, each active weighted
-  marker-based association term gets its own marker-weight structure.
-  When `marker_weights` is a named list, use names `cv_total`,
-  `cs_total`, `cv_marker`, and `cs_marker`.
+  Prior declaration from
+  [`jm_prior()`](https://trinhdhk.github.io/joinme/reference/joinme_priors.md).
+  Global `intercept` and `slope` declarations may be replaced
+  independently within `longitudinal`, `survival`, `vcov`, `assoc`,
+  `functional`, `marker_weights`, and named distributional regressions.
+  Distributional names may use family or marker selectors, for example
+  `` `sigma[family='student']` `` or `` `sigma[marker='y']` ``; marker
+  selection requires a uniquely associated family-scoped `formulaDist`
+  block. `marker$family`, `class$slope`, and an LKJ declaration govern
+  their distinct structures. The `priors$marker_weights` component
+  contains the complete marker-weight declaration. Its `offset` is added
+  to fitted weights and must be wholly named or wholly unnamed. Set
+  `family = "constant"` (or `"none"`) to use that offset exactly.
+  Otherwise the model adds a fitted common location and standardised
+  marker-specific departures from the declared family.
 
 - basehaz:
 
@@ -252,14 +259,32 @@ Marker weights (see
 [`joinme_standata()`](https://trinhdhk.github.io/joinme/reference/joinme_standata.md))
 are used to form marker-average summaries for both current value (CV)
 and current slope (CS) association components. When
-`shared_marker_weights = TRUE`, all weighted marker-based association
-terms share one marker-weight structure. When
-`shared_marker_weights = FALSE`, each active weighted marker-based
-association term (`cv_total`, `cs_total`, `cv_marker`, `cs_marker`) gets
-its own marker-weight structure. When `fixed_marker_weights = FALSE`,
-signed perturbations are estimated around the supplied base weights. The
-effective marker intensities are used directly, without additional
-normalisation, to scale the corresponding association contribution.
+`priors$marker_weights$shared = TRUE`, all weighted marker-based
+association terms share one marker-weight structure. When
+`priors$marker_weights$shared = FALSE`, each active weighted
+marker-based association term (`cv_total`, `cs_total`, `cv_marker`,
+`cs_marker`) gets its own marker-weight structure. When the family is
+stochastic, one common mean per weight set and signed marker-specific
+departures are estimated around the offset declared in
+`priors$marker_weights$offset`. Each offset vector must be wholly named
+or wholly unnamed. The common mean uses
+`jm_prior(marker_weights = list(intercept = ...))`; standardised
+departures use the centred unit-scale family named by
+`marker_weights$family`, for example
+`jm_prior(marker_weights = list(family = "laplace"))`. The family
+intercept is a fitting prior and does not set a simulation truth. A bare
+numeric value retains the ordinary prior-scale shorthand. The
+marker-only current-value and slope channels can supply little
+information about a common shift when the average centred marker
+trajectory is close to zero, so this location prior is substantively
+important. The family name `"student_t"` learns set-specific degrees of
+freedom; each excess above two has a `Gamma(2, 0.1)` shape–rate prior. A
+`prior_student_t(df = ...)` declaration always fixes `df` instead. The
+family names `"constant"` and `"none"` instead use the declared offset
+as the complete marker weight and fit neither a common mean nor
+departures. The effective marker intensities are used directly, without
+additional normalisation, to scale the corresponding association
+contribution.
 
 The returned `JoiNMeFit` object stores a compact association plotting
 bundle containing only the posterior quantities needed to draw
@@ -269,10 +294,18 @@ plotting usable after serialization without needing the full transient
 CmdStan CSV outputs.
 
 For CmdStanR fits, `joinme()` also eagerly imports the CSV-backed fit
-contents in memory before returning. This mirrors the loading step used
-by `cmdstanr::save_object()` so later
+contents in memory before returning. This mirrors the loading operation
+used by `cmdstanr::save_object()` so later
 [`saveRDS()`](https://rdrr.io/r/base/readRDS.html) calls do not rely on
 the original CmdStan CSV files remaining on disk.
+
+`joinme()` can also fit the nested multivariate longitudinal model
+without an event process. Leave both `formulaEvent` and `dataEvent` as
+`NULL`. The longitudinal likelihood and every random-effect block are
+retained, whereas the survival likelihood and longitudinal–survival
+association are removed. Internally, a likelihood-neutral event scaffold
+is used only to reuse the common design and Stan infrastructure. Its
+event parameters are not reported as fitted scientific results.
 
 Formula-scoped subject weighting is supported in random-effect grouping
 terms via `weighted(group, weights = <column>)`. For example:
@@ -365,8 +398,7 @@ For monotone spline transforms:
   pairs or to help derive knot locations.
 
 - `y`: optional target transformed values at those `x` points. Supplying
-  `y` activates the legacy plug-in fit; omitting it activates Stan
-  estimation.
+  `y` activates the plug-in fit; omitting it activates Stan estimation.
 
 - `lambda`: smoothness control (larger = smoother transform).
 
@@ -402,6 +434,13 @@ random-effect covariance.
 
 ``` r
 if (FALSE) { # \dontrun{
+longitudinal_fit <- joinme(
+  formulaLong = y ~ time + (1 + time | id) +
+    (1 + time + (1 + time | id) | marker),
+  dataLong = dataLong,
+  families = rep("gaussian", 3)
+)
+
 formulaDist <- list(
   sigma[family=student_t] ~ 1 + time + (1 | id),
   sigma[family=gaussian] ~ 1 + x1,

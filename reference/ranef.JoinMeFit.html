@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">joinme</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2608</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.2</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -45,7 +45,16 @@
 
     <div class="section level2">
     <h2 id="ref-usage">Usage<a class="anchor" aria-label="anchor" href="#ref-usage"></a></h2>
-    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="co"># S3 method for class 'JoiNMeFit'</span></span>
+    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">.summarise_random_effect_posterior</span><span class="op">(</span></span>
+<span>  <span class="va">object</span>,</span>
+<span>  draws <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  seed <span class="op">=</span> <span class="fl">1</span>,</span>
+<span>  digits <span class="op">=</span> <span class="fl">3</span>,</span>
+<span>  summary <span class="op">=</span> <span class="cn">TRUE</span>,</span>
+<span>  <span class="va">...</span></span>
+<span><span class="op">)</span></span>
+<span></span>
+<span><span class="co"># S3 method for class 'JoiNMeFit'</span></span>
 <span><span class="fu"><a href="https://rdrr.io/pkg/nlme/man/random.effects.html" class="external-link">ranef</a></span><span class="op">(</span><span class="va">object</span>, draws <span class="op">=</span> <span class="cn">NULL</span>, seed <span class="op">=</span> <span class="fl">1</span>, digits <span class="op">=</span> <span class="fl">3</span>, summary <span class="op">=</span> <span class="cn">TRUE</span>, <span class="va">...</span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -80,9 +89,13 @@ return the posterior extraction on the coefficient scale.</p></dd>
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p>A nested list with top-level entries <code>formulaLong</code> and <code>formulaDist</code>.
+    <p>A nested list with top-level entries <code>formulaLong</code>, <code>assoc</code>, and
+<code>formulaDist</code>.
 <code>formulaLong</code> contains random-effect summaries for longitudinal model
-components (<code>id</code>, <code>marker</code>, <code>marker_by_id_latent</code>, when present).
+components (<code>id</code>, <code>marker</code>, <code>marker_by_id_latent</code>, when present). <code>assoc</code>
+contains only marker-specific weight departures,
+calculated as effective weight minus fitted mean minus declared offset;
+<code>assoc_term</code> distinguishes term-specific weight sets.
 <code>formulaDist</code> contains distributional random-effect summaries organised by
 parameter and family scope (e.g., <code>sigma$student_t</code>, <code>nu$allFamilies</code>).</p>
     </div>

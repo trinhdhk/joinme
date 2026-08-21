@@ -9,7 +9,12 @@ the model fit interface.
 
 
 The implementation is model-matrix based end-to-end, so every simulated component
-is generated from the same formula machinery used during fitting."><meta property="og:description" content="Simulator for JoiNMe that mirrors the fitting syntax as closely as
+is generated from the same formula machinery used during fitting.
+Population coefficients are declared through truth. A prior_*() object
+generates one population coefficient vector and a finite numeric vector
+fixes that vector exactly. Every realised coefficient is stored in truth.
+Random effects, marker-weight departures, observations and event times remain
+conditional random realisations."><meta property="og:description" content="Simulator for JoiNMe that mirrors the fitting syntax as closely as
 possible. The simulator supports:
 multivariate outcomes via marker-level families,
 multi-structure random effects from formulaLong (id, marker, marker-by-id),
@@ -19,7 +24,12 @@ the model fit interface.
 
 
 The implementation is model-matrix based end-to-end, so every simulated component
-is generated from the same formula machinery used during fitting."></head><body>
+is generated from the same formula machinery used during fitting.
+Population coefficients are declared through truth. A prior_*() object
+generates one population coefficient vector and a finite numeric vector
+fixes that vector exactly. Every realised coefficient is stored in truth.
+Random effects, marker-weight departures, observations and event times remain
+conditional random realisations."></head><body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
 
 
@@ -27,7 +37,7 @@ is generated from the same formula machinery used during fitting."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">joinme</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2608</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.2</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -68,6 +78,11 @@ possible. The simulator supports:</p><ul><li><p>multivariate outcomes via marker
 the model fit interface.</p></li>
 </ul><p>The implementation is model-matrix based end-to-end, so every simulated component
 is generated from the same formula machinery used during fitting.</p>
+<p>Population coefficients are declared through <code>truth</code>. A <code>prior_*()</code> object
+generates one population coefficient vector and a finite numeric vector
+fixes that vector exactly. Every realised coefficient is stored in <code>truth</code>.
+Random effects, marker-weight departures, observations and event times remain
+conditional random realisations.</p>
     </div>
 
     <div class="section level2">
@@ -79,6 +94,7 @@ is generated from the same formula machinery used during fitting.</p>
 <span>  formulaDist <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  formulaAssoc <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  transforms <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  truth <span class="op">=</span> <span class="fu"><a href="joinme_truth.html">joinme_truth</a></span><span class="op">(</span><span class="op">)</span>,</span>
 <span>  n_id <span class="op">=</span> <span class="fl">50</span>,</span>
 <span>  families <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"gaussian"</span>, <span class="st">"student_t"</span>, <span class="st">"binomial"</span><span class="op">)</span>,</span>
 <span>  marker_levels <span class="op">=</span> <span class="cn">NULL</span>,</span>
@@ -87,30 +103,16 @@ is generated from the same formula machinery used during fitting.</p>
 <span>  censor_longitudinal_after_event <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  left_truncation_max <span class="op">=</span> <span class="fl">0</span>,</span>
 <span>  truncate_longitudinal_before_entry <span class="op">=</span> <span class="cn">TRUE</span>,</span>
-<span>  <span class="va">...</span>,</span>
 <span>  seed <span class="op">=</span> <span class="va">.Random.seed</span><span class="op">[[</span><span class="fl">1</span><span class="op">]</span><span class="op">]</span>,</span>
 <span>  covariate_formulas <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span><span class="va">x1</span> <span class="op">~</span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n_id</span><span class="op">)</span>, <span class="va">x2</span> <span class="op">~</span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n_id</span><span class="op">)</span><span class="op">)</span>,</span>
-<span>  marker_weights <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  shared_marker_weights <span class="op">=</span> <span class="cn">TRUE</span>,</span>
-<span>  fixed_marker_weights <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  shrinkage <span class="op">=</span> <span class="fl">0L</span>,</span>
 <span>  assoc <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"cv_total"</span><span class="op">)</span>,</span>
-<span>  assoc_coefs <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>cv_total <span class="op">=</span> <span class="fl">0.6</span><span class="op">)</span>,</span>
-<span>  beta_long <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  beta_event <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  dist_coefs <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span><span class="op">)</span>,</span>
-<span>  re_params <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>id <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>sd <span class="op">=</span> <span class="cn">NULL</span>, corr <span class="op">=</span> <span class="cn">NULL</span><span class="op">)</span>, marker <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>sd <span class="op">=</span> <span class="cn">NULL</span>, corr <span class="op">=</span></span>
-<span>    <span class="cn">NULL</span><span class="op">)</span>, id_marker_cov <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>latent <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>sd <span class="op">=</span> <span class="cn">NULL</span>, corr <span class="op">=</span> <span class="cn">NULL</span><span class="op">)</span>, alpha <span class="op">=</span> <span class="cn">NULL</span>, beta</span>
-<span>    <span class="op">=</span> <span class="cn">NULL</span>, lambda <span class="op">=</span> <span class="cn">NULL</span>, diag_link <span class="op">=</span> <span class="st">"softplus"</span><span class="op">)</span>, dist <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span><span class="op">)</span><span class="op">)</span>,</span>
+<span>  vcov_diag_link <span class="op">=</span> <span class="st">"softplus"</span>,</span>
 <span>  family_params <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>gaussian <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>sigma <span class="op">=</span> <span class="fl">1</span><span class="op">)</span>, student_t <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>sigma <span class="op">=</span> <span class="fl">1.5</span>, nu <span class="op">=</span> <span class="fl">4</span><span class="op">)</span>,</span>
 <span>    bernoulli <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span><span class="op">)</span>, binomial <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>trials <span class="op">=</span> <span class="fl">10</span><span class="op">)</span>, poisson <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span><span class="op">)</span>, negbin2 <span class="op">=</span></span>
 <span>    <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>phi <span class="op">=</span> <span class="fl">2</span><span class="op">)</span>, skew_normal <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>sigma <span class="op">=</span> <span class="fl">1</span>, alpha <span class="op">=</span> <span class="fl">0</span><span class="op">)</span>, double_exponential <span class="op">=</span></span>
 <span>    <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>sigma <span class="op">=</span> <span class="fl">1</span><span class="op">)</span>, skew_double_exponential <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>sigma <span class="op">=</span> <span class="fl">1</span>, tau <span class="op">=</span> <span class="fl">0.5</span><span class="op">)</span>, beta <span class="op">=</span></span>
 <span>    <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>kappa <span class="op">=</span> <span class="fl">10</span><span class="op">)</span>, cumulative_logit <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>cutpoints <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="op">-</span><span class="fl">1</span>, <span class="fl">1</span><span class="op">)</span><span class="op">)</span><span class="op">)</span>,</span>
-<span>  h0 <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  baseline_hazard <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>type <span class="op">=</span> <span class="st">"weibull"</span>, shape <span class="op">=</span> <span class="fl">1.4</span>, scale <span class="op">=</span> <span class="fl">6</span><span class="op">)</span>,</span>
-<span>  formulaBasehaz <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  beta_basehaz <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  time_cens <span class="op">=</span> <span class="fl">8</span>,</span>
 <span>  eps_cs <span class="op">=</span> <span class="fl">0.001</span>,</span>
 <span>  integration_control <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>rel.tol <span class="op">=</span> <span class="fl">1e-06</span>, subdivisions <span class="op">=</span> <span class="fl">2000L</span>, stop.on.error <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span>,</span>
@@ -123,7 +125,8 @@ is generated from the same formula machinery used during fitting.</p>
 <span>  time_var <span class="op">=</span> <span class="st">"time"</span>,</span>
 <span>  y_var <span class="op">=</span> <span class="st">"y"</span>,</span>
 <span>  event_time_var <span class="op">=</span> <span class="st">"time"</span>,</span>
-<span>  event_var <span class="op">=</span> <span class="st">"event"</span></span>
+<span>  event_var <span class="op">=</span> <span class="st">"event"</span>,</span>
+<span>  .mixture_specification <span class="op">=</span> <span class="cn">NULL</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -142,19 +145,25 @@ keeps marker-only and marker-by-id blocks independent, while inner
 
 
 <dt id="arg-formulaevent">formulaEvent<a class="anchor" aria-label="anchor" href="#arg-formulaevent"></a></dt>
-<dd><p>Event/survival formula (same role as in <code><a href="joinme.html">joinme()</a></code>).</p></dd>
+<dd><p>Event/survival formula (same role as in <code><a href="joinme.html">joinme()</a></code>). Set
+this to <code>NULL</code> to simulate only the nested longitudinal process. In that
+case <code>dataEvent</code> is <code>NULL</code>, the complete scheduled longitudinal history is
+retained, and <code>assoc</code> and <code>formulaAssoc</code> must be absent.</p></dd>
 
 
 <dt id="arg-formulavcov">formulaVCov<a class="anchor" aria-label="anchor" href="#arg-formulavcov"></a></dt>
-<dd><p>Optional covariance-regression formula for the id-specific
-marker-by-id covariance factor (same role as in <code><a href="joinme_standata.html">joinme_standata()</a></code>).
-This formula is evaluated on event-level covariates (one row per subject),
+<dd><p>Optional covariance-regression specification for the
+id-specific marker-by-id covariance factor. A formula is shared by both
+covariance components; <code>list(sd = ~ ..., corr = ~ ...)</code> supplies
+independent observed-covariate regressions with exactly the same syntax as
+<code><a href="joinme.html">joinme()</a></code> and <code><a href="joinme_mix.html">joinme_mix()</a></code>. Each formula is evaluated on event-level covariates (one row per subject),
 must not include random-effect bars <code>( ... | ... )</code>, and must not include
 the longitudinal time variable.</p>
-<p>Internally, this formula drives subject-specific standard deviations and
-Cholesky-correlation-factor rows used to build <code>L_i = SD_i * K_i</code>; see
-<code>re_params$id_marker_cov</code>.
-The default <code>~ 1</code> is supported and gives an intercept-only covariance regression.</p></dd>
+<p>The <code>sd</code> formula drives subject-specific standard deviations and the
+<code>corr</code> formula drives Cholesky-correlation-factor rows used to build
+<code>L_i = SD_i * K_i</code>; their population intercepts, slopes and latent
+loadings are declared under <code>truth$vcov</code>.
+The default <code>~ 1</code> gives intercept-only regressions for both components.</p></dd>
 
 
 <dt id="arg-formuladist">formulaDist<a class="anchor" aria-label="anchor" href="#arg-formuladist"></a></dt>
@@ -197,7 +206,7 @@ and <code>lambda = 1</code> when omitted.</p></li>
 monotone I-spline evaluated on <code>plogis(x)</code>; explicit knots are supplied
 on the expit scale.</p></li>
 <li><p><code>list(type = "ispline_expit_penalised", x = seq(0.02, 0.98, length.out = 50), y = seq(0.02, 0.98, length.out = 50)^0.8, n_knots = 6, degree = 3, lambda = 1)</code>:
-penalised monotone I-spline on <code>plogis(x)</code> in legacy plug-in mode.</p></li>
+penalised monotone I-spline on <code>plogis(x)</code> in plug-in mode.</p></li>
 <li><p><code>list(type = "pwlin", x = c(-2, -1, 0, 1, 2), y = c(0.2, 0.5, 1, 0.5, 0.2))</code>:
 piecewise-linear transform; <code>x</code> and <code>y</code> are required.
 Simulation deliberately treats these as fixed interpolation pairs. This
@@ -219,8 +228,32 @@ on <code>plogis(x)</code> for a bounded-domain representation. Training <code>x<
 and explicit <code>knots</code> for these transform types are specified on that
 bounded expit scale. This is useful
 when the raw association feature has long tails or steep nonlinear effects.</p></li>
-</ul><p>In other words, simulation currently uses the legacy plug-in spline mode;
-it does not estimate spline coefficients jointly inside Stan.</p></dd>
+</ul></dd>
+
+
+<dt id="arg-truth">truth<a class="anchor" aria-label="anchor" href="#arg-truth"></a></dt>
+<dd><p>A <code><a href="joinme_truth.html">jm_truth()</a></code> declaration for population generation. A numeric
+intercept or slope fixes its
+population coefficient vector; a <code>prior_*()</code> declaration draws that
+vector once. This applies to <code>longitudinal</code>, <code>survival</code>, <code>baseline</code>,
+<code>assoc_coef</code>, <code>vcov</code>, <code>functional</code>, and named <code>formulaDist</code> components. Its
+<code>marker_weights$offset</code> component supplies the marker-specific
+constant contribution and its <code>marker_weights$family</code> component generates centred
+marker-specific weight departures, because those departures are otherwise
+random simulation parameters. That field accepts a family name such as
+<code>"student_t"</code>, <code>"normal"</code>, <code>"laplace"</code>, or <code>"horseshoe"</code>. The names
+<code>"constant"</code> and <code>"none"</code> use the offset without a random departure. The
+family name <code>"student_t"</code> draws one value per active set as
+<code>2 + Gamma(2, 0.1)</code>, matching fitting. Departure location and ordinary scale remain zero and
+one. All declarations and their realised population coefficients are
+retained in the realised simulation truth.
+Set <code>marker_weights$family</code> to <code>"constant"</code> or <code>"none"</code> when the
+declared offset is the complete marker weight. No common location or
+marker-specific departure is then drawn. Under a stochastic family, the
+effective weight is <code>offset + marker_weight_mean + departure</code>, where the
+departure is drawn directly from the declared centred unit-scale family.
+No additional marker-weight scale is used: the survival association slope
+already scales the weighted marker feature.</p></dd>
 
 
 <dt id="arg-n-id">n_id<a class="anchor" aria-label="anchor" href="#arg-n-id"></a></dt>
@@ -228,12 +261,15 @@ it does not estimate spline coefficients jointly inside Stan.</p></dd>
 
 
 <dt id="arg-families">families<a class="anchor" aria-label="anchor" href="#arg-families"></a></dt>
-<dd><p>Marker-specific family names.
-Use <code><a href="joinme_family.html">jm_family()</a></code> entries to supply custom <code>link</code>/<code>inv_link</code> expressions.
+<dd><p>Marker-specific family names or <code><a href="joinme_family.html">jm_family()</a></code> declarations.
+Use <code><a href="joinme_family.html">jm_family()</a></code> entries to supply custom <code>link</code>/<code>inv_link</code> expressions
+or to fix the skew-Laplace quantile for a marker, for example
+<code>jm_family("skew_laplace", tau = 0.8)</code>.
 A named probit link applies <code>Phi</code> as its inverse link. In formula
 expressions, <code>Phi</code>/<code>pnorm</code> are the standard normal CDF and
 <code>inv_Phi</code>/<code>qnorm</code>/<code>probit</code> are the standard normal quantile. Simulation
-evaluates the same bytecode instructions as fitting and prediction.</p></dd>
+evaluates the same bytecode instructions and fixed-quantile selection as
+fitting and prediction.</p></dd>
 
 
 <dt id="arg-marker-levels">marker_levels<a class="anchor" aria-label="anchor" href="#arg-marker-levels"></a></dt>
@@ -270,10 +306,6 @@ is active (<code>left_truncation_max &gt; 0</code>), longitudinal rows observed 
 sampled entry time are removed.</p></dd>
 
 
-<dt id="arg--">...<a class="anchor" aria-label="anchor" href="#arg--"></a></dt>
-<dd><p>Additional arguments passed to fun.</p></dd>
-
-
 <dt id="arg-seed">seed<a class="anchor" aria-label="anchor" href="#arg-seed"></a></dt>
 <dd><p>RNG seed.</p></dd>
 
@@ -289,37 +321,12 @@ In this mode, each id receives stepwise periods over <code>[0, time_cens]</code>
 each period value is sampled from <code>fun</code>.</p></dd>
 
 
-<dt id="arg-marker-weights">marker_weights<a class="anchor" aria-label="anchor" href="#arg-marker-weights"></a></dt>
-<dd><p>Optional base marker weights used for association
-aggregation. If <code>shared_marker_weights = TRUE</code>, supply one numeric vector to
-be shared across all active weighted marker-based association terms. If
-<code>shared_marker_weights = FALSE</code>, you may instead supply a named list with
-entries <code>cv_total</code>, <code>cs_total</code>, <code>cv_marker</code>, and <code>cs_marker</code>.</p></dd>
-
-
-<dt id="arg-shared-marker-weights">shared_marker_weights<a class="anchor" aria-label="anchor" href="#arg-shared-marker-weights"></a></dt>
-<dd><p>Logical. If <code>TRUE</code>, all active weighted
-marker-based association terms share one marker-weight structure. If
-<code>FALSE</code>, each active weighted marker-based association term uses its own
-marker-weight structure.</p></dd>
-
-
-<dt id="arg-fixed-marker-weights">fixed_marker_weights<a class="anchor" aria-label="anchor" href="#arg-fixed-marker-weights"></a></dt>
-<dd><p>Logical. This has the same meaning as in
-<code><a href="joinme.html">joinme()</a></code>. If <code>TRUE</code>, <code>marker_weights</code> are the effective weights and no
-latent perturbation is drawn. If <code>FALSE</code> (the default), <code>marker_weights</code>
-are base weights and the effective weights are
-<code>marker_weights + z_marker_weights</code>. When base weights are omitted they
-default to zero, exactly as they do in <code><a href="joinme.html">joinme()</a></code> when marker weights are
-estimated.</p></dd>
-
-
 <dt id="arg-shrinkage">shrinkage<a class="anchor" aria-label="anchor" href="#arg-shrinkage"></a></dt>
-<dd><p>Integer selecting the distribution of each standardized
-latent marker-weight perturbation when <code>fixed_marker_weights = FALSE</code>:
-<code>0</code> draws Student-t with 6 degrees of freedom, <code>1</code> draws standard Laplace,
-and <code>2</code> draws standard Normal. This is the same switch used by the Stan
-priors. It does not change explicitly supplied fixed weights.</p></dd>
+<dd><p>Integer selecting the random-effect component distribution:
+<code>0</code> denotes Student-t with 6 degrees of freedom, <code>1</code> Laplace, and <code>2</code>
+Normal. Marker-weight departures no longer use this switch; their family
+is declared by <code>truth = jm_truth(marker_weights = list(family = "normal"))</code>
+or another supported family name.</p></dd>
 
 
 <dt id="arg-assoc">assoc<a class="anchor" aria-label="anchor" href="#arg-assoc"></a></dt>
@@ -332,74 +339,10 @@ factor <code>K</code> from marker-by-id random effects.</p></li>
 <li><p><code>vcov</code>: the same off-diagonal <code>K</code> entries together with the
 subject-specific standard deviations.</p></li>
 </ul><p>You can also provide <code>formulaAssoc = ~ ...</code> to select channels; when present,
-it overrides <code>assoc</code>.</p></dd>
-
-
-<dt id="arg-assoc-coefs">assoc_coefs<a class="anchor" aria-label="anchor" href="#arg-assoc-coefs"></a></dt>
-<dd><p>Association coefficients for hazard terms.
-Non-<code>corr</code>/<code>vcov</code> terms accept scalar values. The <code>corr</code> term accepts a vector of
-off-diagonal <code>K</code> coefficients ordered as <code>(2,1), (3,1), (3,2), ...</code> in
-lower-triangular row-major order of the marker-by-id random-effect
-covariance dimension. The <code>vcov</code> term accepts the same off-diagonal <code>K</code>
-entries followed by the subject-specific standard deviations,
-<code>(2,1), (3,1), (3,2), ..., sd_1, sd_2, ...</code>; when <code>||</code> is used in the
-marker-by-id random-effects block, only the standard deviation entries are used.</p>
-<p>Accepted input forms:</p><ul><li><p>named numeric vector, e.g. <code>c(cv_total = 0.4, cs_mean = -0.2)</code>,</p></li>
-<li><p>named list, e.g. <code>list(cv_total = 0.4, corr = c(0.2, -0.1), vcov = c(0.4, 0.1, 0.5))</code>.
-Missing channels default to 0.</p></li>
-</ul></dd>
-
-
-<dt id="arg-beta-long">beta_long<a class="anchor" aria-label="anchor" href="#arg-beta-long"></a></dt>
-<dd><p>Fixed-effect coefficients for <code>formulaLong</code> fixed part. If NULL,
-coefficients are randomly generated and named by model-matrix columns.</p></dd>
-
-
-<dt id="arg-beta-event">beta_event<a class="anchor" aria-label="anchor" href="#arg-beta-event"></a></dt>
-<dd><p>Survival baseline-covariate coefficients for non-intercept
-terms in <code>formulaEvent</code> RHS.
-If NULL, coefficients are randomly generated.</p></dd>
-
-
-<dt id="arg-dist-coefs">dist_coefs<a class="anchor" aria-label="anchor" href="#arg-dist-coefs"></a></dt>
-<dd><p>Distributional fixed-effect coefficients for <code>formulaDist</code>
-parameters (<code>sigma</code>, <code>nu</code>, <code>phi</code>, <code>alpha</code>, <code>kappa</code>, <code>tau</code>).</p>
-<p>For each parameter, coefficients can be:</p><ul><li><p>an unnamed numeric vector (matched by column order),</p></li>
-<li><p>a named numeric vector (matched by model-matrix column names),</p></li>
-<li><p>for family-scoped formulas, a named list with per-scope entries.</p></li>
-</ul><p>Family-scoped list syntax examples:</p><ul><li><p><code>dist_coefs = list(sigma = list(default = c("(Intercept)" = -0.3), gaussian = c(...), student_t = c(...)))</code></p></li>
-<li><p>alias keys like <code>"sigma[family='student_t']"</code> are also recognised and
-mapped to the matching family scope.</p></li>
-</ul></dd>
-
-
-<dt id="arg-re-params">re_params<a class="anchor" aria-label="anchor" href="#arg-re-params"></a></dt>
-<dd><p>Random-effects simulation controls.</p>
-<p>Structure:</p><ul><li><p><code>id</code>: controls id-level random effects from <code>( ... | id)</code> in <code>formulaLong</code>.</p></li>
-<li><p><code>marker</code>: controls marker-level random effects from marker-only terms.</p></li>
-<li><p><code>id_marker_cov</code>: controls subject-specific covariance-regression for
-marker-by-id latent effects.</p></li>
-<li><p><code>dist</code>: controls random effects for distributional regressions in
-<code>formulaDist</code>.</p></li>
-</ul><p>For <code>id</code> and <code>marker</code>, each block is a list:</p><ul><li><p><code>sd</code>: scalar or length-K vector of random-effect standard deviations,</p></li>
-<li><p><code>corr</code>: KxK correlation matrix.</p></li>
-</ul><p><code>id_marker_cov</code> fields:</p><ul><li><p><code>latent</code>: deprecated compatibility input. If supplied, its implied
-lower-triangular factor is folded into the baseline <code>alpha</code> intercepts
-before simulation. Marker-by-id latent seeds are still drawn as iid
-standard normal values. Prefer setting <code>alpha</code> directly in new code.</p></li>
-<li><p><code>alpha</code>: baseline linear predictors for the subject-specific covariance
-regression entries. Diagonal positions control standard deviations;
-off-diagonal positions control the row-wise correlation-factor regression,
-on the tanh scale.</p></li>
-<li><p><code>beta</code>: covariate effects from <code>formulaVCov</code> design matrix (systematic
-subject-to-subject covariance shifts by observed covariates),</p></li>
-<li><p><code>lambda</code>: non-negative loading on an iid standard-normal subject latent
-perturbation; if a negative value is supplied, the simulator folds the
-sign into the latent draw so the effective model remains unchanged but
-follows the identified convention used during fitting,</p></li>
-<li><p><code>diag_link</code>: link for the subject-specific standard deviations (<code>"softplus"</code>
-or <code>"exp"</code>).</p></li>
-</ul><p>Element-wise covariance-regression form is:
+it overrides <code>assoc</code>.
+Covariance-regression population values belong to <code>truth$vcov</code>. Its <code>sd</code>
+and <code>corr</code> components each accept <code>intercept</code>, <code>slope</code>, and <code>latent</code>
+declarations. Their element-wise form is
 <code>eta_{im} = alpha_m + x_i^T beta_m + lambda_m z_{im}</code>, with
 <code>lambda_m &gt;= 0</code> and <code>z_{im} ~ Normal(0, 1)</code>. Diagonal entries apply
 <code>diag_link</code> to give positive subject-specific standard deviations. Off-diagonal
@@ -408,7 +351,16 @@ subject-specific Cholesky-correlation factor <code>K_i</code>. The covariance fa
 reconstructed as <code>L_i = SD_i * K_i</code>. Marker-by-id latent seeds are sampled as
 iid standard normal values and the final marker-by-id effects are obtained as
 <code>b_id = L_i z_id</code>.</p>
-<p>Dimension rules for <code>id_marker_cov</code> entries follow marker-by-id random-effect
+<p>In the ordinary non-mixture model, \(\lambda_m\) is the
+conditional standard deviation of the unexplained subject heterogeneity
+on covariance-predictor coordinate \(m\), before applying <code>diag_link</code> or
+<code>tanh</code>. It is not itself an entry of <code>L_i</code>, a covariance, or a correlation.
+With <code>class_type = "corr"</code> or <code>"vcov"</code>, the selected <code>z_{im}</code> has a
+class-specific location and scale. Conditional on class \(g\), its
+contribution to <code>eta_{im}</code> consequently has location
+<code>lambda_m * mix_location[g, m]</code> and distributional scale
+<code>lambda_m * mix_scale[g, m]</code>.</p>
+<p>The covariance-regression dimension follows the marker-by-id random-effect
 dimension <code>Q_idm</code>:</p><ul><li><p>if covariance is full: <code>M = Q_idm * (Q_idm + 1) / 2</code> lower-tri entries,</p></li>
 <li><p>if covariance is forced diagonal (<code>||</code> in nested id-marker term): <code>M = Q_idm</code>.</p></li>
 </ul><p><code>dist</code> block syntax:</p><ul><li><p><code>re_params$dist[[param]]</code> applies to all random-effect terms for that
@@ -418,6 +370,11 @@ controls (same <code>sd</code>/<code>corr</code> fields as above).</p></li>
 </ul></dd>
 
 
+<dt id="arg-vcov-diag-link">vcov_diag_link<a class="anchor" aria-label="anchor" href="#arg-vcov-diag-link"></a></dt>
+<dd><p>Link applied to covariance-regression scale predictors;
+either <code>"softplus"</code> or <code>"exp"</code>.</p></dd>
+
+
 <dt id="arg-family-params">family_params<a class="anchor" aria-label="anchor" href="#arg-family-params"></a></dt>
 <dd><p>Family-specific constants used when the corresponding
 parameter has no distributional regression. In particular, specify the
@@ -425,28 +382,10 @@ Beta mean/sample-size model with <code>beta = list(kappa = ...)</code> and the
 skew double exponential model with
 <code>skew_double_exponential = list(sigma = ..., tau = ...)</code>.
 <code>kappa</code> must be positive. <code>tau</code> must lie in \((0,1)\), with
-\(0.5\) giving the symmetric double exponential distribution.</p></dd>
-
-
-<dt id="arg-h-">h0<a class="anchor" aria-label="anchor" href="#arg-h-"></a></dt>
-<dd><p>Optional baseline hazard function <code>h0(t)</code>
-If supplied, it takes precedence over <code>baseline_hazard</code>/<code>formulaBasehaz</code>.</p></dd>
-
-
-<dt id="arg-baseline-hazard">baseline_hazard<a class="anchor" aria-label="anchor" href="#arg-baseline-hazard"></a></dt>
-<dd><p>Optional baseline hazard specification. Supported forms:</p><ul><li><p>character: one of <code>"constant"</code>, <code>"linear"</code>, <code>"piecewise"</code>, <code>"weibull"</code>, <code>"spline"</code>.</p></li>
-<li><p>named list: <code>list(type = ..., ...)</code> with mode-specific parameters.</p></li>
-</ul></dd>
-
-
-<dt id="arg-formulabasehaz">formulaBasehaz<a class="anchor" aria-label="anchor" href="#arg-formulabasehaz"></a></dt>
-<dd><p>Optional formula-based baseline hazard model on time,
-e.g. <code>~ 1 + time + I(time^2)</code>.</p></dd>
-
-
-<dt id="arg-beta-basehaz">beta_basehaz<a class="anchor" aria-label="anchor" href="#arg-beta-basehaz"></a></dt>
-<dd><p>Optional coefficients for <code>formulaBasehaz</code> (aligned by
-model-matrix column names). If NULL, coefficients are generated.</p></dd>
+\(0.5\) giving the symmetric double exponential distribution.
+A marker-specific <code>tau</code> in <code><a href="joinme_family.html">jm_family()</a></code> takes precedence over this shared
+family constant and over a <code>tau</code> distributional regression for that
+marker, matching the fitted likelihood.</p></dd>
 
 
 <dt id="arg-time-cens">time_cens<a class="anchor" aria-label="anchor" href="#arg-time-cens"></a></dt>
@@ -485,8 +424,18 @@ from the main <code>seed</code> for reproducible simulations.</p></dd>
 with <code><a href="joinme_standata.html">joinme_standata()</a></code> defaults.</p></dd>
 
 
+<dt id="arg--mixture-specification">.mixture_specification<a class="anchor" aria-label="anchor" href="#arg--mixture-specification"></a></dt>
+<dd><p>Private latent-progress simulation
+specification assembled by <code><a href="simulate_joinme_mix.html">simulate_joinme_mix()</a></code>. Users should call
+<code><a href="simulate_joinme_mix.html">simulate_joinme_mix()</a></code> rather than supplying this argument directly.</p></dd>
+
+
 <dt id="arg-fun">fun<a class="anchor" aria-label="anchor" href="#arg-fun"></a></dt>
 <dd><p>Function to apply.</p></dd>
+
+
+<dt id="arg--">...<a class="anchor" aria-label="anchor" href="#arg--"></a></dt>
+<dd><p>Additional arguments passed to fun.</p></dd>
 
 
 <dt id="arg-x">x<a class="anchor" aria-label="anchor" href="#arg-x"></a></dt>
@@ -499,14 +448,23 @@ with <code><a href="joinme_standata.html">joinme_standata()</a></code> defaults.
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p>A list containing <code>dataLong</code>, <code>dataEvent</code>, <code>truth</code> (also available as
-<code>true_params</code>), <code>marker_info</code>, <code>helpers</code>, and <code>tmax</code>. Marker-weight truth
-distinguishes base, latent, and effective values. Baseline-hazard truth is
+    <p>A list containing <code>dataLong</code>, <code>dataEvent</code>, <code>truth</code>, <code>marker_info</code>,
+<code>helpers</code>, and <code>tmax</code>. Marker-weight truth
+distinguishes base, common-location, departure, and effective values. Baseline-hazard truth is
 stored in <code>truth$baseline_hazard</code>; when a log-linear representation exists,
 its resolved coefficients are also in <code>truth$stan_fit$bs_gamma_c</code>.
+Marker-specific fixed skew-Laplace quantiles are recorded in
+<code>truth$stan_fit$use_tau_fixed</code> and <code>truth$stan_fit$tau_fixed</code>; realised
+row-specific quantiles are recorded in
+<code>truth$distributional$rowwise$tau</code>.
 Hazard-scale association coefficients are stored as <code>alpha_cv_total</code>,
 <code>alpha_cs_total</code>, <code>alpha_cv_mean</code>, <code>alpha_cs_mean</code>, <code>alpha_corr</code>, and
-<code>alpha_vcov</code>, matching the fitted posterior output names.</p>
+<code>alpha_vcov</code>, matching the fitted posterior output names.
+<code>truth$recovery</code> contains the paired fitting entry-point name and a
+directly reusable argument list. Thus
+<code>do.call(joinme, c(sim$truth$recovery$arguments, list(seed = 1)))</code>
+recreates the full fitted specification without retyping formulae, priors,
+association controls, or covariance settings.</p>
 <p>List of results.</p>
 <p>Numeric vector on response scale.</p>
     </div>

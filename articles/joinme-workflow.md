@@ -1,54 +1,10 @@
 # A Example Workflow for Joint Modelling with mutlivariate Longitudinal and Survival Data using joinme
 
-## 1 Introduction
-
 This vignette outlines a workflow for using `joinme` in a research
 context, suitable for inclusion in high-impact statistical or clinical
 journals.
 
-In this document, we will be 1. Generating synthetic data with known
-ground truth. 2. Fitting the joint model. 3. Assessing convergence and
-model fit with renamed posterior draws. 4. Performing dynamic
-predictions for individual subjects. 5. Reporting results with
-consistent summaries and plotting helpers.
-
-### 1.1 Program flow in practice
-
-The `joinme` package follows the below data-processing and model-fitting
-sequence:
-
-1.  **Data assembly (R)**: build design matrices, scale time to \[0,
-    1\], and prepare Gauss-Kronrod nodes (default 15, configurable) for
-    survival integration.
-2.  **Parameter declarations (Stan)**: define fixed effects, random
-    effects, distributional regression coefficients, baseline hazard
-    parameters, and association coefficients.
-3.  **Transformed parameters (Stan)**: rescale time-related coefficients
-    and construct the random effects used in the likelihood.
-4.  **Model block (Stan)**: apply priors and evaluate the likelihood
-    using `reduce_sum`, which splits subjects across threads when
-    requested.
-5.  **Generated quantities (Stan)**: compute per-observation
-    log-likelihoods, fitted values, and prediction summaries for
-    posterior diagnostics.
-6.  **Post-processing (R)**: expose the posterior through
-    [`draws()`](https://trinhdhk.github.io/joinme/reference/draws.md),
-    summary helpers,
-    [`mcmc_plot()`](https://trinhdhk.github.io/joinme/reference/mcmc_plot.html),
-    and explicit plotting wrappers such as
-    [`longitudinal_plot()`](https://trinhdhk.github.io/joinme/reference/longitudinal_plot.html)
-    and
-    [`survival_plot()`](https://trinhdhk.github.io/joinme/reference/plot_helpers.html).
-
-This sequence is important because it clarifies where each modelling
-choice enters the inference: formula parsing happens in R, while all
-probability calculations occur in Stan.
-
-## 2 Simulation and Data Exploration
-
-Before analysing real data, it is highly recommended to perform a
-**parameter recovery simulation**. This confirms that the model is
-identifiable given your sample size and sampling frequency.
+## 1 Simulation and Data Exploration
 
 We use the built-in generalised simulator `simulate_joinme` to generate
 a dataset where the hazard depends on the “Total Current Value” of the
@@ -71,24 +27,16 @@ sim <- simulate_joinme(
     jm_family("student_t"),
     jm_family("student_t", inv_link = ~ inv_logit(x / 2))
   ),
-  n_obs_per_marker_per_id = 6,
   times_obs = seq(0, 8, length.out = 12),
   quadrature_nodes = 31,
-  beta_long = c("(Intercept)" = 1.0, "time" = 0.5, "x1" = 0.4),
   assoc = c("cv_total"),
-  assoc_coefs = c(cv_total = 0.5),
-  fixed_marker_weights = FALSE,
+  truth = jm_truth(
+    longitudinal = c("(Intercept)" = 1.0, "time" = 0.5, "x1" = 0.4),
+    assoc_coef = list(slope = c(cv_total = 0.5)),
+    marker_weights = list(family = "student_t")
+  ),
   shrinkage = 0L
 )
-
-# Gauss-Kronrod nodes/weights are fixed in Stan; `quadrature_nodes` selects
-# the node count used to build the design matrices in R.
-#
-# For a probit marker, use link = "probit" or link = ~ inv_Phi(x).
-# A direct inverse-link declaration instead uses inv_link = ~ Phi(x).
-
-# `truth$marker_weights` is the effective base + latent value used in the hazard.
-# The decomposition is available as marker_weights_base/marker_weights_latent.
 
 dataLong <- sim$dataLong
 dataEvent <- sim$dataEvent
@@ -108,22 +56,36 @@ dataEvent_split <- sim_split$dataEvent
 
 # Preview the data
 head(dataLong)
-#>   id marker      time         x1        x2         y
-#> 1  1     m1 0.0000000 -0.2942841 0.1433918 3.2878746
-#> 2  1     m1 0.7272727 -0.2942841 0.1433918 0.4591744
-#> 3  1     m1 1.4545455 -0.2942841 0.1433918 1.5627928
-#> 4  1     m1 2.1818182 -0.2942841 0.1433918 0.7059543
-#> 5  1     m1 2.9090909 -0.2942841 0.1433918 0.6613724
-#> 6  1     m1 3.6363636 -0.2942841 0.1433918 4.6048840
+#>   id marker      time         x1        x2           y
+#> 1  1     m1 0.0000000 -0.2942841 0.1433918   1.3791262
+#> 2  1     m1 0.7272727 -0.2942841 0.1433918   0.4382883
+#> 3  1     m1 1.4545455 -0.2942841 0.1433918  -6.8923800
+#> 4  1     m1 2.1818182 -0.2942841 0.1433918  -5.8036282
+#> 5  1     m1 2.9090909 -0.2942841 0.1433918 -10.3008172
+#> 6  1     m2 0.0000000 -0.2942841 0.1433918   2.4242141
 head(dataEvent)
-#>   id         x1         x2      time event time_start time_stop
-#> 1  1 -0.2942841  0.1433918 4.2850991     1          0 4.2850991
-#> 2  2 -0.5631947  0.7502855 0.1089635     1          0 0.1089635
-#> 3  3  0.3776016 -0.1379869 8.0000000     0          0 8.0000000
-#> 4  4 -0.1430829  0.6646221 0.5845890     1          0 0.5845890
-#> 5  5  0.2235321 -1.0430229 8.0000000     0          0 8.0000000
-#> 6  6  0.4042901  0.5142336 8.0000000     0          0 8.0000000
+#>   id         x1         x2     time event time_start time_stop
+#> 1  1 -0.2942841  0.1433918 3.517974     1          0  3.517974
+#> 2  2 -0.5631947  0.7502855 6.725064     1          0  6.725064
+#> 3  3  0.3776016 -0.1379869 6.560833     1          0  6.560833
+#> 4  4 -0.1430829  0.6646221 8.000000     0          0  8.000000
+#> 5  5  0.2235321 -1.0430229 2.860254     1          0  2.860254
+#> 6  6  0.4042901  0.5142336 8.000000     0          0  8.000000
 ```
+
+[`jm_truth()`](https://trinhdhk.github.io/joinme/reference/joinme_truth.md)
+describes the data-generating population;
+[`jm_prior()`](https://trinhdhk.github.io/joinme/reference/joinme_priors.md)
+describes the probability distributions used in fitting. They share
+scientific component names but are not interchangeable. A numerical
+value in
+[`jm_truth()`](https://trinhdhk.github.io/joinme/reference/joinme_truth.md)
+is fixed for the whole data set; a `prior_*()` declaration is sampled
+once and its realised value is stored in `sim$truth`. The truth object
+also contains `basehaz`, `assoc_coef`, and `re_params`. If an ordinary
+random-effect standard deviation is omitted, it is drawn once from
+`Exponential(1)`. If its correlation matrix is omitted, it is drawn once
+from the LKJ distribution declared by `lkj = prior_lkj(...)`.
 
 Visualise your longitudinal trajectories and survival distribution
 before modelling.
@@ -154,18 +116,14 @@ Code
 table(dataEvent$event)
 #> 
 #>  0  1 
-#> 15 25
+#> 25 15
 prop.table(table(dataEvent$event))
 #> 
 #>     0     1 
-#> 0.375 0.625
+#> 0.625 0.375
 ```
 
-Ensure the event rate is sufficient (typically \>10-20 events per
-parameter in the survival submodel) to support the complexity of the
-proposed association structure.
-
-## 3 Model Specification
+## 2 Model Specification
 
 We specify a joint model where: 1. **Longitudinal Submodel**: Linear
 growth over time with random intercepts and slopes for each
@@ -173,7 +131,7 @@ subject-marker combination. 2. **Survival Submodel**: The hazard depends
 on baseline covariates (`x1`, `x2`) and the current value (`cv_total`)
 of the biomarkers.
 
-#### 3.0.1 Families and distributional regression
+#### 2.0.1 Families and distributional regression
 
 Each marker can follow a distinct family (for example Gaussian,
 Student-t, Poisson, negative binomial, Bernoulli, beta, or ordinal).
@@ -182,23 +140,19 @@ or \phi), those parameters can be modelled through `formulaDist`. This
 allows heteroscedasticity or covariate-dependent dispersion while
 keeping the mean structure aligned across markers.
 
-#### 3.0.2 Association transformations
+#### 2.0.2 Association transformations
 
-The association terms can be transformed using one of four modes:
-identity, functional bytecode expressions, monotone I-splines, or
-ordered piecewise-linear interpolation. These transformations are
-specified in R and passed to Stan as data so that the likelihood remains
-deterministic and reproducible.
+The association terms can be transformed using identity, a user-defined
+mathematical expression, monotone I-splines, or ordered piecewise-linear
+interpolation.
 
-### 3.1 Marker-only random effects (no inner id term)
+### 2.1 Marker-only random effects (no inner id term)
 
-In some studies, we may want **marker-level random effects only**,
-without subject-specific marker deviations. This is done by omitting the
-inner `( ... | id )` term inside the marker block. In this
-configuration, marker-by-id random effects are disabled (internal
-standata `Q_idm = 0`), and covariance-style associations that require
-those effects (`corr`, `vcov`) are not permitted. Note: assoc =
-c(“corr”) or assoc = c(“vcov”) is not allowed when Q_idm = 0.
+In some studies, marker-level random effects may be required without
+subject-specific marker departures. Omit the inner `( ... | id )` term
+inside the marker block. Because `corr` and `vcov` describe the
+covariance of those subject-specific marker departures, they are
+unavailable in this model.
 
 Code
 
@@ -210,26 +164,62 @@ formulaLong_marker_only <- y ~ time + x1 +
   (0 + x1 || marker)
 ```
 
-Scales of the parameters can be set via
-[`joinme_priors()`](https://trinhdhk.github.io/joinme/reference/joinme_priors.md),
-which allows explicit control over the prior distributions for fixed
-effects, association coefficients, and correlation matrices. Stricter
-shrinkage can be set via `shrinkage` params.
+Prior families are declared by model block through
+[`jm_prior()`](https://trinhdhk.github.io/joinme/reference/joinme_priors.md).
+Thus changing the prior for an association coefficient does not silently
+change the fixed effects, affine transformation shifts, marker effects,
+or marker weights.
 
 Code
 
 ``` r
 
-# Define explicit priors for transparency (optional but recommended)
-# Note: JoiNMe exposes beta (fixed effects), alpha (associations), and lkj
-priors <- joinme_priors(
-  beta = list(scale = 2.5),       # Fixed effects (Student-t, df = 6)
-  alpha = list(scale = 1.0),      # Association coefficients
-  lkj = 2.0                       # Correlation matrices (regularizing)
+# Define explicit, block-specific priors for transparency.
+priors <- jm_prior(
+  intercept = prior_student_t(df = 6, mu = 0, scale = 2),
+  slope = prior_normal(mu = 0, scale = 1),
+  longitudinal = list(
+    slope = prior_normal(
+      mu = list(0, 0),
+      scale = list(1, 0.5)
+    )
+  ),
+  assoc = list(slope = prior_student_t(df = 4, mu = 0, scale = 1)),
+  functional = list(slope = prior_laplace(mu = 0, scale = 0.75)),
+  marker = list(family = prior_normal()),
+  marker_weights = list(
+    offset = c(m1 = 0, m2 = 0, m3 = 0),
+    intercept = prior_normal(mu = 0, scale = 0.75),
+    family = "student_t"
+  ),
+  lkj = prior_lkj(2)
 )
 ```
 
-## 4 Model Fitting
+The global `intercept` and `slope` declarations are inherited by every
+ordinary regression component unless that component replaces the named
+role. Numeric vectors and lists of scalar numbers are equivalent.
+Partial recycling is refused: a non-scalar declaration must have exactly
+the dimension of that component and role after the formula has been
+parsed.
+
+When `formulaDist` contains family-scoped regressions, the matching
+prior may use the same scope. Because it is an argument name, quote it
+with backticks:
+
+Code
+
+``` r
+
+scoped_priors <- jm_prior(
+  `sigma[family='student']` = list(
+    intercept = prior_student_t(df = 4, scale = 1),
+    slope = prior_normal(scale = 0.25)
+  )
+)
+```
+
+## 3 Model Fitting
 
 We fit the model using Hamiltonian Monte Carlo (HMC) via Stan. By
 default, `joinme` prefers `cmdstanr` if compiled, otherwise it falls
@@ -270,8 +260,8 @@ fit <- joinme(
 #> 
 #> SAMPLING FOR MODEL 'joinme_fit_threading' NOW (CHAIN 1).
 #> Chain 1: 
-#> Chain 1: Gradient evaluation took 0.005037 seconds
-#> Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 50.37 seconds.
+#> Chain 1: Gradient evaluation took 0.006416 seconds
+#> Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 64.16 seconds.
 #> Chain 1: Adjust your expectations accordingly!
 #> Chain 1: 
 #> Chain 1: 
@@ -288,9 +278,9 @@ fit <- joinme(
 #> Chain 1: Iteration: 101 / 200 [ 50%]  (Sampling)
 #> Chain 1: Iteration: 200 / 200 [100%]  (Sampling)
 #> Chain 1: 
-#> Chain 1:  Elapsed Time: 28.854 seconds (Warm-up)
-#> Chain 1:                41.992 seconds (Sampling)
-#> Chain 1:                70.846 seconds (Total)
+#> Chain 1:  Elapsed Time: 30.898 seconds (Warm-up)
+#> Chain 1:                1058.06 seconds (Sampling)
+#> Chain 1:                1088.95 seconds (Total)
 #> Chain 1:
 
 # Counting-process fit with left truncation/time-split covariates:
@@ -305,8 +295,8 @@ fit_split <- joinme(
 #> 
 #> SAMPLING FOR MODEL 'joinme_fit_threading' NOW (CHAIN 1).
 #> Chain 1: 
-#> Chain 1: Gradient evaluation took 0.009364 seconds
-#> Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 93.64 seconds.
+#> Chain 1: Gradient evaluation took 0.01023 seconds
+#> Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 102.3 seconds.
 #> Chain 1: Adjust your expectations accordingly!
 #> Chain 1: 
 #> Chain 1: 
@@ -323,18 +313,18 @@ fit_split <- joinme(
 #> Chain 1: Iteration: 101 / 200 [ 50%]  (Sampling)
 #> Chain 1: Iteration: 200 / 200 [100%]  (Sampling)
 #> Chain 1: 
-#> Chain 1:  Elapsed Time: 82.625 seconds (Warm-up)
-#> Chain 1:                55.073 seconds (Sampling)
-#> Chain 1:                137.698 seconds (Total)
+#> Chain 1:  Elapsed Time: 64.825 seconds (Warm-up)
+#> Chain 1:                159.09 seconds (Sampling)
+#> Chain 1:                223.915 seconds (Total)
 #> Chain 1:
 ```
 
-## 5 Convergence Diagnostics
+## 4 Convergence Diagnostics
 
 We use the `posterior` and `bayesplot` packages to inspect the MCMC
 chains.
 
-### 5.1 R-hat and Effective Sample Size
+### 4.1 R-hat and Effective Sample Size
 
 Values of \hat{R} \< 1.01 and ESS \> 400 indicate reasonable convergence
 for inference, as recommended by Stan developers.
@@ -344,11 +334,11 @@ Code
 ``` r
 
 # robust summary of regression coefficients on the renamed user-facing scale
-draws_obj <- draws(fit, format = "draws_array")
+draws_obj <- posterior_draws(fit, format = "draws_array")
 
 draws_sub <- posterior::subset_draws(
   draws_obj,
-  variable = c("^\\(Intercept\\)$", "^time$", "^event", "^cv_total"),
+  variable = c("^(Intercept)", "^time$", "^event", "^cv_total"),
   regex = TRUE
 )
 
@@ -357,20 +347,19 @@ posterior::summarise_draws(
   default_summary_measures(),
   default_convergence_measures()
 )
-#> # A tibble: 3 × 10
-#>   variable     mean median    sd   mad     q5   q95  rhat ess_bulk ess_tail
-#>   <chr>       <dbl>  <dbl> <dbl> <dbl>  <dbl> <dbl> <dbl>    <dbl>    <dbl>
-#> 1 (Intercept) 1.08   1.06  0.498 0.418 0.270  1.93  1.02      96.4     74.7
-#> 2 time        0.288  0.285 0.110 0.102 0.103  0.472 1.04      85.1     73.6
-#> 3 cv_total    0.175  0.118 0.235 0.122 0.0158 0.447 0.990     67.4     52.5
+#> # A tibble: 2 × 10
+#>   variable  mean median    sd   mad    q5   q95  rhat ess_bulk ess_tail
+#>   <chr>    <dbl>  <dbl> <dbl> <dbl> <dbl> <dbl> <dbl>    <dbl>    <dbl>
+#> 1 time     0.311  0.323 0.130 0.132 0.114 0.492 0.994     142.     90.9
+#> 2 cv_total 0.873  0.766 0.457 0.352 0.322 1.73  1.02      138.     52.5
 ```
 
-### 5.2 Traceplots
+### 4.2 Traceplots
 
 Visual inspection of traceplots helps identify mixing issues or stuck
 chains. Note that the marker-specific association term for the first
 association (if marker weights are shared) is forced to be positive. If
-`shared_marker_weights == FALSE`, then the marker-specific association
+`marker_weights$shared` is `FALSE`, then the marker-specific association
 terms are all constrained to be positive.
 
 Code
@@ -383,7 +372,7 @@ mcmc_plot(fit, variable = "cv_total", type = "trace")
 
 ![](joinme-workflow_files/figure-html/trace-1.png)
 
-## 6 Dynamic Prediction
+## 5 Dynamic Prediction
 
 One of the most powerful features of joint models is **dynamic
 prediction**: updating survival probabilities as new biomarker data
@@ -416,7 +405,7 @@ ndLong <- dataLong |> filter(id == target_id, time <= t_cond)
 ndEvent <- dataEvent |> filter(id == target_id)
 
 print(paste("Predicting for ID:", target_id, "conditioned on history up to t =", t_cond))
-#> [1] "Predicting for ID: 7 conditioned on history up to t = 4"
+#> [1] "Predicting for ID: 2 conditioned on history up to t = 4"
 ```
 
 Run the prediction:
@@ -444,47 +433,124 @@ preds <- tryCatch(
 
 head(preds$predictions$survival)
 #>     id     time  Survival    Median  Est.Error       L95       U95
-#> 7.1  7 4.000000 1.0000000 1.0000000 0.00000000 1.0000000 1.0000000
-#> 7.2  7 4.137931 0.9804321 0.9828219 0.01082606 0.9532528 0.9947695
-#> 7.3  7 4.275862 0.9611274 0.9657937 0.02129683 0.9083663 0.9896266
-#> 7.4  7 4.413793 0.9420776 0.9486777 0.03142971 0.8647916 0.9845616
-#> 7.5  7 4.551724 0.9232745 0.9318936 0.04124034 0.8232536 0.9795635
-#> 7.6  7 4.689655 0.9047106 0.9155442 0.05074103 0.7833432 0.9746200
+#> 2.1  2 4.000000 1.0000000 1.0000000 0.00000000 1.0000000 1.0000000
+#> 2.2  2 4.137931 0.9729243 0.9804552 0.02519878 0.9130063 0.9950132
+#> 2.3  2 4.275862 0.9449152 0.9605605 0.05087853 0.8245017 0.9900687
+#> 2.4  2 4.413793 0.9160932 0.9403197 0.07668446 0.7353907 0.9851661
+#> 2.5  2 4.551724 0.8866054 0.9197376 0.10222408 0.6471287 0.9803049
+#> 2.6  2 4.689655 0.8566237 0.8988181 0.12708817 0.5611852 0.9754844
 ```
 
+When the identifier occurred during fitting, the posterior random
+effects can be reused directly. This targets a fitted-subject
+conditional prediction and avoids estimating another set of effects from
+the same history:
+
+Code
+
+``` r
+
+fitted_subject_prediction <- posterior_epred(
+  fit,
+  newdataLong = ndLong,
+  newdataEvent = ndEvent,
+  process = c("longitudinal", "event"),
+  times = seq(t_cond, 8, length.out = 30),
+  reuse_fitted_re = TRUE
+)
+```
+
+The identifier is matched to the fitted subject index. An unseen
+identifier is rejected; dynamic prediction for a new subject uses
+`reuse_fitted_re = FALSE`.[`posterior_linpred()`](https://mc-stan.org/rstantools/reference/posterior_linpred.html)
+and
+[`posterior_predict()`](https://mc-stan.org/rstantools/reference/posterior_predict.html)
+accept the same argument.
+
+Conditional effects and contrasts can use the same subject-conditional
+estimand by placing the fitted identifier in `conditions`. Both contrast
+profiles deliberately share that identifier:
+
+Code
+
+``` r
+
+conditional_effects(
+  fit,
+  effects = "time",
+  conditions = data.frame(id = target_id),
+  process = "longitudinal",
+  reuse_fitted_re = TRUE
+)
+
+conditional_contrast(
+  fit,
+  groupA = c(treatment = "active"),
+  groupB = c(treatment = "control"),
+  conditions = data.frame(id = target_id, time = seq(0, 8, length.out = 40)),
+  process = "longitudinal",
+  reuse_fitted_re = TRUE
+)
+```
+
+Both conditional interfaces can retain the posterior calculation before
+it is summarised. This is useful for posterior probabilities, nonlinear
+functions of a contrast, or bespoke figures whose uncertainty must be
+propagated draw by draw:
+
+Code
+
+``` r
+
+effect_draws <- conditional_effects(
+  fit,
+  effects = "time",
+  process = "longitudinal",
+  summary = FALSE
+)
+
+time_draws <- effect_draws$longitudinal$time
+
+contrast_draws <- conditional_contrast(
+  fit,
+  groupA = c(treatment = "active"),
+  groupB = c(treatment = "control"),
+  conditions = data.frame(time = seq(0, 8, length.out = 40)),
+  process = "longitudinal",
+  summary = FALSE
+)
+
+time_contrast_draws <- contrast_draws$longitudinal
+```
+
+Each result is a tidy data frame with one row per retained posterior
+draw and conditional estimand. `.draw` identifies the retained draw,
+`.value` contains the posterior quantity, and `estimand__` identifies
+the condition or evaluation point. All scientific descriptors used by
+the summarised table remain as ordinary columns, so the data can be
+grouped and plotted with tidy posterior tools without joining a separate
+description table. Marker marginalisation and A-versus-B subtraction are
+performed within each draw before the data frame is returned.
+
 `concordance(fit)` is a follow-up-wide survival-curve concordance rather
-than an AUC at a selected horizon. By default, residual follow-up for
-subject (i) starts at their final longitudinal measurement strictly
-before the observed event or censoring time, (T\_{0i}). For an event at
-residual time (r_i=T_i-T\_{0i}), the event subject is compared with
-every subject known to survive longer. The pair is concordant when
-(S_i(r_i)\<S_j(r_i)): both conditional survival curves are evaluated at
-the same earlier event time. This is the survival-curve concordance
-proposed by Antolini and colleagues and does not use the outcome time to
-construct a fixed subject score.
+than a ROC analysis at one selected horizon. By default, residual
+follow-up for subject i starts at their final longitudinal measurement
+strictly before the observed event or censoring time, T\_{0i}. For an
+event at residual time r_i=T_i-T\_{0i}, the event subject is compared
+with every subject known to survive longer. The pair is concordant when
+\widehat S_i(r_i)\<\widehat S_j(r_i): both conditional survival curves
+are evaluated at the same earlier event time. This is the survival-curve
+concordance proposed by Antolini and colleagues and does not use the
+outcome time to construct a fixed subject score.
 
 Premature censoring is handled through observability. A subject censored
-before (r_i) is not comparable with that event; censoring at (r_i)
+before r_i is not comparable with that event; censoring at r_i
 establishes survival through that time and remains comparable.
 `type_weights = "n/G2"` requests Uno’s inverse-censoring weighting
 through
 [`survival::concordance()`](https://rdrr.io/pkg/survival/man/concordance.html).
 Fitted monotone splines and ordered piecewise-linear associations enter
-every conditional curve through their posterior ordinates, exactly as in
-[`predict()`](https://rdrr.io/r/stats/predict.html).
-
-`auc(fit, ...)` retains the horizon-specific estimand. At landmark (s)
-and horizon (t), it compares cumulative risk (1-S_i(ts)) between cases
-observed by (t) and controls known to remain event-free beyond (t).
-Subjects censored earlier have unknown case/control status and are
-omitted. Dynamic prediction for both methods reuses the exact fitted
-B-spline, natural-spline, or formula baseline-hazard basis, including
-its original centring constants.
-
-The estimands, censoring rules, event-time weighting, computational
-steps, and reporting recommendations are derived in the [dedicated
-discrimination
-vignette](https://trinhdhk.github.io/joinme/articles/joinme-discrimination.md).
+every curve through their posterior ordinates.
 
 Code
 
@@ -492,7 +558,14 @@ Code
 
 concordance(fit)
 concordance(fit, time_start = 2, type_weights = "n/G2")
-auc(fit, time_start = 2, time_horizon = 5)
+roc <- tvROC(
+  fit,
+  time_start = 2,
+  time_horizon = 5,
+  type_weights = "model-based"
+)
+plot(roc)
+tvAUC(roc)
 ```
 
 Finally, we visualise the predicted survival curve. The shaded area
@@ -513,28 +586,27 @@ if (!is.null(preds)) {
 
 ![](joinme-workflow_files/figure-html/predict-plot-1.png)
 
-## 7 Posterior reporting helpers
+## 6 Posterior draws and visualisation
 
-The scientific reporting layer should use the same user-facing parameter
-names as the tables returned by `summary(fit)`. The
-[`draws()`](https://trinhdhk.github.io/joinme/reference/draws.md) and
-[`mcmc_plot()`](https://trinhdhk.github.io/joinme/reference/mcmc_plot.html)
-helpers make that possible without directly handling raw Stan variables.
+[`posterior_draws()`](https://trinhdhk.github.io/joinme/reference/posterior_draws.md)
+and
+[`mcmc_plot()`](https://trinhdhk.github.io/joinme/reference/mcmc_plot.md)
+use the same parameter names as `summary(fit)`.
 
 Code
 
 ``` r
 
-renamed_draws <- draws(fit, variables = c("time", "cv_total"), format = "draws_df")
+renamed_draws <- posterior_draws(fit, variables = c("time", "cv_total"), format = "draws_df")
 head(renamed_draws)
 #> # A draws_df: 6 iterations, 1 chains, and 2 variables
 #>   time cv_total
-#> 1 0.29    0.193
-#> 2 0.44    0.076
-#> 3 0.15    0.031
-#> 4 0.13    0.212
-#> 5 0.36    0.127
-#> 6 0.27    0.131
+#> 1 0.14     0.48
+#> 2 0.32     0.86
+#> 3 0.33     0.84
+#> 4 0.32     0.81
+#> 5 0.17     0.93
+#> 6 0.03     0.94
 #> # ... hidden reserved variables {'.chain', '.iteration', '.draw'}
 
 mcmc_plot(fit, variable = c("time", "cv_total"), type = "intervals")
@@ -561,8 +633,8 @@ if (!is.null(preds)) {
 }
 ```
 
-For fitted longitudinal displays, the heatmap is now an alternative to
-the usual separated marker curves:
+For fitted longitudinal displays, the heatmap is an alternative to the
+usual separated marker curves:
 
 Code
 
@@ -605,15 +677,20 @@ plot(effects_data, ask = FALSE)
 ```
 
 The longitudinal calculation has three estimands. `"population"` uses
-only the fixed-effect contribution. `"marker"` adds the fitted
-marker-level deviation while still excluding subject and
-marker-by-subject deviations. `"marginal_marker"` calculates each
-selected marker response first and averages those responses within every
-posterior draw. The last ordering is important for nonlinear links: it
-estimates the average expected response rather than the expected
-response at an average marker effect. The `markers` argument restricts
-the marker-specific panels or the equally weighted set entering that
-average.
+only the fixed-effect contribution, evaluates that contribution under
+every selected marker’s inverse link, and averages the resulting
+trajectories within each posterior draw. `"marker"` adds the fitted
+marker-level deviation and retains a separate trajectory for every
+selected marker, whilst still excluding subject and marker-by-subject
+deviations. `"marginal_marker"` adds the marker-level deviation,
+calculates each selected marker response, and averages those responses
+within every posterior draw. Population and marker-marginal results
+therefore contain one trajectory per condition; only `"marker"` produces
+marker-specific curves. Applying the inverse link before averaging is
+important for nonlinear links: it estimates the average expected
+response rather than the expected response at an average marker effect.
+The `markers` argument restricts the equally weighted set entering
+either average, or the panels retained by the marker-specific estimand.
 
 Code
 
@@ -632,3 +709,40 @@ average_marker_effect <- conditional_effects(
 The event tables contain the covariate-specific relative hazard
 `exp(W * gamma)`, holding the baseline hazard and longitudinal
 association contribution fixed.
+
+A paired comparison of two covariate profiles is obtained with
+[`conditional_contrast()`](https://trinhdhk.github.io/joinme/reference/conditional_contrast.md).
+This differs from subtracting two rows of a printed conditional-effects
+table: predictions for A and B are paired within each MCMC draw, the
+contrast is formed, and only that posterior contrast is summarised.
+
+Code
+
+``` r
+
+contrast_conditions <- data.frame(
+  time = seq(0, max(dataLong$time), length.out = 60),
+  x2 = 0,
+  cond__ = paste0("time=", round(seq(0, max(dataLong$time), length.out = 60), 2))
+)
+
+profile_contrast <- conditional_contrast(
+  fit,
+  groupA = list(x1 = 1),
+  groupB = list(x1 = -1),
+  conditions = contrast_conditions,
+  process = c("longitudinal", "event"),
+  method = "posterior_epred",
+  longitudinal_estimand = "marginal_marker",
+  event_scale = "hazard_ratio",
+  plot = FALSE
+)
+
+plot(profile_contrast, condition_variable = "time", ask = FALSE)
+```
+
+Longitudinal contrasts are differences, A minus B, on the selected
+scale. Event contrasts are hazard ratios, A divided by B, unless the
+log-hazard-ratio scale is requested. Group assignments override matching
+columns in `conditions`; all remaining predictors use the condition
+value or their reference value from the fitting data.
