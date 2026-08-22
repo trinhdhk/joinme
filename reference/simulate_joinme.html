@@ -12,9 +12,7 @@ The implementation is model-matrix based end-to-end, so every simulated componen
 is generated from the same formula machinery used during fitting.
 Population coefficients are declared through truth. A prior_*() object
 generates one population coefficient vector and a finite numeric vector
-fixes that vector exactly. Every realised coefficient is stored in truth.
-Random effects, marker-weight departures, observations and event times remain
-conditional random realisations."><meta property="og:description" content="Simulator for JoiNMe that mirrors the fitting syntax as closely as
+fixes that vector exactly. Every realised coefficient is stored in truth."><meta property="og:description" content="Simulator for JoiNMe that mirrors the fitting syntax as closely as
 possible. The simulator supports:
 multivariate outcomes via marker-level families,
 multi-structure random effects from formulaLong (id, marker, marker-by-id),
@@ -27,9 +25,7 @@ The implementation is model-matrix based end-to-end, so every simulated componen
 is generated from the same formula machinery used during fitting.
 Population coefficients are declared through truth. A prior_*() object
 generates one population coefficient vector and a finite numeric vector
-fixes that vector exactly. Every realised coefficient is stored in truth.
-Random effects, marker-weight departures, observations and event times remain
-conditional random realisations."></head><body>
+fixes that vector exactly. Every realised coefficient is stored in truth."></head><body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
 
 
@@ -37,7 +33,7 @@ conditional random realisations."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">joinme</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.2</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.3</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -80,9 +76,7 @@ the model fit interface.</p></li>
 is generated from the same formula machinery used during fitting.</p>
 <p>Population coefficients are declared through <code>truth</code>. A <code>prior_*()</code> object
 generates one population coefficient vector and a finite numeric vector
-fixes that vector exactly. Every realised coefficient is stored in <code>truth</code>.
-Random effects, marker-weight departures, observations and event times remain
-conditional random realisations.</p>
+fixes that vector exactly. Every realised coefficient is stored in <code>truth</code>.</p>
     </div>
 
     <div class="section level2">
@@ -105,7 +99,6 @@ conditional random realisations.</p>
 <span>  truncate_longitudinal_before_entry <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  seed <span class="op">=</span> <span class="va">.Random.seed</span><span class="op">[[</span><span class="fl">1</span><span class="op">]</span><span class="op">]</span>,</span>
 <span>  covariate_formulas <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span><span class="va">x1</span> <span class="op">~</span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n_id</span><span class="op">)</span>, <span class="va">x2</span> <span class="op">~</span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n_id</span><span class="op">)</span><span class="op">)</span>,</span>
-<span>  shrinkage <span class="op">=</span> <span class="fl">0L</span>,</span>
 <span>  assoc <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"cv_total"</span><span class="op">)</span>,</span>
 <span>  vcov_diag_link <span class="op">=</span> <span class="st">"softplus"</span>,</span>
 <span>  family_params <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>gaussian <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>sigma <span class="op">=</span> <span class="fl">1</span><span class="op">)</span>, student_t <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>sigma <span class="op">=</span> <span class="fl">1.5</span>, nu <span class="op">=</span> <span class="fl">4</span><span class="op">)</span>,</span>
@@ -243,17 +236,16 @@ marker-specific weight departures, because those departures are otherwise
 random simulation parameters. That field accepts a family name such as
 <code>"student_t"</code>, <code>"normal"</code>, <code>"laplace"</code>, or <code>"horseshoe"</code>. The names
 <code>"constant"</code> and <code>"none"</code> use the offset without a random departure. The
-family name <code>"student_t"</code> draws one value per active set as
-<code>2 + Gamma(2, 0.1)</code>, matching fitting. Departure location and ordinary scale remain zero and
-one. All declarations and their realised population coefficients are
-retained in the realised simulation truth.
+family name <code>"student_t"</code> draws one value shared by all active sets as
+<code>2 + Gamma(2, 0.1)</code>, matching fitting.
 Set <code>marker_weights$family</code> to <code>"constant"</code> or <code>"none"</code> when the
 declared offset is the complete marker weight. No common location or
 marker-specific departure is then drawn. Under a stochastic family, the
 effective weight is <code>offset + marker_weight_mean + departure</code>, where the
 departure is drawn directly from the declared centred unit-scale family.
 No additional marker-weight scale is used: the survival association slope
-already scales the weighted marker feature.</p></dd>
+already scales the weighted marker feature.
+or another supported family name.</p></dd>
 
 
 <dt id="arg-n-id">n_id<a class="anchor" aria-label="anchor" href="#arg-n-id"></a></dt>
@@ -319,14 +311,6 @@ Time-varying step covariates are supported via
 <code>list(x ~ time_varyring(rnorm, steps = c(1, 3, 5), mean = 0, sd = 1))</code>.
 In this mode, each id receives stepwise periods over <code>[0, time_cens]</code>, and
 each period value is sampled from <code>fun</code>.</p></dd>
-
-
-<dt id="arg-shrinkage">shrinkage<a class="anchor" aria-label="anchor" href="#arg-shrinkage"></a></dt>
-<dd><p>Integer selecting the random-effect component distribution:
-<code>0</code> denotes Student-t with 6 degrees of freedom, <code>1</code> Laplace, and <code>2</code>
-Normal. Marker-weight departures no longer use this switch; their family
-is declared by <code>truth = jm_truth(marker_weights = list(family = "normal"))</code>
-or another supported family name.</p></dd>
 
 
 <dt id="arg-assoc">assoc<a class="anchor" aria-label="anchor" href="#arg-assoc"></a></dt>

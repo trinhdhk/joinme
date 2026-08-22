@@ -23,7 +23,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">joinme</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.2</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.3</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -73,7 +73,7 @@
 
     <section class="section level2"><h2 id="purpose">Purpose<a class="anchor" aria-label="anchor" href="#purpose"></a>
 </h2>
-<p>This vignette defines the fitted quantities returned by <code><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">conditional_effects()</a></code> and <code><a href="../reference/conditional_contrast.html">conditional_contrast()</a></code> and demonstrates their public interface. It also states the event-likelihood quantities required to distinguish interval censoring, delayed entry and ordinary right censoring.</p>
+<p>This vignette defines the fitted quantities returned by <code>conditional_effects()</code> and <code><a href="../reference/conditional_contrast.html">conditional_contrast()</a></code> and demonstrates their public interface. It also states the event-likelihood quantities required to distinguish interval censoring, delayed entry and ordinary right censoring.</p>
 <p>The examples use generic variable names that can be adapted to a study.</p>
 </section><section class="section level2"><h2 id="the-event-model-is-a-full-likelihood">The event model is a full likelihood<a class="anchor" aria-label="anchor" href="#the-event-model-is-a-full-likelihood"></a>
 </h2>
@@ -175,7 +175,7 @@ S_i(L_i)-S_i(R_i)
 <span>    <span class="va">treatment</span> <span class="op">+</span> <span class="va">age</span>,</span>
 <span>  dataEvent <span class="op">=</span> <span class="va">dataEvent_interval</span>,</span>
 <span>  assoc <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"cv_mean"</span>, <span class="st">"cv_marker"</span><span class="op">)</span>,</span>
-<span>  priors <span class="op">=</span> <span class="fu"><a href="../reference/joinme_priors.html">jm_prior</a></span><span class="op">(</span></span>
+<span>  priors <span class="op">=</span> <span class="fu"><a href="../reference/joinme_priors.html">jm_priors</a></span><span class="op">(</span></span>
 <span>    longitudinal <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>slope <span class="op">=</span> <span class="fu"><a href="../reference/prior_normal.html">prior_normal</a></span><span class="op">(</span><span class="fl">0</span>, <span class="fl">1</span><span class="op">)</span><span class="op">)</span>,</span>
 <span>    survival <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>slope <span class="op">=</span> <span class="fu"><a href="../reference/prior_normal.html">prior_normal</a></span><span class="op">(</span><span class="fl">0</span>, <span class="fl">1</span><span class="op">)</span><span class="op">)</span>,</span>
 <span>    assoc <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>slope <span class="op">=</span> <span class="fu"><a href="../reference/prior_normal.html">prior_normal</a></span><span class="op">(</span><span class="fl">0</span>, <span class="fl">1</span><span class="op">)</span><span class="op">)</span></span>
@@ -210,7 +210,7 @@ S_i(L_i)-S_i(R_i)
 For a `JoiNMeMixFit`, a class is a component of the selected random-effect distribution. Posterior class probabilities express uncertainty in allocation. A most-probable class label discards that tuncertainty. Class differences are descriptions of latent heterogeneity; they are not treatment effects and need not identify biological subtypes without external evidence. -->
 </section></section><section class="section level2"><h2 id="conditional-effects">Conditional effects<a class="anchor" aria-label="anchor" href="#conditional-effects"></a>
 </h2>
-<p><code><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">conditional_effects()</a></code> describes fitted outcomes while selected predictors vary and the remaining predictors are held at declared values. It is useful for displaying nonlinear terms, interactions and response-scale trajectories. It does not itself compare two groups.</p>
+<p><code>conditional_effects()</code> describes fitted outcomes while selected predictors vary and the remaining predictors are held at declared values. It is useful for displaying nonlinear terms, interactions and response-scale trajectories.</p>
 <div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">profiles</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span></span>
 <span>  age <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">55</span>, <span class="fl">70</span><span class="op">)</span>,</span>
@@ -218,7 +218,7 @@ For a `JoiNMeMixFit`, a class is a component of the selected random-effect distr
 <span>  cond__ <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"Age 55"</span>, <span class="st">"Age 70"</span><span class="op">)</span></span>
 <span><span class="op">)</span></span>
 <span></span>
-<span><span class="va">effects</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">conditional_effects</a></span><span class="op">(</span></span>
+<span><span class="va">effects</span> <span class="op">&lt;-</span> <span class="fu">conditional_effects</span><span class="op">(</span></span>
 <span>  <span class="va">fit</span>,</span>
 <span>  effects <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span></span>
 <span>    longitudinal <span class="op">=</span> <span class="st">"time:treatment"</span>,</span>
@@ -285,7 +285,7 @@ For a `JoiNMeMixFit`, a class is a component of the selected random-effect distr
 <p>For <code>method = "posterior_epred"</code>, each marker’s inverse link is applied before any marker average. This matters when markers have different families or nonlinear links. The result is an average of expected marker responses, not the inverse link of an average linear predictor. <code>method = "posterior_linpred"</code> keeps the comparison on the longitudinal linear-predictor scale.</p>
 <p>The <code>markers</code> argument restricts the markers shown by <code>"marker"</code> or averaged by the other two estimands:</p>
 <div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">average_response</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">conditional_effects</a></span><span class="op">(</span></span>
+<code class="sourceCode R"><span><span class="va">average_response</span> <span class="op">&lt;-</span> <span class="fu">conditional_effects</span><span class="op">(</span></span>
 <span>  <span class="va">fit</span>,</span>
 <span>  effects <span class="op">=</span> <span class="st">"time"</span>,</span>
 <span>  conditions <span class="op">=</span> <span class="va">profiles</span>,</span>
@@ -300,7 +300,7 @@ For a `JoiNMeMixFit`, a class is a component of the selected random-effect distr
 <p>By default, subject and marker-by-subject deviations are excluded. The result therefore describes the fitted population or marker distribution rather than one observed subject.</p>
 <p>To describe a subject represented during fitting, include the fitted identifier in <code>conditions</code> and request its fitted random effects:</p>
 <div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">subject_effect</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">conditional_effects</a></span><span class="op">(</span></span>
+<code class="sourceCode R"><span><span class="va">subject_effect</span> <span class="op">&lt;-</span> <span class="fu">conditional_effects</span><span class="op">(</span></span>
 <span>  <span class="va">fit</span>,</span>
 <span>  effects <span class="op">=</span> <span class="st">"time"</span>,</span>
 <span>  conditions <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span></span>
@@ -324,7 +324,7 @@ For a `JoiNMeMixFit`, a class is a component of the selected random-effect distr
 <p>With <code>summary = TRUE</code>, each table contains a posterior centre, posterior standard error and equal-tailed credible limits. <code>robust = TRUE</code> uses the posterior median as the centre; <code>robust = FALSE</code> uses the posterior mean.</p>
 <p>With <code>summary = FALSE</code>, the result retains one row per posterior draw and estimand. <code>.draw</code> identifies the paired posterior draw, <code>.value</code> is the fitted quantity, and the remaining columns describe the condition, marker and event type. This form is suitable for probabilities such as <span class="math inline">P(\Delta&gt;0\mid\text{data})</span> or for another scientifically defined summary:</p>
 <div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">effect_draws</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">conditional_effects</a></span><span class="op">(</span></span>
+<code class="sourceCode R"><span><span class="va">effect_draws</span> <span class="op">&lt;-</span> <span class="fu">conditional_effects</span><span class="op">(</span></span>
 <span>  <span class="va">fit</span>,</span>
 <span>  effects <span class="op">=</span> <span class="st">"time"</span>,</span>
 <span>  conditions <span class="op">=</span> <span class="va">profiles</span>,</span>

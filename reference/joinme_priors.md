@@ -1,6 +1,6 @@
 # Declare priors by scientific model component
 
-`jm_prior()` names priors by the part of the statistical model they
+`jm_priors()` names priors by the part of the statistical model they
 govern, rather than by internal coefficient letters. `intercept` and
 `slope` are global fallbacks. A component-specific declaration replaces
 only the named role, leaving the other role to inherit its global
@@ -45,40 +45,6 @@ joinme_priors(
 )
 
 jm_priors(
-  ...,
-  intercept = NULL,
-  slope = NULL,
-  longitudinal = NULL,
-  survival = NULL,
-  baseline = NULL,
-  vcov = NULL,
-  marker_weights = NULL,
-  assoc = NULL,
-  functional = NULL,
-  marker = NULL,
-  lkj = NULL,
-  class = NULL,
-  .validate = TRUE
-)
-
-jm_prior(
-  ...,
-  intercept = NULL,
-  slope = NULL,
-  longitudinal = NULL,
-  survival = NULL,
-  baseline = NULL,
-  vcov = NULL,
-  marker_weights = NULL,
-  assoc = NULL,
-  functional = NULL,
-  marker = NULL,
-  lkj = NULL,
-  class = NULL,
-  .validate = TRUE
-)
-
-joinme_prior(
   ...,
   intercept = NULL,
   slope = NULL,
@@ -154,13 +120,13 @@ joinme_prior(
   Accepted stochastic values are `"student_t"`, `"normal"`, `"laplace"`,
   and `"horseshoe"`. Values `"constant"` and `"none"` are synonymous:
   the offset is then used exactly, with no fitted location or departure.
-  The family name `"student_t"` fits one degrees-of-freedom value above
-  two per active weight set under a shifted `Gamma(2, 0.1)` prior.
-  `prior_*()` objects are not accepted for `family` because
-  marker-weight departures retain location zero and ordinary scale one.
-  `marker_weights` itself must be a named list; bare prior declarations
-  are rejected to avoid confusing the common-location prior with the
-  departure family. Fixed common locations belong to
+  The family name `"student_t"` fits a single degrees-of-freedom value
+  above two shared by every active weight set under a shifted
+  `Gamma(2, 0.1)` prior. `prior_*()` objects are not accepted for
+  `family` because marker-weight departures retain location zero and
+  ordinary scale one. `marker_weights` itself must be a named list; bare
+  prior declarations are rejected to avoid confusing the common-location
+  prior with the departure family. Fixed common locations belong to
   [`jm_truth()`](https://trinhdhk.github.io/joinme/reference/joinme_truth.md).
 
 - assoc:
@@ -186,12 +152,20 @@ joinme_prior(
 - class:
 
   A named list with `baseline_prob`, the positive Dirichlet
-  concentration for baseline class probabilities, and `slope`, the prior
-  declaration for coefficients from `formulaClass`. A scalar
-  `baseline_prob` is repeated over classes; a vector may provide one
-  concentration per class. The slope remains one prior block because
-  class-specific formula lists share a reference-class parameterisation.
-  When omitted, `class$slope` inherits the global `slope` declaration.
+  concentration for baseline class probabilities; `slope`, the prior
+  declaration for coefficients from `formulaClass`; and `family`, the
+  centred unit-scale distribution of latent coordinates within each
+  class. `family` must be created with
+  [`prior_student_t()`](https://trinhdhk.github.io/joinme/reference/prior_student_t.md),
+  [`prior_normal()`](https://trinhdhk.github.io/joinme/reference/prior_normal.md),
+  or
+  [`prior_laplace()`](https://trinhdhk.github.io/joinme/reference/prior_laplace.md);
+  its location and scale must be zero and one because class-specific
+  locations and scales are fitted separately. A scalar `baseline_prob`
+  is repeated over classes; a vector may provide one concentration per
+  class. The slope remains one prior block because class-specific
+  formula lists share a reference-class parameterisation. When omitted,
+  `class$slope` inherits the global `slope` declaration.
 
 - .validate:
 
@@ -205,7 +179,7 @@ An object of class `joinme_priors`.
 ## Examples
 
 ``` r
-pri <- jm_prior(
+pri <- jm_priors(
   intercept = prior_student_t(df = 6, scale = 2),
   slope = prior_normal(scale = 1),
   longitudinal = list(slope = prior_normal(scale = 0.5)),
@@ -221,7 +195,8 @@ pri <- jm_prior(
   lkj = prior_lkj(2),
   class = list(
     baseline_prob = c(2, 2, 2),
-    slope = prior_normal(scale = 1)
+    slope = prior_normal(scale = 1),
+    family = prior_student_t(df = 6)
   )
 )
 print(pri)
@@ -265,6 +240,7 @@ print(pri)
 #>                                lkj
 #>                class.baseline_prob
 #>                        class.slope
+#>                       class.family
 #>                                                             value
 #>                              student_t(mu = 0; scale = 2; df = 6)
 #>                                         normal(mu = 0; scale = 1)
@@ -304,4 +280,5 @@ print(pri)
 #>                                                      lkj(eta = 2)
 #>                                                           2, 2, 2
 #>                                         normal(mu = 0; scale = 1)
+#>                              student_t(mu = 0; scale = 1; df = 6)
 ```

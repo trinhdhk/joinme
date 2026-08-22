@@ -21,8 +21,7 @@ fitting.
 Population coefficients are declared through `truth`. A `prior_*()`
 object generates one population coefficient vector and a finite numeric
 vector fixes that vector exactly. Every realised coefficient is stored
-in `truth`. Random effects, marker-weight departures, observations and
-event times remain conditional random realisations.
+in `truth`.
 
 ## Usage
 
@@ -45,7 +44,6 @@ simulate_joinme(
   truncate_longitudinal_before_entry = TRUE,
   seed = .Random.seed[[1]],
   covariate_formulas = list(x1 ~ rnorm(n_id), x2 ~ rnorm(n_id)),
-  shrinkage = 0L,
   assoc = c("cv_total"),
   vcov_diag_link = "softplus",
   family_params = list(gaussian = list(sigma = 1), student_t = list(sigma = 1.5, nu = 4),
@@ -209,17 +207,16 @@ simulate_joinme(
   simulation parameters. That field accepts a family name such as
   `"student_t"`, `"normal"`, `"laplace"`, or `"horseshoe"`. The names
   `"constant"` and `"none"` use the offset without a random departure.
-  The family name `"student_t"` draws one value per active set as
-  `2 + Gamma(2, 0.1)`, matching fitting. Departure location and ordinary
-  scale remain zero and one. All declarations and their realised
-  population coefficients are retained in the realised simulation truth.
-  Set `marker_weights$family` to `"constant"` or `"none"` when the
-  declared offset is the complete marker weight. No common location or
+  The family name `"student_t"` draws one value shared by all active
+  sets as `2 + Gamma(2, 0.1)`, matching fitting. Set
+  `marker_weights$family` to `"constant"` or `"none"` when the declared
+  offset is the complete marker weight. No common location or
   marker-specific departure is then drawn. Under a stochastic family,
   the effective weight is `offset + marker_weight_mean + departure`,
   where the departure is drawn directly from the declared centred
   unit-scale family. No additional marker-weight scale is used: the
   survival association slope already scales the weighted marker feature.
+  or another supported family name.
 
 - n_id:
 
@@ -286,15 +283,6 @@ simulate_joinme(
   `list(x ~ time_varyring(rnorm, steps = c(1, 3, 5), mean = 0, sd = 1))`.
   In this mode, each id receives stepwise periods over `[0, time_cens]`,
   and each period value is sampled from `fun`.
-
-- shrinkage:
-
-  Integer selecting the random-effect component distribution: `0`
-  denotes Student-t with 6 degrees of freedom, `1` Laplace, and `2`
-  Normal. Marker-weight departures no longer use this switch; their
-  family is declared by
-  `truth = jm_truth(marker_weights = list(family = "normal"))` or
-  another supported family name.
 
 - assoc:
 

@@ -47,7 +47,6 @@ simulate_joinme_mix(
   truncate_longitudinal_before_entry = TRUE,
   seed = .Random.seed[[1]],
   covariate_formulas = list(x1 ~ rnorm(n_id), x2 ~ rnorm(n_id)),
-  shrinkage = 0L,
   assoc = c("cv_total"),
   vcov_diag_link = "softplus",
   family_params = list(gaussian = list(sigma = 1), student_t = list(sigma = 1.5, nu = 4),
@@ -216,17 +215,16 @@ simulate_joinme_mix(
   simulation parameters. That field accepts a family name such as
   `"student_t"`, `"normal"`, `"laplace"`, or `"horseshoe"`. The names
   `"constant"` and `"none"` use the offset without a random departure.
-  The family name `"student_t"` draws one value per active set as
-  `2 + Gamma(2, 0.1)`, matching fitting. Departure location and ordinary
-  scale remain zero and one. All declarations and their realised
-  population coefficients are retained in the realised simulation truth.
-  Set `marker_weights$family` to `"constant"` or `"none"` when the
-  declared offset is the complete marker weight. No common location or
+  The family name `"student_t"` draws one value shared by all active
+  sets as `2 + Gamma(2, 0.1)`, matching fitting. Set
+  `marker_weights$family` to `"constant"` or `"none"` when the declared
+  offset is the complete marker weight. No common location or
   marker-specific departure is then drawn. Under a stochastic family,
   the effective weight is `offset + marker_weight_mean + departure`,
   where the departure is drawn directly from the declared centred
   unit-scale family. No additional marker-weight scale is used: the
   survival association slope already scales the weighted marker feature.
+  or another supported family name.
 
 - n_id:
 
@@ -293,15 +291,6 @@ simulate_joinme_mix(
   `list(x ~ time_varyring(rnorm, steps = c(1, 3, 5), mean = 0, sd = 1))`.
   In this mode, each id receives stepwise periods over `[0, time_cens]`,
   and each period value is sampled from `fun`.
-
-- shrinkage:
-
-  Integer selecting the random-effect component distribution: `0`
-  denotes Student-t with 6 degrees of freedom, `1` Laplace, and `2`
-  Normal. Marker-weight departures no longer use this switch; their
-  family is declared by
-  `truth = jm_truth(marker_weights = list(family = "normal"))` or
-  another supported family name.
 
 - assoc:
 
@@ -474,9 +463,15 @@ drawn independently as
 
 \$\$ z\_{jr}\mid C_j=g \sim D\\\mu\_{gr},\sigma\_{gr}\\, \$\$
 
-where \\D\\ is Student-\\t_6\\, Laplace or Normal according to
-`shrinkage`. Unselected subject, marker and covariance-regression
-coordinates remain standard Normal.
+where \\D\\ is declared by
+`jm_truth(class = list(family = prior_student_t(...)))`,
+[`prior_normal()`](https://trinhdhk.github.io/joinme/reference/prior_normal.md),
+or
+[`prior_laplace()`](https://trinhdhk.github.io/joinme/reference/prior_laplace.md).
+The same declaration is retained as the recovery prior used by
+[`joinme_mix()`](https://trinhdhk.github.io/joinme/reference/joinme_mix.md).
+Unselected subject, marker and covariance-regression coordinates are
+standard Normal.
 
 Marker weights are not latent-class coordinates. When they are
 estimated, their common location is supplied by
@@ -484,11 +479,11 @@ estimated, their common location is supplied by
 from the centred unit-scale `truth$marker_weights$family`. No further
 scale multiplies those departures because the association slope already
 scales the weighted marker feature. The family name `"student_t"` draws
-one set-specific value as `2 + Gamma(2, 0.1)`. The realised values are
-retained in `truth`. The departure coordinate retains location zero and
-ordinary scale one. A constant family bypasses both quantities, so the
-effective weights equal the offsets declared in `truth$marker_weights`
-exactly.
+one value shared by all weight sets as `2 + Gamma(2, 0.1)`. The realised
+value is retained in `truth`. The departure coordinate retains location
+zero and ordinary scale one. A constant family bypasses both quantities,
+so the effective weights equal the offsets declared in
+`truth$marker_weights` exactly.
 
 Subject and covariance-regression coordinates share one subject-level
 allocation. Combining compatible types consequently retains exactly
@@ -541,13 +536,14 @@ The `truth` argument is created with
 and follows the scientific component hierarchy used for fitting. It
 describes data-generating quantities rather than fitting distributions.
 In particular, class truths are declared together as
-`class = list(baseline_prob = ..., slope = ...)`: `baseline_prob`
-governs the Dirichlet prior and `slope` governs coefficients introduced
-by `formulaClass`. A numeric `class$slope` fixes the generating
-coefficient vector; a `prior_*()` declaration draws it once at the
-beginning of the simulation. Class probabilities, locations and scales
-are supplied through `class_parameters` when fixed generating values are
-required.
+`class = list(baseline_prob = ..., slope = ..., family = ...)`:
+`baseline_prob` governs the Dirichlet prior, `slope` governs
+coefficients introduced by `formulaClass`, and `family` governs the
+centred unit-scale distribution within every latent class. A numeric
+`class$slope` fixes the generating coefficient vector; a `prior_*()`
+declaration draws it once at the beginning of the simulation. Class
+probabilities, locations and scales are supplied through
+`class_parameters` when fixed generating values are required.
 
 ## Examples
 

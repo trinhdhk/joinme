@@ -92,8 +92,7 @@ joinme_mix(
 
   Additional arguments passed to
   [`joinme_standata()`](https://trinhdhk.github.io/joinme/reference/joinme_standata.md),
-  including `assoc`, `id_var`, `marker_var`, `time_var`, and
-  `shrinkage`.
+  including `assoc`, `id_var`, `marker_var`, and `time_var`.
 
 ## Value
 
@@ -115,11 +114,14 @@ replaced by
 \$\$ p(a_j)=\sum\_{g=1}^{G}\pi_g
 D\\a_j;\mu_g,\operatorname{diag}(s_g)\\. \$\$
 
-`shrinkage = 0`, `1`, and `2` select Student-\\t_6\\, Laplace, and
-Normal latent-class component densities, respectively. These choices do
-not set the ordinary priors for `beta`, `alpha`, `iota`, marker effects
-or marker weights; declare those independently with
-[`jm_prior()`](https://trinhdhk.github.io/joinme/reference/joinme_priors.md).
+The latent-class component density is declared through
+`jm_priors(class = list(family = ...))` using
+[`prior_student_t()`](https://trinhdhk.github.io/joinme/reference/prior_student_t.md),
+[`prior_normal()`](https://trinhdhk.github.io/joinme/reference/prior_normal.md),
+or
+[`prior_laplace()`](https://trinhdhk.github.io/joinme/reference/prior_laplace.md).
+This choice does not set the ordinary priors for longitudinal,
+association, functional, marker-effect, or marker-weight coefficients.
 The component locations and scales are estimated. By default, Stan
 orders only the first selected random-intercept location. Selected
 slopes and other coordinates remain unrestricted. Alternatively,
@@ -171,7 +173,10 @@ mixed_fit <- joinme_mix(
   n_classes = 3,
   class_type = c("subject", "vcov"),
   formulaClass = ~ treatment + age,
-  priors = jm_prior(class = list(baseline_prob = rep(2, 3))),
+  priors = jm_priors(class = list(
+    baseline_prob = rep(2, 3),
+    family = prior_student_t(df = 6)
+  )),
   assoc = c("cv_total")
 )
 

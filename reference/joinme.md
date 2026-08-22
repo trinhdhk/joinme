@@ -194,7 +194,7 @@ joinme(
 - priors:
 
   Prior declaration from
-  [`jm_prior()`](https://trinhdhk.github.io/joinme/reference/joinme_priors.md).
+  [`jm_priors()`](https://trinhdhk.github.io/joinme/reference/joinme_priors.md).
   Global `intercept` and `slope` declarations may be replaced
   independently within `longitudinal`, `survival`, `vcov`, `assoc`,
   `functional`, `marker_weights`, and named distributional regressions.
@@ -251,10 +251,6 @@ Distributional regression can be specified in two equivalent forms:
 2.  An unnamed list with explicit LHS parameter names, e.g.
     `list(sigma ~ 1 + time)`.
 
-The time axis is internally scaled for numerical stability; reported
-coefficients are rescaled within Stan so fixed effects remain
-interpretable on the original scale.
-
 Marker weights (see
 [`joinme_standata()`](https://trinhdhk.github.io/joinme/reference/joinme_standata.md))
 are used to form marker-average summaries for both current value (CV)
@@ -268,17 +264,18 @@ stochastic, one common mean per weight set and signed marker-specific
 departures are estimated around the offset declared in
 `priors$marker_weights$offset`. Each offset vector must be wholly named
 or wholly unnamed. The common mean uses
-`jm_prior(marker_weights = list(intercept = ...))`; standardised
+`jm_priors(marker_weights = list(intercept = ...))`; standardised
 departures use the centred unit-scale family named by
 `marker_weights$family`, for example
-`jm_prior(marker_weights = list(family = "laplace"))`. The family
+`jm_priors(marker_weights = list(family = "laplace"))`. The family
 intercept is a fitting prior and does not set a simulation truth. A bare
 numeric value retains the ordinary prior-scale shorthand. The
 marker-only current-value and slope channels can supply little
 information about a common shift when the average centred marker
 trajectory is close to zero, so this location prior is substantively
-important. The family name `"student_t"` learns set-specific degrees of
-freedom; each excess above two has a `Gamma(2, 0.1)` shape–rate prior. A
+important. The family name `"student_t"` learns a single
+degrees-of-freedom value shared across all weight sets; its excess above
+two has a `Gamma(2, 0.1)` shape–rate prior. A
 `prior_student_t(df = ...)` declaration always fixes `df` instead. The
 family names `"constant"` and `"none"` instead use the declared offset
 as the complete marker weight and fit neither a common mean nor
@@ -398,7 +395,8 @@ For monotone spline transforms:
   pairs or to help derive knot locations.
 
 - `y`: optional target transformed values at those `x` points. Supplying
-  `y` activates the plug-in fit; omitting it activates Stan estimation.
+  `y` activates the plug-in fit; omitting it uses built-in Stan
+  estimation.
 
 - `lambda`: smoothness control (larger = smoother transform).
 
@@ -426,9 +424,9 @@ For monotone spline transforms:
 
 Additional arguments are forwarded to
 [`joinme_standata()`](https://trinhdhk.github.io/joinme/reference/joinme_standata.md)
-(e.g., `assoc`, `basehaz`, `basehaz_degree`, `n_knots`, `time_var`, and
-`shrinkage`). Use lme4-style `||` in `formulaLong` to request diagonal
-random-effect covariance.
+(e.g., `assoc`, `basehaz`, `basehaz_degree`, `n_knots`, and `time_var`).
+Use lme4-style `||` in `formulaLong` to request diagonal random-effect
+covariance.
 
 ## Examples
 

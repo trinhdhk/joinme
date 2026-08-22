@@ -1,10 +1,6 @@
 # JoiNMe R6 Classes
 
-R6 classes used to hold JoiNMe fit and prediction results with mutable
-state.
-
-`JoiNMeFit` is the canonical exported fit class. `JoiNMeFit` remains as
-a compatibility alias.
+R6 classes for JoiNMe fit and prediction results with mutable state.
 
 **JoiNMeFit**: holds fitted model, Stan data, and formulas. Public
 fields: fit, stan_data, formulaLong, formulaEvent, formulaVCov, config,

@@ -2,7 +2,7 @@
 
 `jm_truth()` describes the population quantities used once to generate a
 complete data set. Its coefficient hierarchy follows
-[`jm_prior()`](https://trinhdhk.github.io/joinme/reference/joinme_priors.md):
+[`jm_priors()`](https://trinhdhk.github.io/joinme/reference/joinme_priors.md):
 global `intercept` and `slope` declarations provide fallbacks, whilst
 named model components may replace either role.
 
@@ -132,10 +132,13 @@ jm_truth(
 
 - class:
 
-  A named list containing `baseline_prob` and `slope`, following the
-  class-membership roles accepted by
-  [`jm_prior()`](https://trinhdhk.github.io/joinme/reference/joinme_priors.md).
-  The slope may be fixed or drawn once for each simulation.
+  A named list containing `baseline_prob`, `slope`, and `family`,
+  following the class roles accepted by
+  [`jm_priors()`](https://trinhdhk.github.io/joinme/reference/joinme_priors.md).
+  The slope may be fixed or drawn once for each simulation. The family
+  is a probability declaration governing every standardised latent
+  coordinate drawn conditionally on its class; it is not itself a
+  population coefficient draw.
 
 - basehaz:
 

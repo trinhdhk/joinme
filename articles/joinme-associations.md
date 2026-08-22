@@ -56,7 +56,7 @@ f\_{cs}(\frac{1}{D}\sum_d \omega_d CS\_{id}(t)) unless f\_{cs} is
 linear.
 
 In practice, place the entire declaration in
-`jm_prior(marker_weights = ...)`. Use `family = "constant"` or `"none"`
+`jm_priors(marker_weights = ...)`. Use `family = "constant"` or `"none"`
 for fixed weights, or a stochastic family to fit a hierarchical
 marker-weight decomposition. For marker (d) in weight set (s),
 
@@ -69,7 +69,7 @@ departure drawn directly from the selected centred unit-scale family.
 Every marker attached to set (s) contributes likelihood information
 about \mu\_{\omega,s}, so the common location is the marker-weight
 analogue of a population intercept. The common location uses
-`jm_prior(marker_weights = list(intercept = ...))`. The departures use
+`jm_priors(marker_weights = list(intercept = ...))`. The departures use
 `marker_weights$family`; their location and scale are fixed at zero and
 one.
 
@@ -139,13 +139,11 @@ mcmc_plot(fit, variable = "alpha_cv_total", type = "dens_overlay")
 ### Conditional effects in the two joint-model processes
 
 Conditional effects are distinct from subject-specific dynamic
-prediction.
-[`conditional_effects()`](https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html)
-varies named predictors while holding other predictors at explicit
-profile values and can return the longitudinal process, the event
-process, or both. The longitudinal estimand is the population-level
-expected marker response by default. Set
-`longitudinal_estimand = "marker"` to retain the fitted marker-level
+prediction. `conditional_effects()` varies named predictors while
+holding other predictors at explicit profile values and can return the
+longitudinal process, the event process, or both. The longitudinal
+estimand is the population-level expected marker response by default.
+Set `longitudinal_estimand = "marker"` to retain the fitted marker-level
 deviation, or `"marginal_marker"` to average the marker-specific
 predictions within each posterior draw. Because marker averaging occurs
 after each inverse-link transformation, it targets an average expected
@@ -185,7 +183,7 @@ plot(ce, ask = FALSE)
 Association coefficients are denoted by \alpha. This follows joint-model
 conventions and avoids confusion with the linear predictor \eta. Total,
 mean, marker, correlation, and covariance associations use the slope
-prior declared by `jm_prior(assoc = list(slope = ...))`. Its location
+prior declared by `jm_priors(assoc = list(slope = ...))`. Its location
 and scale describe the effective coefficient entering the log hazard;
 there is no additional random association-scale multiplier.
 Marker-weight sign conventions are applied after this prior

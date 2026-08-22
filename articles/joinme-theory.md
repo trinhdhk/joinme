@@ -210,7 +210,7 @@ conditional residual variance of the corresponding *untransformed*
 covariance predictor. It is not directly a standard deviation,
 correlation, or covariance in L_iL_i^\top.
 
-`jm_prior(vcov = list(sd = ..., corr = ...))` assigns independent
+`jm_priors(vcov = list(sd = ..., corr = ...))` assigns independent
 intercept and slope prior families to the two blocks. Their formula
 dimensions and packed orders are shared by fitting, dynamic prediction,
 and both simulation entry points. The dedicated covariance-regression
@@ -291,7 +291,7 @@ For covariance-style channels (`corr`, `vcov`), the declared
 entering the log hazard. The coefficient is not multiplied by a second
 random association scale. Normal, fixed-degrees-of-freedom Student-t,
 Laplace, and regularised horseshoe priors are selected independently
-through `jm_prior(assoc = list(slope = ...))`.
+through `jm_priors(assoc = list(slope = ...))`.
 
 The covariance-regression layer itself uses an identified
 parameterisation for the subject-specific Cholesky factor: each

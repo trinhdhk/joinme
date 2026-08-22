@@ -18,4 +18,4 @@ prior_lkj(eta = 1)
 ## Value
 
 A `joinme_lkj_prior` object for use inside
-[`jm_prior()`](https://trinhdhk.github.io/joinme/reference/joinme_priors.md).
+[`jm_priors()`](https://trinhdhk.github.io/joinme/reference/joinme_priors.md).

@@ -23,7 +23,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">joinme</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.2</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.3</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -205,7 +205,7 @@
 <span><span class="op">)</span></span></code></pre></div>
 </details>
 </div>
-<p>To customise priors or the baseline hazard basis, supply <code>priors = jm_prior(...)</code> and the relevant model arguments. Distributional regression for parameters such as <span class="math inline">\sigma</span> or <span class="math inline">\nu</span> can be specified through <code>formulaDist</code>.</p>
+<p>To customise priors or the baseline hazard basis, supply <code>priors = jm_priors(...)</code> and the relevant model arguments. Distributional regression for parameters such as <span class="math inline">\sigma</span> or <span class="math inline">\nu</span> can be specified through <code>formulaDist</code>.</p>
 <div class="cell">
 <details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb7"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">fit2</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/joinme.html">joinme</a></span><span class="op">(</span></span>
@@ -285,7 +285,7 @@
 <p>The <code>JoiNMeDynPred</code> object includes fitted values for observed history. We compute a <strong>residual sum of squares</strong> (RSS) on the expected-response scale (<code>epred</code>).</p>
 <div class="cell">
 <details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb9"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">pred_fit</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://mc-stan.org/rstantools/reference/posterior_epred.html" class="external-link">posterior_epred</a></span><span class="op">(</span></span>
+<code class="sourceCode R"><span><span class="va">pred_fit</span> <span class="op">&lt;-</span> <span class="fu">posterior_epred</span><span class="op">(</span></span>
 <span>  <span class="va">fit</span>,</span>
 <span>  newdataLong <span class="op">=</span> <span class="va">sim</span><span class="op">$</span><span class="va">dataLong</span>,</span>
 <span>  newdataEvent <span class="op">=</span> <span class="va">sim</span><span class="op">$</span><span class="va">dataEvent</span>,</span>
@@ -332,7 +332,7 @@
 <span><span class="va">time_start</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/Extremes.html" class="external-link">max</a></span><span class="op">(</span><span class="va">ndL</span><span class="op">$</span><span class="va">time</span><span class="op">)</span></span>
 <span><span class="va">times</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/seq.html" class="external-link">seq</a></span><span class="op">(</span><span class="va">time_start</span>, <span class="va">time_start</span> <span class="op">+</span> <span class="fl">2</span>, length.out <span class="op">=</span> <span class="fl">50</span><span class="op">)</span></span>
 <span></span>
-<span><span class="va">pred_ep</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://mc-stan.org/rstantools/reference/posterior_epred.html" class="external-link">posterior_epred</a></span><span class="op">(</span></span>
+<span><span class="va">pred_ep</span> <span class="op">&lt;-</span> <span class="fu">posterior_epred</span><span class="op">(</span></span>
 <span>  <span class="va">fit</span>,</span>
 <span>  newdataLong <span class="op">=</span> <span class="va">ndL</span>,</span>
 <span>  newdataEvent <span class="op">=</span> <span class="va">ndE</span>,</span>
@@ -360,7 +360,7 @@
 <p>When <code>times = NULL</code>, control the default forecast window with <code>time_horizon</code> (defaulting to <code>tmax</code> from the fitted model):</p>
 <div class="cell">
 <details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb11"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">pred_ep_horizon</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://mc-stan.org/rstantools/reference/posterior_epred.html" class="external-link">posterior_epred</a></span><span class="op">(</span></span>
+<code class="sourceCode R"><span><span class="va">pred_ep_horizon</span> <span class="op">&lt;-</span> <span class="fu">posterior_epred</span><span class="op">(</span></span>
 <span>  <span class="va">fit</span>,</span>
 <span>  newdataLong <span class="op">=</span> <span class="va">ndL</span>,</span>
 <span>  newdataEvent <span class="op">=</span> <span class="va">ndE</span>,</span>

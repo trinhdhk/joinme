@@ -93,8 +93,8 @@ This means:
 - `sigma` is modelled through regression (fixed/random effects if
   included),
 - `nu` is regression-driven with an intercept-only structure,
-- other distributional parameters without formulas continue using
-  family-shared baselines when applicable.
+- other distributional parameters without formulas use family-shared
+  baselines when applicable.
 
 ## Data
 
@@ -672,12 +672,8 @@ orders markers by the magnitude of posterior mean change and makes tiles
 transparent when the posterior sign certainty does not exceed
 `1 - threshold`.
 
-`plot(fit, ...)` uses fitted posterior samples directly and has no
-conditioning argument. Conditional covariate profiles are evaluated with
-[`conditional_effects()`](https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html),
-while [`predict()`](https://rdrr.io/r/stats/predict.html) remains
-reserved for dynamic subject-specific forecasts given observed
-longitudinal history.
+Conditional covariate profiles are evaluated with
+\`conditional_effects().
 
 ``` r
 

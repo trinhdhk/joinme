@@ -261,7 +261,7 @@ estimates subject-specific future trajectories and survival conditional
 on the longitudinal histories supplied in `newdataLong`. Use
 [`conditional_effects.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/conditional_effects.JoiNMeFit.md)
 with
-[`make_conditions()`](https://paulbuerkner.com/brms/reference/make_conditions.html)
+[`make_conditions()`](https://trinhdhk.github.io/joinme/reference/make_conditions.md)
 when the target is a population-level comparison across named covariate
 profiles.
 

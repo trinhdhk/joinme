@@ -191,7 +191,7 @@ fit <- joinme(
 ```
 
 To customise priors or the baseline hazard basis, supply
-`priors = jm_prior(...)` and the relevant model arguments.
+`priors = jm_priors(...)` and the relevant model arguments.
 Distributional regression for parameters such as \sigma or \nu can be
 specified through `formulaDist`.
 

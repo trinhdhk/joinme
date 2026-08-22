@@ -128,7 +128,7 @@ Code
 
 ``` r
 
-covariance_priors <- jm_prior(
+covariance_priors <- jm_priors(
   vcov = list(
     sd = list(
       intercept = prior_normal(mu = 0, scale = 1),

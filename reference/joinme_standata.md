@@ -22,7 +22,6 @@ joinme_standata(
   transforms = NULL,
   prior_specification = NULL,
   allow_marker_crosscorr = 1L,
-  shrinkage = 0L,
   basehaz = c("bs", "ns", "formula"),
   basehaz_n_knots = 5L,
   basehaz_knots = NULL,
@@ -180,7 +179,7 @@ joinme_standata(
 - prior_specification:
 
   A component-based
-  [`jm_prior()`](https://trinhdhk.github.io/joinme/reference/joinme_priors.md)
+  [`jm_priors()`](https://trinhdhk.github.io/joinme/reference/joinme_priors.md)
   declaration. Global `intercept` and `slope` declarations are inherited
   unless a scientific component supplies the corresponding role
   explicitly. Marker-weighted associations are governed entirely by its
@@ -198,13 +197,6 @@ joinme_standata(
 - allow_marker_crosscorr:
 
   Integer flag; 1 allows cross-marker correlation in marker RE.
-
-- shrinkage:
-
-  Compatibility flag used by latent-class component distributions and
-  simulation: 0 = Student-t(6), 1 = Laplace, and 2 = Normal. Ordinary
-  coefficient and marker priors are declared separately through
-  [`jm_prior()`](https://trinhdhk.github.io/joinme/reference/joinme_priors.md).
 
 - basehaz:
 

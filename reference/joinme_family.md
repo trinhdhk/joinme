@@ -79,219 +79,33 @@ Object of class `"JoiNMe_family_spec"`.
 
 ``` r
 jm_family("poisson", link = "log")
-#> $family
-#> [1] "poisson"
-#> 
-#> $link
-#> [1] "log"
-#> 
-#> $inv_link
-#> $inv_link$bytecode
-#> [1] 0 7
-#> 
-#> $inv_link$const_data
-#> numeric(0)
-#> 
-#> $inv_link$n_ops
-#> [1] 2
-#> 
-#> $inv_link$n_const
-#> [1] 0
-#> 
-#> 
-#> $tau
-#> [1] NA
-#> 
-#> attr(,"class")
-#> [1] "JoiNMe_family_spec"
+#> Joint Nested Mixed-effects Longitudinal Family Specification:
+#>   Family: poisson
+#>   Link: log
+#>   Inverse link: exp(x)
 jm_family("poisson", link = ~ log(x))
-#> $family
-#> [1] "poisson"
-#> 
-#> $link
-#> [1] "log"
-#> 
-#> $inv_link
-#> $inv_link$bytecode
-#> [1] 0 7
-#> 
-#> $inv_link$const_data
-#> numeric(0)
-#> 
-#> $inv_link$op_iota_intercept_idx
-#> [1] 0 0
-#> 
-#> $inv_link$op_iota_slope_idx
-#> [1] 0 0
-#> 
-#> $inv_link$n_ops
-#> [1] 2
-#> 
-#> $inv_link$n_bytecode
-#> [1] 2
-#> 
-#> $inv_link$n_const
-#> [1] 0
-#> 
-#> $inv_link$n_iota_intercept
-#> [1] 0
-#> 
-#> $inv_link$n_iota_slope
-#> [1] 0
-#> 
-#> 
-#> $tau
-#> [1] NA
-#> 
-#> attr(,"class")
-#> [1] "JoiNMe_family_spec"
+#> Joint Nested Mixed-effects Longitudinal Family Specification:
+#>   Family: poisson
+#>   Link: log
+#>   Inverse link: exp(x)
 jm_family("bernoulli", inv_link = ~ inv_logit(x))
-#> $family
-#> [1] "bernoulli"
-#> 
-#> $link
-#> [1] "logit"
-#> 
-#> $inv_link
-#> $inv_link$bytecode
-#> [1] 0 9
-#> 
-#> $inv_link$const_data
-#> numeric(0)
-#> 
-#> $inv_link$op_iota_intercept_idx
-#> [1] 0 0
-#> 
-#> $inv_link$op_iota_slope_idx
-#> [1] 0 0
-#> 
-#> $inv_link$n_ops
-#> [1] 2
-#> 
-#> $inv_link$n_bytecode
-#> [1] 2
-#> 
-#> $inv_link$n_const
-#> [1] 0
-#> 
-#> $inv_link$n_iota_intercept
-#> [1] 0
-#> 
-#> $inv_link$n_iota_slope
-#> [1] 0
-#> 
-#> 
-#> $tau
-#> [1] NA
-#> 
-#> attr(,"class")
-#> [1] "JoiNMe_family_spec"
+#> Joint Nested Mixed-effects Longitudinal Family Specification:
+#>   Family: bernoulli
+#>   Link: logit
+#>   Inverse link: inv_logit(x)
 jm_family("bernoulli", link = ~ inv_Phi(x))
-#> $family
-#> [1] "bernoulli"
-#> 
-#> $link
-#> [1] "probit"
-#> 
-#> $inv_link
-#> $inv_link$bytecode
-#> [1]  0 26
-#> 
-#> $inv_link$const_data
-#> numeric(0)
-#> 
-#> $inv_link$op_iota_intercept_idx
-#> [1] 0 0
-#> 
-#> $inv_link$op_iota_slope_idx
-#> [1] 0 0
-#> 
-#> $inv_link$n_ops
-#> [1] 2
-#> 
-#> $inv_link$n_bytecode
-#> [1] 2
-#> 
-#> $inv_link$n_const
-#> [1] 0
-#> 
-#> $inv_link$n_iota_intercept
-#> [1] 0
-#> 
-#> $inv_link$n_iota_slope
-#> [1] 0
-#> 
-#> 
-#> $tau
-#> [1] NA
-#> 
-#> attr(,"class")
-#> [1] "JoiNMe_family_spec"
+#> Joint Nested Mixed-effects Longitudinal Family Specification:
+#>   Family: bernoulli
+#>   Link: probit
+#>   Inverse link: Phi(x)
 jm_family("bernoulli", inv_link = ~ Phi(x))
-#> $family
-#> [1] "bernoulli"
-#> 
-#> $link
-#> [1] "probit"
-#> 
-#> $inv_link
-#> $inv_link$bytecode
-#> [1]  0 26
-#> 
-#> $inv_link$const_data
-#> numeric(0)
-#> 
-#> $inv_link$op_iota_intercept_idx
-#> [1] 0 0
-#> 
-#> $inv_link$op_iota_slope_idx
-#> [1] 0 0
-#> 
-#> $inv_link$n_ops
-#> [1] 2
-#> 
-#> $inv_link$n_bytecode
-#> [1] 2
-#> 
-#> $inv_link$n_const
-#> [1] 0
-#> 
-#> $inv_link$n_iota_intercept
-#> [1] 0
-#> 
-#> $inv_link$n_iota_slope
-#> [1] 0
-#> 
-#> 
-#> $tau
-#> [1] NA
-#> 
-#> attr(,"class")
-#> [1] "JoiNMe_family_spec"
+#> Joint Nested Mixed-effects Longitudinal Family Specification:
+#>   Family: bernoulli
+#>   Link: probit
+#>   Inverse link: Phi(x)
 jm_family("skew_laplace", tau = 0.8)
-#> $family
-#> [1] "skew_double_exponential"
-#> 
-#> $link
-#> [1] "identity"
-#> 
-#> $inv_link
-#> $inv_link$bytecode
-#> [1] 0
-#> 
-#> $inv_link$const_data
-#> numeric(0)
-#> 
-#> $inv_link$n_ops
-#> [1] 1
-#> 
-#> $inv_link$n_const
-#> [1] 0
-#> 
-#> 
-#> $tau
-#> [1] 0.8
-#> 
-#> attr(,"class")
-#> [1] "JoiNMe_family_spec"
+#> Joint Nested Mixed-effects Longitudinal Family Specification:
+#>   Family: skew_double_exponential
+#>   Link: identity
+#>   Inverse link: x
 ```

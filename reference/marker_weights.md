@@ -7,8 +7,7 @@ departure. When `marker_weights$shared = TRUE`, one shared set is
 returned once. Otherwise, each active weighted association term receives
 its own set.
 
-Individual weights are intentionally kept out of
-[`summary.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/summary.JoinMeFit.md).
+Individual weights are intentionally kept out of `summary.JoiNMeFit()`.
 The model summary reports only the common location and within-set
 spread. This function and [`coef()`](https://rdrr.io/r/stats/coef.html)
 return effective weights,

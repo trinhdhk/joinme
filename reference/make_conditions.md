@@ -9,9 +9,7 @@ or
 Conditioning belongs to the conditional-effects or conditional-contrast
 estimand; neither
 [`predict.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/predict.JoiNMeFit.md)
-nor
-[`plot.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/plot.JoinMeFit.md)
-accepts a `condition` argument.
+nor `plot.JoiNMeFit()` accepts a `condition` argument.
 
 ## Usage
 

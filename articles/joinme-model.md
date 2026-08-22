@@ -128,7 +128,7 @@ location and marker-specific departures are added to base weights and
 the resulting weights are used directly before aggregation.
 
 The common marker-weight location uses `marker_weights$intercept` in
-[`jm_prior()`](https://trinhdhk.github.io/joinme/reference/joinme_priors.md);
+[`jm_priors()`](https://trinhdhk.github.io/joinme/reference/joinme_priors.md);
 association coefficients use `assoc$slope`, and marker-specific
 departures use the family named by `marker_weights$family`. Normal,
 Student-t, Laplace, and regularised horseshoe families are available.

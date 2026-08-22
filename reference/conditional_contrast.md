@@ -191,7 +191,7 @@ select such a variable with `condition_variable`.
 ## See also
 
 [`conditional_effects.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/conditional_effects.JoiNMeFit.md),
-[`make_conditions()`](https://paulbuerkner.com/brms/reference/make_conditions.html)
+[`make_conditions()`](https://trinhdhk.github.io/joinme/reference/make_conditions.md)
 
 ## Examples
 

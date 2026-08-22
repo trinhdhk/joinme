@@ -39,7 +39,7 @@ locations and scales are recorded under truth$mixture."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">joinme</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.2</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.3</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -111,7 +111,6 @@ locations and scales are recorded under <code>truth$mixture</code>.</p>
 <span>  truncate_longitudinal_before_entry <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  seed <span class="op">=</span> <span class="va">.Random.seed</span><span class="op">[[</span><span class="fl">1</span><span class="op">]</span><span class="op">]</span>,</span>
 <span>  covariate_formulas <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span><span class="va">x1</span> <span class="op">~</span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n_id</span><span class="op">)</span>, <span class="va">x2</span> <span class="op">~</span> <span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="va">n_id</span><span class="op">)</span><span class="op">)</span>,</span>
-<span>  shrinkage <span class="op">=</span> <span class="fl">0L</span>,</span>
 <span>  assoc <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"cv_total"</span><span class="op">)</span>,</span>
 <span>  vcov_diag_link <span class="op">=</span> <span class="st">"softplus"</span>,</span>
 <span>  family_params <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>gaussian <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>sigma <span class="op">=</span> <span class="fl">1</span><span class="op">)</span>, student_t <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>sigma <span class="op">=</span> <span class="fl">1.5</span>, nu <span class="op">=</span> <span class="fl">4</span><span class="op">)</span>,</span>
@@ -254,17 +253,16 @@ marker-specific weight departures, because those departures are otherwise
 random simulation parameters. That field accepts a family name such as
 <code>"student_t"</code>, <code>"normal"</code>, <code>"laplace"</code>, or <code>"horseshoe"</code>. The names
 <code>"constant"</code> and <code>"none"</code> use the offset without a random departure. The
-family name <code>"student_t"</code> draws one value per active set as
-<code>2 + Gamma(2, 0.1)</code>, matching fitting. Departure location and ordinary scale remain zero and
-one. All declarations and their realised population coefficients are
-retained in the realised simulation truth.
+family name <code>"student_t"</code> draws one value shared by all active sets as
+<code>2 + Gamma(2, 0.1)</code>, matching fitting.
 Set <code>marker_weights$family</code> to <code>"constant"</code> or <code>"none"</code> when the
 declared offset is the complete marker weight. No common location or
 marker-specific departure is then drawn. Under a stochastic family, the
 effective weight is <code>offset + marker_weight_mean + departure</code>, where the
 departure is drawn directly from the declared centred unit-scale family.
 No additional marker-weight scale is used: the survival association slope
-already scales the weighted marker feature.</p></dd>
+already scales the weighted marker feature.
+or another supported family name.</p></dd>
 
 
 <dt id="arg-n-id">n_id<a class="anchor" aria-label="anchor" href="#arg-n-id"></a></dt>
@@ -330,14 +328,6 @@ Time-varying step covariates are supported via
 <code>list(x ~ time_varyring(rnorm, steps = c(1, 3, 5), mean = 0, sd = 1))</code>.
 In this mode, each id receives stepwise periods over <code>[0, time_cens]</code>, and
 each period value is sampled from <code>fun</code>.</p></dd>
-
-
-<dt id="arg-shrinkage">shrinkage<a class="anchor" aria-label="anchor" href="#arg-shrinkage"></a></dt>
-<dd><p>Integer selecting the random-effect component distribution:
-<code>0</code> denotes Student-t with 6 degrees of freedom, <code>1</code> Laplace, and <code>2</code>
-Normal. Marker-weight departures no longer use this switch; their family
-is declared by <code>truth = jm_truth(marker_weights = list(family = "normal"))</code>
-or another supported family name.</p></dd>
 
 
 <dt id="arg-assoc">assoc<a class="anchor" aria-label="anchor" href="#arg-assoc"></a></dt>
@@ -489,16 +479,19 @@ independently as</p>
 z_{jr}\mid C_j=g \sim
 D\{\mu_{gr},\sigma_{gr}\},
 $$</p>
-<p>where \(D\) is Student-\(t_6\), Laplace or Normal according to <code>shrinkage</code>.
-Unselected subject, marker and covariance-regression coordinates remain
+<p>where \(D\) is declared by
+<code>jm_truth(class = list(family = prior_student_t(...)))</code>,
+<code><a href="prior_normal.html">prior_normal()</a></code>, or <code><a href="prior_laplace.html">prior_laplace()</a></code>. The same declaration is retained as
+the recovery prior used by <code><a href="joinme_mix.html">joinme_mix()</a></code>.
+Unselected subject, marker and covariance-regression coordinates are
 standard Normal.</p>
 <p>Marker weights are not latent-class coordinates. When they are estimated,
 their common location is supplied by <code>truth$marker_weights$intercept</code>,
 and direct marker departures are drawn from the centred unit-scale
 <code>truth$marker_weights$family</code>. No further scale multiplies those
 departures because the association slope already scales the weighted
-marker feature. The family name <code>"student_t"</code> draws one set-specific
-value as <code>2 + Gamma(2, 0.1)</code>. The realised values are retained in <code>truth</code>. The departure
+marker feature. The family name <code>"student_t"</code> draws one value shared by all
+weight sets as <code>2 + Gamma(2, 0.1)</code>. The realised value is retained in <code>truth</code>. The departure
 coordinate retains location zero and ordinary scale one. A constant family
 bypasses both quantities, so the effective weights equal the offsets declared
 in <code>truth$marker_weights</code> exactly.</p>
@@ -536,9 +529,10 @@ association terms are not permitted in this mode.</p>
 component hierarchy used for fitting. It describes data-generating
 quantities rather than fitting distributions. In particular,
 class truths are declared together as
-<code>class = list(baseline_prob = ..., slope = ...)</code>: <code>baseline_prob</code> governs
-the Dirichlet prior and <code>slope</code> governs coefficients introduced by
-<code>formulaClass</code>. A numeric <code>class$slope</code> fixes the generating coefficient
+<code>class = list(baseline_prob = ..., slope = ..., family = ...)</code>:
+<code>baseline_prob</code> governs the Dirichlet prior, <code>slope</code> governs coefficients
+introduced by <code>formulaClass</code>, and <code>family</code> governs the centred unit-scale
+distribution within every latent class. A numeric <code>class$slope</code> fixes the generating coefficient
 vector; a <code>prior_*()</code> declaration draws it once at the beginning of the
 simulation. Class probabilities, locations and scales are supplied through
 <code>class_parameters</code> when fixed generating values are required.</p>

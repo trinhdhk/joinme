@@ -23,7 +23,7 @@ predictive draws (includes observation noise)."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">joinme</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.2</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.3</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -90,13 +90,13 @@ predictive draws (includes observation noise).</p>
 <span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># S3 method for class 'JoiNMeFit'</span></span>
-<span><span class="fu"><a href="https://mc-stan.org/rstantools/reference/posterior_linpred.html" class="external-link">posterior_linpred</a></span><span class="op">(</span><span class="va">object</span>, reuse_fitted_re <span class="op">=</span> <span class="cn">FALSE</span>, <span class="va">...</span><span class="op">)</span></span>
+<span><span class="fu">posterior_linpred</span><span class="op">(</span><span class="va">object</span>, reuse_fitted_re <span class="op">=</span> <span class="cn">FALSE</span>, <span class="va">...</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># S3 method for class 'JoiNMeFit'</span></span>
-<span><span class="fu"><a href="https://mc-stan.org/rstantools/reference/posterior_epred.html" class="external-link">posterior_epred</a></span><span class="op">(</span><span class="va">object</span>, reuse_fitted_re <span class="op">=</span> <span class="cn">FALSE</span>, <span class="va">...</span><span class="op">)</span></span>
+<span><span class="fu">posterior_epred</span><span class="op">(</span><span class="va">object</span>, reuse_fitted_re <span class="op">=</span> <span class="cn">FALSE</span>, <span class="va">...</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># S3 method for class 'JoiNMeFit'</span></span>
-<span><span class="fu"><a href="https://mc-stan.org/rstantools/reference/posterior_predict.html" class="external-link">posterior_predict</a></span><span class="op">(</span><span class="va">object</span>, reuse_fitted_re <span class="op">=</span> <span class="cn">FALSE</span>, <span class="va">...</span><span class="op">)</span></span></code></pre></div>
+<span><span class="fu">posterior_predict</span><span class="op">(</span><span class="va">object</span>, reuse_fitted_re <span class="op">=</span> <span class="cn">FALSE</span>, <span class="va">...</span><span class="op">)</span></span></code></pre></div>
     </div>
 
     <div class="section level2">
@@ -263,7 +263,7 @@ draws in <code>posterior_class</code>.</p></dd>
     <p><code>predict.JoiNMeFit()</code> does not accept a <code>condition</code> argument. It estimates
 subject-specific future trajectories and survival conditional on the
 longitudinal histories supplied in <code>newdataLong</code>. Use
-<code><a href="conditional_effects.JoiNMeFit.html">conditional_effects.JoiNMeFit()</a></code> with <code><a href="https://paulbuerkner.com/brms/reference/make_conditions.html" class="external-link">make_conditions()</a></code> when the target is
+<code><a href="conditional_effects.JoiNMeFit.html">conditional_effects.JoiNMeFit()</a></code> with <code><a href="make_conditions.html">make_conditions()</a></code> when the target is
 a population-level comparison across named covariate profiles.</p>
 <p>The function uses a Bayesian approach in two draw layers:</p><ol><li><p>Extract posterior parameter draws from the fitted object (<code>n_samples</code>).</p></li>
 <li><p>Re-index those draws to the dynpred draw count (<code>control$n_pred_draws</code>),

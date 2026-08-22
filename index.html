@@ -23,7 +23,7 @@
 
     <a class="navbar-brand me-2" href="index.html">joinme</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.2</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.3</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -166,7 +166,7 @@
 <code><a href="reference/mcmc_plot.html">mcmc_plot()</a></code> forwards those draws to <code>bayesplot</code>, imitating the behaviour of <code>brms</code>
 </li>
 <li>
-<code><a href="reference/longitudinal_plot.html">longitudinal_plot()</a></code>, <code><a href="reference/survival_plot.html">survival_plot()</a></code>, <code><a href="reference/cumhaz_plot.html">cumhaz_plot()</a></code>, <code><a href="reference/association_plot.html">association_plot()</a></code>, and <code><a href="reference/diagnostic_plot.html">diagnostic_plot()</a></code> provide methods for plotting individual processes.</li>
+<code><a href="reference/longitudinal_plot.html">longitudinal_plot()</a></code>, <code><a href="reference/survival_plot.html">survival_plot()</a></code>, <code><a href="reference/cumhaz_plot.html">cumhaz_plot()</a></code>, <code><a href="reference/association_plot.html">association_plot()</a></code>, and <code><a href="reference/diagnostic_plot.html">diagnostic_plot()</a></code> provide methods for plotting individual processes.f</li>
 </ul>
 <!--
 Summary-scale consistency:
@@ -250,8 +250,8 @@ Summary-scale consistency:
 <span><span class="fu"><a href="reference/mcmc_plot.html">mcmc_plot</a></span><span class="op">(</span><span class="va">fit</span>, variable <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"time"</span>, <span class="st">"alpha_cv_total"</span><span class="op">)</span>, type <span class="op">=</span> <span class="st">"trace"</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># Conditional effects for either joint-model process</span></span>
-<span><span class="va">profiles</span> <span class="op">&lt;-</span> <span class="fu">make_conditions</span><span class="op">(</span><span class="va">sim</span><span class="op">$</span><span class="va">dataEvent</span>, vars <span class="op">=</span> <span class="st">"x1"</span><span class="op">)</span></span>
-<span><span class="va">ce</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">conditional_effects</a></span><span class="op">(</span></span>
+<span><span class="va">profiles</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/make_conditions.html">make_conditions</a></span><span class="op">(</span><span class="va">sim</span><span class="op">$</span><span class="va">dataEvent</span>, vars <span class="op">=</span> <span class="st">"x1"</span><span class="op">)</span></span>
+<span><span class="va">ce</span> <span class="op">&lt;-</span> <span class="fu">conditional_effects</span><span class="op">(</span></span>
 <span>  <span class="va">fit</span>,</span>
 <span>  effects <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>longitudinal <span class="op">=</span> <span class="st">"time"</span>, event <span class="op">=</span> <span class="st">"x1"</span><span class="op">)</span>,</span>
 <span>  conditions <span class="op">=</span> <span class="va">profiles</span>,</span>
@@ -261,7 +261,7 @@ Summary-scale consistency:
 <span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">ce</span>, ask <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># Average marker-specific expected responses after applying each inverse link</span></span>
-<span><span class="va">ce_average_marker</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">conditional_effects</a></span><span class="op">(</span></span>
+<span><span class="va">ce_average_marker</span> <span class="op">&lt;-</span> <span class="fu">conditional_effects</span><span class="op">(</span></span>
 <span>  <span class="va">fit</span>,</span>
 <span>  effects <span class="op">=</span> <span class="st">"time"</span>,</span>
 <span>  process <span class="op">=</span> <span class="st">"longitudinal"</span>,</span>
@@ -301,7 +301,7 @@ Summary-scale consistency:
 <span><span class="va">ndE</span> <span class="op">&lt;-</span> <span class="va">sim</span><span class="op">$</span><span class="va">dataEvent</span><span class="op">[</span><span class="va">sim</span><span class="op">$</span><span class="va">dataEvent</span><span class="op">$</span><span class="va">id</span> <span class="op">==</span> <span class="fl">1</span>, <span class="op">]</span></span>
 <span><span class="va">time_start</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/Extremes.html" class="external-link">max</a></span><span class="op">(</span><span class="va">ndL</span><span class="op">$</span><span class="va">time</span><span class="op">)</span></span>
 <span></span>
-<span><span class="va">pred</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://mc-stan.org/rstantools/reference/posterior_epred.html" class="external-link">posterior_epred</a></span><span class="op">(</span></span>
+<span><span class="va">pred</span> <span class="op">&lt;-</span> <span class="fu">posterior_epred</span><span class="op">(</span></span>
 <span>  <span class="va">fit</span>,</span>
 <span>  newdataLong <span class="op">=</span> <span class="va">ndL</span>,</span>
 <span>  newdataEvent <span class="op">=</span> <span class="va">ndE</span>,</span>
@@ -336,7 +336,7 @@ Summary-scale consistency:
 <span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># Posterior summary/extraction helpers</span></span>
-<span><span class="fu"><a href="https://paulbuerkner.com/brms/reference/posterior_summary.html" class="external-link">posterior_summary</a></span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span>
+<span><span class="fu">posterior_summary</span><span class="op">(</span><span class="va">fit</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/assoc.html">posterior_assoc</a></span><span class="op">(</span><span class="va">fit</span>, summary <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># Conventional coefficient interfaces use posterior_summary() for reporting</span></span>

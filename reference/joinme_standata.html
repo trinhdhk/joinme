@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">joinme</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.2</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.3</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -61,7 +61,6 @@
 <span>  transforms <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  prior_specification <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  allow_marker_crosscorr <span class="op">=</span> <span class="fl">1L</span>,</span>
-<span>  shrinkage <span class="op">=</span> <span class="fl">0L</span>,</span>
 <span>  basehaz <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"bs"</span>, <span class="st">"ns"</span>, <span class="st">"formula"</span><span class="op">)</span>,</span>
 <span>  basehaz_n_knots <span class="op">=</span> <span class="fl">5L</span>,</span>
 <span>  basehaz_knots <span class="op">=</span> <span class="cn">NULL</span>,</span>
@@ -207,7 +206,7 @@ the earlier <code>y</code> field no longer fixes the fitted curve.</p></dd>
 
 
 <dt id="arg-prior-specification">prior_specification<a class="anchor" aria-label="anchor" href="#arg-prior-specification"></a></dt>
-<dd><p>A component-based <code><a href="joinme_priors.html">jm_prior()</a></code> declaration.
+<dd><p>A component-based <code><a href="joinme_priors.html">jm_priors()</a></code> declaration.
 Global <code>intercept</code> and <code>slope</code> declarations are inherited unless a
 scientific component supplies the corresponding role explicitly.
 Marker-weighted associations are governed entirely by its
@@ -224,13 +223,6 @@ supplies the multiplier for the completed weighted marker feature.</p></dd>
 
 <dt id="arg-allow-marker-crosscorr">allow_marker_crosscorr<a class="anchor" aria-label="anchor" href="#arg-allow-marker-crosscorr"></a></dt>
 <dd><p>Integer flag; 1 allows cross-marker correlation in marker RE.</p></dd>
-
-
-<dt id="arg-shrinkage">shrinkage<a class="anchor" aria-label="anchor" href="#arg-shrinkage"></a></dt>
-<dd><p>Compatibility flag used by latent-class component
-distributions and simulation: 0 = Student-t(6), 1 = Laplace, and
-2 = Normal. Ordinary coefficient and marker priors are declared separately
-through <code><a href="joinme_priors.html">jm_prior()</a></code>.</p></dd>
 
 
 <dt id="arg-basehaz">basehaz<a class="anchor" aria-label="anchor" href="#arg-basehaz"></a></dt>

@@ -138,7 +138,7 @@ interface:
   [`association_plot()`](https://trinhdhk.github.io/joinme/reference/association_plot.md),
   and
   [`diagnostic_plot()`](https://trinhdhk.github.io/joinme/reference/diagnostic_plot.md)
-  provide methods for plotting individual processes.
+  provide methods for plotting individual processes.f
 
 ## Quick example
 

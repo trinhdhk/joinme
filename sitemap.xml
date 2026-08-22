@@ -63,7 +63,6 @@
 <url><loc>https://trinhdhk.github.io/joinme/reference/plot.JoiNMeMixFit.html</loc></url>
 <url><loc>https://trinhdhk.github.io/joinme/reference/plot.JoiNMePosteriorClass.html</loc></url>
 <url><loc>https://trinhdhk.github.io/joinme/reference/plot.JoinMeDynPred.html</loc></url>
-<url><loc>https://trinhdhk.github.io/joinme/reference/plot.JoinMeFit.html</loc></url>
 <url><loc>https://trinhdhk.github.io/joinme/reference/plot.PosteriorAssoc.html</loc></url>
 <url><loc>https://trinhdhk.github.io/joinme/reference/posterior_class.JoiNMeMixDynPred.html</loc></url>
 <url><loc>https://trinhdhk.github.io/joinme/reference/posterior_class.html</loc></url>
@@ -78,6 +77,7 @@
 <url><loc>https://trinhdhk.github.io/joinme/reference/print.JoiNMeConditionalContrasts.html</loc></url>
 <url><loc>https://trinhdhk.github.io/joinme/reference/print.JoiNMeConditionalEffects.html</loc></url>
 <url><loc>https://trinhdhk.github.io/joinme/reference/print.JoiNMePosteriorClass.html</loc></url>
+<url><loc>https://trinhdhk.github.io/joinme/reference/print.JoiNMe_family_spec.html</loc></url>
 <url><loc>https://trinhdhk.github.io/joinme/reference/print.JoinMeDynPred.html</loc></url>
 <url><loc>https://trinhdhk.github.io/joinme/reference/print.JoinMeFit.html</loc></url>
 <url><loc>https://trinhdhk.github.io/joinme/reference/print.PosteriorAssoc.html</loc></url>
@@ -90,16 +90,13 @@
 <url><loc>https://trinhdhk.github.io/joinme/reference/prior_student_t.html</loc></url>
 <url><loc>https://trinhdhk.github.io/joinme/reference/ranef.JoinMeDynPred.html</loc></url>
 <url><loc>https://trinhdhk.github.io/joinme/reference/ranef.JoinMeFit.html</loc></url>
-<url><loc>https://trinhdhk.github.io/joinme/reference/reexports.html</loc></url>
 <url><loc>https://trinhdhk.github.io/joinme/reference/run_joinme_example.html</loc></url>
 <url><loc>https://trinhdhk.github.io/joinme/reference/simulate_joinme.html</loc></url>
-<url><loc>https://trinhdhk.github.io/joinme/reference/simulate_joinme_joint_student_t_cvtotal.html</loc></url>
 <url><loc>https://trinhdhk.github.io/joinme/reference/simulate_joinme_mix.html</loc></url>
 <url><loc>https://trinhdhk.github.io/joinme/reference/softplus.html</loc></url>
 <url><loc>https://trinhdhk.github.io/joinme/reference/stan_diagnostics.JoinMeFit.html</loc></url>
 <url><loc>https://trinhdhk.github.io/joinme/reference/summary.JoiNMeMixFit.html</loc></url>
 <url><loc>https://trinhdhk.github.io/joinme/reference/summary.JoinMeDynPred.html</loc></url>
-<url><loc>https://trinhdhk.github.io/joinme/reference/summary.JoinMeFit.html</loc></url>
 <url><loc>https://trinhdhk.github.io/joinme/reference/survival_plot.html</loc></url>
 <url><loc>https://trinhdhk.github.io/joinme/reference/time_varyring.html</loc></url>
 <url><loc>https://trinhdhk.github.io/joinme/reference/tvROC.html</loc></url>

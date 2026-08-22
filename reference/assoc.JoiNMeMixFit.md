@@ -73,8 +73,8 @@ assoc(
 - class_points:
 
   Number of reference time or covariance-covariate values used in the
-  compact class-specific association tables. The plotting method
-  continues to use its requested full grid.
+  compact class-specific association tables. The plotting method use its
+  requested full grid.
 
 - ...:
 
@@ -85,5 +85,4 @@ assoc(
 A `PosteriorAssoc` object, or a class-trajectory ggplot when
 `trajectory = TRUE`. For summary-form mixture output, relevant compact
 class contributions are retained in the `class_association` attribute
-and printed beneath the common coefficient tables. The plotted numerical
-values remain available in the ggplot's `data` field.
+and printed beneath the common coefficient tables.

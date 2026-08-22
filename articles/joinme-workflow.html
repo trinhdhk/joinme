@@ -23,7 +23,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">joinme</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.2</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.3</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -98,8 +98,7 @@
 <span>    longitudinal <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"(Intercept)"</span> <span class="op">=</span> <span class="fl">1.0</span>, <span class="st">"time"</span> <span class="op">=</span> <span class="fl">0.5</span>, <span class="st">"x1"</span> <span class="op">=</span> <span class="fl">0.4</span><span class="op">)</span>,</span>
 <span>    assoc_coef <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>slope <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>cv_total <span class="op">=</span> <span class="fl">0.5</span><span class="op">)</span><span class="op">)</span>,</span>
 <span>    marker_weights <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>family <span class="op">=</span> <span class="st">"student_t"</span><span class="op">)</span></span>
-<span>  <span class="op">)</span>,</span>
-<span>  shrinkage <span class="op">=</span> <span class="fl">0L</span></span>
+<span>  <span class="op">)</span></span>
 <span><span class="op">)</span></span>
 <span></span>
 <span><span class="va">dataLong</span> <span class="op">&lt;-</span> <span class="va">sim</span><span class="op">$</span><span class="va">dataLong</span></span>
@@ -137,7 +136,7 @@
 <span><span class="co">#&gt; 6  6  0.4042901  0.5142336 8.000000     0          0  8.000000</span></span></code></pre></div>
 </details>
 </div>
-<p><code><a href="../reference/joinme_truth.html">jm_truth()</a></code> describes the data-generating population; <code><a href="../reference/joinme_priors.html">jm_prior()</a></code> describes the probability distributions used in fitting. They share scientific component names but are not interchangeable. A numerical value in <code><a href="../reference/joinme_truth.html">jm_truth()</a></code> is fixed for the whole data set; a <code>prior_*()</code> declaration is sampled once and its realised value is stored in <code>sim$truth</code>. The truth object also contains <code>basehaz</code>, <code>assoc_coef</code>, and <code>re_params</code>. If an ordinary random-effect standard deviation is omitted, it is drawn once from <code>Exponential(1)</code>. If its correlation matrix is omitted, it is drawn once from the LKJ distribution declared by <code>lkj = prior_lkj(...)</code>.</p>
+<p><code><a href="../reference/joinme_truth.html">jm_truth()</a></code> describes the data-generating population; <code><a href="../reference/joinme_priors.html">jm_priors()</a></code> describes the probability distributions used in fitting. They share scientific component names but are not interchangeable. A numerical value in <code><a href="../reference/joinme_truth.html">jm_truth()</a></code> is fixed for the whole data set; a <code>prior_*()</code> declaration is sampled once and its realised value is stored in <code>sim$truth</code>. The truth object also contains <code>basehaz</code>, <code>assoc_coef</code>, and <code>re_params</code>. If an ordinary random-effect standard deviation is omitted, it is drawn once from <code>Exponential(1)</code>. If its correlation matrix is omitted, it is drawn once from the LKJ distribution declared by <code>lkj = prior_lkj(...)</code>.</p>
 <p>Visualise your longitudinal trajectories and survival distribution before modelling.</p>
 <div class="cell">
 <details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb2"><pre class="downlit sourceCode r">
@@ -193,11 +192,11 @@
 <span>  <span class="op">(</span><span class="fl">0</span> <span class="op">+</span> <span class="va">x1</span> <span class="op">||</span> <span class="va">marker</span><span class="op">)</span></span></code></pre></div>
 </details>
 </div>
-<p>Prior families are declared by model block through <code><a href="../reference/joinme_priors.html">jm_prior()</a></code>. Thus changing the prior for an association coefficient does not silently change the fixed effects, affine transformation shifts, marker effects, or marker weights.</p>
+<p>Prior families are declared by model block through <code><a href="../reference/joinme_priors.html">jm_priors()</a></code>. Thus changing the prior for an association coefficient does not silently change the fixed effects, affine transformation shifts, marker effects, or marker weights.</p>
 <div class="cell">
 <details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb5"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># Define explicit, block-specific priors for transparency.</span></span>
-<span><span class="va">priors</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/joinme_priors.html">jm_prior</a></span><span class="op">(</span></span>
+<span><span class="va">priors</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/joinme_priors.html">jm_priors</a></span><span class="op">(</span></span>
 <span>  intercept <span class="op">=</span> <span class="fu"><a href="../reference/prior_student_t.html">prior_student_t</a></span><span class="op">(</span>df <span class="op">=</span> <span class="fl">6</span>, mu <span class="op">=</span> <span class="fl">0</span>, scale <span class="op">=</span> <span class="fl">2</span><span class="op">)</span>,</span>
 <span>  slope <span class="op">=</span> <span class="fu"><a href="../reference/prior_normal.html">prior_normal</a></span><span class="op">(</span>mu <span class="op">=</span> <span class="fl">0</span>, scale <span class="op">=</span> <span class="fl">1</span><span class="op">)</span>,</span>
 <span>  longitudinal <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span></span>
@@ -222,7 +221,7 @@
 <p>When <code>formulaDist</code> contains family-scoped regressions, the matching prior may use the same scope. Because it is an argument name, quote it with backticks:</p>
 <div class="cell">
 <details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb6"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">scoped_priors</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/joinme_priors.html">jm_prior</a></span><span class="op">(</span></span>
+<code class="sourceCode R"><span><span class="va">scoped_priors</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/joinme_priors.html">jm_priors</a></span><span class="op">(</span></span>
 <span>  `sigma[family='student']` <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span></span>
 <span>    intercept <span class="op">=</span> <span class="fu"><a href="../reference/prior_student_t.html">prior_student_t</a></span><span class="op">(</span>df <span class="op">=</span> <span class="fl">4</span>, scale <span class="op">=</span> <span class="fl">1</span><span class="op">)</span>,</span>
 <span>    slope <span class="op">=</span> <span class="fu"><a href="../reference/prior_normal.html">prior_normal</a></span><span class="op">(</span>scale <span class="op">=</span> <span class="fl">0.25</span><span class="op">)</span></span>
@@ -271,8 +270,8 @@ coefficient vector. -->
 <span><span class="co">#&gt; </span></span>
 <span><span class="co">#&gt; SAMPLING FOR MODEL 'joinme_fit_threading' NOW (CHAIN 1).</span></span>
 <span><span class="co">#&gt; Chain 1: </span></span>
-<span><span class="co">#&gt; Chain 1: Gradient evaluation took 0.006416 seconds</span></span>
-<span><span class="co">#&gt; Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 64.16 seconds.</span></span>
+<span><span class="co">#&gt; Chain 1: Gradient evaluation took 0.005867 seconds</span></span>
+<span><span class="co">#&gt; Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 58.67 seconds.</span></span>
 <span><span class="co">#&gt; Chain 1: Adjust your expectations accordingly!</span></span>
 <span><span class="co">#&gt; Chain 1: </span></span>
 <span><span class="co">#&gt; Chain 1: </span></span>
@@ -289,9 +288,9 @@ coefficient vector. -->
 <span><span class="co">#&gt; Chain 1: Iteration: 101 / 200 [ 50%]  (Sampling)</span></span>
 <span><span class="co">#&gt; Chain 1: Iteration: 200 / 200 [100%]  (Sampling)</span></span>
 <span><span class="co">#&gt; Chain 1: </span></span>
-<span><span class="co">#&gt; Chain 1:  Elapsed Time: 30.898 seconds (Warm-up)</span></span>
-<span><span class="co">#&gt; Chain 1:                1058.06 seconds (Sampling)</span></span>
-<span><span class="co">#&gt; Chain 1:                1088.95 seconds (Total)</span></span>
+<span><span class="co">#&gt; Chain 1:  Elapsed Time: 26.033 seconds (Warm-up)</span></span>
+<span><span class="co">#&gt; Chain 1:                980.357 seconds (Sampling)</span></span>
+<span><span class="co">#&gt; Chain 1:                1006.39 seconds (Total)</span></span>
 <span><span class="co">#&gt; Chain 1:</span></span>
 <span></span>
 <span><span class="co"># Counting-process fit with left truncation/time-split covariates:</span></span>
@@ -306,8 +305,8 @@ coefficient vector. -->
 <span><span class="co">#&gt; </span></span>
 <span><span class="co">#&gt; SAMPLING FOR MODEL 'joinme_fit_threading' NOW (CHAIN 1).</span></span>
 <span><span class="co">#&gt; Chain 1: </span></span>
-<span><span class="co">#&gt; Chain 1: Gradient evaluation took 0.01023 seconds</span></span>
-<span><span class="co">#&gt; Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 102.3 seconds.</span></span>
+<span><span class="co">#&gt; Chain 1: Gradient evaluation took 0.010632 seconds</span></span>
+<span><span class="co">#&gt; Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 106.32 seconds.</span></span>
 <span><span class="co">#&gt; Chain 1: Adjust your expectations accordingly!</span></span>
 <span><span class="co">#&gt; Chain 1: </span></span>
 <span><span class="co">#&gt; Chain 1: </span></span>
@@ -324,9 +323,9 @@ coefficient vector. -->
 <span><span class="co">#&gt; Chain 1: Iteration: 101 / 200 [ 50%]  (Sampling)</span></span>
 <span><span class="co">#&gt; Chain 1: Iteration: 200 / 200 [100%]  (Sampling)</span></span>
 <span><span class="co">#&gt; Chain 1: </span></span>
-<span><span class="co">#&gt; Chain 1:  Elapsed Time: 64.825 seconds (Warm-up)</span></span>
-<span><span class="co">#&gt; Chain 1:                159.09 seconds (Sampling)</span></span>
-<span><span class="co">#&gt; Chain 1:                223.915 seconds (Total)</span></span>
+<span><span class="co">#&gt; Chain 1:  Elapsed Time: 63.009 seconds (Warm-up)</span></span>
+<span><span class="co">#&gt; Chain 1:                159.806 seconds (Sampling)</span></span>
+<span><span class="co">#&gt; Chain 1:                222.815 seconds (Total)</span></span>
 <span><span class="co">#&gt; Chain 1:</span></span></code></pre></div>
 </details>
 </div>
@@ -355,10 +354,10 @@ coefficient vector. -->
 <span>  <span class="fu">default_convergence_measures</span><span class="op">(</span><span class="op">)</span></span>
 <span><span class="op">)</span></span>
 <span><span class="co">#&gt; # A tibble: 2 × 10</span></span>
-<span><span class="co">#&gt;   variable  mean median    sd   mad    q5   q95  rhat ess_bulk ess_tail</span></span>
-<span><span class="co">#&gt;   &lt;chr&gt;    &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;</span></span>
-<span><span class="co">#&gt; 1 time     0.311  0.323 0.130 0.132 0.114 0.492 0.994     142.     90.9</span></span>
-<span><span class="co">#&gt; 2 cv_total 0.873  0.766 0.457 0.352 0.322 1.73  1.02      138.     52.5</span></span></code></pre></div>
+<span><span class="co">#&gt;   variable  mean median    sd   mad     q5   q95  rhat ess_bulk ess_tail</span></span>
+<span><span class="co">#&gt;   &lt;chr&gt;    &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;</span></span>
+<span><span class="co">#&gt; 1 time     0.320  0.326 0.143 0.149 0.0840 0.530 1.01      115.     78.3</span></span>
+<span><span class="co">#&gt; 2 cv_total 0.770  0.658 0.439 0.292 0.319  1.49  0.991     139.    102.</span></span></code></pre></div>
 </details>
 </div>
 </section><section class="level2" data-number="4.2"><h3 data-number="4.2" id="traceplots">
@@ -424,17 +423,17 @@ coefficient vector. -->
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">preds</span><span class="op">$</span><span class="va">predictions</span><span class="op">$</span><span class="va">survival</span><span class="op">)</span></span>
 <span><span class="co">#&gt;     id     time  Survival    Median  Est.Error       L95       U95</span></span>
 <span><span class="co">#&gt; 2.1  2 4.000000 1.0000000 1.0000000 0.00000000 1.0000000 1.0000000</span></span>
-<span><span class="co">#&gt; 2.2  2 4.137931 0.9729243 0.9804552 0.02519878 0.9130063 0.9950132</span></span>
-<span><span class="co">#&gt; 2.3  2 4.275862 0.9449152 0.9605605 0.05087853 0.8245017 0.9900687</span></span>
-<span><span class="co">#&gt; 2.4  2 4.413793 0.9160932 0.9403197 0.07668446 0.7353907 0.9851661</span></span>
-<span><span class="co">#&gt; 2.5  2 4.551724 0.8866054 0.9197376 0.10222408 0.6471287 0.9803049</span></span>
-<span><span class="co">#&gt; 2.6  2 4.689655 0.8566237 0.8988181 0.12708817 0.5611852 0.9754844</span></span></code></pre></div>
+<span><span class="co">#&gt; 2.2  2 4.137931 0.9716349 0.9803110 0.02763955 0.9065650 0.9978418</span></span>
+<span><span class="co">#&gt; 2.3  2 4.275862 0.9423368 0.9598085 0.05587747 0.8123380 0.9957610</span></span>
+<span><span class="co">#&gt; 2.4  2 4.413793 0.9122360 0.9393903 0.08442012 0.7184409 0.9937528</span></span>
+<span><span class="co">#&gt; 2.5  2 4.551724 0.8814960 0.9187693 0.11293141 0.6261259 0.9918227</span></span>
+<span><span class="co">#&gt; 2.6  2 4.689655 0.8503127 0.8979580 0.14104076 0.5367392 0.9899672</span></span></code></pre></div>
 </details>
 </div>
 <p>When the identifier occurred during fitting, the posterior random effects can be reused directly. This targets a fitted-subject conditional prediction and avoids estimating another set of effects from the same history:</p>
 <div class="cell">
 <details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb12"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">fitted_subject_prediction</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://mc-stan.org/rstantools/reference/posterior_epred.html" class="external-link">posterior_epred</a></span><span class="op">(</span></span>
+<code class="sourceCode R"><span><span class="va">fitted_subject_prediction</span> <span class="op">&lt;-</span> <span class="fu">posterior_epred</span><span class="op">(</span></span>
 <span>  <span class="va">fit</span>,</span>
 <span>  newdataLong <span class="op">=</span> <span class="va">ndLong</span>,</span>
 <span>  newdataEvent <span class="op">=</span> <span class="va">ndEvent</span>,</span>
@@ -444,11 +443,11 @@ coefficient vector. -->
 <span><span class="op">)</span></span></code></pre></div>
 </details>
 </div>
-<p>The identifier is matched to the fitted subject index. An unseen identifier is rejected; dynamic prediction for a new subject uses <code>reuse_fitted_re = FALSE</code>.<code><a href="https://mc-stan.org/rstantools/reference/posterior_linpred.html" class="external-link">posterior_linpred()</a></code> and <code><a href="https://mc-stan.org/rstantools/reference/posterior_predict.html" class="external-link">posterior_predict()</a></code> accept the same argument. <!-- For a latent-class fit, fitted allocation probabilities remain paired with the reused effects. --></p>
+<p>The identifier is matched to the fitted subject index. An unseen identifier is rejected; dynamic prediction for a new subject uses <code>reuse_fitted_re = FALSE</code>.<code>posterior_linpred()</code> and <code>posterior_predict()</code> accept the same argument. <!-- For a latent-class fit, fitted allocation probabilities remain paired with the reused effects. --></p>
 <p>Conditional effects and contrasts can use the same subject-conditional estimand by placing the fitted identifier in <code>conditions</code>. Both contrast profiles deliberately share that identifier:</p>
 <div class="cell">
 <details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb13"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="fu"><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">conditional_effects</a></span><span class="op">(</span></span>
+<code class="sourceCode R"><span><span class="fu">conditional_effects</span><span class="op">(</span></span>
 <span>  <span class="va">fit</span>,</span>
 <span>  effects <span class="op">=</span> <span class="st">"time"</span>,</span>
 <span>  conditions <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span>id <span class="op">=</span> <span class="va">target_id</span><span class="op">)</span>,</span>
@@ -469,7 +468,7 @@ coefficient vector. -->
 <p>Both conditional interfaces can retain the posterior calculation before it is summarised. This is useful for posterior probabilities, nonlinear functions of a contrast, or bespoke figures whose uncertainty must be propagated draw by draw:</p>
 <div class="cell">
 <details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb14"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">effect_draws</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">conditional_effects</a></span><span class="op">(</span></span>
+<code class="sourceCode R"><span><span class="va">effect_draws</span> <span class="op">&lt;-</span> <span class="fu">conditional_effects</span><span class="op">(</span></span>
 <span>  <span class="va">fit</span>,</span>
 <span>  effects <span class="op">=</span> <span class="st">"time"</span>,</span>
 <span>  process <span class="op">=</span> <span class="st">"longitudinal"</span>,</span>
@@ -490,7 +489,6 @@ coefficient vector. -->
 <span><span class="va">time_contrast_draws</span> <span class="op">&lt;-</span> <span class="va">contrast_draws</span><span class="op">$</span><span class="va">longitudinal</span></span></code></pre></div>
 </details>
 </div>
-<p>Each result is a tidy data frame with one row per retained posterior draw and conditional estimand. <code>.draw</code> identifies the retained draw, <code>.value</code> contains the posterior quantity, and <code>estimand__</code> identifies the condition or evaluation point. All scientific descriptors used by the summarised table remain as ordinary columns, so the data can be grouped and plotted with tidy posterior tools without joining a separate description table. Marker marginalisation and A-versus-B subtraction are performed within each draw before the data frame is returned.</p>
 <p><code>concordance(fit)</code> is a follow-up-wide survival-curve concordance rather than a ROC analysis at one selected horizon. By default, residual follow-up for subject <span class="math inline">i</span> starts at their final longitudinal measurement strictly before the observed event or censoring time, <span class="math inline">T_{0i}</span>. For an event at residual time <span class="math inline">r_i=T_i-T_{0i}</span>, the event subject is compared with every subject known to survive longer. The pair is concordant when <span class="math inline">\widehat S_i(r_i)&lt;\widehat S_j(r_i)</span>: both conditional survival curves are evaluated at the same earlier event time. This is the survival-curve concordance proposed by Antolini and colleagues and does not use the outcome time to construct a fixed subject score.</p>
 <p>Premature censoring is handled through observability. A subject censored before <span class="math inline">r_i</span> is not comparable with that event; censoring at <span class="math inline">r_i</span> establishes survival through that time and remains comparable. <code>type_weights = "n/G2"</code> requests Uno’s inverse-censoring weighting through <code><a href="https://rdrr.io/pkg/survival/man/concordance.html" class="external-link">survival::concordance()</a></code>. Fitted monotone splines and ordered piecewise-linear associations enter every curve through their posterior ordinates.</p>
 <!-- `tvROC(fit, ...)` retains the horizon-specific estimand. At landmark $s$ and horizon $t$, it evaluates sensitivity and the false-positive fraction over 101 thresholds of conditional survival. Cases experience the requested cause in the interval $(s,t]$, while controls are known to remain without that cause through $t$. Premature censoring is handled either bymodel-based expected case/control status or inverse Kaplan--Meier censoring weights. `tvAUC(fit, ...)` first calculates that curve and then uses `JMbayes2::tvAUC.tvROC()` to obtain its trapezoidal area. Dynamic prediction for all methods reuses the exact fitted B-spline, natural-spline, or formula baseline-hazard basis, including its original centring constants and any ordered piecewise-linear association. -->
@@ -533,13 +531,13 @@ coefficient vector. -->
 <code class="sourceCode R"><span><span class="va">renamed_draws</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/posterior_draws.html">posterior_draws</a></span><span class="op">(</span><span class="va">fit</span>, variables <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"time"</span>, <span class="st">"cv_total"</span><span class="op">)</span>, format <span class="op">=</span> <span class="st">"draws_df"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">renamed_draws</span><span class="op">)</span></span>
 <span><span class="co">#&gt; # A draws_df: 6 iterations, 1 chains, and 2 variables</span></span>
-<span><span class="co">#&gt;   time cv_total</span></span>
-<span><span class="co">#&gt; 1 0.14     0.48</span></span>
-<span><span class="co">#&gt; 2 0.32     0.86</span></span>
-<span><span class="co">#&gt; 3 0.33     0.84</span></span>
-<span><span class="co">#&gt; 4 0.32     0.81</span></span>
-<span><span class="co">#&gt; 5 0.17     0.93</span></span>
-<span><span class="co">#&gt; 6 0.03     0.94</span></span>
+<span><span class="co">#&gt;      time cv_total</span></span>
+<span><span class="co">#&gt; 1  0.5131     0.62</span></span>
+<span><span class="co">#&gt; 2 -0.0038     0.85</span></span>
+<span><span class="co">#&gt; 3  0.6096     1.26</span></span>
+<span><span class="co">#&gt; 4  0.1803     0.47</span></span>
+<span><span class="co">#&gt; 5  0.4196     3.34</span></span>
+<span><span class="co">#&gt; 6  0.2498     0.47</span></span>
 <span><span class="co">#&gt; # ... hidden reserved variables {'.chain', '.iteration', '.draw'}</span></span>
 <span></span>
 <span><span class="fu"><a href="../reference/mcmc_plot.html">mcmc_plot</a></span><span class="op">(</span><span class="va">fit</span>, variable <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"time"</span>, <span class="st">"cv_total"</span><span class="op">)</span>, type <span class="op">=</span> <span class="st">"intervals"</span><span class="op">)</span></span></code></pre></div>
@@ -576,12 +574,12 @@ coefficient vector. -->
 <span><span class="op">)</span></span></code></pre></div>
 </details>
 </div>
-<p><code>plot(fit, ...)</code> uses fitted posterior samples directly and does not accept a conditioning argument. Named covariate profiles belong to the conditional- effects estimand. Build those profiles with <code>make_conditions()</code> and pass them to <code><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">conditional_effects()</a></code>:</p>
+<p><code>plot(fit, ...)</code> uses fitted posterior samples directly and does not accept a conditioning argument. Named covariate profiles belong to the conditional- effects estimand. Build those profiles with <code><a href="../reference/make_conditions.html">make_conditions()</a></code> and pass them to <code>conditional_effects()</code>:</p>
 <div class="cell">
 <details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb20"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">profiles</span> <span class="op">&lt;-</span> <span class="fu">make_conditions</span><span class="op">(</span><span class="va">dataEvent</span>, vars <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"x1"</span>, <span class="st">"x2"</span><span class="op">)</span><span class="op">)</span></span>
+<code class="sourceCode R"><span><span class="va">profiles</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_conditions.html">make_conditions</a></span><span class="op">(</span><span class="va">dataEvent</span>, vars <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"x1"</span>, <span class="st">"x2"</span><span class="op">)</span><span class="op">)</span></span>
 <span></span>
-<span><span class="va">effects_data</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">conditional_effects</a></span><span class="op">(</span></span>
+<span><span class="va">effects_data</span> <span class="op">&lt;-</span> <span class="fu">conditional_effects</span><span class="op">(</span></span>
 <span>  <span class="va">fit</span>,</span>
 <span>  effects <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span></span>
 <span>    longitudinal <span class="op">=</span> <span class="st">"time"</span>,</span>
@@ -599,7 +597,7 @@ coefficient vector. -->
 <p>The longitudinal calculation has three estimands. <code>"population"</code> uses only the fixed-effect contribution, evaluates that contribution under every selected marker’s inverse link, and averages the resulting trajectories within each posterior draw. <code>"marker"</code> adds the fitted marker-level deviation and retains a separate trajectory for every selected marker, whilst still excluding subject and marker-by-subject deviations. <code>"marginal_marker"</code> adds the marker-level deviation, calculates each selected marker response, and averages those responses within every posterior draw. Population and marker-marginal results therefore contain one trajectory per condition; only <code>"marker"</code> produces marker-specific curves. Applying the inverse link before averaging is important for nonlinear links: it estimates the average expected response rather than the expected response at an average marker effect. The <code>markers</code> argument restricts the equally weighted set entering either average, or the panels retained by the marker-specific estimand.</p>
 <div class="cell">
 <details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb21"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">average_marker_effect</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">conditional_effects</a></span><span class="op">(</span></span>
+<code class="sourceCode R"><span><span class="va">average_marker_effect</span> <span class="op">&lt;-</span> <span class="fu">conditional_effects</span><span class="op">(</span></span>
 <span>  <span class="va">fit</span>,</span>
 <span>  effects <span class="op">=</span> <span class="st">"time"</span>,</span>
 <span>  process <span class="op">=</span> <span class="st">"longitudinal"</span>,</span>

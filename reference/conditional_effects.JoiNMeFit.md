@@ -1,9 +1,8 @@
 # Conditional effects for a fitted joint model
 
-[`conditional_effects()`](https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html)
-evaluates model-implied changes in the longitudinal and event processes
-while holding all predictors not named in `effects` at explicit
-conditioning values. Its interface follows
+`conditional_effects()` evaluates model-implied changes in the
+longitudinal and event processes while holding all predictors not named
+in `effects` at explicit conditioning values. Its interface follows
 [`brms::conditional_effects()`](https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html)
 where the joint-model structure permits a direct correspondence.
 
@@ -76,7 +75,7 @@ conditional_effects(
   condition. One set of effects is evaluated for every row.
   `conditions$cond__`, when supplied, provides the facet label;
   otherwise row names are used. Tables returned by
-  [`make_conditions()`](https://paulbuerkner.com/brms/reference/make_conditions.html)
+  [`make_conditions()`](https://trinhdhk.github.io/joinme/reference/make_conditions.md)
   can be supplied directly.
 
 - int_conditions:
@@ -228,7 +227,7 @@ prediction.
 ## See also
 
 [`brms::conditional_effects()`](https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html),
-[`make_conditions()`](https://paulbuerkner.com/brms/reference/make_conditions.html),
+[`make_conditions()`](https://trinhdhk.github.io/joinme/reference/make_conditions.md),
 [`predict.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/predict.JoiNMeFit.md)
 
 ## Examples

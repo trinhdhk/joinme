@@ -71,7 +71,7 @@ The named forward links and their inverse links are:
 
     <a class="navbar-brand me-2" href="../index.html">joinme</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.2</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.3</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -181,221 +181,35 @@ from a distributional regression or as a family-level parameter.</p></dd>
     <div class="section level2">
     <h2 id="ref-examples">Examples<a class="anchor" aria-label="anchor" href="#ref-examples"></a></h2>
     <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="fu">jm_family</span><span class="op">(</span><span class="st">"poisson"</span>, link <span class="op">=</span> <span class="st">"log"</span><span class="op">)</span></span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $family</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "poisson"</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $link</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "log"</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$bytecode</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0 7</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$const_data</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> numeric(0)</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$n_ops</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 2</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$n_const</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $tau</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] NA</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> attr(,"class")</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "JoiNMe_family_spec"</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Joint Nested Mixed-effects Longitudinal Family Specification:</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Family: poisson</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Link: log</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Inverse link: exp(x)</span>
 <span class="r-in"><span><span class="fu">jm_family</span><span class="op">(</span><span class="st">"poisson"</span>, link <span class="op">=</span> <span class="op">~</span> <span class="fu"><a href="https://rdrr.io/r/base/Log.html" class="external-link">log</a></span><span class="op">(</span><span class="va">x</span><span class="op">)</span><span class="op">)</span></span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $family</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "poisson"</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $link</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "log"</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$bytecode</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0 7</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$const_data</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> numeric(0)</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$op_iota_intercept_idx</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0 0</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$op_iota_slope_idx</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0 0</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$n_ops</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 2</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$n_bytecode</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 2</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$n_const</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$n_iota_intercept</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$n_iota_slope</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $tau</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] NA</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> attr(,"class")</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "JoiNMe_family_spec"</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Joint Nested Mixed-effects Longitudinal Family Specification:</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Family: poisson</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Link: log</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Inverse link: exp(x)</span>
 <span class="r-in"><span><span class="fu">jm_family</span><span class="op">(</span><span class="st">"bernoulli"</span>, inv_link <span class="op">=</span> <span class="op">~</span> <span class="fu">inv_logit</span><span class="op">(</span><span class="va">x</span><span class="op">)</span><span class="op">)</span></span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $family</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "bernoulli"</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $link</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "logit"</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$bytecode</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0 9</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$const_data</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> numeric(0)</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$op_iota_intercept_idx</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0 0</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$op_iota_slope_idx</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0 0</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$n_ops</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 2</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$n_bytecode</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 2</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$n_const</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$n_iota_intercept</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$n_iota_slope</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $tau</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] NA</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> attr(,"class")</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "JoiNMe_family_spec"</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Joint Nested Mixed-effects Longitudinal Family Specification:</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Family: bernoulli</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Link: logit</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Inverse link: inv_logit(x)</span>
 <span class="r-in"><span><span class="fu">jm_family</span><span class="op">(</span><span class="st">"bernoulli"</span>, link <span class="op">=</span> <span class="op">~</span> <span class="fu">inv_Phi</span><span class="op">(</span><span class="va">x</span><span class="op">)</span><span class="op">)</span></span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $family</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "bernoulli"</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $link</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "probit"</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$bytecode</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1]  0 26</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$const_data</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> numeric(0)</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$op_iota_intercept_idx</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0 0</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$op_iota_slope_idx</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0 0</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$n_ops</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 2</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$n_bytecode</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 2</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$n_const</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$n_iota_intercept</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$n_iota_slope</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $tau</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] NA</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> attr(,"class")</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "JoiNMe_family_spec"</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Joint Nested Mixed-effects Longitudinal Family Specification:</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Family: bernoulli</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Link: probit</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Inverse link: Phi(x)</span>
 <span class="r-in"><span><span class="fu">jm_family</span><span class="op">(</span><span class="st">"bernoulli"</span>, inv_link <span class="op">=</span> <span class="op">~</span> <span class="fu">Phi</span><span class="op">(</span><span class="va">x</span><span class="op">)</span><span class="op">)</span></span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $family</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "bernoulli"</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $link</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "probit"</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$bytecode</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1]  0 26</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$const_data</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> numeric(0)</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$op_iota_intercept_idx</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0 0</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$op_iota_slope_idx</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0 0</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$n_ops</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 2</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$n_bytecode</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 2</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$n_const</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$n_iota_intercept</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$n_iota_slope</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $tau</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] NA</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> attr(,"class")</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "JoiNMe_family_spec"</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Joint Nested Mixed-effects Longitudinal Family Specification:</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Family: bernoulli</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Link: probit</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Inverse link: Phi(x)</span>
 <span class="r-in"><span><span class="fu">jm_family</span><span class="op">(</span><span class="st">"skew_laplace"</span>, tau <span class="op">=</span> <span class="fl">0.8</span><span class="op">)</span></span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $family</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "skew_double_exponential"</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $link</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "identity"</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$bytecode</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$const_data</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> numeric(0)</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$n_ops</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 1</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $inv_link$n_const</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> $tau</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 0.8</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> attr(,"class")</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "JoiNMe_family_spec"</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Joint Nested Mixed-effects Longitudinal Family Specification:</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Family: skew_double_exponential</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Link: identity</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   Inverse link: x</span>
 </code></pre></div>
     </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

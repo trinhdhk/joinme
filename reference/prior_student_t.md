@@ -29,4 +29,4 @@ prior_student_t(df = 6, mu = 0, scale = 1)
 ## Value
 
 A `joinme_prior_spec` object for use inside
-[`jm_prior()`](https://trinhdhk.github.io/joinme/reference/joinme_priors.md).
+[`jm_priors()`](https://trinhdhk.github.io/joinme/reference/joinme_priors.md).

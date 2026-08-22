@@ -23,7 +23,7 @@ subject or marker in generated quantities."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">joinme</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.2</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.3</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -145,8 +145,7 @@ no order. The default is <code>"intercept"</code> for a shared class formula and
 
 <dt id="arg--">...<a class="anchor" aria-label="anchor" href="#arg--"></a></dt>
 <dd><p>Additional arguments passed to <code><a href="joinme_standata.html">joinme_standata()</a></code>, including
-<code>assoc</code>, <code>id_var</code>, <code>marker_var</code>, <code>time_var</code>, and
-<code>shrinkage</code>.</p></dd>
+<code>assoc</code>, <code>id_var</code>, <code>marker_var</code>, and <code>time_var</code>.</p></dd>
 
 </dl></div>
     <div class="section level2">
@@ -169,10 +168,11 @@ effects, not the structural decomposition above.  For a selected vector
 p(a_j)=\sum_{g=1}^{G}\pi_g
 D\{a_j;\mu_g,\operatorname{diag}(s_g)\}.
 $$</p>
-<p><code>shrinkage = 0</code>, <code>1</code>, and <code>2</code> select Student-\(t_6\), Laplace, and Normal
-latent-class component densities, respectively. These choices do not set
-the ordinary priors for <code>beta</code>, <code>alpha</code>, <code>iota</code>, marker effects or marker
-weights; declare those independently with <code><a href="joinme_priors.html">jm_prior()</a></code>. The component locations and scales are
+<p>The latent-class component density is declared through
+<code>jm_priors(class = list(family = ...))</code> using <code><a href="prior_student_t.html">prior_student_t()</a></code>,
+<code><a href="prior_normal.html">prior_normal()</a></code>, or <code><a href="prior_laplace.html">prior_laplace()</a></code>. This choice does not set the ordinary
+priors for longitudinal, association, functional, marker-effect, or
+marker-weight coefficients. The component locations and scales are
 estimated. By default, Stan orders only the first selected random-intercept
 location. Selected slopes and other coordinates remain unrestricted.
 Alternatively, baseline class probabilities may be ordered, or ordering may
@@ -214,7 +214,10 @@ unavailable in this mode.</p>
 <span class="r-in"><span>  n_classes <span class="op">=</span> <span class="fl">3</span>,</span></span>
 <span class="r-in"><span>  class_type <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"subject"</span>, <span class="st">"vcov"</span><span class="op">)</span>,</span></span>
 <span class="r-in"><span>  formulaClass <span class="op">=</span> <span class="op">~</span> <span class="va">treatment</span> <span class="op">+</span> <span class="va">age</span>,</span></span>
-<span class="r-in"><span>  priors <span class="op">=</span> <span class="fu"><a href="joinme_priors.html">jm_prior</a></span><span class="op">(</span>class <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>baseline_prob <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/rep.html" class="external-link">rep</a></span><span class="op">(</span><span class="fl">2</span>, <span class="fl">3</span><span class="op">)</span><span class="op">)</span><span class="op">)</span>,</span></span>
+<span class="r-in"><span>  priors <span class="op">=</span> <span class="fu"><a href="joinme_priors.html">jm_priors</a></span><span class="op">(</span>class <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span></span></span>
+<span class="r-in"><span>    baseline_prob <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/rep.html" class="external-link">rep</a></span><span class="op">(</span><span class="fl">2</span>, <span class="fl">3</span><span class="op">)</span>,</span></span>
+<span class="r-in"><span>    family <span class="op">=</span> <span class="fu"><a href="prior_student_t.html">prior_student_t</a></span><span class="op">(</span>df <span class="op">=</span> <span class="fl">6</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="op">)</span><span class="op">)</span>,</span></span>
 <span class="r-in"><span>  assoc <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"cv_total"</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="op">)</span></span></span>
 <span class="r-in"><span></span></span>

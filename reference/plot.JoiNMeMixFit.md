@@ -14,8 +14,7 @@ Adds four mixture displays to the inherited JoiNMe plotting interface:
 - `type = "covariance_class"` shows class-specific covariance-regression
   curves, with all \\G\\ classes in each panel.
 
-All other plot types are delegated to
-[`plot.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/plot.JoinMeFit.md).
+All other plot types are delegated to `plot.JoiNMeFit()`.
 
 ## Usage
 

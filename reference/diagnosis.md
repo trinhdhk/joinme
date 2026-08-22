@@ -5,11 +5,9 @@ prediction (`JoiNMeDynPred`) objects.
 
 For `JoiNMeFit`, diagnostics include both an overall summary table and a
 parameter-level diagnostics table built from the same cached posterior
-summaries used by
-[`summary.JoiNMeFit()`](https://trinhdhk.github.io/joinme/reference/summary.JoinMeFit.md).
-This avoids the slower backend-wide diagnostic pass and keeps the
-reported metrics aligned with the summary sections users already
-inspect.
+summaries used by `summary.JoiNMeFit()`. This avoids the slower
+backend-wide diagnostic pass and keeps the reported metrics aligned with
+the summary sections users already inspect.
 
 For `JoiNMeDynPred`, diagnostics summarise posterior-draw quality for
 predicted quantities and are aligned to the same metric schema used for

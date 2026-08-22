@@ -24,7 +24,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">joinme</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.2</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.3</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -109,12 +109,12 @@
 \frac{1}{D}\sum_{d=1}^{D} \omega_d\, f_{cs}\!\left(CS_{id}(t)\right),
 </span></p>
 <p>and analogously for <code>cs_marker</code>. This is intentionally not equal to <span class="math inline">f_{cs}(\frac{1}{D}\sum_d \omega_d CS_{id}(t))</span> unless <span class="math inline">f_{cs}</span> is linear.</p>
-<p>In practice, place the entire declaration in <code>jm_prior(marker_weights = ...)</code>. Use <code>family = "constant"</code> or <code>"none"</code> for fixed weights, or a stochastic family to fit a hierarchical marker-weight decomposition. For marker (d) in weight set (s),</p>
+<p>In practice, place the entire declaration in <code>jm_priors(marker_weights = ...)</code>. Use <code>family = "constant"</code> or <code>"none"</code> for fixed weights, or a stochastic family to fit a hierarchical marker-weight decomposition. For marker (d) in weight set (s),</p>
 <p><span class="math display">
 \omega_{sd}=\omega^{(0)}_{sd}+\mu_{\omega,s}+z_{sd}.
 </span></p>
 <p>Here <span class="math inline">\omega^{(0)}_{sd}</span> is the offset in <code>marker_weights$offset</code>, <span class="math inline">\mu_{\omega,s}</span> is a fitted common location, and <span class="math inline">z_{sd}</span> is a marker departure drawn directly from the selected centred unit-scale family.</p>
-<p>Every marker attached to set (s) contributes likelihood information about <span class="math inline">\mu_{\omega,s}</span>, so the common location is the marker-weight analogue of a population intercept. The common location uses <code>jm_prior(marker_weights = list(intercept = ...))</code>. The departures use <code>marker_weights$family</code>; their location and scale are fixed at zero and one.</p>
+<p>Every marker attached to set (s) contributes likelihood information about <span class="math inline">\mu_{\omega,s}</span>, so the common location is the marker-weight analogue of a population intercept. The common location uses <code>jm_priors(marker_weights = list(intercept = ...))</code>. The departures use <code>marker_weights$family</code>; their location and scale are fixed at zero and one.</p>
 <p>A shared weight structure has one (_{}) and one departure vector. With <code>marker_weights$shared = FALSE</code>, every active weighted association term has its own mean and departures.</p>
 <p>With estimated weights and no supplied base, (^{(0)}=0). In <code><a href="../reference/simulate_joinme.html">simulate_joinme()</a></code> and <code><a href="../reference/simulate_joinme_mix.html">simulate_joinme_mix()</a></code>, a numeric <code>truth$marker_weights$intercept</code> supplies the true (_{,s}); a <code>prior_*()</code> declaration inside <code><a href="../reference/joinme_truth.html">jm_truth()</a></code> draws it once for each fitted set and then holds it fixed. The simulator stores the base, common mean, marker-specific departure, and effective truths in <code>truth$marker_weights_offset</code>, <code>truth$marker_weight_mean</code>, <code>truth$marker_weights_latent</code>, and <code>truth$marker_weights</code>. The final quantity is the effective weight used to generate survival times. The recovery call does not pass the true common mean to fitting, because it is an estimand.</p>
 <p>In the log hazard, this feature is multiplied by the association slope (declared through <code>assoc$slope</code>). The <code>iota</code> intercept and slope belong to an optional affine transformation inside <code>tf()</code>; they are not the association multiplier.</p>
@@ -143,13 +143,13 @@
 </div>
 </section><section class="level2"><h3 id="conditional-effects-in-the-two-joint-model-processes">Conditional effects in the two joint-model processes<a class="anchor" aria-label="anchor" href="#conditional-effects-in-the-two-joint-model-processes"></a>
 </h3>
-<p>Conditional effects are distinct from subject-specific dynamic prediction. <code><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">conditional_effects()</a></code> varies named predictors while holding other predictors at explicit profile values and can return the longitudinal process, the event process, or both. The longitudinal estimand is the population-level expected marker response by default. Set <code>longitudinal_estimand = "marker"</code> to retain the fitted marker-level deviation, or <code>"marginal_marker"</code> to average the marker-specific predictions within each posterior draw. Because marker averaging occurs after each inverse-link transformation, it targets an average expected response rather than an expected response at an average marker effect.</p>
+<p>Conditional effects are distinct from subject-specific dynamic prediction. <code>conditional_effects()</code> varies named predictors while holding other predictors at explicit profile values and can return the longitudinal process, the event process, or both. The longitudinal estimand is the population-level expected marker response by default. Set <code>longitudinal_estimand = "marker"</code> to retain the fitted marker-level deviation, or <code>"marginal_marker"</code> to average the marker-specific predictions within each posterior draw. Because marker averaging occurs after each inverse-link transformation, it targets an average expected response rather than an expected response at an average marker effect.</p>
 <p>The event estimand is the direct relative-hazard component <code>exp(W * gamma)</code>; the baseline hazard and longitudinal association contribution are held fixed when making event-covariate comparisons.</p>
 <div class="cell">
 <details class="code-fold"><summary>Code</summary><div class="sourceCode cell-code" id="cb3"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">profiles</span> <span class="op">&lt;-</span> <span class="fu">make_conditions</span><span class="op">(</span><span class="va">fit</span><span class="op">$</span><span class="va">dataEvent</span>, vars <span class="op">=</span> <span class="st">"treatment"</span><span class="op">)</span></span>
+<code class="sourceCode R"><span><span class="va">profiles</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_conditions.html">make_conditions</a></span><span class="op">(</span><span class="va">fit</span><span class="op">$</span><span class="va">dataEvent</span>, vars <span class="op">=</span> <span class="st">"treatment"</span><span class="op">)</span></span>
 <span></span>
-<span><span class="va">ce</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">conditional_effects</a></span><span class="op">(</span></span>
+<span><span class="va">ce</span> <span class="op">&lt;-</span> <span class="fu">conditional_effects</span><span class="op">(</span></span>
 <span>  <span class="va">fit</span>,</span>
 <span>  effects <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span></span>
 <span>    longitudinal <span class="op">=</span> <span class="st">"time:treatment"</span>,</span>
@@ -170,7 +170,7 @@
 </div>
 </section></section><section class="section level2"><h2 id="association-coefficients-and-naming">Association coefficients and naming<a class="anchor" aria-label="anchor" href="#association-coefficients-and-naming"></a>
 </h2>
-<p>Association coefficients are denoted by <span class="math inline">\alpha</span>. This follows joint-model conventions and avoids confusion with the linear predictor <span class="math inline">\eta</span>. Total, mean, marker, correlation, and covariance associations use the slope prior declared by <code>jm_prior(assoc = list(slope = ...))</code>. Its location and scale describe the effective coefficient entering the log hazard; there is no additional random association-scale multiplier. Marker-weight sign conventions are applied after this prior transformation where required for identification.</p>
+<p>Association coefficients are denoted by <span class="math inline">\alpha</span>. This follows joint-model conventions and avoids confusion with the linear predictor <span class="math inline">\eta</span>. Total, mean, marker, correlation, and covariance associations use the slope prior declared by <code>jm_priors(assoc = list(slope = ...))</code>. Its location and scale describe the effective coefficient entering the log hazard; there is no additional random association-scale multiplier. Marker-weight sign conventions are applied after this prior transformation where required for identification.</p>
 <p>Summaries report the selected association components so that interpretation remains focused on the fitted association structure.</p>
 </section><section class="section level2"><h2 id="transform-modes">Transform modes<a class="anchor" aria-label="anchor" href="#transform-modes"></a>
 </h2>

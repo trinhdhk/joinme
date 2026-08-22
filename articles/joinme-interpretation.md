@@ -3,8 +3,7 @@
 ## Purpose
 
 This vignette defines the fitted quantities returned by
-[`conditional_effects()`](https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html)
-and
+`conditional_effects()` and
 [`conditional_contrast()`](https://trinhdhk.github.io/joinme/reference/conditional_contrast.md)
 and demonstrates their public interface. It also states the
 event-likelihood quantities required to distinguish interval censoring,
@@ -112,7 +111,7 @@ fit_interval <- joinme(
     treatment + age,
   dataEvent = dataEvent_interval,
   assoc = c("cv_mean", "cv_marker"),
-  priors = jm_prior(
+  priors = jm_priors(
     longitudinal = list(slope = prior_normal(0, 1)),
     survival = list(slope = prior_normal(0, 1)),
     assoc = list(slope = prior_normal(0, 1))
@@ -199,11 +198,10 @@ return the posterior association curve over a chosen covariate range.
 
 ## Conditional effects
 
-[`conditional_effects()`](https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html)
-describes fitted outcomes while selected predictors vary and the
-remaining predictors are held at declared values. It is useful for
-displaying nonlinear terms, interactions and response-scale
-trajectories. It does not itself compare two groups.
+`conditional_effects()` describes fitted outcomes while selected
+predictors vary and the remaining predictors are held at declared
+values. It is useful for displaying nonlinear terms, interactions and
+response-scale trajectories.
 
 ``` r
 

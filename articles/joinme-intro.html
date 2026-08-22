@@ -23,7 +23,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">joinme</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.2</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.3</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -129,7 +129,7 @@
 <code>sigma</code> is modelled through regression (fixed/random effects if included),</li>
 <li>
 <code>nu</code> is regression-driven with an intercept-only structure,</li>
-<li>other distributional parameters without formulas continue using family-shared baselines when applicable.</li>
+<li>other distributional parameters without formulas use family-shared baselines when applicable.</li>
 </ul></section></section><section class="level2"><h2 id="data">Data<a class="anchor" aria-label="anchor" href="#data"></a>
 </h2>
 <p>You need two data frames:</p>
@@ -606,7 +606,7 @@ Association term: cv_total
 <span><span class="va">ndE</span> <span class="op">&lt;-</span> <span class="va">sim</span><span class="op">$</span><span class="va">dataEvent</span><span class="op">[</span><span class="va">sim</span><span class="op">$</span><span class="va">dataEvent</span><span class="op">$</span><span class="va">id</span> <span class="op">==</span> <span class="fl">1</span>, <span class="op">]</span></span>
 <span><span class="va">time_start</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/Extremes.html" class="external-link">max</a></span><span class="op">(</span><span class="va">ndL</span><span class="op">$</span><span class="va">time</span><span class="op">)</span></span>
 <span></span>
-<span><span class="va">pred</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://mc-stan.org/rstantools/reference/posterior_predict.html" class="external-link">posterior_predict</a></span><span class="op">(</span></span>
+<span><span class="va">pred</span> <span class="op">&lt;-</span> <span class="fu">posterior_predict</span><span class="op">(</span></span>
 <span>  <span class="va">fit</span>,</span>
 <span>  newdataLong <span class="op">=</span> <span class="va">ndL</span>,</span>
 <span>  newdataEvent <span class="op">=</span> <span class="va">ndE</span>,</span>
@@ -648,12 +648,12 @@ Association term: cv_total
 </div>
 </div>
 <p>The heatmap is an alternative to the usual separated marker curves. It orders markers by the magnitude of posterior mean change and makes tiles transparent when the posterior sign certainty does not exceed <code>1 - threshold</code>.</p>
-<p><code>plot(fit, ...)</code> uses fitted posterior samples directly and has no conditioning argument. Conditional covariate profiles are evaluated with <code><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">conditional_effects()</a></code>, while <code><a href="https://rdrr.io/r/stats/predict.html" class="external-link">predict()</a></code> remains reserved for dynamic subject-specific forecasts given observed longitudinal history.</p>
+<p>Conditional covariate profiles are evaluated with `conditional_effects().</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb25"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">profiles</span> <span class="op">&lt;-</span> <span class="fu">make_conditions</span><span class="op">(</span><span class="va">sim</span><span class="op">$</span><span class="va">dataEvent</span>, vars <span class="op">=</span> <span class="st">"x1"</span><span class="op">)</span></span>
+<code class="sourceCode R"><span><span class="va">profiles</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/make_conditions.html">make_conditions</a></span><span class="op">(</span><span class="va">sim</span><span class="op">$</span><span class="va">dataEvent</span>, vars <span class="op">=</span> <span class="st">"x1"</span><span class="op">)</span></span>
 <span></span>
-<span><span class="va">effects_data</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://paulbuerkner.com/brms/reference/conditional_effects.brmsfit.html" class="external-link">conditional_effects</a></span><span class="op">(</span></span>
+<span><span class="va">effects_data</span> <span class="op">&lt;-</span> <span class="fu">conditional_effects</span><span class="op">(</span></span>
 <span>  <span class="va">fit</span>,</span>
 <span>  effects <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>longitudinal <span class="op">=</span> <span class="st">"time"</span>, event <span class="op">=</span> <span class="st">"x1"</span><span class="op">)</span>,</span>
 <span>  conditions <span class="op">=</span> <span class="va">profiles</span>,</span>

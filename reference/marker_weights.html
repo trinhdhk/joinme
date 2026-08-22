@@ -25,7 +25,7 @@ departures after subtracting the common location and declared offset."></head><b
 
     <a class="navbar-brand me-2" href="../index.html">joinme</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.2</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.1.2609.3</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -63,7 +63,7 @@ terms. The effective value is the declared marker-specific offset plus the
 fitted common weight location and marker-specific departure. When
 <code>marker_weights$shared = TRUE</code>, one shared set is returned once. Otherwise,
 each active weighted association term receives its own set.</p>
-<p>Individual weights are intentionally kept out of <code><a href="summary.JoinMeFit.html">summary.JoiNMeFit()</a></code>. The
+<p>Individual weights are intentionally kept out of <code>summary.JoiNMeFit()</code>. The
 model summary reports only the common location and within-set spread. This
 function and <code><a href="https://rdrr.io/r/stats/coef.html" class="external-link">coef()</a></code> return effective weights, <code><a href="https://rdrr.io/pkg/nlme/man/fixed.effects.html" class="external-link">fixef()</a></code> returns their
 fitted common locations, and <code><a href="https://rdrr.io/pkg/nlme/man/random.effects.html" class="external-link">ranef()</a></code> returns only marker-specific

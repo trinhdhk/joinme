@@ -50,8 +50,3 @@ summary(
 ## Value
 
 A `summary_JoiNMeMixFit` object inheriting from `summary_JoiNMeFit`.
-Full location and scale summaries are retained in the separate
-`tables$class_location` and `tables$class_scale` elements. The console
-reports compact expected and hard allocation counts; unit-level
-posterior membership remains available through
-[`posterior_class()`](https://trinhdhk.github.io/joinme/reference/posterior_class.md).

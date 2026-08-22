@@ -28,7 +28,7 @@ Use `posterior_draws()` when you want:
   and regex-style variable filtering,
 
 - `bayesplot` directly, similar to
-  [`mcmc_plot()`](https://paulbuerkner.com/brms/reference/mcmc_plot.brmsfit.html),
+  [`mcmc_plot()`](https://trinhdhk.github.io/joinme/reference/mcmc_plot.md),
 
 - a standard draws array/matrix/data frame rather than a
   component-specific extraction result.
