@@ -64,9 +64,8 @@ docs
 *.txt
 
 # Internal notes
-notes/
-notes/*
-notes/docs/*
+_notes/
+_notes/docs/*
 tests/local/
 
 # rstan crap

@@ -201,6 +201,89 @@ test_that("mixture simulation retains the same direct marker-weight departures",
     truth$marker_weight_mean_by_term$cv_total,
     truth$marker_weight_mean[["shared"]]
   )
+  expect_error(
+    simulate_joinme(n_id = 2, marker_weight_scale = 1, use_mirai = FALSE),
+    "unused argument"
+  )
+  expect_error(
+    simulate_joinme_mix(n_id = 2, marker_weight_scale = 1, use_mirai = FALSE),
+    "unused argument"
+  )
+  fixed <- simulate_joinme(
+    n_id = 2,
+    truth = jm_truth(marker_weights = list(
+      offset = c(m1 = 2, m2 = -1, m3 = 0.5),
+      family = "none"
+    )),
+    seed = 7310,
+    use_mirai = FALSE
+  )
+  expect_equal(fixed$truth$marker_weights, c(m1 = 2, m2 = -1, m3 = 0.5))
+})
+
+test_that("Stan uses direct unit-scale marker-weight departures", {
+  parameter_code <- paste(
+    readLines(testthat::test_path("..", "..", "inst", "stan", "include", "submodels", "marker_weight", "parameters", "fit.stan"), warn = FALSE),
+    collapse = "\n"
+  )
+  transformed_code <- paste(
+    readLines(testthat::test_path("..", "..", "inst", "stan", "include", "submodels", "marker_weight", "transformed_parameters", "fit.stan"), warn = FALSE),
+    collapse = "\n"
+  )
+  model_code <- paste(
+    readLines(testthat::test_path("..", "..", "inst", "stan", "include", "submodels", "marker_weight", "model", "fit.stan"), warn = FALSE),
+    collapse = "\n"
+  )
+
+  expect_false(grepl("marker_weight_scale", parameter_code, fixed = TRUE))
+  expect_false(grepl("marker_weight_scale", model_code, fixed = TRUE))
+  expect_match(
+    parameter_code,
+    "n_marker_weight_means > 0 ? 1 : 0] marker_weight_df_excess",
+    fixed = TRUE
+  )
+  expect_match(
+    model_code,
+    "z_marker_weights ~ student_t(marker_weight_df[1], 0, 1);",
+    fixed = TRUE
+  )
+  expect_false(grepl("marker_weight_df[s]", model_code, fixed = TRUE))
+  expect_match(
+    transformed_code,
+    "z_marker_weight_sets[s] = to_row_vector(marker_weight_prior_effect[start_pos:end_pos]);",
+    fixed = TRUE
+  )
+  expect_false(grepl("marker_weight_scale", transformed_code, fixed = TRUE))
+})
+
+test_that("regularised-horseshoe marker-weight simulation retains its realised hierarchy", {
+  set.seed(7311)
+  draw <- .sim_draw_marker_weight_prior(
+    5L,
+    prior_horseshoe(global_scale = 0.25, slab_scale = 1)
+  )
+
+  expect_length(draw$departure, 5L)
+  expect_length(draw$raw, 5L)
+  expect_length(draw$local_scale, 5L)
+  expect_length(draw$global_scale, 1L)
+  expect_length(draw$slab_multiplier, 1L)
+  expect_true(all(is.finite(draw$departure)))
+})
+
+test_that("Student-t marker-weight simulation draws fitted degrees of freedom", {
+  set.seed(7312)
+  moving_prior <- jm_prior(marker_weights = list(family = "student_t"))$marker_weights$family
+  automatic_draw <- .sim_draw_marker_weight_prior(
+    12L,
+    moving_prior,
+    n_sets = 3L
+  )
+
+  expect_length(automatic_draw$departure, 12L)
+  expect_length(automatic_draw$df, 1L)
+  expect_true(all(automatic_draw$df > 2))
+  expect_identical(automatic_draw$df_was_fitted, TRUE)
 })
 
 test_that("mixture truth retains term-specific marker-weight means", {

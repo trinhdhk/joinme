@@ -59,3 +59,9 @@ association terms, and optional covariance blocks. For survival, the summary
 reports \code{survival_process} when the event model
 contains non-intercept covariates beyond association features.
 }
+\details{
+For coefficient views, this is the reporting layer between \code{\link[=extract]{extract()}} and
+the conventional \code{\link[nlme:fixef]{fixef()}}, \code{\link[nlme:ranef]{ranef()}}, and \code{\link[=coef]{coef()}} methods. The high-level
+methods delegate here; requests with \code{summary = FALSE} continue to the
+component-aware draw representation owned by \code{extract()}.
+}
