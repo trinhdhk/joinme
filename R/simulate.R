@@ -399,6 +399,301 @@ softplus <- function(x) {
   output
 }
 
+#' Draw marker-weight departures from a declared prior family
+#'
+#' @description
+#' Generates the same centred, unit-scale marker-weight departure used by the
+#' fitting programme.  Ordinary Student-t, Normal and Laplace declarations are
+#' direct marginal draws.  A regularised horseshoe first draws its local,
+#' global and finite-slab scales, then applies the same transformation as the
+#' Stan prior module.  Returning the hierarchy alongside the departures makes
+#' a simulation study fully auditable without changing the effective weights.
+#'
+#' @param n Number of marker-specific departures.
+#' @param prior A checked `joinme_prior_spec` whose location and ordinary scale
+#'   have already been fixed at zero and one.
+#' @param n_sets Number of marker-weight sets. The family name `"student_t"`
+#'   draws one `2 + Gamma(2, 0.1)` degrees-of-freedom value shared by every
+#'   set, exactly as in Stan.
+#'
+#' @return A named list containing `departure`, `raw`, and any horseshoe scales.
+#' @keywords internal
+#' @noRd
+.sim_draw_marker_weight_prior <- function(n, prior, n_sets = 1L) {
+  number_departures <- as.integer(n) # number of marker-by-weight-set deviations required by the simulation
+  number_sets <- as.integer(n_sets) # shared or term-specific weight sets governing contiguous marker groups in Stan
+  if (length(number_sets) != 1L || is.na(number_sets) || number_sets < 1L ||
+      number_departures %% number_sets != 0L) {
+    cli::cli_abort("{.arg n_sets} must be positive and divide the number of marker-weight departures exactly.")
+  }
+  if (number_departures <= 0L) {
+    return(list(
+      departure = numeric(0),
+      raw = numeric(0),
+      df = numeric(0),
+      df_was_fitted = logical(0),
+      local_scale = numeric(0),
+      global_scale = numeric(0),
+      slab_multiplier = numeric(0)
+    ))
+  }
+
+  if (identical(prior$family, "student_t")) {
+    fitted_df <- 2 + stats::rgamma(1L, shape = 2, rate = 0.1) # shifted-Gamma law for the single tail parameter shared by all marker-weight sets in Stan
+    departure <- stats::rt(number_departures, df = fitted_df) # set-major departure vector whose entries all use the same realised degrees of freedom
+    return(list(
+      departure = departure,
+      raw = departure,
+      df = fitted_df,
+      df_was_fitted = TRUE
+    ))
+  }
+  if (identical(prior$family, "normal")) {
+    departure <- stats::rnorm(number_departures) # centred unit-scale Gaussian deviations
+    return(list(departure = departure, raw = departure))
+  }
+  if (identical(prior$family, "laplace")) {
+    departure <- sample(c(-1, 1), number_departures, replace = TRUE) *
+      stats::rexp(number_departures, rate = 1) # centred unit-scale-parameter Laplace deviations
+    return(list(departure = departure, raw = departure))
+  }
+
+  raw <- stats::rnorm(number_departures) # standard-Normal coefficient seeds in the regularised horseshoe
+  local_scale <- abs(stats::rt(number_departures, df = prior$df)) # coefficient-specific half-Student-t local scales
+  global_scale <- abs(stats::rt(1L, df = prior$global_df)) * prior$global_scale # shared half-Student-t global scale for this marker-weight block
+  slab_multiplier <- 1 / stats::rgamma(
+    1L,
+    shape = 0.5 * prior$slab_df,
+    rate = 0.5 * prior$slab_df
+  ) # inverse-gamma finite-slab variance multiplier used by Stan
+  squared_slab <- prior$slab_scale^2 * slab_multiplier # realised finite-slab variance
+  regularised_local_scale <- sqrt(
+    squared_slab * local_scale^2 /
+      (squared_slab + global_scale^2 * local_scale^2)
+  ) # local scales after the finite slab has regularised their upper tails
+  departure <- raw * global_scale * regularised_local_scale # effective centred marker-weight deviations
+
+  list(
+    departure = departure,
+    raw = raw,
+    local_scale = local_scale,
+    global_scale = global_scale,
+    slab_multiplier = slab_multiplier
+  )
+}
+
+#' Draw or fix a population coefficient vector from a simulation declaration
+#'
+#' @description
+#' A `prior_*()` object is interpreted as a population-generating distribution.
+#' A numeric declaration is interpreted as the population coefficient itself.
+#' This distinction is confined to simulation. A separate fitting-prior object
+#' supplies the fitting declaration retained in `truth$recovery`.
+#'
+#' @param declaration Numeric fixed values or a `joinme_prior_spec`.
+#' @param coefficient_names Names and order of the required coefficients.
+#' @param context Statistical component named in diagnostic messages.
+#'
+#' @return A named numeric vector in `coefficient_names` order.
+#' @keywords internal
+#' @noRd
+.sim_resolve_prior_or_fixed <- function(declaration, coefficient_names, context) {
+  coefficient_names <- as.character(coefficient_names) # fitted model-matrix order defining the population coefficient vector
+  number_coefficients <- length(coefficient_names) # dimension of the requested population regression component
+  if (number_coefficients == 0L) return(stats::setNames(numeric(0), coefficient_names))
+
+  if (is.numeric(declaration) && !inherits(declaration, "joinme_prior_spec")) {
+    if (!is.null(dim(declaration))) {
+      cli::cli_abort("Fixed {.arg {context}} coefficients must be supplied as a numeric vector.")
+    }
+    supplied_names <- names(declaration) # optional model-matrix labels supplied for exact alignment
+    fixed_values <- as.numeric(declaration) # population values held fixed throughout generation
+    if (!is.null(supplied_names)) {
+      unscoped_coefficient_names <- sub("^(all::|family=[^:]+::)", "", coefficient_names) # readable formula labels accepted for scoped distributional designs
+      if (setequal(supplied_names, unscoped_coefficient_names) && !anyDuplicated(unscoped_coefficient_names)) {
+        supplied_names <- coefficient_names[match(supplied_names, unscoped_coefficient_names)]
+      }
+      unknown_names <- setdiff(supplied_names, coefficient_names)
+      if (length(unknown_names) > 0L || anyDuplicated(supplied_names)) {
+        cli::cli_abort("Fixed {.arg {context}} coefficients have unknown or duplicated names.")
+      }
+      if (!setequal(supplied_names, coefficient_names)) {
+        cli::cli_abort("Named fixed {.arg {context}} coefficients must name every required coefficient exactly once.")
+      }
+      fixed_values <- fixed_values[match(coefficient_names, supplied_names)]
+    } else if (length(fixed_values) == 1L) {
+      fixed_values <- rep(fixed_values, number_coefficients)
+    } else if (length(fixed_values) != number_coefficients) {
+      cli::cli_abort("Fixed {.arg {context}} coefficients must have length one or {number_coefficients}.")
+    }
+    if (any(!is.finite(fixed_values))) cli::cli_abort("Fixed {.arg {context}} coefficients must be finite.")
+    return(stats::setNames(fixed_values, coefficient_names))
+  }
+
+  if (!inherits(declaration, "joinme_prior_spec")) {
+    cli::cli_abort("{.arg {context}} must be a numeric fixed value or a prior_*() declaration.")
+  }
+  expand_parameter <- function(value, name) {
+    value <- as.numeric(unlist(value, use.names = FALSE))
+    if (length(value) == 1L) value <- rep(value, number_coefficients)
+    if (length(value) != number_coefficients || any(!is.finite(value))) {
+      cli::cli_abort("The {.arg {context}} {name} must have length one or {number_coefficients}.")
+    }
+    value
+  }
+  location <- expand_parameter(declaration$mu %||% 0, "location") # population distribution location aligned with coefficient order
+  scale <- expand_parameter(declaration$scale %||% 1, "scale") # population distribution scale aligned with coefficient order
+  if (any(scale <= 0)) cli::cli_abort("The {.arg {context}} scale must be positive.")
+  family <- declaration$family # declared population-generating family
+  draws <- switch(
+    family,
+    normal = stats::rnorm(number_coefficients, location, scale),
+    student_t = location + scale * stats::rt(number_coefficients, df = declaration$df),
+    laplace = location + scale * sample(c(-1, 1), number_coefficients, replace = TRUE) * stats::rexp(number_coefficients),
+    horseshoe = {
+      local_scale <- abs(stats::rt(number_coefficients, df = declaration$df)) # coefficient-specific half-Student-t scales
+      global_scale <- abs(stats::rt(1L, df = declaration$global_df)) * declaration$global_scale # shared global population scale
+      slab_multiplier <- 1 / stats::rgamma(1L, 0.5 * declaration$slab_df, 0.5 * declaration$slab_df) # finite-slab variance multiplier
+      squared_slab <- declaration$slab_scale^2 * slab_multiplier # realised slab variance
+      regularised_local <- sqrt(squared_slab * local_scale^2 / (squared_slab + global_scale^2 * local_scale^2)) # regularised local scales
+      location + scale * stats::rnorm(number_coefficients) * global_scale * regularised_local
+    },
+    cli::cli_abort("Unsupported population-generating family {.val {family}} for {.arg {context}}.")
+  )
+  stats::setNames(as.numeric(draws), coefficient_names)
+}
+
+#' Resolve intercept and slope population declarations
+#'
+#' @param raw_component Unnormalised component retained by [jm_truth()].
+#' @param checked_component Normalised fitting-prior component.
+#' @param coefficient_names Model-matrix coefficient labels.
+#' @param context Statistical component used in messages.
+#'
+#' @return Named population coefficient vector.
+#' @keywords internal
+#' @noRd
+.sim_resolve_regression_component <- function(raw_component, checked_component, coefficient_names, context) {
+  raw_component <- raw_component %||% list() # analyst's prior-or-fixed simulation declarations
+  if (is.numeric(raw_component) && !inherits(raw_component, "joinme_prior_spec")) {
+    return(.sim_resolve_prior_or_fixed(raw_component, coefficient_names, context))
+  } # a bare numeric component fixes the complete model-matrix vector
+  if (inherits(raw_component, "joinme_prior_spec")) {
+    return(.sim_resolve_prior_or_fixed(raw_component, coefficient_names, context))
+  }
+  intercept_positions <- which(grepl("(^|::)\\(Intercept\\)$", coefficient_names)) # population intercept columns under the fitted design convention
+  slope_positions <- setdiff(seq_along(coefficient_names), intercept_positions) # all non-intercept population columns
+  output <- stats::setNames(numeric(length(coefficient_names)), coefficient_names) # complete population vector assembled role by role
+  if (length(intercept_positions) > 0L) {
+    output[intercept_positions] <- .sim_resolve_prior_or_fixed(
+      raw_component$intercept %||% checked_component$intercept,
+      coefficient_names[intercept_positions], paste0(context, "$intercept")
+    )
+  }
+  if (length(slope_positions) > 0L) {
+    output[slope_positions] <- .sim_resolve_prior_or_fixed(
+      raw_component$slope %||% checked_component$slope,
+      coefficient_names[slope_positions], paste0(context, "$slope")
+    )
+  }
+  output
+}
+
+#' Combine global and component population declarations for simulation
+#'
+#' @param simulation_request Unnormalised declaration retained by [jm_truth()].
+#' @param component_name Scientific component name.
+#' @param roles Regression roles required by the component.
+#'
+#' @return A named list containing the most specific declaration for each role.
+#' @keywords internal
+#' @noRd
+.sim_population_component <- function(simulation_request, component_name, roles = c("intercept", "slope")) {
+  component <- simulation_request[[component_name]] %||% list() # component-specific population declaration
+  if ((is.numeric(component) || inherits(component, "joinme_prior_spec")) && length(roles) > 1L) {
+    return(component)
+  } # a bare multi-role declaration governs the complete regression vector in model-matrix order
+  if (inherits(component, "joinme_prior_spec") || is.numeric(component)) {
+    component <- stats::setNames(rep(list(component), length(roles)), roles)
+  }
+  if (!is.list(component)) component <- list()
+  stats::setNames(lapply(roles, function(role_name) {
+    component[[role_name]] %||% simulation_request[[role_name]]
+  }), roles) # component declaration with the global population fallback filled role by role
+}
+
+#' Resolve formulaDist population coefficients, including scoped declarations
+#'
+#' @param simulation_request Unnormalised declaration retained by [jm_truth()].
+#' @param checked_parameter Normalised priors for one distributional parameter.
+#' @param parameter_name Canonical formulaDist left-hand-side name.
+#' @param coefficient_names Scoped model-matrix column names.
+#' @param marker_levels Longitudinal marker labels.
+#' @param family_names Family label for each marker.
+#'
+#' @return A named population coefficient vector in fitted design order.
+#' @keywords internal
+#' @noRd
+.sim_distributional_population <- function(
+  simulation_request,
+  checked_parameter,
+  parameter_name,
+  coefficient_names,
+  marker_levels,
+  family_names
+) {
+  raw_collection <- simulation_request$distributional %||% list() # all unnormalised formulaDist declarations
+  raw_default <- raw_collection[[parameter_name]] # parameter-wide fixed values or generating distributions
+  base_component <- .sim_population_component(
+    c(simulation_request[c("intercept", "slope")], stats::setNames(list(raw_default), parameter_name)),
+    parameter_name
+  )
+  output <- .sim_resolve_regression_component(
+    base_component, checked_parameter, coefficient_names, parameter_name
+  ) # parameter-wide coefficients before family or marker refinements
+
+  selector_names <- setdiff(names(raw_collection) %||% character(0), parameter_name)
+  for (selector_name in selector_names) {
+    selector <- tryCatch(.parse_dist_selector_text(selector_name, allow_marker = TRUE), error = function(error) NULL)
+    if (is.null(selector) || !identical(selector$param, parameter_name) || is.null(selector$scope_type)) next
+    scope_family <- if (identical(selector$scope_type, "family")) {
+      .canonical_family_name(selector$scope_value)
+    } else {
+      marker_position <- match(selector$scope_value, marker_levels)
+      if (is.na(marker_position)) next
+      family_names[[marker_position]]
+    } # fitted family block selected directly or through its marker label
+    positions <- which(grepl(paste0("^family=", scope_family, "::"), coefficient_names))
+    if (length(positions) == 0L) next
+    scoped_request <- raw_collection[[selector_name]] # population override for this fitted family block
+    stripped_names <- sub("^family=[^:]+::", "", coefficient_names[positions])
+    if (inherits(scoped_request, "joinme_prior_spec") || is.numeric(scoped_request)) {
+      output[positions] <- .sim_resolve_prior_or_fixed(
+        scoped_request, stripped_names, selector_name
+      ) # bare scoped declaration follows the selected family block's complete model-matrix order
+    } else {
+      scoped_request <- scoped_request %||% list()
+      intercept_positions <- which(grepl("(^|::)\\(Intercept\\)$", stripped_names)) # intercept columns within this selected family block
+      slope_positions <- setdiff(seq_along(stripped_names), intercept_positions) # non-intercept columns within this selected family block
+      if (!is.null(scoped_request$intercept) && length(intercept_positions) > 0L) {
+        output[positions[intercept_positions]] <- .sim_resolve_prior_or_fixed(
+          scoped_request$intercept,
+          stripped_names[intercept_positions],
+          paste0(selector_name, "$intercept")
+        )
+      }
+      if (!is.null(scoped_request$slope) && length(slope_positions) > 0L) {
+        output[positions[slope_positions]] <- .sim_resolve_prior_or_fixed(
+          scoped_request$slope,
+          stripped_names[slope_positions],
+          paste0(selector_name, "$slope")
+        )
+      }
+    }
+  }
+  output
+}
+
 #' Declare a time-varying simulation covariate generator
 #'
 #' @description
@@ -464,6 +759,78 @@ weibull_h0 <- function(shape = 1.4, scale = 6.0) {
     it <- it + 1L
   }
   if (f_upper >= 0) list(lower = lower, upper = upper) else NULL
+}
+
+#' Resolve marker-specific family declarations for simulation
+#'
+#' @description
+#' Converts character and structured family declarations into the
+#' marker-aligned codes, inverse-link instructions, and fixed skew-Laplace
+#' quantiles used by `simulate_joinme()`. The same family parser and fixed-`tau`
+#' normaliser are used by fitting, which prevents simulation and estimation
+#' from assigning different meanings to a family declaration.
+#'
+#' @param families Character vector or list containing one family declaration
+#'   per marker.
+#' @param D Positive integer number of longitudinal markers.
+#'
+#' @return A list containing marker-aligned `family_codes`, `link_names`,
+#'   `inv_link_specs`, `use_tau_fixed`, and `tau_fixed`.
+#' @keywords internal
+#' @noRd
+.sim_resolve_family_specs <- function(families, D) {
+  if (.is_single_family_spec(families)) {
+    families <- rep(list(families), D)
+  } else if (length(families) == 1L && !is.list(families)) {
+    families <- rep(list(families), D)
+  } else if (!is.list(families)) {
+    families <- as.list(families)
+  }
+
+  if (length(families) != D) {
+    cli::cli_abort(
+      "families must have length {D} (number of markers), got {length(families)}"
+    )
+  }
+
+  specifications <- lapply(families, .extract_family_and_link)
+  family_codes <- vapply(
+    specifications,
+    function(specification) specification$family_code,
+    integer(1)
+  )
+  fixed_tau <- .normalise_fixed_tau_by_marker(
+    use_tau_fixed = as.integer(vapply(
+      specifications,
+      function(specification) !is.na(specification$tau_fixed),
+      logical(1)
+    )),
+    tau_fixed = vapply(
+      specifications,
+      function(specification) {
+        if (is.na(specification$tau_fixed)) 0.5 else specification$tau_fixed
+      },
+      numeric(1)
+    ),
+    family_codes = family_codes
+  )
+  link_names <- vapply(
+    specifications,
+    function(specification) specification$link_name,
+    character(1)
+  )
+  link_names[is.na(link_names)] <- "custom"
+
+  list(
+    family_codes = as.integer(family_codes),
+    link_names = link_names,
+    inv_link_specs = lapply(
+      specifications,
+      function(specification) specification$inv_link_bc
+    ),
+    use_tau_fixed = fixed_tau$use_tau_fixed,
+    tau_fixed = fixed_tau$tau_fixed
+  )
 }
 
 #' Resolve marker-specific family declarations for simulation

@@ -88,7 +88,7 @@ Use \code{posterior_draws()} when you want:
 \itemize{
 \item one posterior object containing renamed variables,
 \item \code{posterior::subset_draws()} and regex-style variable filtering,
-\item \code{bayesplot} directly, similar to \code{\link[=mcmc_plot]{mcmc_plot()}},
+\item \code{bayesplot} directly, similar to \code{\link[brms:mcmc_plot]{mcmc_plot()}},
 \item a standard draws array/matrix/data frame rather than a component-specific
 extraction result.
 \item \code{as.array} is a shorthand for \code{posterior_draws(format = "draws_array")}.

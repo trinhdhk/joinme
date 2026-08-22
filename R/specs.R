@@ -1665,3 +1665,169 @@ make_conditions <- function(x, ...) {
     i = "A positive numeric concentration is also accepted."
   ))
 }
+
+#' @keywords internal
+#' @noRd
+.normalise_marker_weight_family <- function(x, name, default = "student_t") {
+  family_request <- x %||% default # family label for the standardised marker-weight departure
+  if (inherits(family_request, "joinme_prior_spec")) {
+    cli::cli_abort(c(
+      x = "{.arg {name}} accepts a family name rather than a prior declaration.",
+      i = "Use {.code family = 'student_t'}, {.code 'normal'}, {.code 'laplace'}, {.code 'horseshoe'}, or {.code 'constant'}."
+    ))
+  }
+  family_name <- family_request
+  if (!is.character(family_name) || length(family_name) != 1L || !nzchar(family_name)) {
+    cli::cli_abort(c(
+      x = "{.arg {name}} must be one family name.",
+      i = "Family names are {.val student_t}, {.val normal}, {.val laplace}, {.val horseshoe}, {.val constant}, and {.val none}."
+    ))
+  }
+  family_name <- match.arg(
+    tolower(family_name),
+    c("student_t", "normal", "laplace", "horseshoe", "constant", "none")
+  )
+  if (identical(family_name, "none")) family_name <- "constant"
+
+  # A constant family has no stochastic departure and no fitted common
+  # location.  The ordinary prior fields are retained only so this declaration
+  # has the same predictable shape as the stochastic family declarations.
+  if (identical(family_name, "constant")) {
+    return(structure(list(
+      family = "constant",
+      mu = 0,
+      scale = 1,
+      df = Inf,
+      global_df = Inf,
+      global_scale = 1,
+      slab_df = Inf,
+      slab_scale = 1,
+      estimate_df = FALSE
+    ), class = c("joinme_prior_spec", "list")))
+  }
+
+  # A family name selects the standardised departure law. Student-t deliberately
+  # leaves df undeclared so fitting uses the shifted-Gamma distributional
+  # parameter; other families retain their fixed-unit-scale records.
+  output <- switch(
+    family_name,
+    student_t = prior_student_t(df = 6),
+    normal = prior_normal(),
+    laplace = prior_laplace(),
+    horseshoe = prior_horseshoe()
+  )
+  output$estimate_df <- identical(family_name, "student_t") # only the family label requests the moving shifted-Gamma degrees of freedom
+  output
+}
+
+#' Validate a marker-weight offset declaration before marker names are known
+#'
+#' @description
+#' The prior declaration is parsed before the longitudinal data establish the
+#' fitted marker order. This helper therefore checks the numerical and naming
+#' rules without reordering values. Alignment to the observed marker levels is
+#' performed later by `.normalise_marker_weight_vector()`.
+#'
+#' Every individual offset vector must use one of two complete conventions:
+#' either all entries are named, or no entries are named. A partly named vector
+#' is ambiguous because unnamed entries cannot be assigned to markers without
+#' relying on their incidental position.
+#'
+#' @param offset `NULL`, a numeric vector, a numeric matrix or data frame, or a
+#'   named list of numeric vectors indexed by weighted association term.
+#' @param name Name used in diagnostic messages.
+#'
+#' @return The checked declaration without changing its numerical values or
+#'   names.
+#' @keywords internal
+#' @noRd
+.normalise_marker_weight_offset_request <- function(offset, name) {
+  check_vector <- function(values, vector_name) {
+    if (!is.numeric(values) || length(values) < 1L || any(!is.finite(values))) {
+      cli::cli_abort("{.arg {vector_name}} must be a non-empty finite numeric vector.")
+    }
+    value_names <- names(values)
+    if (!is.null(value_names)) {
+      named <- !is.na(value_names) & nzchar(value_names)
+      if (any(named) && !all(named)) {
+        cli::cli_abort(c(
+          x = "{.arg {vector_name}} must be wholly named or wholly unnamed.",
+          i = "Name every marker entry, or remove every marker name and use fitted marker order."
+        ))
+      }
+      if (all(named) && anyDuplicated(value_names)) {
+        cli::cli_abort("{.arg {vector_name}} contains duplicated marker names.")
+      }
+    }
+    values
+  }
+
+  if (is.null(offset)) return(NULL)
+  if (is.numeric(offset) && is.null(dim(offset))) return(check_vector(offset, name))
+  if (is.matrix(offset) || is.data.frame(offset)) {
+    if (!all(vapply(offset, is.numeric, logical(1)))) {
+      cli::cli_abort("{.arg {name}} must contain only numeric marker offsets.")
+    }
+    if (any(!is.finite(as.matrix(offset)))) {
+      cli::cli_abort("{.arg {name}} must contain only finite marker offsets.")
+    }
+    column_names <- colnames(offset)
+    if (!is.null(column_names)) {
+      named_columns <- !is.na(column_names) & nzchar(column_names)
+      if (any(named_columns) && !all(named_columns)) {
+        cli::cli_abort("The marker columns of {.arg {name}} must be wholly named or wholly unnamed.")
+      }
+      if (all(named_columns) && anyDuplicated(column_names)) {
+        cli::cli_abort("The marker columns of {.arg {name}} contain duplicated names.")
+      }
+    }
+    row_names <- rownames(offset)
+    if (is.null(row_names) || anyNA(row_names) || any(!nzchar(row_names)) || anyDuplicated(row_names)) {
+      cli::cli_abort(c(
+        x = "The rows of {.arg {name}} must be uniquely named.",
+        i = "Name each row by its weighted association term."
+      ))
+    }
+    unknown_terms <- setdiff(row_names, .weighted_assoc_term_keys())
+    if (length(unknown_terms) > 0L) {
+      cli::cli_abort("The rows of {.arg {name}} contain unknown weighted association terms: {.val {paste(unknown_terms, collapse = ', ')}}.")
+    }
+    return(offset)
+  }
+  if (is.list(offset)) {
+    offset_names <- names(offset)
+    if (is.null(offset_names) || anyNA(offset_names) || any(!nzchar(offset_names)) || anyDuplicated(offset_names)) {
+      cli::cli_abort(c(
+        x = "{.arg {name}} must be a completely named list.",
+        i = "Name each vector by its weighted association term."
+      ))
+    }
+    unknown_terms <- setdiff(offset_names, .weighted_assoc_term_keys())
+    if (length(unknown_terms) > 0L) {
+      cli::cli_abort("{.arg {name}} contains unknown weighted association terms: {.val {paste(unknown_terms, collapse = ', ')}}.")
+    }
+    return(stats::setNames(lapply(seq_along(offset), function(index) {
+      check_vector(offset[[index]], paste0(name, "$", offset_names[[index]]))
+    }), offset_names))
+  }
+  cli::cli_abort(c(
+    x = "{.arg {name}} has an unsupported form.",
+    i = "Use a numeric vector, or a named collection of numeric vectors for term-specific offsets."
+  ))
+}
+
+#' @keywords internal
+#' @noRd
+.normalise_joinme_lkj_prior <- function(x) {
+  if (is.null(x)) return(prior_lkj(1))
+  if (is.numeric(x)) {
+    return(prior_lkj(x))
+  }
+  if (inherits(x, "joinme_lkj_prior")) {
+    return(x)
+  }
+  cli::cli_abort(c(
+    x = "{.arg lkj} must be created with {.fn prior_lkj}.",
+    i = "A positive numeric concentration is also accepted."
+  ))
+}

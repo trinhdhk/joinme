@@ -385,6 +385,68 @@ extract.JoiNMeFit <- function(object,
   # These three selectors own the complete draw-level inputs used by the
   # posterior-summary layer and corresponding high-level coefficient methods. They deliberately return
   # scientific structures rather than Stan storage coordinates. The shorter
+  # `what = "fixef"` selector below remains the longitudinal design-matrix
+  # component and is useful when a rectangular posterior object is required.
+  if (what %in% c("fixed_effects", "random_effects", "coefficients")) {
+    structured_draws <- switch(
+      what,
+      fixed_effects = .extract_fixed_effect_draws(object, draws = draws, seed = seed),
+      random_effects = .extract_random_effect_draws(object, draws = draws, seed = seed),
+      coefficients = .extract_combined_coefficient_draws(object, draws = draws, seed = seed)
+    )
+    return(list(
+      posterior_draws = structured_draws,
+      term_map = NULL,
+      metadata = list(
+        what = what,
+        scale = "scientific",
+        keep_chains = FALSE
+      )
+    ))
+  }
+
+  # Marker weights are a derived posterior quantity rather than one rectangular
+  # Stan variable. This selector makes their chain-preserving reconstruction
+  # available without requiring callers to reach into package internals.
+  if (identical(what, "marker_weights")) {
+    active_terms <- .reported_marker_weight_terms(sd) # one representative term per fitted shared or term-specific set
+    if (!is.null(term)) active_terms <- intersect(active_terms, as.character(term))
+    if (!length(active_terms)) {
+      cli::cli_abort("No matching marker-weight set is available for extraction.")
+    }
+    all_variables <- tryCatch(
+      posterior::variables(.get_draws_obj(fit)),
+      error = function(error) character(0)
+    ) # posterior vocabulary used to select fitted rather than constant weights
+    weight_arrays <- lapply(active_terms, function(term_key) {
+      .association_marker_weight_array(
+        object,
+        term_key = term_key,
+        draws = draws,
+        seed = seed,
+        all_vars = all_variables
+      )
+    })
+    names(weight_arrays) <- active_terms
+    if (!isTRUE(keep_chains)) {
+      weight_arrays <- lapply(weight_arrays, function(weight_array) {
+        posterior::as_draws_matrix(posterior::as_draws_array(weight_array))
+      })
+    }
+    return(list(
+      posterior_draws = if (length(weight_arrays) == 1L) weight_arrays[[1L]] else weight_arrays,
+      term_map = data.frame(
+        term = active_terms,
+        variable = "effective_marker_weight",
+        stringsAsFactors = FALSE
+      ),
+      metadata = list(what = what, keep_chains = isTRUE(keep_chains))
+    ))
+  }
+
+  # These three selectors own the complete draw-level inputs used by the
+  # posterior-summary layer and corresponding high-level coefficient methods. They deliberately return
+  # scientific structures rather than Stan storage coordinates. The shorter
   # `what = "fixef"` selector remains the longitudinal design-matrix
   # component and is useful when a rectangular posterior object is required.
   if (what %in% c("fixed_effects", "random_effects", "coefficients")) {
