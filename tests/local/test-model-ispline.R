@@ -33,12 +33,21 @@ sim <- simulate_joinme(
   formulaVCov = ~ 1,
   families = c("gaussian", "gaussian"),
   n_id = 200,
-  n_obs_per_marker_per_id = 6,
   times_obs = seq(0, 6, length.out = 8),
   assoc = c("cv_total", "corr"),
-  beta_long = c('(Intercept)' = 0.5, time = 0.3, x1 = -0.2),
-  beta_event = c(x2 = 0.2),
-  assoc_coefs = list(cv_total = 0.25, corr = c(0.12)),
+  truth = jm_truth(
+    longitudinal = c('(Intercept)' = 0.5, time = 0.3, x1 = -0.2),
+    survival = list(slope = c(x2 = 0.2)),
+    assoc_coef = list(slope = c(cv_total = 0.25, "corr[1]" = 0.12)),
+    vcov = list(
+      sd = list(intercept = c(-0.1, -0.05), latent = 0.12),
+      corr = list(intercept = 0.05, latent = 0.12)
+    ),
+    re_params = list(
+      id = list(sd = c(0.5, 0.25)),
+      marker = list(sd = 0.3)
+    )
+  ),
   transforms = joinme_tf(
     # cv_total = ~ expit(x), #sim_cv_tf,
     corr = list(
@@ -48,15 +57,6 @@ sim <- simulate_joinme(
       n_knots = 6,
       degree = 3,
       lambda = 1
-    )
-  ),
-  re_params = list(
-    id = list(sd = c(0.5, 0.25)),
-    marker = list(sd = 0.3),
-    id_marker_cov = list(
-      latent = list(sd = c(0.6, 0.25)),
-      alpha = c(-0.1, 0.05, -0.05),
-      lambda = 0.12
     )
   ),
   use_mirai = TRUE,

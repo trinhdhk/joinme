@@ -19,7 +19,8 @@
 int<lower=0, upper=1> use_mixture; // whether latent-progress classes are fitted
 int<lower=1> n_classes; // number of shared latent classes
 int<lower=0> K_mix; // total selected latent-coordinate count
-int<lower=0, upper=2> shrinkage; // latent-progress component family: 0 Student-t(6), 1 Laplace, 2 Normal
+int<lower=1, upper=3> mix_component_family; // component family declared by jm_prior(): 1 Student-t, 2 Normal, 3 Laplace
+real<lower=0> mix_component_df; // fixed Student-t degrees of freedom from class$family; unused by Normal and Laplace components
 int<lower=0, upper=1> mix_subject; // whether subject effects receive a latent-class distribution
 int<lower=0, upper=1> mix_marker; // whether marker effects receive a latent-class distribution
 int<lower=0, upper=1> mix_covariance; // whether covariance effects receive a latent-class distribution

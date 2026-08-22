@@ -12,10 +12,9 @@ set.seed(2602)
 sim <- simulate_joinme(
   n_id = 30,
   families = c("gaussian", "bernoulli", "poisson"),
-  n_obs_per_marker_per_id = 4,
   times_obs = seq(0, 5, length.out = 8),
   assoc = c("cv_total"),
-  assoc_coefs = c(cv_total = 0.2),
+  truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.2))),
   seed = 2602
 )
 

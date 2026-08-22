@@ -135,7 +135,7 @@ test_that("marker-scoped priors reject coefficients shared by several markers", 
   )
 })
 
-test_that("family-scoped horseshoes retain separate global shrinkage groups", {
+test_that("family-scoped horseshoes retain separate global regularisation groups", {
   pri <- jm_prior(
     `sigma[family='gaussian']` = list(
       slope = prior_horseshoe(global_scale = 0.1)

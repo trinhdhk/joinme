@@ -38,7 +38,7 @@ If \code{NULL}, all model predictors and fitted two-way interactions are used.}
 \item{conditions}{Optional data frame containing values of predictors on
 which to condition. One set of effects is evaluated for every row.
 \code{conditions$cond__}, when supplied, provides the facet label; otherwise row
-names are used. Tables returned by \code{\link[brms:make_conditions]{make_conditions()}} can be supplied
+names are used. Tables returned by \code{\link[=make_conditions]{make_conditions()}} can be supplied
 directly.}
 
 \item{int_conditions}{Optional named list controlling the evaluation values
@@ -215,6 +215,6 @@ conditional_effects(
 
 }
 \seealso{
-\code{\link[brms:conditional_effects]{brms::conditional_effects()}}, \code{\link[brms:make_conditions]{make_conditions()}},
+\code{\link[brms:conditional_effects]{brms::conditional_effects()}}, \code{\link[=make_conditions]{make_conditions()}},
 \code{\link[=predict.JoiNMeFit]{predict.JoiNMeFit()}}
 }

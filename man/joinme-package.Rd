@@ -15,7 +15,7 @@ prediction, and \code{plot()} for visualisation of predicted trajectories and
 survival curves.
 }
 \references{
-Stan Development Team (NA). RStan: the R interface to Stan. R package version 2.36.0.9000. https://mc-stan.org
+Stan Development Team (2026). RStan: the R interface to Stan. R package version 2.36.0.9000. https://mc-stan.org
 }
 \seealso{
 Useful links:

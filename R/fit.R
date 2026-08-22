@@ -22,9 +22,6 @@
 #' 1. A named list with RHS-only formulas, e.g. `list(sigma = ~ 1 + time)`.
 #' 2. An unnamed list with explicit LHS parameter names, e.g. `list(sigma ~ 1 + time)`.
 #'
-#' The time axis is internally scaled for numerical stability; reported coefficients
-#' are rescaled within Stan so fixed effects remain interpretable on the original scale.
-#'
 #' Marker weights (see `joinme_standata()`) are used to form marker-average summaries
 #' for both current value (CV) and current slope (CS) association components. When
 #' `priors$marker_weights$shared = TRUE`, all weighted marker-based association terms share
@@ -139,7 +136,7 @@
 #' - `x`: raw association-feature values used either to define training pairs or
 #'   to help derive knot locations.
 #' - `y`: optional target transformed values at those `x` points. Supplying `y`
-#'   activates the plug-in fit; omitting it activates Stan estimation.
+#'   activates the plug-in fit; omitting it uses built-in Stan estimation.
 #' - `lambda`: smoothness control (larger = smoother transform).
 #' - `direction`: monotone orientation for penalised spline families. Accepted
 #'   values are `"increasing"` and `"decreasing"`. When `y` is supplied, the
@@ -161,7 +158,7 @@
 #'   dividing by sqrt of the second moment.
 #'
 #' Additional arguments are forwarded to `joinme_standata()` (e.g., `assoc`,
-#' `basehaz`, `basehaz_degree`, `n_knots`, `time_var`, and `shrinkage`). Use
+#' `basehaz`, `basehaz_degree`, `n_knots`, and `time_var`). Use
 #' lme4-style `||` in `formulaLong` to request diagonal random-effect covariance.
 #'
 #' @param formulaLong Longitudinal formula defining fixed effects, id-level effects,

@@ -150,9 +150,9 @@ prior_laplace <- function(mu = 0, scale = 1) {
 #' Declares the regularised horseshoe hierarchy used by brms and rstanarm. The
 #' coefficient is conditionally Normal with local and global half-Student-t
 #' scales and a finite Student-t slab. The slab regularises very large signals,
-#' whilst the local scales permit coefficient-specific escape from shrinkage.
+#' whilst the local scales permit coefficient-specific escape from regularisation.
 #'
-#' @param df Positive fixed degrees of freedom for local shrinkage scales.
+#' @param df Positive fixed degrees of freedom for local regularisation scales.
 #' @param global_df Positive fixed degrees of freedom for the global scale.
 #' @param global_scale Positive global scale. Smaller values express stronger
 #'   prior sparsity.
@@ -348,8 +348,12 @@ make_prior_dist <- function(
 #'   `` `sigma[marker='y']` = list(intercept = ...) ``.
 #' @param lkj An object from [prior_lkj()] or a positive numeric concentration.
 #' @param class A named list with `baseline_prob`, the positive Dirichlet
-#'   concentration for baseline class probabilities, and `slope`, the prior
-#'   declaration for coefficients from `formulaClass`. A scalar
+#'   concentration for baseline class probabilities; `slope`, the prior
+#'   declaration for coefficients from `formulaClass`; and `family`, the
+#'   centred unit-scale distribution of latent coordinates within each class.
+#'   `family` must be created with [prior_student_t()], [prior_normal()], or
+#'   [prior_laplace()]; its location and scale must be zero and one because
+#'   class-specific locations and scales are fitted separately. A scalar
 #'   `baseline_prob` is repeated over classes; a vector may provide one
 #'   concentration per class. The slope remains one prior block because
 #'   class-specific formula lists share a reference-class parameterisation.
@@ -378,7 +382,8 @@ make_prior_dist <- function(
 #'   lkj = prior_lkj(2),
 #'   class = list(
 #'     baseline_prob = c(2, 2, 2),
-#'     slope = prior_normal(scale = 1)
+#'     slope = prior_normal(scale = 1),
+#'     family = prior_student_t(df = 6)
 #'   )
 #' )
 #' print(pri)
@@ -435,14 +440,6 @@ joinme_priors <- function(
 #' @export
 jm_priors <- joinme_priors
 
-#' @rdname joinme_priors
-#' @export
-jm_prior <- joinme_priors
-
-#' @rdname joinme_priors
-#' @export
-joinme_prior <- joinme_priors
-
 #' Declare population truths for JoiNMe simulation
 #'
 #' @description
@@ -493,9 +490,11 @@ joinme_prior <- joinme_priors
 #'   left-hand sides of `formulaDist`, including family or marker selectors.
 #' @param lkj An object created by [prior_lkj()]. Its concentration governs each
 #'   random-effect correlation matrix drawn when `re_params` omits `corr`.
-#' @param class A named list containing `baseline_prob` and `slope`, following
-#'   the class-membership roles accepted by [jm_prior()]. The slope may be fixed
-#'   or drawn once for each simulation.
+#' @param class A named list containing `baseline_prob`, `slope`, and `family`,
+#'   following the class roles accepted by [jm_prior()]. The slope may be fixed
+#'   or drawn once for each simulation. The family is a probability declaration
+#'   governing every standardised latent coordinate drawn conditionally on its
+#'   class; it is not itself a population coefficient draw.
 #' @param basehaz Baseline-hazard truth. Supply a hazard function, a formula in
 #'   `time`, a character family name, or a named list such as
 #'   `list(type = "weibull", shape = 1.4, scale = 6)`.
@@ -746,7 +745,8 @@ print.joinme_priors <- function(x, ...) {
       })),
       data.frame(component = "lkj", value = describe_prior(priors$lkj), stringsAsFactors = FALSE),
       data.frame(component = "class.baseline_prob", value = paste(priors$class$baseline_prob, collapse = ", "), stringsAsFactors = FALSE),
-      data.frame(component = "class.slope", value = describe_prior(priors$class$slope), stringsAsFactors = FALSE)
+      data.frame(component = "class.slope", value = describe_prior(priors$class$slope), stringsAsFactors = FALSE),
+      data.frame(component = "class.family", value = describe_prior(priors$class$family), stringsAsFactors = FALSE)
     )
   ))
   cat("Prior specification for Joint Mixed Effects model\n")
@@ -1368,13 +1368,13 @@ make_conditions <- function(x, ...) {
     c(parameter_default, list(by_family = family_overrides, by_marker = marker_overrides))
   }), distributional_names)
 
-  class_request <- priors$class %||% list() # baseline allocation and formulaClass slope declarations
+  class_request <- priors$class %||% list() # baseline allocation, formulaClass slope prior and latent-component family
   if (!is.list(class_request) ||
       (length(class_request) > 0L &&
-        (is.null(names(class_request)) || any(!names(class_request) %in% c("baseline_prob", "slope"))))) {
+        (is.null(names(class_request)) || any(!names(class_request) %in% c("baseline_prob", "slope", "family"))))) {
     cli::cli_abort(c(
-      x = "{.arg class} must be a named list containing only {.field baseline_prob} and {.field slope}.",
-      i = "For example, use {.code class = list(baseline_prob = 1, slope = prior_normal())}."
+      x = "{.arg class} must be a named list containing only {.field baseline_prob}, {.field slope}, and {.field family}.",
+      i = "For example, use {.code class = list(baseline_prob = 1, slope = prior_normal(), family = prior_student_t(df = 6))}."
     ))
   }
   class_baseline_probability <- class_request$baseline_prob %||% 1 # Dirichlet concentration before expansion to n_classes
@@ -1389,6 +1389,25 @@ make_conditions <- function(x, ...) {
     )
   }
   class_slope_request <- class_request$slope # common family and hyperparameters for formulaClass slopes
+  class_family_request <- class_request$family # location-zero, unit-scale component distribution for selected latent coordinates
+  if (!is.null(class_family_request) && !inherits(class_family_request, "joinme_prior_spec")) {
+    cli::cli_abort(c(
+      x = "{.arg class$family} must be created with {.fn prior_student_t}, {.fn prior_normal}, or {.fn prior_laplace}.",
+      i = "The component locations and scales are estimated separately, so fixed numbers are not meaningful here."
+    ))
+  }
+  class_family <- .normalise_joinme_prior_component(
+    class_family_request,
+    name = "class$family",
+    default = prior_student_t(df = 6),
+    fixed_unit_scale = TRUE
+  ) # validated standard component law before its fitted class-specific location and scale are applied
+  if (identical(class_family$family, "horseshoe")) {
+    cli::cli_abort(c(
+      x = "{.arg class$family} does not accept {.fn prior_horseshoe}.",
+      i = "Use {.fn prior_student_t}, {.fn prior_normal}, or {.fn prior_laplace} for a proper location--scale component density."
+    ))
+  }
 
   out <- list(
     global = global_defaults,
@@ -1428,7 +1447,8 @@ make_conditions <- function(x, ...) {
           name = "class$slope",
           default = global_slope
         )
-      }
+      },
+      family = class_family
     )
   )
 

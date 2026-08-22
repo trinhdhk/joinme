@@ -28,11 +28,7 @@
 }
 \value{
 A \code{summary_JoiNMeMixFit} object inheriting from
-\code{summary_JoiNMeFit}. Full location and scale summaries are retained in
-the separate \code{tables$class_location} and \code{tables$class_scale} elements.
-The console reports compact expected and hard allocation counts;
-unit-level posterior membership remains available through
-\code{\link[=posterior_class]{posterior_class()}}.
+\code{summary_JoiNMeFit}.
 }
 \description{
 Extends the ordinary JoiNMe summary with baseline class probabilities,

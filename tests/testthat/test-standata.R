@@ -1,11 +1,12 @@
 test_that("standata builds marker weights", {
   set.seed(101)
-  sim <- simulate_joinme_joint_student_t_cvtotal(
+  sim <- simulate_joinme(
     n_id = 3,
-    D = 3,
-    n_t = 2,
+    families = rep("student_t", 3),
+    times_obs = seq(0, 5, length.out = 2),
+    censor_longitudinal_after_event = FALSE,
     seed = 101,
-    include_marker_only = TRUE
+    use_mirai = FALSE
   )
 
   formulaLong <- y ~ 1 + time + x1 +
@@ -36,12 +37,13 @@ test_that("standata builds marker weights", {
 })
 
 test_that("standata validates formula requirements", {
-  sim <- simulate_joinme_joint_student_t_cvtotal(
+  sim <- simulate_joinme(
     n_id = 3,
-    D = 2,
-    n_t = 2,
+    families = rep("student_t", 2),
+    times_obs = seq(0, 5, length.out = 2),
+    censor_longitudinal_after_event = FALSE,
     seed = 202,
-    include_marker_only = TRUE
+    use_mirai = FALSE
   )
 
   formulaEvent <- survival::Surv(time, event) ~ 1 + x1 + x2
@@ -100,12 +102,13 @@ test_that("standata validates formula requirements", {
 
 test_that("standata builds one marker-weight structure per active weighted association term", {
   set.seed(111)
-  sim <- simulate_joinme_joint_student_t_cvtotal(
+  sim <- simulate_joinme(
     n_id = 3,
-    D = 3,
-    n_t = 2,
+    families = rep("student_t", 3),
+    times_obs = seq(0, 5, length.out = 2),
+    censor_longitudinal_after_event = FALSE,
     seed = 111,
-    include_marker_only = TRUE
+    use_mirai = FALSE
   )
 
   formulaLong <- y ~ 1 + time + x1 +
@@ -146,12 +149,13 @@ test_that("standata builds one marker-weight structure per active weighted assoc
 })
 
 test_that("constant marker-weight families use aligned offsets without fitted coefficients", {
-  sim <- simulate_joinme_joint_student_t_cvtotal(
+  sim <- simulate_joinme(
     n_id = 3,
-    D = 3,
-    n_t = 2,
+    families = rep("student_t", 3),
+    times_obs = seq(0, 5, length.out = 2),
+    censor_longitudinal_after_event = FALSE,
     seed = 102,
-    include_marker_only = TRUE
+    use_mirai = FALSE
   )
   levels(sim$dataLong$marker) <- c("m1", "m2", "m3")
   declared <- c(m3 = -0.5, m1 = 1.5, m2 = 0.25)
@@ -180,12 +184,13 @@ test_that("constant marker-weight families use aligned offsets without fitted co
 })
 
 test_that("standata builds vcov association metadata", {
-  sim <- simulate_joinme_joint_student_t_cvtotal(
+  sim <- simulate_joinme(
     n_id = 3,
-    D = 2,
-    n_t = 2,
+    families = rep("student_t", 2),
+    times_obs = seq(0, 5, length.out = 2),
+    censor_longitudinal_after_event = FALSE,
     seed = 204,
-    include_marker_only = TRUE
+    use_mirai = FALSE
   )
 
   sd <- joinme_standata(
@@ -205,12 +210,13 @@ test_that("standata builds vcov association metadata", {
 })
 
 test_that("vcov dimension follows nested marker-by-id basis, not top-level id covariance", {
-  sim <- simulate_joinme_joint_student_t_cvtotal(
+  sim <- simulate_joinme(
     n_id = 3,
-    D = 2,
-    n_t = 2,
+    families = rep("student_t", 2),
+    times_obs = seq(0, 5, length.out = 2),
+    censor_longitudinal_after_event = FALSE,
     seed = 206,
-    include_marker_only = TRUE
+    use_mirai = FALSE
   )
 
   sd_one <- joinme_standata(
@@ -246,12 +252,13 @@ test_that("vcov dimension follows nested marker-by-id basis, not top-level id co
 })
 
 test_that("standata marks top-level id double-bar terms as independent id covariance", {
-  sim <- simulate_joinme_joint_student_t_cvtotal(
+  sim <- simulate_joinme(
     n_id = 3,
-    D = 3,
-    n_t = 2,
+    families = rep("student_t", 3),
+    times_obs = seq(0, 5, length.out = 2),
+    censor_longitudinal_after_event = FALSE,
     seed = 207,
-    include_marker_only = TRUE
+    use_mirai = FALSE
   )
 
   sd <- joinme_standata(
@@ -272,12 +279,13 @@ test_that("standata marks top-level id double-bar terms as independent id covari
 })
 
 test_that("outer marker double-bar disables cross-correlation but keeps inner id covariance", {
-  sim <- simulate_joinme_joint_student_t_cvtotal(
+  sim <- simulate_joinme(
     n_id = 3,
-    D = 3,
-    n_t = 2,
+    families = rep("student_t", 3),
+    times_obs = seq(0, 5, length.out = 2),
+    censor_longitudinal_after_event = FALSE,
     seed = 208,
-    include_marker_only = TRUE
+    use_mirai = FALSE
   )
 
   sd <- joinme_standata(
@@ -298,12 +306,13 @@ test_that("outer marker double-bar disables cross-correlation but keeps inner id
 })
 
 test_that("inner id double-bar rejects corr and keeps cross-correlation available", {
-  sim <- simulate_joinme_joint_student_t_cvtotal(
+  sim <- simulate_joinme(
     n_id = 3,
-    D = 3,
-    n_t = 2,
+    families = rep("student_t", 3),
+    times_obs = seq(0, 5, length.out = 2),
+    censor_longitudinal_after_event = FALSE,
     seed = 209,
-    include_marker_only = TRUE
+    use_mirai = FALSE
   )
 
   expect_error(
@@ -336,12 +345,13 @@ test_that("inner id double-bar rejects corr and keeps cross-correlation availabl
 })
 
 test_that("functional vcov constants remain vector-shaped for Stan data", {
-  sim <- simulate_joinme_joint_student_t_cvtotal(
+  sim <- simulate_joinme(
     n_id = 3,
-    D = 2,
-    n_t = 2,
+    families = rep("student_t", 2),
+    times_obs = seq(0, 5, length.out = 2),
+    censor_longitudinal_after_event = FALSE,
     seed = 205,
-    include_marker_only = TRUE
+    use_mirai = FALSE
   )
 
   sd <- joinme_standata(

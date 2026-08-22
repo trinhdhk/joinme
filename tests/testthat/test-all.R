@@ -12,7 +12,6 @@ testthat::test_that("all", {
       assoc_coef = list(slope = c(cv_total = 0.5)),
       basehaz = list(type = "constant", lambda = 0.1)
     ),
-    shrinkage = 2L,
     integration_control = list(rel.tol = 1e-6, subdivisions = 2000L, stop.on.error = TRUE)
   )
 
@@ -30,7 +29,6 @@ testthat::test_that("all", {
     families = "student_t",
     basehaz = joinme_basehaz(type = "formula", formula = ~ 1),
     transforms = joinme_tf(cv_total = "identity"),
-    shrinkage = 2L,
     priors = joinme_priors(
       intercept = prior_student_t(df = 6, scale = 3),
       slope = prior_student_t(df = 6, scale = 3)
@@ -49,7 +47,6 @@ testthat::test_that("all", {
   )
 
   expect_s3_class(fit, "JoiNMeFit")
-  expect_equal(sim$truth$shrinkage, fit$stan_data$shrinkage)
   expect_identical(sim$truth$marker_weight_prior_family, "student_t")
   expect_equal(unname(sim$truth$marker_weights_offset), fit$stan_data$marker_weight_offsets)
   expect_equal(

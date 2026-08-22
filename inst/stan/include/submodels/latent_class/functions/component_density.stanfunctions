@@ -23,7 +23,10 @@
  * @param component_location Complete row of class-specific locations.
  * @param component_scale Complete row of positive class-specific scales.
  * @param segment_start First packed column belonging to this random-effect block.
- * @param shrinkage_family 0 = Student-t(6), 1 = Laplace, 2 = Normal.
+ * @param component_family Common jm_prior family code: 1 = Student-t,
+ *   2 = Normal, 3 = Laplace.
+ * @param component_df Fixed Student-t degrees of freedom; ignored by the
+ *   Normal and Laplace families.
  *
  * @return Sum of conditionally independent coordinate log densities for one
  * class. Marginal dependence remains because all selected coordinates of an
@@ -34,7 +37,8 @@ real latent_progress_component_lpdf(
   row_vector component_location,
   row_vector component_scale,
   int segment_start,
-  int shrinkage_family
+  int component_family,
+  real component_df
 ) {
   real log_density = 0; // accumulated conditional log density over selected coordinates
   int latent_dimension = num_elements(latent_value); // number of source coordinates selected from this random-effect block
@@ -44,17 +48,17 @@ real latent_progress_component_lpdf(
     real location = component_location[mixture_coordinate]; // class-specific centre for this packed coordinate
     real scale = component_scale[mixture_coordinate]; // class-specific positive spread for this packed coordinate
 
-    if (shrinkage_family == 1) {
-      log_density += double_exponential_lpdf(
+    if (component_family == 2) {
+      log_density += normal_lpdf(
         latent_value[coordinate] | location, scale
       );
-    } else if (shrinkage_family == 2) {
-      log_density += normal_lpdf(
+    } else if (component_family == 3) {
+      log_density += double_exponential_lpdf(
         latent_value[coordinate] | location, scale
       );
     } else {
       log_density += student_t_lpdf(
-        latent_value[coordinate] | 6, location, scale
+        latent_value[coordinate] | component_df, location, scale
       );
     }
   }

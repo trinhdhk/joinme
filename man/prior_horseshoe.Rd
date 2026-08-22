@@ -13,7 +13,7 @@ prior_horseshoe(
 )
 }
 \arguments{
-\item{df}{Positive fixed degrees of freedom for local shrinkage scales.}
+\item{df}{Positive fixed degrees of freedom for local regularisation scales.}
 
 \item{global_df}{Positive fixed degrees of freedom for the global scale.}
 
@@ -31,5 +31,5 @@ A \code{joinme_prior_spec} object for use inside \code{\link[=jm_prior]{jm_prior
 Declares the regularised horseshoe hierarchy used by brms and rstanarm. The
 coefficient is conditionally Normal with local and global half-Student-t
 scales and a finite Student-t slab. The slab regularises very large signals,
-whilst the local scales permit coefficient-specific escape from shrinkage.
+whilst the local scales permit coefficient-specific escape from regularisation.
 }

@@ -110,17 +110,35 @@ jm_family <- joinme_family
 
 #' Method for printing a `JoiNMe_family_spec` object
 #' 
-#' @description Print out the spec details of a `JoiNMe_family_spec` object.
+#' @description
+#' Prints the family, forward link, and inverse-link expression. The inverse
+#' link is reconstructed from its stored functional bytecode so that a family
+#' specification displays mathematical R syntax rather than the underlying
+#' instruction and constant vectors.
 #' @param x An object of class `JoiNMe_family_spec`.
 #' @param ... Additional arguments (currently unused).
 #' @return Invisibly returns the input object `x`.
 #' @method print JoiNMe_family_spec
 #' @export
-print.JoiNMe_family_spec <- function(x, ...){
-  cat('Joint Nested Mixed-effects Longitudinal Family Specification:\n')
-  cat('  Family: ', x$family, '\n', sep = '')
-  cat('  Link: ', x$link, '\n', sep = '')
-  cat('  Inverse Link: ', x$inv_link, '\n', sep = '')
+print.JoiNMe_family_spec <- function(x, ...) {
+  inverse_link_expression <- .bytecode_as_expression(
+    bytecode = x$inv_link$bytecode,
+    const_data = x$inv_link$const_data %||% numeric(0)
+  ) # readable mathematical representation of the stored inverse-link programme
+  inverse_link_label <- base::deparse1(
+    inverse_link_expression,
+    collapse = " "
+  ) # single-line expression suitable for console output
+  link_label <- if (length(x$link) == 1L && !is.na(x$link)) {
+    x$link
+  } else {
+    "custom"
+  } # named forward link where recognised, otherwise an explicit custom label
+
+  cat("Joint Nested Mixed-effects Longitudinal Family Specification:\n")
+  cat("  Family: ", x$family, "\n", sep = "")
+  cat("  Link: ", link_label, "\n", sep = "")
+  cat("  Inverse link: ", inverse_link_label, "\n", sep = "")
   invisible(x)
 }
 
@@ -270,8 +288,8 @@ print.JoiNMe_family_spec <- function(x, ...){
 #' @param link Character scalar containing a supported forward-link name or
 #'   recognised alias.
 #'
-#' @return One canonical name among `"identity"`, `"log"`, `"logit"`,
-#'   `"probit"`, and `"exp"`.
+#' @return One canonical name among 
+#' `"identity"`, `"log"`, `"logit"`, `"probit"`, and `"exp"`.
 #' @keywords internal
 #' @noRd
 .normalize_link_name <- function(link) {
@@ -285,12 +303,12 @@ print.JoiNMe_family_spec <- function(x, ...){
   key <- tolower(trimws(link))
   key <- switch(
     key,
-    id = "identity",
-    inverse = "identity",
+    id            = "identity",
+    inverse       = "identity",
     inverse_logit = "logit",
-    inv_logit = "logit",
-    sigmoid = "logit",
-    expit = "logit",
+    inv_logit     = "logit",
+    sigmoid       = "logit",
+    expit         = "logit",
     key
   )
 
@@ -427,7 +445,7 @@ print.JoiNMe_family_spec <- function(x, ...){
     15L, # tan
     16L, # abs
     17L, # square
-    # 18L, # sinh (strictly monotone but can induce extreme tails)
+    # 18L, # sinh
     19L # cosh
     # 20L  # tanh (bounded; may flatten heavily)
   )
@@ -722,30 +740,30 @@ print.JoiNMe_family_spec <- function(x, ...){
 
   switch(
     family,
-    "gaussian" = 1L,
-    "normal" = 1L,
-    "student_t" = 2L,
-    "student" = 2L,
-    "student-t" = 2L,
-    "bernoulli" = 3L,
-    "binomial" = 4L,
-    "poisson" = 5L,
-    "negbin2" = 6L,
-    "negative_binomial" = 6L,
-    "skew_normal" = 7L,
-    "skew-normal" = 7L,
-    "skewnormal" = 7L,
-    "double_exponential" = 8L,
-    "double-exponential" = 8L,
-    "laplace" = 8L,
+    "gaussian"                = 1L,
+    "normal"                  = 1L,
+    "student_t"               = 2L,
+    "student"                 = 2L,
+    "student-t"               = 2L,
+    "bernoulli"               = 3L,
+    "binomial"                = 4L,
+    "poisson"                 = 5L,
+    "negbin2"                 = 6L,
+    "negative_binomial"       = 6L,
+    "skew_normal"             = 7L,
+    "skew-normal"             = 7L,
+    "skewnormal"              = 7L,
+    "double_exponential"      = 8L,
+    "double-exponential"      = 8L,
+    "laplace"                 = 8L,
     "skew_double_exponential" = 9L,
     "skew-double-exponential" = 9L,
-    "skew_laplace" = 9L,
-    "skew-laplace" = 9L,
-    "beta" = 10L,
-    "cumulative_logit" = 11L,
-    "ordered_logistic" = 11L,
-    "ordinal" = 11L,
+    "skew_laplace"            = 9L,
+    "skew-laplace"            = 9L,
+    "beta"                    = 10L,
+    "cumulative_logit"        = 11L,
+    "ordered_logistic"        = 11L,
+    "ordinal"                 = 11L,
     stop(
       "Unknown family: ",
       family,
@@ -770,15 +788,15 @@ print.JoiNMe_family_spec <- function(x, ...){
 
   switch(
     as.character(fam),
-    "1" = "gaussian",
-    "2" = "student_t",
-    "3" = "bernoulli",
-    "4" = "binomial",
-    "5" = "poisson",
-    "6" = "negbin2",
-    "7" = "skew_normal",
-    "8" = "double_exponential",
-    "9" = "skew_double_exponential",
+    "1"  = "gaussian",
+    "2"  = "student_t",
+    "3"  = "bernoulli",
+    "4"  = "binomial",
+    "5"  = "poisson",
+    "6"  = "negbin2",
+    "7"  = "skew_normal",
+    "8"  = "double_exponential",
+    "9"  = "skew_double_exponential",
     "10" = "beta",
     "11" = "cumulative_logit",
     stop("Unknown family code: ", fam)
@@ -1502,7 +1520,7 @@ print.JoiNMe_family_spec <- function(x, ...){
       if (identical(declaration$family, "horseshoe")) {
         complete_prior_id <- attr(declaration, "complete_prior_id", exact = TRUE) # bare component horseshoe shares one global scale across its roles
         stored_group_index <- if (is.null(complete_prior_id)) NULL else complete_horseshoe_groups[[complete_prior_id]]
-        group_index <- stored_group_index %||% (length(horseshoe_global_df) + 1L) # one shared global shrinkage scale for this declared prior group
+        group_index <- stored_group_index %||% (length(horseshoe_global_df) + 1L) # one shared global regularisation scale for this declared prior group
         local_indices <- seq.int(length(horseshoe_local_df) + 1L, length.out = length(role_positions)) # coefficient-specific local scales
         block_local_index[role_positions] <- local_indices
         block_group_index[role_positions] <- group_index

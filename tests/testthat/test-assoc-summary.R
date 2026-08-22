@@ -3,12 +3,13 @@ test_that("summary reports only active association components", {
   testthat::skip_if_not_installed("rstan")
 
   set.seed(303)
-  sim <- simulate_joinme_joint_student_t_cvtotal(
+  sim <- simulate_joinme(
     n_id = 4,
-    D = 2,
-    n_t = 3,
+    families = rep("student_t", 2),
+    times_obs = seq(0, 5, length.out = 3),
+    censor_longitudinal_after_event = FALSE,
     seed = 303,
-    include_marker_only = TRUE
+    use_mirai = FALSE
   )
 
   formulaLong <- y ~ 1 + time + x1 +

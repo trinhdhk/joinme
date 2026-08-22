@@ -9,7 +9,7 @@
    * @brief Latent increments for Stan-estimated monotone I-splines.
    *
    * @details These parameters preserve the established I-spline
-   * parameterisation and its shrinkage-family prior.  Piecewise-linear modes
+   * parameterisation and its regularisation-family prior.  Piecewise-linear modes
    * omit them because those modes use the explicit simplexes declared below.
    */
   vector[(tf_mode_cv_tot == 3 || tf_mode_cv_tot == 7) ? 0 : n_free_spline_cv] z_spline_cv; // Role: standardised latent value spline current value.
@@ -56,5 +56,4 @@
   vector[estimate_iota_slope_cs_mean] z_iota_slope_cs_mean; // Role: standardised latent value affine transformation slope current slope mean.
   vector[estimate_iota_intercept_cs_marker] z_iota_intercept_cs_marker; // Role: standardised latent value affine transformation intercept current slope marker.
   vector[estimate_iota_slope_cs_marker] z_iota_slope_cs_marker; // Role: standardised latent value affine transformation slope current slope marker.
-
 

@@ -269,11 +269,8 @@ For `"n"`, the event-time weight returned by `survival` equals the risk-set
 size, so division by that size gives unit weight to every pair. The other
 options change the relative contribution of event times.
 
-The `"n/G2"` option reuses the event-time weighting associated with Uno's
-concordance in `survival`; the subject scores in `joinme` remain the
-time-dependent survival-curve comparisons defined above. The resulting
-estimand is an Uno-style censoring-weighted Antolini comparison rather than a
-conventional static-score Uno estimator.
+The `"n/G2"` option reuses the event-time weighting associated with Uno's concordance in `survival`; the subject scores in `joinme` remain the
+time-dependent survival-curve comparisons defined above. The resulting estimand is an Uno-style censoring-weighted Antolini comparison rather than a conventional static-score Uno estimator.
 
 ## Choice of prediction origin
 

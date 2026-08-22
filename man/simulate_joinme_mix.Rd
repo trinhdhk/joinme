@@ -22,7 +22,6 @@ simulate_joinme_mix(
   truncate_longitudinal_before_entry = TRUE,
   seed = .Random.seed[[1]],
   covariate_formulas = list(x1 ~ rnorm(n_id), x2 ~ rnorm(n_id)),
-  shrinkage = 0L,
   assoc = c("cv_total"),
   vcov_diag_link = "softplus",
   family_params = list(gaussian = list(sigma = 1), student_t = list(sigma = 1.5, nu = 4),
@@ -158,17 +157,16 @@ marker-specific weight departures, because those departures are otherwise
 random simulation parameters. That field accepts a family name such as
 \code{"student_t"}, \code{"normal"}, \code{"laplace"}, or \code{"horseshoe"}. The names
 \code{"constant"} and \code{"none"} use the offset without a random departure. The
-family name \code{"student_t"} draws one value per active set as
-\code{2 + Gamma(2, 0.1)}, matching fitting. Departure location and ordinary scale remain zero and
-one. All declarations and their realised population coefficients are
-retained in the realised simulation truth.
+family name \code{"student_t"} draws one value shared by all active sets as
+\code{2 + Gamma(2, 0.1)}, matching fitting.
 Set \code{marker_weights$family} to \code{"constant"} or \code{"none"} when the
 declared offset is the complete marker weight. No common location or
 marker-specific departure is then drawn. Under a stochastic family, the
 effective weight is \code{offset + marker_weight_mean + departure}, where the
 departure is drawn directly from the declared centred unit-scale family.
 No additional marker-weight scale is used: the survival association slope
-already scales the weighted marker feature.}
+already scales the weighted marker feature.
+or another supported family name.}
 
 \item{n_id}{Number of subjects.}
 
@@ -214,12 +212,6 @@ Time-varying step covariates are supported via
 \code{list(x ~ time_varyring(rnorm, steps = c(1, 3, 5), mean = 0, sd = 1))}.
 In this mode, each id receives stepwise periods over \verb{[0, time_cens]}, and
 each period value is sampled from \code{fun}.}
-
-\item{shrinkage}{Integer selecting the random-effect component distribution:
-\code{0} denotes Student-t with 6 degrees of freedom, \code{1} Laplace, and \code{2}
-Normal. Marker-weight departures no longer use this switch; their family
-is declared by \code{truth = jm_truth(marker_weights = list(family = "normal"))}
-or another supported family name.}
 
 \item{assoc}{Association components (same names as fit): \code{cv_total}, \code{cv_mean},
 \code{cv_marker}, \code{cs_total}, \code{cs_mean}, \code{cs_marker}, \code{corr}, \code{vcov}.
@@ -369,8 +361,11 @@ z_{jr}\mid C_j=g \sim
 D\{\mu_{gr},\sigma_{gr}\},
 }
 
-where \eqn{D} is Student-\eqn{t_6}, Laplace or Normal according to \code{shrinkage}.
-Unselected subject, marker and covariance-regression coordinates remain
+where \eqn{D} is declared by
+\code{jm_truth(class = list(family = prior_student_t(...)))},
+\code{\link[=prior_normal]{prior_normal()}}, or \code{\link[=prior_laplace]{prior_laplace()}}. The same declaration is retained as
+the recovery prior used by \code{\link[=joinme_mix]{joinme_mix()}}.
+Unselected subject, marker and covariance-regression coordinates are
 standard Normal.
 
 Marker weights are not latent-class coordinates. When they are estimated,
@@ -378,8 +373,8 @@ their common location is supplied by \code{truth$marker_weights$intercept},
 and direct marker departures are drawn from the centred unit-scale
 \code{truth$marker_weights$family}. No further scale multiplies those
 departures because the association slope already scales the weighted
-marker feature. The family name \code{"student_t"} draws one set-specific
-value as \code{2 + Gamma(2, 0.1)}. The realised values are retained in \code{truth}. The departure
+marker feature. The family name \code{"student_t"} draws one value shared by all
+weight sets as \code{2 + Gamma(2, 0.1)}. The realised value is retained in \code{truth}. The departure
 coordinate retains location zero and ordinary scale one. A constant family
 bypasses both quantities, so the effective weights equal the offsets declared
 in \code{truth$marker_weights} exactly.
@@ -426,9 +421,10 @@ The \code{truth} argument is created with \code{\link[=jm_truth]{jm_truth()}} an
 component hierarchy used for fitting. It describes data-generating
 quantities rather than fitting distributions. In particular,
 class truths are declared together as
-\code{class = list(baseline_prob = ..., slope = ...)}: \code{baseline_prob} governs
-the Dirichlet prior and \code{slope} governs coefficients introduced by
-\code{formulaClass}. A numeric \code{class$slope} fixes the generating coefficient
+\code{class = list(baseline_prob = ..., slope = ..., family = ...)}:
+\code{baseline_prob} governs the Dirichlet prior, \code{slope} governs coefficients
+introduced by \code{formulaClass}, and \code{family} governs the centred unit-scale
+distribution within every latent class. A numeric \code{class$slope} fixes the generating coefficient
 vector; a \verb{prior_*()} declaration draws it once at the beginning of the
 simulation. Class probabilities, locations and scales are supplied through
 \code{class_parameters} when fixed generating values are required.

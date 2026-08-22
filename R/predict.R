@@ -1213,8 +1213,7 @@ predict.JoiNMeFit <- function(object,
     }
     # Mixture predictions additionally retain the conditional allocation
     # probabilities calculated from the dynamically sampled latent effects.
-    # Ordinary fits set `use_dynamic_mixture` to zero, so their extraction
-    # contract and output size remain unchanged.
+    # Ordinary fits set `use_dynamic_mixture` to zero.
     if (as.integer(standata_subject$use_dynamic_mixture %||% 0L) == 1L) {
         if (
             as.integer(standata_subject$dynamic_mix_subject %||% 0L) == 1L ||
@@ -1292,7 +1291,8 @@ predict.JoiNMeFit <- function(object,
         "use_dynamic_mixture",
         "dynamic_n_classes",
         "dynamic_mix_dimension",
-        "dynamic_mix_family",
+        "dynamic_mix_component_family",
+        "dynamic_mix_component_df",
         "dynamic_mix_subject",
         "dynamic_mix_dim_subject",
         "dynamic_mix_idx_subject",
@@ -2222,8 +2222,7 @@ posterior_predict.JoiNMeFit <- function(object, reuse_fitted_re = FALSE, ...) {
     # fitted draw.  We consequently preserve the posterior pairing: row k of
     # the ordinary parameter arrays receives row k of the component
     # probabilities, locations and scales.  An ordinary model uses one neutral
-    # component and one inert coordinate so the dynamic data structure remains
-    # simple and robust across Stan interfaces.
+    # component and one inert coordinate so the dynamic data structure.
     use_dynamic_mixture <- as.integer(sd$use_mixture %||% 0L)
     dynamic_n_classes <- max(1L, as.integer(sd$n_classes %||% 1L))
     fitted_mix_dimension <- max(0L, as.integer(sd$K_mix %||% 0L))
@@ -2414,7 +2413,8 @@ posterior_predict.JoiNMeFit <- function(object, reuse_fitted_re = FALSE, ...) {
         use_dynamic_mixture = use_dynamic_mixture,
         dynamic_n_classes = dynamic_n_classes,
         dynamic_mix_dimension = dynamic_mix_dimension,
-        dynamic_mix_family = as.integer(sd$shrinkage %||% 0L),
+        dynamic_mix_component_family = as.integer(sd$mix_component_family %||% 2L),
+        dynamic_mix_component_df = as.numeric(sd$mix_component_df %||% 6),
         dynamic_mix_probability = dynamic_mix_probability,
         dynamic_class_coefficient_subject =
             dynamic_class_coefficient_subject,
@@ -3074,7 +3074,8 @@ posterior_predict.JoiNMeFit <- function(object, reuse_fitted_re = FALSE, ...) {
         use_dynamic_mixture = draws_list$use_dynamic_mixture,
         dynamic_n_classes = draws_list$dynamic_n_classes,
         dynamic_mix_dimension = draws_list$dynamic_mix_dimension,
-        dynamic_mix_family = draws_list$dynamic_mix_family,
+        dynamic_mix_component_family = draws_list$dynamic_mix_component_family,
+        dynamic_mix_component_df = draws_list$dynamic_mix_component_df,
         dynamic_mix_probability_subject =
             dynamic_mix_probability_subject,
         dynamic_mix_probability_marker =

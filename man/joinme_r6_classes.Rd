@@ -10,10 +10,7 @@
 \alias{SummaryJoiNMeDynPred}
 \title{JoiNMe R6 Classes}
 \description{
-R6 classes used to hold JoiNMe fit and prediction results with mutable state.
-
-\code{JoiNMeFit} is the canonical exported fit class. \code{JoiNMeFit} remains as a
-compatibility alias.
+R6 classes for JoiNMe fit and prediction results with mutable state.
 
 \strong{JoiNMeFit}: holds fitted model, Stan data, and formulas.
 Public fields: fit, stan_data, formulaLong, formulaEvent, formulaVCov, config, call, tmax,

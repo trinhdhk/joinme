@@ -38,6 +38,6 @@
   int<lower=0, upper=1> estimate_marker_weight_df; // 1 learns one Student-t degrees-of-freedom value shared by every active weight set; 0 uses an explicitly declared fixed value or a non-Student family
   real<lower=0> prior_marker_weight_df; // fixed Student-t degrees of freedom when declared, or local-scale degrees of freedom for the horseshoe family
   real<lower=0> prior_marker_weight_global_df; // unit-default horseshoe global degrees of freedom for marker weights
-  real<lower=0> prior_marker_weight_global_scale; // configured horseshoe global shrinkage scale for marker-weight departures
+  real<lower=0> prior_marker_weight_global_scale; // configured horseshoe global regularisation scale for marker-weight departures
   real<lower=0> prior_marker_weight_slab_df; // fixed horseshoe slab degrees of freedom for marker weights
   real<lower=0> prior_marker_weight_slab_scale; // configured finite-slab scale for marker-weight departures

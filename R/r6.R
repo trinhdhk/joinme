@@ -5,10 +5,7 @@
 #' @importFrom R6 R6Class
 #'
 #' @description
-#' R6 classes used to hold JoiNMe fit and prediction results with mutable state.
-#'
-#' `JoiNMeFit` is the canonical exported fit class. `JoiNMeFit` remains as a
-#' compatibility alias.
+#' R6 classes for JoiNMe fit and prediction results with mutable state.
 #'
 #' **JoiNMeFit**: holds fitted model, Stan data, and formulas.
 #' Public fields: fit, stan_data, formulaLong, formulaEvent, formulaVCov, config, call, tmax,
@@ -471,7 +468,6 @@ JoiNMeStanData <- R6::R6Class(
           idmarker_cov = sd$indep_idmarker_cov
         ),
         allow_marker_crosscorr = sd$allow_marker_crosscorr,
-        shrinkage = sd$shrinkage,
         dims = c(
           n_id = sd$n_id,
           N = sd$N,
@@ -544,8 +540,7 @@ JoiNMeStanData <- R6::R6Class(
       #   do.call(JoiNMeFit$new, common_fit_arguments)
       # }
 
-      # Store a plotting bundle for association plots remain
-      # usable even when cmdstanr CSV outputs are no longer available.
+      # Store a plotting bundle for association plots
       # fit_obj$config$association_plot_ <- tryCatch(
       #   .build_JoiNMefit_association_plot_(
       #     fit = fit,

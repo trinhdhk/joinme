@@ -803,11 +803,6 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
 #'   reporting layer used by the corresponding high-level methods.
 #' @param summary Logical. For a coefficient view, `TRUE` returns posterior
 #'   summaries and `FALSE` returns its structured draw-level extraction.
-#' @details
-#' For coefficient views, this is the reporting layer between [extract()] and
-#' the conventional [fixef()], [ranef()], and [coef()] methods. The high-level
-#' methods delegate here; requests with `summary = FALSE` continue to the
-#' component-aware draw representation owned by `extract()`.
 #' @export
 posterior_summary.JoiNMeFit <- function(
   object,

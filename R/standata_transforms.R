@@ -1131,8 +1131,7 @@ penalized_ispline_transform <- function(...) {
 
 #' Default Backward-Compatible Transforms
 #'
-#' If no transforms specified, create identity specs so existing models
-#' continue to work unchanged.
+#' If no transforms specified, create identity specs
 #'
 #' @keywords internal
 #' @noRd

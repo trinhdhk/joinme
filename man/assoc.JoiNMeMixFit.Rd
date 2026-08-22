@@ -49,7 +49,7 @@ fitted class-specific random-effect block.}
 
 \item{class_points}{Number of reference time or covariance-covariate values
 used in the compact class-specific association tables. The plotting method
-continues to use its requested full grid.}
+use its requested full grid.}
 
 \item{...}{Unused.}
 }
@@ -57,8 +57,7 @@ continues to use its requested full grid.}
 A \code{PosteriorAssoc} object, or a class-trajectory ggplot when
 \code{trajectory = TRUE}. For summary-form mixture output, relevant compact
 class contributions are retained in the \code{class_association} attribute and
-printed beneath the common coefficient tables. The plotted numerical
-values remain available in the ggplot's \code{data} field.
+printed beneath the common coefficient tables.
 }
 \description{
 Posterior associations from a latent-progress mixture

@@ -26,8 +26,8 @@ cat(
 )
 
 # create tmp directory
-dir.create('records', showWarnings = FALSE)
-replication <- as.integer(Sys.getenv("SLURM_ARRAY_TASK_ID"))
+dir.create(".artifacts/records", showWarnings = FALSE)
+replication <- as.integer(Sys.getenv("SLURM_ARRAY_TASK_ID", unset = 1L))
 
 rep_seed <- cfg$seed + replication - 1L
 cat("[", replication, "/", cfg$n_rep, "] seed=", rep_seed, "\n", sep = "")
@@ -35,12 +35,12 @@ cat("[", replication, "/", cfg$n_rep, "] seed=", rep_seed, "\n", sep = "")
 # Check for existing simulation result for this replication
 if (
   file.exists(
-    file.path("records", paste0(base_name, '-rep', replication, '.rds'))
+    file.path(".artifacts/records", paste0(base_name, '-rep', replication, '.rds'))
   )
 ) {
   cat("Found existing simulation for replication ", replication, "\n", sep = "")
   records <- readRDS(
-    file.path("records", paste0(base_name, '-rep', replication, '.rds'))
+    file.path(".artifacts/records", paste0(base_name, '-rep', replication, '.rds'))
   )
 
   # runtime_records <- append(runtime_records, records$runtime_records)
@@ -58,8 +58,11 @@ if (
   # next
 }
 
+cfg$n_id = 300
 sim <- simulate_replication(rep_seed)
 marker_levels <- as.character(sim$marker_info$names)
+marker_weight_truth <- benchmark_marker_weight_truth(sim, term = "cv_marker")
+print(marker_weight_truth, row.names = FALSE)
 truth_long <- build_truth_long(sim, marker_levels)
 truth_survival <- build_truth_survival(sim)
 truth_assoc <- build_truth_assoc(sim, marker_levels)
@@ -72,18 +75,28 @@ joinme_result <- time_try(
     dataEvent = sim$dataEvent,
     assoc = c("cv_mean", "cv_marker"),
     families = rep("gaussian", cfg$n_markers),
-    marker_weights = rep(1, cfg$n_markers),
-    fixed_marker_weights = TRUE,
-    shared_marker_weights = TRUE,
+    priors = jm_prior(
+      intercept = prior_student_t(df=3, mu = 0, scale = 3),
+      slope = prior_student_t(df=3, mu = 0, scale = 3),
+
+      marker_weights = list(
+        # This prior is deliberately independent of the randomly generated
+        # population marker-weight mean retained in sim$truth.
+        intercept = prior_student_t(df = 3, mu = 0, scale = 3),
+        offset = rep(0, cfg$n_markers),
+        # Estimate marker-weight departures on a unit normal scale.
+        family = "normal"
+      )
+    ),
     control = list(
       engine = "cmdstanr",
       chains = 2,
       parallel_chains = 2,
-      threads_per_chain = 6,
+      threads_per_chain = 4,
       iter_warmup = cfg$iter_warmup_joinme,
       iter_sampling = cfg$iter_sampling_joinme,
-      refresh = 0,
-      show_messages = FALSE,
+      refresh = 200,
+      show_messages = TRUE,
       init = 1,
       seed = rep_seed,
       adapt_delta = 0.72,

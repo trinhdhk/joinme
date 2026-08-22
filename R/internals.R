@@ -1144,8 +1144,7 @@ print.JoiNMeDynPred <- function(x, ...) {
 #' Round summary tables using the standard JoiNMe summary schema
 #'
 #' @description
-#' Applies the same rounding rules used throughout JoiNMe summaries so new
-#' posterior reports remain directly comparable to [summary.JoiNMeFit()].
+#' Applies the same rounding rules used throughout JoiNMe summaries
 #'
 #' The rounded columns are the inferential columns that users typically inspect
 #' first: posterior mean, posterior standard deviation, interval bounds, and

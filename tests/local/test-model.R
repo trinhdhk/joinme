@@ -7,25 +7,24 @@ sim <- simulate_joinme(
   formulaVCov = ~ x1,
   families = c("gaussian", "student_t", "student_t"),
   n_id = 100,
-  n_obs_per_marker_per_id = 8,
   times_obs = seq(0, 6, length.out = 10),
   assoc = c("cv_total", "corr"),
-  marker_weights = c(1, -0.5, 2),
-  fixed_marker_weights = TRUE,
-  beta_long = c('(Intercept)' = 0.5, time = 0.3, x1 = -0.2),
-  beta_event = c(x2 = 0.4),
-  assoc_coefs = list(cv_total = 0.35, corr = c(0.1)),
-  transforms = joinme_tf(corr = ~ -x),
-  re_params = list(
-    id = list(sd = c(0.6, 0.3)),
-    marker = list(sd = 0.25),
-    id_marker_cov = list(
-      latent = list(sd = c(0.7, 0.3)),
-      alpha = c(-0.2, 0.0, -0.1),
-      lambda = 0.175
+  truth = jm_truth(
+    longitudinal = c('(Intercept)' = 0.5, time = 0.3, x1 = -0.2),
+    survival = list(slope = c(x2 = 0.4)),
+    assoc_coef = list(slope = c(cv_total = 0.35, "corr[1]" = 0.1)),
+    vcov = list(
+      sd = list(intercept = c(-0.2, -0.1), latent = 0.175),
+      corr = list(intercept = 0, latent = 0.175)
     ),
-    dist = list(sigma = list(sd = 0.4))
+    marker_weights = list(offset = c(1, -0.5, 2), family = "constant"),
+    re_params = list(
+      id = list(sd = c(0.6, 0.3)),
+      marker = list(sd = 0.25),
+      dist = list(sigma = list(sd = 0.4))
+    )
   ),
+  transforms = joinme_tf(corr = ~ -x),
   seed = 2026,
   use_mirai = TRUE,
   n_workers = 5
@@ -41,10 +40,10 @@ fit <- joinme(
   assoc = c("cv_total", "corr"),
   transforms = joinme_tf(corr = ~ -x),
   # transforms = list(cv_mean = list(type = "functional", expr =  ~ expit(x))),
-  # fixed_marker_weights = TRUE,
-  # marker_weights = sim$truth$marker_weights,
-  fixed_marker_weights = FALSE,
-  # marker_weight_scale = 1,
+  # priors = jm_prior(marker_weights = list(
+  #   offset = sim$truth$marker_weights,
+  #   family = "constant"
+  # )),
   control = list(
     threads_per_chain = 6,
     parallel_chains = 2,

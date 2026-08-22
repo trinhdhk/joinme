@@ -662,11 +662,7 @@ plot.JoiNMePosteriorClass <- function(x, domain = NULL, ...) {
 #'
 #' @inheritParams summary.JoiNMeFit
 #' @return A `summary_JoiNMeMixFit` object inheriting from
-#'   `summary_JoiNMeFit`. Full location and scale summaries are retained in
-#'   the separate `tables$class_location` and `tables$class_scale` elements.
-#'   The console reports compact expected and hard allocation counts;
-#'   unit-level posterior membership remains available through
-#'   [posterior_class()].
+#'   `summary_JoiNMeFit`. 
 #' @export
 summary.JoiNMeMixFit <- function(
   object,
@@ -691,8 +687,7 @@ summary.JoiNMeMixFit <- function(
     return(cached)
   }
 
-  # First obtain the established model summary so all ordinary JoiNMe sections
-  # remain byte-for-byte consistent with a non-mixture fit.
+  # Obtain the established model summary
   output <- summary.JoiNMeFit(
     object,
     draws = draws,
@@ -2175,7 +2170,6 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
           mixture,
           class_location,
           class_scale,
-          distribution = mixture$distribution,
           seed = .mixture_safe_seed(
             seed,
             104729 * sample_index
@@ -2544,7 +2538,6 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
   mixture,
   location,
   scale,
-  distribution,
   seed
 ) {
   dimensions <- dim(location)
@@ -2565,10 +2558,12 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
     )
   }
   set.seed(.mixture_safe_seed(seed, 319))
+  component_family <- as.character(mixture$distribution %||% "student_t") # family retained from jm_prior(class$family)
+  component_df <- as.numeric(mixture$distribution_df %||% 6) # fixed Student-t degrees of freedom, ignored by other component families
   noise <- switch(
-    distribution,
-    student_t_6 = array(
-      stats::rt(prod(dimensions), df = 6),
+    component_family,
+    student_t = array(
+      stats::rt(prod(dimensions), df = component_df),
       dim = dimensions
     ),
     laplace = {
@@ -3006,7 +3001,7 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
 #' A class trajectory instead supplies a different raw value for every draw and
 #' time.  The existing transform programme is evaluated once on a fine common
 #' grid and each posterior curve is interpolated at its corresponding raw
-#' value.  Identity transformations remain exact.
+#' value. 
 #'
 #' @keywords internal
 #' @noRd
@@ -3810,13 +3805,12 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
 #'   fitted class-specific random-effect block.
 #' @param class_points Number of reference time or covariance-covariate values
 #'   used in the compact class-specific association tables. The plotting method
-#'   continues to use its requested full grid.
+#'   use its requested full grid.
 #'
 #' @return A `PosteriorAssoc` object, or a class-trajectory ggplot when
 #'   `trajectory = TRUE`. For summary-form mixture output, relevant compact
 #'   class contributions are retained in the `class_association` attribute and
-#'   printed beneath the common coefficient tables. The plotted numerical
-#'   values remain available in the ggplot's `data` field.
+#'   printed beneath the common coefficient tables. 
 #' @export
 assoc.JoiNMeMixFit <- function(
   object,
@@ -3956,9 +3950,7 @@ assoc.JoiNMeMixFit <- function(
 #' Global association coefficients are shared across classes.  Their realised
 #' contribution to log hazard can nevertheless differ because a class-specific
 #' random-effect block changes the longitudinal or covariance feature being
-#' multiplied by that coefficient.  This helper evaluates only such terms and
-#' reports a small, interpretable set of reference points; the plotting method
-#' remains the interface for a dense trajectory.
+#' multiplied by that coefficient.  
 #'
 #' @param object A fitted latent-progress mixture.
 #' @param association_output The ordinary `PosteriorAssoc` coefficient object.

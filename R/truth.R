@@ -59,6 +59,7 @@
   inspect_coefficient_declaration(prior_request$marker, "marker")
   if (is.list(prior_request$class)) {
     inspect_coefficient_declaration(prior_request$class$slope, "class$slope")
+    inspect_coefficient_declaration(prior_request$class$family, "class$family")
   }
   invisible(NULL)
 }
@@ -107,6 +108,7 @@
   }
   if (is.list(fitting_request$class)) {
     fitting_request$class$slope <- remove_coefficients(fitting_request$class$slope)
+    fitting_request$class$family <- remove_coefficients(fitting_request$class$family)
   }
   fitting_request
 }

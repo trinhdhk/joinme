@@ -44,7 +44,8 @@ test_that("subject mixture draws follow their recorded class parameters", {
     class_type = "subject",
     class_dimensions = 1,
     truth = jm_truth(class = list(
-      slope = c("class_1:x1" = -0.8)
+      slope = c("class_1:x1" = -0.8),
+      family = prior_laplace()
     )),
     class_parameters = list(
       probability = c(0.45, 0.55),
@@ -64,6 +65,8 @@ test_that("subject mixture draws follow their recorded class parameters", {
   expect_s3_class(simulation$dataEvent, "data.frame")
   expect_identical(mixture$n_classes, 2L)
   expect_identical(mixture$class_type, "subject")
+  expect_identical(mixture$component_family$family, "laplace")
+  expect_identical(mixture$stan_data_contract$mix_component_family, 3L)
   expect_equal(unname(mixture$coefficient$subject), -0.8)
   expect_equal(realised, expected, tolerance = 0.01)
   expect_equal(
@@ -311,6 +314,7 @@ test_that("simulated data enter joinme_mix through the matching syntax", {
       subject = c(1, 2),
       vcov = c(1, 2)
     ),
+    truth = jm_truth(class = list(family = prior_student_t(df = 4))),
     seed = 8109,
     use_mirai = FALSE
   )
@@ -351,6 +355,8 @@ test_that("simulated data enter joinme_mix through the matching syntax", {
     prepared$stan_data$mixture$dimensions,
     simulation$truth$mixture$dimensions
   )
+  expect_identical(prepared$stan_data$mix_component_family, 1L)
+  expect_equal(prepared$stan_data$mix_component_df, 4)
   simulation_contract <-
     simulation$truth$mixture$stan_data_contract
   expect_true(is.list(simulation_contract))

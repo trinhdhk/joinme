@@ -22,20 +22,19 @@ sim <- simulate_joinme(
   formulaVCov = ~ 1,
   families = c("gaussian", "gaussian", "student_t"),
   n_id = 200,
-  n_obs_per_marker_per_id = 5,
   times_obs = seq(0, 8, length.out = 5),
   assoc = "vcov",
-  assoc_coefs = list(vcov = c(2, -1, -1)),
-  transforms = joinme_tf(vcov = ~ log(1 + exp(x))),
-  beta_long = c(-1, 0.5),
-  beta_event = 0.5,
-  re_params = list(
-    id = list(sd = c(0.5, 0.25)),
-    id_marker_cov = list(
-      alpha = -c(0.5, -0.5, -1),
-      lambda = c(0.1, -0.15, 0.2)
-    )
+  truth = jm_truth(
+    longitudinal = c(-1, 0.5),
+    survival = list(slope = 0.5),
+    assoc_coef = list(slope = c("vcov[1]" = 2, "vcov[2]" = -1, "vcov[3]" = -1)),
+    vcov = list(
+      sd = list(intercept = c(-0.5, 1), latent = c(0.1, 0.2)),
+      corr = list(intercept = 0.5, latent = -0.15)
+    ),
+    re_params = list(id = list(sd = c(0.5, 0.25)))
   ),
+  transforms = joinme_tf(vcov = ~ log(1 + exp(x))),
   seed = seed,
   use_mirai = TRUE,
   n_workers = 10
@@ -103,7 +102,13 @@ draw_vars <- c(
   as.vector(outer(rep(seq_len(n_id), each = n_marker), rep(seq_len(n_marker), times = n_id), function(i, d) paste0("w_idm[", i, ",", d, ",2]")))
 )
 
-draws <- joinme:::.get_draws_matrix(fit$fit, variables = draw_vars, seed = seed)
+draws <- extract(
+  fit,
+  what = "raw",
+  variable = draw_vars,
+  seed = seed,
+  keep_chains = FALSE
+)$posterior_draws
 draw_names <- colnames(draws)
 
 reconstruct_L_draws <- function(draw_mat, n_subject) {
@@ -194,13 +199,10 @@ subject_tbl <- subject_tbl[order(subject_tbl$abs_err_L22, decreasing = TRUE), ]
 alpha_draws <- draws[, paste0("alpha_L[", 1:3, "]"), drop = FALSE]
 lambda_draws <- draws[, paste0("lambda_L[", 1:3, "]"), drop = FALSE]
 
-cat("== Time scaling ==\n")
+cat("== Time basis ==\n")
 cat("tmax:", format(tmax, digits = 6), "\n")
 cat("observed time range:", paste(format(range(sim$dataLong$time), digits = 6), collapse = " to "), "\n")
-cat("scaled time range:", paste(format(range(sim$dataLong$time / tmax), digits = 6), collapse = " to "), "\n")
-cat("idx_time_beta:", paste(sd_check$idx_time_beta, collapse = ", "), "\n")
-cat("idx_time_uid:", paste(sd_check$idx_time_uid, collapse = ", "), "\n")
-cat("idx_time_idm:", paste(sd_check$idx_time_idm, collapse = ", "), "\n\n")
+cat("longitudinal designs use the observed time range directly\n\n")
 
 cat("== Alpha/Lambda posterior ==\n")
 print(data.frame(

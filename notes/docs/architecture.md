@@ -522,9 +522,10 @@ coefficient by coefficient; a regularised horseshoe shares its global scale
 within one selector-role assignment rather than across unrelated families.
 
 The public class prior is one nested declaration:
-`class = list(baseline_prob = ..., slope = ...)`. `baseline_prob` supplies the
-positive Dirichlet concentration, while the mixture-only data module applies
-the common coefficient-family contract to `class$slope`. Its packed prior order is every subject-domain design
+`class = list(baseline_prob = ..., slope = ..., family = ...)`.
+`baseline_prob` supplies the positive Dirichlet concentration,
+`class$slope` follows the common coefficient-prior contract, and
+`class$family` supplies the centred unit-scale component distribution. Its packed prior order is every subject-domain design
 column followed by every marker-domain design column. The transformed-
 parameter module restores the longstanding domain-specific coefficient names
 before the multinomial-logit probability function is evaluated.
@@ -646,10 +647,12 @@ is not copied into either observed data table. For a combined
 `c("subject", "vcov")` request, `E` contains one subject allocation vector.
 The `"marker"` type has one marker allocation vector.
 
-The component family is selected by `shrinkage`, exactly as in the fitted
-mixture. Unselected subject, marker and covariance-regression coordinates
-retain standard Normal draws. Unselected estimated marker weights retain the
-ordinary Student-\(t_6\), Laplace or Normal shrinkage draw.
+The component family is declared by
+`jm_prior(class = list(family = ...))`, exactly as in the fitted mixture.
+The accepted declarations are `prior_student_t()`, `prior_normal()`, and
+`prior_laplace()`. Unselected subject, marker and covariance-regression
+coordinates retain standard Normal draws. Marker weights remain outside the
+class allocation and follow `marker_weights$family` independently.
 
 The truth record contains:
 
@@ -920,7 +923,8 @@ The latent-class function stage separates definitions by use:
 
 Together these files provide:
 
-- Student-\(t_6\), Laplace and Normal component densities;
+- fixed-degrees-of-freedom Student-t, Normal and Laplace component densities
+  encoded by the common `jm_prior()` family map;
 - compact shared or class-specific multinomial-logit calculations for
   `formulaClass`.
 
@@ -1047,18 +1051,18 @@ Covariance classes primarily alter dispersion and covariance; the dedicated curv
 `JoiNMeMixFit` inherits the ordinary fit class, so methods use the established
 implementation unless a class-specific calculation is needed:
 
-| method | mixture behaviour |
-|---|---|
-| `summary()` | ordinary tables plus mixture tables |
-| `plot()` | ordinary plots plus class plots |
-| `predict()` | fitted component priors propagated to new latent effects, or paired fitted effects reused for a known subject; mixture subclass retained |
-| `pp_check()` | inherited longitudinal check |
-| `mcmc_plot()` | inherited, mixture variables selectable |
-| `diagnosis()` | inherited diagnostics plus chain-specific energy, scale-trade-off and energy-association tables |
-| `concordance()` | inherited for joint fits; guarded for longitudinal-only |
-| `tvROC()`, `tvAUC()` | inherited for joint fits; guarded for longitudinal-only |
-| `assoc()` | common coefficient output plus relevant class-specific contribution tables and a dense trajectory option |
-| `posterior_class()` | fitted-unit and conditional new-unit allocation probabilities, compact printing and interval plotting |
+| method                   | mixture behaviour                                                                                                                        |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `summary()`            | ordinary tables plus mixture tables                                                                                                      |
+| `plot()`               | ordinary plots plus class plots                                                                                                          |
+| `predict()`            | fitted component priors propagated to new latent effects, or paired fitted effects reused for a known subject; mixture subclass retained |
+| `pp_check()`           | inherited longitudinal check                                                                                                             |
+| `mcmc_plot()`          | inherited, mixture variables selectable                                                                                                  |
+| `diagnosis()`          | inherited diagnostics plus chain-specific energy, scale-trade-off and energy-association tables                                          |
+| `concordance()`        | inherited for joint fits; guarded for longitudinal-only                                                                                  |
+| `tvROC()`, `tvAUC()` | inherited for joint fits; guarded for longitudinal-only                                                                                  |
+| `assoc()`              | common coefficient output plus relevant class-specific contribution tables and a dense trajectory option                                 |
+| `posterior_class()`    | fitted-unit and conditional new-unit allocation probabilities, compact printing and interval plotting                                    |
 
 ### Dynamic prediction and latent classes
 
@@ -1304,19 +1308,18 @@ empirical concordance without further structure.
 
 The result contains:
 
-| Column | Meaning |
-|---|---|
+| Column          | Meaning                                                            |
+| --------------- | ------------------------------------------------------------------ |
 | `concordance` | $( \text{concordant}+0.5 \times \text{tied} )/ n_{\text{pairs}}$ |
-| `concordant` | Weighted number of correctly ordered pairs |
-| `discordant` | Weighted number of incorrectly ordered pairs |
-| `tied` | Weighted number of survival-probability ties |
-| `n_pairs` | Total comparison weight |
-| `n_subjects` | Number of subjects retained after landmark and history checks |
-| `n_events` | Number of observed events of the requested cause |
+| `concordant`  | Weighted number of correctly ordered pairs                         |
+| `discordant`  | Weighted number of incorrectly ordered pairs                       |
+| `tied`        | Weighted number of survival-probability ties                       |
+| `n_pairs`     | Total comparison weight                                            |
+| `n_subjects`  | Number of subjects retained after landmark and history checks      |
+| `n_events`    | Number of observed events of the requested cause                   |
 
 With non-unit event weighting, the first four pair-count columns are weighted
 amounts and need not be integers.
-
 
 ### Time-dependent ROC: call to result
 
@@ -1437,17 +1440,17 @@ substantial in external validation samples.
 For one landmark, `tvROC.JoiNMeFit()` returns class `"tvROC"` with the
 JMbayes2 fields:
 
-| Field | Statistical content |
-|---|---|
-| `TP`, `FP` | Primary sensitivity and false-positive fractions |
-| `nTP`, `nFN`, `nFP`, `nTN` | Weighted classification totals |
-| `tp`, `fp` | Posterior-draw ROC ordinate matrices |
-| `thrs` | The 101 survival thresholds |
-| `F1score`, `Youden` | Descriptive optimal threshold summaries |
-| `Tstart`, `Thoriz` | Landmark and horizon |
-| `nr` | Number of analysable subjects |
-| `type_weights` | Censoring treatment |
-| `nameObject`, `classObject` | Model labels used by JMbayes2 methods |
+| Field                              | Statistical content                              |
+| ---------------------------------- | ------------------------------------------------ |
+| `TP`, `FP`                     | Primary sensitivity and false-positive fractions |
+| `nTP`, `nFN`, `nFP`, `nTN` | Weighted classification totals                   |
+| `tp`, `fp`                     | Posterior-draw ROC ordinate matrices             |
+| `thrs`                           | The 101 survival thresholds                      |
+| `F1score`, `Youden`            | Descriptive optimal threshold summaries          |
+| `Tstart`, `Thoriz`             | Landmark and horizon                             |
+| `nr`                             | Number of analysable subjects                    |
+| `type_weights`                   | Censoring treatment                              |
+| `nameObject`, `classObject`    | Model labels used by JMbayes2 methods            |
 
 JoiNMe additionally retains `cause` and the `thr` spelling for transparent
 inspection. The inherited `plot.tvROC()` method draws `FP` against `TP`.
@@ -1468,28 +1471,27 @@ For several landmarks, each compatible curve is integrated separately and a
 `"tvAUC_JoiNMeFit"` data frame returns `time_start`, `time_horizon`, `auc`,
 `n_subjects`, and `type_weights`.
 
-
 ### Discrimination function map
 
-| Function | Responsibility |
-|---|---|
-| `concordance.JoiNMeFit()` | validates the request, obtains conditional survival curves and forms the follow-up-wide comparison |
-| `tvROC.JoiNMeFit()` | resolves the evaluation data, landmarks and horizons and forms one ROC curve for each landmark--horizon pair |
-| `tvAUC.JoiNMeFit()` | obtains the corresponding ROC curves and delegates trapezoidal integration to the `JMbayes2` method |
-| `.get_train_data()` | selects the complete stored training pair or a complete longitudinal and event validation pair |
-| `.subject_event_outcomes()` | reduces right-censored or counting-process records to one terminal outcome per subject |
-| `.subject_time_map()` | aligns scalar, vector or event-column time declarations by subject |
-| `.last_preoutcome_measurement()` | obtains the default subject-specific concordance landmark without using an outcome-time measurement |
-| `.concordance_prediction_grid()` | adds every required residual event time to each subject's prediction grid |
-| `.concordance_survival_curves()` | restricts histories prospectively and obtains aligned conditional survival curves |
-| `.concordance_survival_matrix()` | aligns posterior mean curves at observed residual event times without extrapolation |
-| `.concordance_event_weights()` | obtains event-time weights and converts them to pair weights |
-| `.concordance_from_survival_curves()` | counts each observable concordant, discordant or tied pair |
-| `.get_tvroc_times()` | aligns the landmark, horizon and prediction-window declarations |
-| `.dynamic_discrimination_risk_set()` | constructs one horizon-specific risk set using only information observed by the landmark |
-| `.discrimination_horizon_risk_draws()` | aligns posterior event-risk draws at the exact horizon |
-| `.tvroc_status_weights()` | constructs model-based or inverse-censoring-weighted case and control contributions |
-| `.tvroc_from_risk_set()` | calculates threshold-wise ROC ordinates and constructs the public result |
+| Function                                 | Responsibility                                                                                               |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `concordance.JoiNMeFit()`              | validates the request, obtains conditional survival curves and forms the follow-up-wide comparison           |
+| `tvROC.JoiNMeFit()`                    | resolves the evaluation data, landmarks and horizons and forms one ROC curve for each landmark--horizon pair |
+| `tvAUC.JoiNMeFit()`                    | obtains the corresponding ROC curves and delegates trapezoidal integration to the`JMbayes2` method         |
+| `.get_train_data()`                    | selects the complete stored training pair or a complete longitudinal and event validation pair               |
+| `.subject_event_outcomes()`            | reduces right-censored or counting-process records to one terminal outcome per subject                       |
+| `.subject_time_map()`                  | aligns scalar, vector or event-column time declarations by subject                                           |
+| `.last_preoutcome_measurement()`       | obtains the default subject-specific concordance landmark without using an outcome-time measurement          |
+| `.concordance_prediction_grid()`       | adds every required residual event time to each subject's prediction grid                                    |
+| `.concordance_survival_curves()`       | restricts histories prospectively and obtains aligned conditional survival curves                            |
+| `.concordance_survival_matrix()`       | aligns posterior mean curves at observed residual event times without extrapolation                          |
+| `.concordance_event_weights()`         | obtains event-time weights and converts them to pair weights                                                 |
+| `.concordance_from_survival_curves()`  | counts each observable concordant, discordant or tied pair                                                   |
+| `.get_tvroc_times()`                   | aligns the landmark, horizon and prediction-window declarations                                              |
+| `.dynamic_discrimination_risk_set()`   | constructs one horizon-specific risk set using only information observed by the landmark                     |
+| `.discrimination_horizon_risk_draws()` | aligns posterior event-risk draws at the exact horizon                                                       |
+| `.tvroc_status_weights()`              | constructs model-based or inverse-censoring-weighted case and control contributions                          |
+| `.tvroc_from_risk_set()`               | calculates threshold-wise ROC ordinates and constructs the public result                                     |
 
 ## Verification map
 

@@ -8,20 +8,16 @@ sim <- simulate_joinme(
   formulaLong = y ~ 1 + time + x1 + (1 + time | id) + (0 + x1 + (1 + time | id) | marker),
   formulaEvent = survival::Surv(time, event) ~ x2,
   families = rep("gaussian", 3),
-  n_obs_per_marker_per_id = 10,
   times_obs = seq(0, 6, length.out = 10),
-  beta_long = c("(Intercept)" = 0.8, "time" = 0.6, "x1" = 0.5),
-  beta_event = c("x2" = 0.1),
   assoc = c("cv_mean", "cv_marker"),
-  assoc_coefs = c(cv_mean = truth_cv_mean, cv_marker = truth_cv_marker),
-  marker_weights = c(-1,2,1),
-  fixed_marker_weights = TRUE,
-  transforms = joinme_tf(cv_marker = ~ expit(x)),
-  baseline_hazard = list(
-    type='weibull',
-    shape = 1.1,
-    scale = 10
+  truth = jm_truth(
+    longitudinal = c("(Intercept)" = 0.8, "time" = 0.6, "x1" = 0.5),
+    survival = list(slope = c(x2 = 0.1)),
+    assoc_coef = list(slope = c(cv_mean = truth_cv_mean, cv_marker = truth_cv_marker)),
+    marker_weights = list(offset = c(-1, 2, 1), family = "constant"),
+    basehaz = list(type = "weibull", shape = 1.1, scale = 10)
   ),
+  transforms = joinme_tf(cv_marker = ~ expit(x)),
   seed = 202603,
   time_cens = 10,
   use_mirai = TRUE,
@@ -38,8 +34,10 @@ run_fit <- function(label, alpha_prior, tau_spline) {
     dataEvent = sim$dataEvent,
     assoc = c("cv_mean", "cv_marker"),
     families = rep("gaussian", 3),
-    # fixed_marker_weights = TRUE,
-    # marker_weights = sim$truth$marker_weights,
+    # priors = jm_prior(marker_weights = list(
+    #   offset = sim$truth$marker_weights,
+    #   family = "constant"
+    # )),
     # priors = list(alpha = list(scale = alpha_prior)),
     # tau_spline = tau_spline,
     control = list(
@@ -76,10 +74,13 @@ run_fit <- function(label, alpha_prior, tau_spline) {
 
   # ---- Diagnostics: compare key latent components by chain
   sd <- fit$stan_data
-  draws <- fit$fit$draws
-
   get_draw_array <- function(vars) {
-    posterior::as_draws_array(draws(variables = vars))
+    posterior::as_draws_array(extract(
+      fit,
+      what = "raw",
+      variable = vars,
+      keep_chains = TRUE
+    )$posterior_draws)
   }
 
   summ_by_chain <- function(arr) {
@@ -106,8 +107,6 @@ run_fit <- function(label, alpha_prior, tau_spline) {
 
   # ---- Approximate hazard at event time for subject 1 using posterior draws
   if (sd$K_event >= 1) {
-    beta_idx_time <- sd$idx_time_beta %||% integer(0)
-    tmax <- sd$tmax
     X_event <- sd$X_event_now[i, ]
     Z_id_event <- sd$Z_id_event_now[i, ]
     Z_mk_event <- if (sd$R_mk > 0) sd$Z_mk_event_now[i, ] else numeric(0)
@@ -115,25 +114,22 @@ run_fit <- function(label, alpha_prior, tau_spline) {
     W_event <- if (sd$p_w > 0) sd$W[i, ] else numeric(0)
     bs_event <- sd$Bs_event_c[i, ]
 
-    beta_draws <- posterior::as_draws_matrix(draws(variables = beta_vars))
-    u_draws <- posterior::as_draws_matrix(draws(variables = u_vars))
-    v_draws <- if (length(v_vars) > 0) posterior::as_draws_matrix(draws(variables = v_vars)) else NULL
-    w_draws <- if (length(w_vars) > 0) posterior::as_draws_matrix(draws(variables = w_vars)) else NULL
-    alpha_draws <- posterior::as_draws_matrix(draws(variables = "alpha_cv_marker"))
-    bs_gamma_draws <- posterior::as_draws_matrix(draws(variables = paste0("bs_gamma_c[1,", seq_len(sd$Kbs), "]")))
-    gamma_w_draws <- if (sd$p_w > 0) posterior::as_draws_matrix(draws(variables = paste0("gamma_w[1,", seq_len(sd$p_w), "]"))) else NULL
+    beta_draws <- posterior::as_draws_matrix(get_draw_array(beta_vars))
+    u_draws <- posterior::as_draws_matrix(get_draw_array(u_vars))
+    v_draws <- if (length(v_vars) > 0) posterior::as_draws_matrix(get_draw_array(v_vars)) else NULL
+    w_draws <- if (length(w_vars) > 0) posterior::as_draws_matrix(get_draw_array(w_vars)) else NULL
+    alpha_draws <- posterior::as_draws_matrix(get_draw_array("alpha_cv_marker"))
+    bs_gamma_draws <- posterior::as_draws_matrix(get_draw_array(paste0("bs_gamma_c[1,", seq_len(sd$Kbs), "]")))
+    gamma_w_draws <- if (sd$p_w > 0) posterior::as_draws_matrix(get_draw_array(paste0("gamma_w[1,", seq_len(sd$p_w), "]"))) else NULL
     sigma_draws <- NULL
     if (!is.null(sd$n_family_sigma) && sd$n_family_sigma > 0) {
-      sigma_draws <- posterior::as_draws_matrix(draws(variables = paste0("sigma_family[", seq_len(sd$n_family_sigma), "]")))
+      sigma_draws <- posterior::as_draws_matrix(get_draw_array(paste0("sigma_family[", seq_len(sd$n_family_sigma), "]")))
     } else if ("sigma_y" %in% fit$fit$metadata()$variables) {
-      sigma_draws <- posterior::as_draws_matrix(draws(variables = "sigma_y"))
+      sigma_draws <- posterior::as_draws_matrix(get_draw_array("sigma_y"))
     }
 
-    beta_scaled <- beta_draws
-    if (length(beta_idx_time) > 0) beta_scaled[, beta_idx_time] <- beta_scaled[, beta_idx_time, drop = FALSE] * tmax
-
-    cvm_S <- as.numeric(beta_scaled %*% X_event + u_draws %*% Z_id_event)
-    cvk_S <- rep(0, nrow(beta_scaled))
+    cvm_S <- as.numeric(beta_draws %*% X_event + u_draws %*% Z_id_event)
+    cvk_S <- rep(0, nrow(beta_draws))
     if (sd$R_mk > 0 && !is.null(v_draws)) cvk_S <- cvk_S + as.numeric(v_draws %*% Z_mk_event)
     if (sd$Q_idm > 0 && !is.null(w_draws)) cvk_S <- cvk_S + as.numeric(w_draws %*% Z_idm_event)
 
@@ -160,7 +156,7 @@ run_fit <- function(label, alpha_prior, tau_spline) {
     const_vals <- if (length(const_cols) > 0) sd$Bs_event_c[1, const_cols] else numeric(0)
 
     surv_truth <- sim$helpers$survival_prob(i, truth_time)
-    cumhaz_draws <- posterior::as_draws_matrix(draws(variables = paste0("cumhaz_event[", i, "]")))
+    cumhaz_draws <- posterior::as_draws_matrix(get_draw_array(paste0("cumhaz_event[", i, "]")))
     surv_prob_draws <- exp(-cumhaz_draws)
     cumhaz_truth <- sim$helpers$cumhaz(i, truth_time)
 

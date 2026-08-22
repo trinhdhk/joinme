@@ -27,6 +27,65 @@ test_that("named links compile their mathematical inverse links", {
   )
 })
 
+test_that("jm_family prints inverse links as mathematical expressions", {
+  named_output <- capture.output(print(jm_family("poisson", link = "log")))
+  expect_true(any(grepl("Family: poisson", named_output, fixed = TRUE)))
+  expect_true(any(grepl("Link: log", named_output, fixed = TRUE)))
+  expect_true(any(grepl("Inverse link: exp(x)", named_output, fixed = TRUE)))
+
+  custom_output <- capture.output(print(jm_family(
+    "gaussian",
+    inv_link = ~ inv_logit(2 * x - 0.25)
+  )))
+  expect_true(any(grepl("Link: custom", custom_output, fixed = TRUE)))
+  expect_true(any(grepl(
+    "Inverse link: inv_logit(2 * x - 0.25)",
+    custom_output,
+    fixed = TRUE
+  )))
+
+  formula_output <- capture.output(print(jm_family(
+    "gaussian",
+    link = ~ log(2 * x + 1)
+  )))
+  expect_true(any(grepl(
+    "Inverse link: (exp(x) - 1)/2",
+    formula_output,
+    fixed = TRUE
+  )))
+})
+
+test_that("inverse-link expression reconstruction names every unary instruction", {
+  unary_labels <- c(
+    `6` = "log(x)",
+    `7` = "exp(x)",
+    `8` = "sqrt(x)",
+    `9` = "inv_logit(x)",
+    `10` = "logit(x)",
+    `11` = "1/x",
+    `13` = "sin(x)",
+    `14` = "cos(x)",
+    `15` = "tan(x)",
+    `16` = "abs(x)",
+    `17` = "x^2",
+    `18` = "sinh(x)",
+    `19` = "cosh(x)",
+    `20` = "tanh(x)",
+    `21` = "asinh(x)",
+    `22` = "acosh(x)",
+    `23` = "atanh(x)",
+    `24` = "log1p_exp(x)",
+    `25` = "cbrt(x)",
+    `26` = "Phi(x)",
+    `27` = "inv_Phi(x)"
+  )
+
+  reconstructed_labels <- vapply(names(unary_labels), function(operation) {
+    base::deparse1(.bytecode_as_expression(c(0L, as.integer(operation))))
+  }, character(1))
+  expect_identical(unname(reconstructed_labels), unname(unary_labels))
+})
+
 test_that("formula links are inverted before bytecode compilation", {
   simple <- jm_family("poisson", link = ~ log(x))
   affine <- jm_family("gaussian", link = ~ log(2 * x + 1))

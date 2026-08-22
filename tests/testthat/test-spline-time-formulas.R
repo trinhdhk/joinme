@@ -1,10 +1,11 @@
 test_that("standata evaluates spline time terms on original study time", {
-  sim <- simulate_joinme_joint_student_t_cvtotal(
+  sim <- simulate_joinme(
     n_id = 4,
-    D = 2,
-    n_t = 3,
+    families = rep("student_t", 2),
+    times_obs = seq(0, 5, length.out = 3),
+    censor_longitudinal_after_event = FALSE,
     seed = 3101,
-    include_marker_only = TRUE
+    use_mirai = FALSE
   )
 
   formulaLong <- y ~ 1 + splines::ns(time, df = 3) + x1 +

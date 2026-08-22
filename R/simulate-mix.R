@@ -30,8 +30,11 @@
 #' D\{\mu_{gr},\sigma_{gr}\},
 #' }
 #'
-#' where \eqn{D} is Student-\eqn{t_6}, Laplace or Normal according to `shrinkage`.
-#' Unselected subject, marker and covariance-regression coordinates remain
+#' where \eqn{D} is declared by
+#' `jm_truth(class = list(family = prior_student_t(...)))`,
+#' [prior_normal()], or [prior_laplace()]. The same declaration is retained as
+#' the recovery prior used by [joinme_mix()].
+#' Unselected subject, marker and covariance-regression coordinates are
 #' standard Normal.
 #'
 #' Marker weights are not latent-class coordinates. When they are estimated,
@@ -88,9 +91,10 @@
 #' component hierarchy used for fitting. It describes data-generating
 #' quantities rather than fitting distributions. In particular,
 #' class truths are declared together as
-#' `class = list(baseline_prob = ..., slope = ...)`: `baseline_prob` governs
-#' the Dirichlet prior and `slope` governs coefficients introduced by
-#' `formulaClass`. A numeric `class$slope` fixes the generating coefficient
+#' `class = list(baseline_prob = ..., slope = ..., family = ...)`:
+#' `baseline_prob` governs the Dirichlet prior, `slope` governs coefficients
+#' introduced by `formulaClass`, and `family` governs the centred unit-scale
+#' distribution within every latent class. A numeric `class$slope` fixes the generating coefficient
 #' vector; a `prior_*()` declaration draws it once at the beginning of the
 #' simulation. Class probabilities, locations and scales are supplied through
 #' `class_parameters` when fixed generating values are required.
@@ -186,7 +190,6 @@ simulate_joinme_mix <- function(
     x1 ~ rnorm(n_id),
     x2 ~ rnorm(n_id)
   ),
-  shrinkage = 0L,
   assoc = c("cv_total"),
   vcov_diag_link = "softplus",
   family_params = list(
@@ -450,7 +453,6 @@ simulate_joinme_mix <- function(
 #' @param labels Named random-effect column labels.
 #' @param covariance_is_diagonal Whether the marker-by-subject covariance is
 #'   diagonal.
-#' @param shrinkage Integer component-family code.
 #' @param id_variable Subject identifier name.
 #' @param marker_variable Marker identifier name.
 #'
@@ -465,7 +467,6 @@ simulate_joinme_mix <- function(
   dimensions,
   labels,
   covariance_is_diagonal,
-  shrinkage,
   id_variable,
   marker_variable
 ) {
@@ -549,7 +550,6 @@ simulate_joinme_mix <- function(
       R_mk = as.integer(dimensions[["marker"]]),
       Q_idm = as.integer(dimensions[["covariance_basis"]]),
       indep_idmarker_cov = as.integer(covariance_is_diagonal),
-      shrinkage = as.integer(shrinkage),
       zid_cols = labels$subject,
       zmk_cols = labels$marker,
       zidm_cols = labels$covariance
@@ -560,7 +560,8 @@ simulate_joinme_mix <- function(
       class_dimensions = specification$class_dimensions,
       class_prior = list(
         baseline_prob = specification$class_prior$baseline_prob,
-        slope = specification$class_prior$slope
+        slope = specification$class_prior$slope,
+        family = specification$class_prior$family
       ),
       class_design = class_design,
       class_ordering = ordering,
@@ -742,7 +743,6 @@ simulate_joinme_mix <- function(
 
   # Step 7: resolve complete packed location and scale matrices. Omitted
   # population matrices are drawn once, then fixed for all allocation units.
-  # Their centres remain separated enough for useful recovery studies.
   total_dimension <- fit_layout$K_mix # packed selected-coordinate count
   default_centre <- seq(-1.25, 1.25, length.out = n_classes)
   default_location <- matrix(
@@ -795,6 +795,7 @@ simulate_joinme_mix <- function(
     ordering = ordering,
     ordered_location_coordinate = ordered_coordinate,
     distribution = fit_layout$mixture$distribution,
+    component_family = specification$class_prior$family,
     probability = stats::setNames(
       probability,
       paste0("class_", seq_len(n_classes))
@@ -837,7 +838,8 @@ simulate_joinme_mix <- function(
         fit_layout$class_term_start_marker,
       class_term_count_marker =
         fit_layout$class_term_count_marker,
-      shrinkage = as.integer(shrinkage)
+      mix_component_family = fit_layout$mix_component_family,
+      mix_component_df = fit_layout$mix_component_df
     ) # structural Stan fields which a fit to the simulated data must reproduce exactly
   )
 }
@@ -849,7 +851,6 @@ simulate_joinme_mix <- function(
 #' @param level Canonical class-specific block name.
 #' @param allocation Integer class label per row.
 #' @param mixture Prepared generative mixture, or `NULL`.
-#' @param shrinkage Integer component-family code.
 #'
 #' @return The input matrix with selected coordinates replaced by conditional
 #'   component draws.
@@ -859,8 +860,7 @@ simulate_joinme_mix <- function(
   latent_matrix,
   level,
   allocation,
-  mixture,
-  shrinkage
+  mixture
 ) {
   if (is.null(mixture) || !(level %in% mixture$class_type)) {
     return(latent_matrix)
@@ -882,10 +882,10 @@ simulate_joinme_mix <- function(
   for (local_coordinate in seq_along(selected_coordinates)) {
     source_coordinate <- selected_coordinates[[local_coordinate]]
     packed_coordinate <- packed_start + local_coordinate - 1L
-    standard_draw <- .sim_draw_standard_shrinkage(
+    standard_draw <- .sim_draw_standard_component(
       nrow(latent_matrix),
-      shrinkage = shrinkage
-    ) # centred unit-scale draw from the selected component family
+      family = mixture$component_family
+    ) # centred unit-scale draw from the class family declared through jm_truth() and jm_prior()
     latent_matrix[, source_coordinate] <-
       mixture$location[allocation, packed_coordinate] +
       mixture$scale[allocation, packed_coordinate] * standard_draw

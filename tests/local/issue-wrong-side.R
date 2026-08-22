@@ -16,20 +16,20 @@ sim <- simulate_joinme(
   obs_time_noise_sd = 0.5,
   time_cens = 10,
   assoc = "vcov",
-  assoc_coefs = list(
-    vcov = c(2, -1)),
-    # vcov = c(2, -1, -1)),
-  transforms = joinme_tf(vcov = ~ softplus(x)),
-   baseline_hazard = list(type = "weibull", shape = 0.8, scale = 10),
-  beta_long = c(-0.5, 0.5),
-  beta_event = 0.5,
-  re_params = list(
-    id = list(sd = c(1, 0.5), corr = matrix(c(1, -0.5, -0.5, 1), ncol=2)),
-    id_marker_cov = list(
-      alpha = c(0.5, -0.2, -0.2),
-      lambda = c(1, 0.5, 0.25)
+  truth = jm_truth(
+    longitudinal = c(-0.5, 0.5),
+    survival = list(slope = 0.5),
+    assoc_coef = list(slope = c("vcov[1]" = 2, "vcov[2]" = -1, "vcov[3]" = 0)),
+    vcov = list(
+      sd = list(intercept = c(0.5, -0.2), latent = c(1, 0.25)),
+      corr = list(intercept = -0.2, latent = 0.5)
+    ),
+    basehaz = list(type = "weibull", shape = 0.8, scale = 10),
+    re_params = list(
+      id = list(sd = c(1, 0.5), corr = matrix(c(1, -0.5, -0.5, 1), ncol = 2))
     )
   ),
+  transforms = joinme_tf(vcov = ~ softplus(x)),
   seed = seed,
   use_mirai = TRUE,
   n_workers = 10
@@ -112,13 +112,15 @@ draw_vars <- c(
   "s_vcov"
 )
 
-draws <- joinme:::.get_draws_matrix(
-  fit$fit,
-  variables = draw_vars,
-  seed = seed
-)
+draws <- extract(
+  fit,
+  what = "raw",
+  variable = draw_vars,
+  seed = seed,
+  keep_chains = FALSE
+)$posterior_draws
 
-draws_df <- posterior::as_draws_df(joinme:::.get_draws_obj(fit$fit))
+draws_df <- posterior_draws(fit, format = "draws_df")
 tracked_vars <- c(
   paste0("alpha_L[", seq_len(sd_check$M_vcov_tf), "]"),
   paste0("lambda_L[", seq_len(sd_check$M_vcov_tf), "]"),

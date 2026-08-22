@@ -5,12 +5,13 @@ set.seed(42)
 sim <- simulate_joinme(
   n_id = 40,
   families = c(rep("student_t", 3), "gaussian"),
-  n_obs_per_marker_per_id = 6,
   times_obs = seq(0, 6, length.out = 10),
-  beta_long = c(0.5, -2, 1),
   seed = 42,
   assoc = c("cv_total"),
-  assoc_coefs = c(cv_total = 0.6)
+  truth = jm_truth(
+    longitudinal = c(0.5, -2, 1),
+    assoc_coef = list(slope = c(cv_total = 0.6))
+  )
 )
 
 formulaLong <- y ~ 1 + time + x1 +
@@ -26,8 +27,6 @@ fit <- joinme(
   assoc = c("cv_total"),
   families = c(rep("student_t", 3), "gaussian"),
   transforms = list(cv_total = list(type = "identity")),
-  fixed_marker_weights = FALSE,
-  marker_weight_scale = 1,
   control = list(
     threads_per_chain = 2,
     parallel_chains = 2,

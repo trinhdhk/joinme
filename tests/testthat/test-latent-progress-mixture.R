@@ -22,7 +22,6 @@ test_that("compatible random-effect levels share G rather than forming a product
     estimate_marker_weights = 0L,
     use_marker_weight_assoc = 0L,
     n_marker_weight_sets = 0L,
-    shrinkage = 0L,
     marker_weight_sets_shared = 1L
   )
   mixture_data <- .build_mixture_standata(
@@ -31,7 +30,7 @@ test_that("compatible random-effect levels share G rather than forming a product
       n_classes = 3L,
       class_type = c("subject", "vcov"),
       class_dimensions = NULL,
-      class_prior = list(baseline_prob = 1, slope = prior_normal()),
+      class_prior = list(baseline_prob = 1, slope = prior_normal(), family = prior_student_t(df = 6)),
       include_survival = TRUE
     )
   )
@@ -55,14 +54,13 @@ test_that("corr selects only off-diagonal covariance-regression coordinates", {
       R_id = 1L,
       R_mk = 1L,
       Q_idm = 3L,
-      indep_idmarker_cov = 0L,
-      shrinkage = 2L
+      indep_idmarker_cov = 0L
     ),
     mixture = list(
       n_classes = 2L,
       class_type = "corr",
       class_dimensions = c(1L, 2L),
-      class_prior = list(baseline_prob = 1, slope = prior_normal()),
+      class_prior = list(baseline_prob = 1, slope = prior_normal(), family = prior_normal()),
       include_survival = TRUE
     )
   )
@@ -82,7 +80,6 @@ test_that("subject and marker domains retain common labels and separate units", 
     estimate_marker_weights = 0L,
     use_marker_weight_assoc = 0L,
     n_marker_weight_sets = 0L,
-    shrinkage = 2L,
     marker_weight_sets_shared = 1L
   )
   mixture_data <- .build_mixture_standata(
@@ -91,7 +88,7 @@ test_that("subject and marker domains retain common labels and separate units", 
       n_classes = 2L,
       class_type = c("subject", "marker"),
       class_dimensions = NULL,
-      class_prior = list(baseline_prob = c(2, 3), slope = prior_normal()),
+      class_prior = list(baseline_prob = c(2, 3), slope = prior_normal(), family = prior_normal()),
       include_survival = TRUE
     )
   )
@@ -112,8 +109,7 @@ test_that("class-regression priors are assembled in subject-then-marker order", 
     R_id = 2L,
     R_mk = 2L,
     Q_idm = 1L,
-    indep_idmarker_cov = 1L,
-    shrinkage = 2L
+    indep_idmarker_cov = 1L
   )
   class_design <- list(
     subject = list(
@@ -135,7 +131,8 @@ test_that("class-regression priors are assembled in subject-then-marker order", 
       slope = prior_laplace(
         mu = c(0, 0.5, -0.5),
         scale = c(1, 0.75, 0.5)
-      )
+      ),
+      family = prior_normal()
     ),
     class_design = class_design,
     include_survival = TRUE
@@ -175,14 +172,13 @@ test_that("mixture dimensions and unavailable levels are explained", {
     indep_idmarker_cov = 1L,
     estimate_marker_weights = 0L,
     use_marker_weight_assoc = 0L,
-    n_marker_weight_sets = 0L,
-    shrinkage = 0L
+    n_marker_weight_sets = 0L
   )
   specification <- list(
     n_classes = 2L,
     class_type = "subject",
     class_dimensions = 2L,
-    class_prior = list(baseline_prob = 1, slope = prior_normal()),
+    class_prior = list(baseline_prob = 1, slope = prior_normal(), family = prior_student_t(df = 6)),
     include_survival = FALSE
   )
 
@@ -325,14 +321,13 @@ test_that("class_ordering targets only an intercept, baseline probabilities, or 
     indep_idmarker_cov = 1L,
     estimate_marker_weights = 0L,
     use_marker_weight_assoc = 0L,
-    n_marker_weight_sets = 0L,
-    shrinkage = 0L
+    n_marker_weight_sets = 0L
   )
   specification <- list(
     n_classes = 3L,
     class_type = "subject",
     class_dimensions = c(1L, 2L),
-    class_prior = list(baseline_prob = 1, slope = prior_normal()),
+    class_prior = list(baseline_prob = 1, slope = prior_normal(), family = prior_student_t(df = 6)),
     class_ordering = "intercept",
     include_survival = FALSE
   )
@@ -366,7 +361,8 @@ test_that("latent-class priors are declared through jm_prior", {
         df = 4,
         mu = c(0, 0.5),
         scale = c(1.25, 0.75)
-      )
+      ),
+      family = prior_laplace()
     )
   )
   expect_s3_class(priors, "joinme_priors")
@@ -374,11 +370,22 @@ test_that("latent-class priors are declared through jm_prior", {
   expect_identical(priors$class$slope$family, "student_t")
   expect_equal(priors$class$slope$df, 4)
   expect_equal(priors$class$slope$mu, c(0, 0.5))
+  expect_identical(priors$class$family$family, "laplace")
   expect_true("class" %in% names(formals(jm_prior)))
   expect_false("class_probability" %in% names(formals(jm_prior)))
   expect_false("class_regression" %in% names(formals(jm_prior)))
   expect_error(jm_prior(class = list(probability = 1)), "baseline_prob")
   expect_error(jm_prior(class = list(baseline_prob = 0)), "positive")
+  expect_error(jm_prior(class = list(family = "normal")), "prior_normal")
+  expect_error(
+    jm_prior(class = list(family = prior_normal(mu = 0.25))),
+    "standardised latent block"
+  )
+  expect_error(
+    jm_prior(class = list(family = prior_laplace(scale = 1.5))),
+    "standardised latent block"
+  )
+  expect_error(jm_prior(class = list(family = prior_horseshoe())), "does not accept")
   inherited <- jm_prior(slope = prior_laplace(scale = 0.75))
   expect_identical(inherited$class$slope$family, "laplace")
   expect_equal(inherited$class$slope$scale, 0.75)

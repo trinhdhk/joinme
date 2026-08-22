@@ -94,7 +94,8 @@ if (use_mixture == 1) {
                 mix_location[group],
                 mix_scale[group],
                 mix_start_subject,
-                shrinkage
+                mix_component_family,
+                mix_component_df
               );
         }
       }
@@ -112,7 +113,8 @@ if (use_mixture == 1) {
                 mix_location[group],
                 mix_scale[group],
                 mix_start_covariance,
-                shrinkage
+                mix_component_family,
+                mix_component_df
               );
         }
       }
@@ -158,7 +160,8 @@ if (use_mixture == 1) {
               mix_location[group],
               mix_scale[group],
               mix_start_marker,
-              shrinkage
+              mix_component_family,
+              mix_component_df
             );
       }
 

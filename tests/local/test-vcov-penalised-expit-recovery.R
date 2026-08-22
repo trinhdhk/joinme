@@ -36,10 +36,11 @@ test_that("penalised expit vcov recovers a one-component association", {
     families = c("gaussian", "gaussian"),
     family_params = list(gaussian = list(sigma = 0.2)),
     n_id = 300,
-    n_obs_per_marker_per_id = 10,
     times_obs = seq(0, 10, length.out = 10),
     assoc = "vcov",
-    assoc_coefs = list(vcov = 0.5),
+    truth = jm_truth(assoc_coef = list(slope = c(
+      "vcov[1]" = 0.5, "vcov[2]" = 0, "vcov[3]" = 0
+    ))),
     transforms = sim_tf,
     seed = 2405,
     use_mirai = TRUE,

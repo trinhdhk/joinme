@@ -25,10 +25,11 @@ test_that("fixed vcov expit I-spline recovers a one-component association", {
     families = c("gaussian", "gaussian"),
     family_params = list(gaussian = list(sigma = 0.2)),
     n_id = 300,
-    n_obs_per_marker_per_id = 12,
     times_obs = seq(0, 10, length.out = 12),
     assoc = "vcov",
-    assoc_coefs = list(vcov = 0.8),
+    truth = jm_truth(assoc_coef = list(slope = c(
+      "vcov[1]" = 0.8, "vcov[2]" = 0, "vcov[3]" = 0
+    ))),
     transforms = tf,
     seed = 2404,
     use_mirai = TRUE,

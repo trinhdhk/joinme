@@ -15,7 +15,7 @@
    * Family codes are 1 Student-t, 2 Normal, 3 Laplace and 4 regularised
    * horseshoe. Marker and marker-weight declarations contain no ordinary
    * location or scale data: their transformations construct zero and one
-   * explicitly, so only the family and its tail/shrinkage hyperparameters can
+   * explicitly, so only the family and its tail or regularisation hyperparameters can
    * vary.
    */
   /* Common regression-prior programme: component roles are resolved in R. */
@@ -30,7 +30,7 @@
   vector<lower=0>[n_regression_horseshoe_local] prior_regression_horseshoe_local_df; // half-Student-t degrees of freedom for local scales
   int<lower=0> n_regression_horseshoe_group; // number of component-role groups using a horseshoe
   vector<lower=0>[n_regression_horseshoe_group] prior_regression_horseshoe_global_df; // half-Student-t degrees of freedom for group-global scales
-  vector<lower=0>[n_regression_horseshoe_group] prior_regression_horseshoe_global_scale; // fixed global shrinkage scales
+  vector<lower=0>[n_regression_horseshoe_group] prior_regression_horseshoe_global_scale; // fixed global regularisation scales
   vector<lower=0>[n_regression_horseshoe_group] prior_regression_horseshoe_slab_df; // finite-slab degrees of freedom by group
   vector<lower=0>[n_regression_horseshoe_group] prior_regression_horseshoe_slab_scale; // finite-slab scales by group
   int<lower=0> prior_start_beta; // first longitudinal population coefficient in the packed prior vector
@@ -45,5 +45,4 @@
   int<lower=0> prior_start_distributional_alpha; // first skewness-regression coefficient
   int<lower=0> prior_start_kappa; // first beta-sample-size regression coefficient
   int<lower=0> prior_start_tau; // first quantile-regression coefficient
-
 

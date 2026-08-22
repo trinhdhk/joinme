@@ -59,8 +59,7 @@ no order. The default is \code{"intercept"} for a shared class formula and
 \code{"none"} for a list of \code{n_classes} class-specific formulae.}
 
 \item{...}{Additional arguments passed to \code{\link[=joinme_standata]{joinme_standata()}}, including
-\code{assoc}, \code{id_var}, \code{marker_var}, \code{time_var}, and
-\code{shrinkage}.}
+\code{assoc}, \code{id_var}, \code{marker_var}, and \code{time_var}.}
 }
 \value{
 If \code{fit = TRUE}, a \code{JoiNMeMixFit} object inheriting from
@@ -96,10 +95,11 @@ p(a_j)=\sum_{g=1}^{G}\pi_g
 D\{a_j;\mu_g,\operatorname{diag}(s_g)\}.
 }
 
-\code{shrinkage = 0}, \code{1}, and \code{2} select Student-\eqn{t_6}, Laplace, and Normal
-latent-class component densities, respectively. These choices do not set
-the ordinary priors for \code{beta}, \code{alpha}, \code{iota}, marker effects or marker
-weights; declare those independently with \code{\link[=jm_prior]{jm_prior()}}. The component locations and scales are
+The latent-class component density is declared through
+\code{jm_prior(class = list(family = ...))} using \code{\link[=prior_student_t]{prior_student_t()}},
+\code{\link[=prior_normal]{prior_normal()}}, or \code{\link[=prior_laplace]{prior_laplace()}}. This choice does not set the ordinary
+priors for longitudinal, association, functional, marker-effect, or
+marker-weight coefficients. The component locations and scales are
 estimated. By default, Stan orders only the first selected random-intercept
 location. Selected slopes and other coordinates remain unrestricted.
 Alternatively, baseline class probabilities may be ordered, or ordering may
@@ -146,7 +146,10 @@ mixed_fit <- joinme_mix(
   n_classes = 3,
   class_type = c("subject", "vcov"),
   formulaClass = ~ treatment + age,
-  priors = jm_prior(class = list(baseline_prob = rep(2, 3))),
+  priors = jm_prior(class = list(
+    baseline_prob = rep(2, 3),
+    family = prior_student_t(df = 6)
+  )),
   assoc = c("cv_total")
 )
 

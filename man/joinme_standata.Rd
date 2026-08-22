@@ -20,7 +20,6 @@ joinme_standata(
   transforms = NULL,
   prior_specification = NULL,
   allow_marker_crosscorr = 1L,
-  shrinkage = 0L,
   basehaz = c("bs", "ns", "formula"),
   basehaz_n_knots = 5L,
   basehaz_knots = NULL,
@@ -155,11 +154,6 @@ supply a population value to simulation. The association slope
 supplies the multiplier for the completed weighted marker feature.}
 
 \item{allow_marker_crosscorr}{Integer flag; 1 allows cross-marker correlation in marker RE.}
-
-\item{shrinkage}{Compatibility flag used by latent-class component
-distributions and simulation: 0 = Student-t(6), 1 = Laplace, and
-2 = Normal. Ordinary coefficient and marker priors are declared separately
-through \code{\link[=jm_prior]{jm_prior()}}.}
 
 \item{basehaz}{Baseline hazard basis type: "bs", "ns", or "formula".}
 

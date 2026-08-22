@@ -117,10 +117,6 @@
 #'   supply a population value to simulation. The association slope
 #'   supplies the multiplier for the completed weighted marker feature.
 #' @param allow_marker_crosscorr Integer flag; 1 allows cross-marker correlation in marker RE.
-#' @param shrinkage Compatibility flag used by latent-class component
-#'   distributions and simulation: 0 = Student-t(6), 1 = Laplace, and
-#'   2 = Normal. Ordinary coefficient and marker priors are declared separately
-#'   through [jm_prior()].
 #' @param flag_resid_dim Integer flag to include residual dimension checks.
 #' @param basehaz Baseline hazard basis type: "bs", "ns", or "formula".
 #' @param basehaz_n_knots Number of internal knots for spline baseline hazards.
@@ -156,7 +152,6 @@ joinme_standata <- function(
   transforms = NULL,
   prior_specification = NULL,
   allow_marker_crosscorr = 1L,
-  shrinkage = 0L,
   # flag_resid_dim = 0L,
   basehaz = c("bs", "ns", "formula"),
   basehaz_n_knots = 5L,
@@ -1252,7 +1247,6 @@ joinme_standata <- function(
     assoc_cs_marker = af$assoc_cs_marker,
     assoc_corr = af$assoc_corr,
     assoc_vcov = af$assoc_vcov,
-    shrinkage = as.integer(shrinkage),
 
     # --------------------------
     # TRANSFORMATIONS

@@ -12,6 +12,7 @@ benchmark_config <- function(
   output_dir = ".artifacts",
   use_mirai = TRUE,
   n_workers = 10L,
+  tmax = 5,
   benchmark_stamp = format(Sys.time(), "%Y%m%d-%H%M%S")
 ) {
   list(
@@ -28,6 +29,7 @@ benchmark_config <- function(
     output_dir = as.character(output_dir),
     use_mirai = isTRUE(use_mirai),
     n_workers = as.integer(n_workers),
+    tmax = as.numeric(tmax),
     benchmark_stamp = as.character(benchmark_stamp)
   )
 }
@@ -70,7 +72,11 @@ output_rds <- file.path(
 
 # Keep the longitudinal basis identical across simulation, joinme, and the
 # per-marker JMbayes2 submodels so term-level recovery compares like with like.
-benchmark_long_basis <- "splines::bs(time, knots = 1, degree = 2)"
+# benchmark_long_basis <- paste0("splines::bs(time, knots = 1, Boundary.knots = c(0, ", cfg$tmax, "), degree = 2)")
+benchmark_long_basis <-
+  paste0(
+    'splines::ns(time, knots = 1, Boundary.knots = c(0, ', cfg$tmax, '))'
+  )
 benchmark_formula_long <- stats::as.formula(
   paste0(
     "y ~ 1 + ",
@@ -84,12 +90,13 @@ benchmark_formula_jm_long <- function(outcome_var) {
   stats::as.formula(paste0(outcome_var, " ~ 1 + ", benchmark_long_basis))
 }
 benchmark_beta_long <- stats::setNames(
-  c(1.0, 0.5, 0.6, 0.7),
-  c("(Intercept)", paste0(benchmark_long_basis, 1:3))
+  # c(1.0, 0.5, 0.6, 0.7),
+  c(1.0, 0.5, 0.2),
+  c("(Intercept)", paste0(benchmark_long_basis, 1:2))
 )
 benchmark_marker_re_params <- list(
-  sd = c(1.0, 0.25, 0.2, 0.15),
-  corr = diag(4)
+  sd = c(1.0, 0.25, 0.2), #0.15),
+  corr = diag(3)
 )
 
 safe_cor <- function(x, y) {
@@ -127,7 +134,7 @@ normalize_marker_draws <- function(marker_draws, marker_levels, marker_terms) {
     marker_draws <- matrix(marker_draws, ncol = length(marker_terms))
   }
   if (!is.matrix(marker_draws)) {
-    stop("sim$true_params$re_draws$marker must be a matrix-like object.")
+    stop("sim$truth$re_draws$marker must be a matrix-like object.")
   }
   if (
     nrow(marker_draws) != length(marker_levels) &&
@@ -137,7 +144,7 @@ normalize_marker_draws <- function(marker_draws, marker_levels, marker_terms) {
   }
   if (nrow(marker_draws) != length(marker_levels)) {
     stop(
-      "Could not align sim$true_params$re_draws$marker with marker levels: ",
+      "Could not align sim$truth$re_draws$marker with marker levels: ",
       nrow(marker_draws),
       " rows for ",
       length(marker_levels),
@@ -146,7 +153,7 @@ normalize_marker_draws <- function(marker_draws, marker_levels, marker_terms) {
   }
   if (ncol(marker_draws) != length(marker_terms)) {
     stop(
-      "Could not align sim$true_params$re_draws$marker with marker terms: ",
+      "Could not align sim$truth$re_draws$marker with marker terms: ",
       ncol(marker_draws),
       " columns for ",
       length(marker_terms),
@@ -159,7 +166,7 @@ normalize_marker_draws <- function(marker_draws, marker_levels, marker_terms) {
 }
 
 infer_marker_terms <- function(sim, marker_levels) {
-  marker_draws <- sim$true_params$re_draws$marker
+  marker_draws <- sim$truth$re_draws$marker
   if (is.data.frame(marker_draws)) {
     marker_draws <- as.matrix(marker_draws)
   }
@@ -178,7 +185,7 @@ infer_marker_terms <- function(sim, marker_levels) {
   }
 
   if (is.null(term_names) || any(!nzchar(term_names))) {
-    beta_names <- names(sim$true_params$beta_long)
+    beta_names <- names(sim$truth$beta_long)
     if (length(beta_names) < term_count) {
       stop(
         "Could not infer marker-level longitudinal terms from simulation truth."
@@ -192,11 +199,11 @@ infer_marker_terms <- function(sim, marker_levels) {
 build_truth_long <- function(sim, marker_levels) {
   marker_terms <- infer_marker_terms(sim, marker_levels)
   marker_draws <- normalize_marker_draws(
-    sim$true_params$re_draws$marker,
+    sim$truth$re_draws$marker,
     marker_levels,
     marker_terms
   )
-  fixed_truth <- as.numeric(sim$true_params$beta_long[marker_terms])
+  fixed_truth <- as.numeric(sim$truth$beta_long[marker_terms])
   fixed_truth[is.na(fixed_truth)] <- 0
   do.call(
     rbind,
@@ -213,7 +220,7 @@ build_truth_long <- function(sim, marker_levels) {
 }
 
 infer_survival_terms <- function(sim) {
-  beta_event <- sim$true_params$beta_event
+  beta_event <- sim$truth$beta_event
   term_names <- names(beta_event)
   if (
     !is.null(term_names) && length(term_names) > 0L && all(nzchar(term_names))
@@ -221,8 +228,8 @@ infer_survival_terms <- function(sim) {
     return(as.character(term_names))
   }
 
-  formula_event <- sim$true_params$formulaEvent %||% sim$truth$formulaEvent
-  event_cols <- colnames(joinme:::.mm_event(formula_event, sim$dataEvent))
+  formula_event <- sim$truth$formulaEvent
+  event_cols <- colnames(stats::model.matrix(formula_event, sim$dataEvent))
   as.character(event_cols %||% character(0))
 }
 
@@ -231,7 +238,7 @@ build_truth_survival <- function(sim) {
   truth_vals <- rep(0, length(survival_terms))
   names(truth_vals) <- survival_terms
 
-  beta_event <- sim$true_params$beta_event
+  beta_event <- sim$truth$beta_event
   if (!is.null(beta_event) && length(beta_event) > 0L) {
     beta_names <- names(beta_event)
     if (!is.null(beta_names) && any(nzchar(beta_names))) {
@@ -255,13 +262,13 @@ build_truth_survival <- function(sim) {
 }
 
 build_truth_assoc <- function(sim, marker_levels) {
-  assoc_coefs <- sim$true_params$assoc_coefs
+  assoc_coefs <- sim$truth$assoc_coefs
   marker_weights_by_term <- null_or(
-    sim$true_params$marker_weights_by_term,
+    sim$truth$marker_weights_by_term,
     list()
   )
   default_weights <- as.numeric(null_or(
-    sim$true_params$marker_weights,
+    sim$truth$marker_weights,
     rep(1, length(marker_levels))
   ))
   cv_marker_weights <- as.numeric(null_or(
@@ -273,9 +280,10 @@ build_truth_assoc <- function(sim, marker_levels) {
   }
   cv_mean_coef <- as.numeric(null_or(assoc_coefs[["cv_mean"]], 0))
   cv_marker_coef <- as.numeric(null_or(assoc_coefs[["cv_marker"]], 0))
+  n_markers <- length(marker_levels) # normalising divisor used by the fitted weighted marker aggregate
   data.frame(
     marker = marker_levels,
-    truth = cv_mean_coef + cv_marker_coef * cv_marker_weights,
+    truth = (cv_mean_coef + cv_marker_coef * cv_marker_weights) / n_markers,
     stringsAsFactors = FALSE
   )
 }
@@ -306,18 +314,21 @@ summarise_draw_array_with_rhat <- function(draw_array, id_col, labels) {
   ) {
     return(data.frame())
   }
-  summary_tbl <- joinme:::.assoc_summary_from_draw_array(
-    draw_array,
-    term_labels = labels,
-    digits = 8
+  dimnames(draw_array)[[3L]] <- labels
+  summary_tbl <- posterior::summarise_draws(
+    posterior::as_draws_array(draw_array),
+    "mean",
+    "sd",
+    ~posterior::quantile2(.x, probs = c(0.025, 0.975)),
+    "rhat"
   )
   out <- data.frame(
     id = labels,
-    estimate = summary_tbl$Estimate,
-    std_error = summary_tbl$Est.Error,
-    conf_low = summary_tbl$Q2.5,
-    conf_high = summary_tbl$Q97.5,
-    rhat = summary_tbl$Rhat,
+    estimate = summary_tbl$mean,
+    std_error = summary_tbl$sd,
+    conf_low = summary_tbl$q2.5,
+    conf_high = summary_tbl$q97.5,
+    rhat = summary_tbl$rhat,
     stringsAsFactors = FALSE
   )
   names(out)[names(out) == "id"] <- id_col
@@ -344,42 +355,40 @@ build_joinme_assoc_coef_draws <- function(
   draws = NULL,
   seed = 1
 ) {
-  fit <- fit_joinme$fit
-  all_vars <- tryCatch(
-    posterior::variables(joinme:::.get_draws_obj(fit)),
-    error = function(e) character(0)
+  association_raw <- tryCatch(
+    extract(
+      fit_joinme,
+      what = "raw",
+      variable = c("alpha_cv_mean", "alpha_cv_marker"),
+      draws = draws,
+      seed = seed,
+      keep_chains = TRUE
+    )$posterior_draws,
+    error = function(error) NULL
   )
-  cv_mean_var <- if ("alpha_cv_mean" %in% all_vars) "alpha_cv_mean" else NULL
-  cv_marker_var <- if ("alpha_cv_marker" %in% all_vars) "alpha_cv_marker" else NULL
+  available_variables <- if (is.null(association_raw)) character(0) else dimnames(association_raw)[[3L]]
+  cv_mean_var <- if ("alpha_cv_mean" %in% available_variables) "alpha_cv_mean" else NULL
+  cv_marker_var <- if ("alpha_cv_marker" %in% available_variables) "alpha_cv_marker" else NULL
 
   cv_mean_arr <- if (!is.null(cv_mean_var)) {
-    joinme:::.get_draws_array(
-      fit,
-      variables = cv_mean_var,
-      draws = draws,
-      seed = seed
-    )
+    association_raw[, , cv_mean_var, drop = FALSE]
   } else {
     NULL
   }
   cv_marker_arr <- if (!is.null(cv_marker_var)) {
-    joinme:::.get_draws_array(
-      fit,
-      variables = cv_marker_var,
-      draws = draws,
-      seed = seed
-    )
+    association_raw[, , cv_marker_var, drop = FALSE]
   } else {
     NULL
   }
   weight_arr <- if (!is.null(cv_marker_var)) {
-    joinme:::.association_marker_weight_array(
+    extract(
       fit_joinme,
-      term_key = "cv_marker",
+      what = "marker_weights",
+      term = "cv_marker",
       draws = draws,
       seed = seed,
-      all_vars = all_vars
-    )
+      keep_chains = TRUE
+    )$posterior_draws
   } else {
     NULL
   }
@@ -420,7 +429,9 @@ build_joinme_assoc_coef_draws <- function(
     }
   }
 
-  joinme:::.assoc_matrix_from_draw_array(out_arr, marker_levels)
+  out_arr <- out_arr / n_markers # convert the mean and marker channels to coefficients of the separate marker trajectories used by JMbayes2
+
+  posterior::as_draws_matrix(posterior::as_draws_array(out_arr))
 }
 
 build_joinme_assoc_coef_array <- function(
@@ -429,42 +440,40 @@ build_joinme_assoc_coef_array <- function(
   draws = NULL,
   seed = 1
 ) {
-  fit <- fit_joinme$fit
-  all_vars <- tryCatch(
-    posterior::variables(joinme:::.get_draws_obj(fit)),
-    error = function(e) character(0)
+  association_raw <- tryCatch(
+    extract(
+      fit_joinme,
+      what = "raw",
+      variable = c("alpha_cv_mean", "alpha_cv_marker"),
+      draws = draws,
+      seed = seed,
+      keep_chains = TRUE
+    )$posterior_draws,
+    error = function(error) NULL
   )
-  cv_mean_var <- if ("alpha_cv_mean" %in% all_vars) "alpha_cv_mean" else NULL
-  cv_marker_var <- if ("alpha_cv_marker" %in% all_vars) "alpha_cv_marker" else NULL
+  available_variables <- if (is.null(association_raw)) character(0) else dimnames(association_raw)[[3L]]
+  cv_mean_var <- if ("alpha_cv_mean" %in% available_variables) "alpha_cv_mean" else NULL
+  cv_marker_var <- if ("alpha_cv_marker" %in% available_variables) "alpha_cv_marker" else NULL
 
   cv_mean_arr <- if (!is.null(cv_mean_var)) {
-    joinme:::.get_draws_array(
-      fit,
-      variables = cv_mean_var,
-      draws = draws,
-      seed = seed
-    )
+    association_raw[, , cv_mean_var, drop = FALSE]
   } else {
     NULL
   }
   cv_marker_arr <- if (!is.null(cv_marker_var)) {
-    joinme:::.get_draws_array(
-      fit,
-      variables = cv_marker_var,
-      draws = draws,
-      seed = seed
-    )
+    association_raw[, , cv_marker_var, drop = FALSE]
   } else {
     NULL
   }
   weight_arr <- if (!is.null(cv_marker_var)) {
-    joinme:::.association_marker_weight_array(
+    extract(
       fit_joinme,
-      term_key = "cv_marker",
+      what = "marker_weights",
+      term = "cv_marker",
       draws = draws,
       seed = seed,
-      all_vars = all_vars
-    )
+      keep_chains = TRUE
+    )$posterior_draws
   } else {
     NULL
   }
@@ -505,7 +514,85 @@ build_joinme_assoc_coef_array <- function(
     }
   }
 
+  out_arr <- out_arr / n_markers # match the marker-count normalisation in the fitted hazard exactly
+
   out_arr
+}
+
+#' Check the marker-weight data-generating parameterisation used by a benchmark
+#'
+#' The comparison is meaningful only when simulation and fitting use the same
+#' latent marker coordinates. This check verifies that a Normal family draw is
+#' inserted directly into the effective weight, with no unrecorded multiplier,
+#' and that the reported effective weights equal offset plus common location
+#' plus that departure. It also guards the marker ordering used by both fitted
+#' models before a computationally expensive replication begins.
+#'
+#' @param simulation Result returned by `simulate_joinme()`.
+#' @param marker_levels Marker labels in the benchmark fitting order.
+#'
+#' @return The unchanged simulation result, suitable as the final expression
+#'   of `simulate_replication()`.
+validate_benchmark_marker_weight_dgp <- function(simulation, marker_levels) {
+  truth <- simulation$truth # complete data-generating record returned by simulate_joinme()
+  direct_departures <- truth$z_marker_weight_sets # set-by-marker departures entering effective weights directly
+  stored_departures <- truth$marker_weight_standardised_sets # same family-transformed coordinates retained for recovery checks
+  if (!is.matrix(direct_departures) || ncol(direct_departures) != length(marker_levels)) {
+    stop("Simulated marker-weight departures do not align with the benchmark markers.")
+  }
+  if (!isTRUE(all.equal(direct_departures, stored_departures, tolerance = 0))) {
+    stop("The simulator has transformed marker-weight departures after drawing them.")
+  }
+  if (!isTRUE(all.equal(as.numeric(t(direct_departures)), truth$marker_weight_prior_raw, tolerance = 0))) {
+    stop("The Normal marker-weight draw no longer matches the coordinate used by the fitted model.")
+  }
+  if (!any(abs(direct_departures) > sqrt(.Machine$double.eps))) {
+    stop("The benchmark requires randomly drawn marker-weight departures, but all departures are zero.")
+  }
+  effective_weights <- as.numeric(truth$marker_weights_by_term$cv_marker) # marker weights that generated the event process
+  declared_offsets <- as.numeric(truth$marker_weights_offset_by_term$cv_marker) # fixed marker-specific reference values
+  common_location <- as.numeric(truth$marker_weight_mean_by_term$cv_marker) # population location drawn once because marker_weight_mean is NULL
+  if (length(common_location) != 1L || !is.finite(common_location)) {
+    stop("The benchmark requires one finite randomly generated marker-weight mean.")
+  }
+  expected_weights <- declared_offsets + common_location + as.numeric(direct_departures[1L, ]) # direct offset-plus-location-plus-departure parameterisation
+  if (!isTRUE(all.equal(effective_weights, expected_weights, tolerance = 1e-12))) {
+    stop("The benchmark marker weights do not follow offset + common location + direct departure.")
+  }
+  if ("marker_weight_scale" %in% names(truth) || "marker_weight_scale" %in% names(truth$stan_fit)) {
+    stop("The simulated truth unexpectedly contains a separate marker-weight scale.")
+  }
+  simulation
+}
+
+#' Summarise the finite-marker realisation of the marker-weight hierarchy
+#'
+#' The population location, average realised departure and average effective
+#' weight are different statistical quantities when only finitely many markers
+#' are sampled. This compact table prevents a recovery benchmark from treating
+#' the realised average weight as if it had to equal its generating population
+#' location. Increasing the number of subjects improves information about the
+#' realised weights, but does not increase the number of marker-level draws
+#' informing their population location.
+#'
+#' @param simulation Result returned by `simulate_joinme()`.
+#' @param term Weighted association term represented in the benchmark.
+#'
+#' @return One-row data frame containing the population location and the two
+#'   finite-marker averages.
+benchmark_marker_weight_truth <- function(simulation, term = "cv_marker") {
+  truth <- simulation$truth # complete data-generating record for this replication
+  population_location <- as.numeric(truth$marker_weight_mean_by_term[[term]]) # location held fixed while markers and subjects are generated
+  realised_departures <- as.numeric(truth$marker_weights_latent_by_term[[term]]) # finite collection of marker-specific random departures
+  effective_weights <- as.numeric(truth$marker_weights_by_term[[term]]) # offset-plus-location-plus-departure values entering the event process
+  data.frame(
+    assoc_term = term,
+    n_markers = length(effective_weights),
+    population_mean_weight = population_location,
+    realised_departure_mean = mean(realised_departures),
+    realised_effective_weight_mean = mean(effective_weights),
+    stringsAsFactors = FALSE
+  )
 }
 
 parse_assoc_marker <- function(x, fallback = NULL) {
@@ -839,32 +926,42 @@ build_rhat_comparison <- function(summary_df, key_cols) {
 }
 
 simulate_replication <- function(seed) {
-  simulate_joinme(
+  simulation <- simulate_joinme(
     formulaLong = benchmark_formula_long,
     formulaEvent = survival::Surv(time, event) ~ x1 + x2,
     n_id = cfg$n_id,
     families = rep("gaussian", cfg$n_markers),
-    times_obs = seq(0, 5, length.out = 5),
-    n_obs_per_marker_per_id = 5,
+    times_obs = seq(0, cfg$tmax, length.out = 5),
     assoc = c("cv_mean", "cv_marker"),
-    assoc_coefs = c(cv_mean = 1, cv_marker = 1),
-    marker_weights = rep(1, cfg$n_markers),
-    fixed_marker_weights = TRUE,
-    shared_marker_weights = TRUE,
-    beta_long = benchmark_beta_long,
-    beta_event = c(-0.5, 0.25),
-    baseline_hazard = list(type = "weibull", shape = 0.8, scale = 12),
-    re_params = list(
-      id = list(sd = c(1)),
-      marker = benchmark_marker_re_params,
-      id_marker_cov = list(
-        latent = list(sd = 1),
-        alpha = c(-0.5),
-        lambda = c(1)
+    truth = jm_truth(
+      longitudinal = list(
+        intercept = benchmark_beta_long["(Intercept)"],
+        slope = benchmark_beta_long[setdiff(names(benchmark_beta_long), "(Intercept)")]
+      ),
+      survival = list(slope = c(x1 = -0.5, x2 = 0.25)),
+      assoc_coef = list(slope = c(cv_mean = 1, cv_marker = 1)),
+      vcov = list(
+        sd = list(intercept = -0.5, latent = 1),
+        corr = list(intercept = numeric(0), latent = numeric(0))
+      ),
+      marker_weights = list(
+        # Centred unit-scale family for the random departures used directly
+        # around the offsets; the association slope supplies hazard magnitude.
+        intercept = 0.5,
+        family = "normal"
+      ),
+      basehaz = list(type = "weibull", shape = 0.8, scale = 12),
+      re_params = list(
+        id = list(sd = c(1)),
+        marker = benchmark_marker_re_params
       )
     ),
     use_mirai = cfg$use_mirai,
     n_workers = cfg$n_workers,
     seed = seed
   )
+  validate_benchmark_marker_weight_dgp(
+    simulation,
+    paste0("m", seq_len(cfg$n_markers))
+  ) # default marker labels generated by simulate_joinme()
 }

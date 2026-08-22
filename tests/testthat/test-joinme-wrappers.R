@@ -301,7 +301,14 @@ test_that("standardised marker priors reject user-supplied location and scale", 
 })
 
 test_that("family-only marker blocks do not send ordinary locations or scales to Stan", {
-  simulated <- simulate_joinme_joint_student_t_cvtotal(n_id = 3, D = 2, n_t = 2, seed = 1204)
+  simulated <- simulate_joinme(
+    n_id = 3,
+    families = rep("student_t", 2),
+    times_obs = seq(0, 5, length.out = 2),
+    censor_longitudinal_after_event = FALSE,
+    seed = 1204,
+    use_mirai = FALSE
+  )
   stan_data <- joinme_standata(
     formulaLong = y ~ 1 + time + x1 +
       (1 + time | id) +
@@ -327,7 +334,14 @@ test_that("family-only marker blocks do not send ordinary locations or scales to
 })
 
 test_that("Student-t marker weights fit their degrees of freedom", {
-  simulated <- simulate_joinme_joint_student_t_cvtotal(n_id = 3, D = 3, n_t = 2, seed = 1205)
+  simulated <- simulate_joinme(
+    n_id = 3,
+    families = rep("student_t", 3),
+    times_obs = seq(0, 5, length.out = 2),
+    censor_longitudinal_after_event = FALSE,
+    seed = 1205,
+    use_mirai = FALSE
+  )
   stan_data <- joinme_standata(
     formulaLong = y ~ 1 + time + x1 +
       (1 + time | id) +

@@ -15,13 +15,12 @@
 #' @keywords internal
 NULL
 
-#' Bytecode instruction registry
+#' Bytecode instruction
 #'
 #' @description
-#' Defines the language-neutral integer protocol shared by the R and Stan
-#' interpreters.  A named registry makes callers independent of package model
-#' objects and gives a future standalone package one place to extend the
-#' instruction set.
+#' Defines the integer protocol shared by the R and Stan
+#' interpreters. The instruction is set in preparation for
+#' reuse in other use cases but unexported for now.
 #'
 #' @return A named integer vector.
 #' @keywords internal
@@ -121,6 +120,116 @@ verify_bytecode <- function(bytecode, const_data) {
     6L, 7L, 8L, 9L, 10L, 11L, 13L, 14L, 15L, 16L, 17L, 18L, 19L,
     20L, 21L, 22L, 23L, 24L, 25L, unname(.bytecode_normal_ops())
   )
+}
+
+#' Reconstruct a mathematical expression from functional bytecode
+#'
+#' @description
+#' Converts the reverse-Polish instruction stream used by the R and Stan
+#' evaluators into an R language object. The reconstruction is intended for
+#' readable printing and inspection: it does not evaluate the transformation.
+#' Arithmetic instructions become ordinary infix calls, whilst elementary
+#' transformations become named function calls such as `exp(x)`,
+#' `inv_logit(x)`, and `Phi(x)`.
+#'
+#' Constants are consumed in exactly the same order as by
+#' `eval_bytecode_scalar()`.` The bytecode verifier is called before decoding,
+#' so malformed programmes fail with the same stack diagnostics as numerical
+#' evaluation. An empty programme denotes the identity transformation `x`.
+#'
+#' @param bytecode Integer bytecode sequence or `NULL` for the identity map.
+#' @param const_data Numeric constants consumed by `PUSH_CONST` instructions.
+#'
+#' @return An R language object representing the scalar transformation.
+#' @keywords internal
+#' @noRd
+.bytecode_as_expression <- function(bytecode = NULL, const_data = numeric()) {
+  # Normalise the programme first so earlier one-operation representations are
+  # interpreted in precisely the same way as by the numerical evaluator.
+  program <- .normalize_bytecode_program(
+    bytecode = bytecode,
+    const_data = const_data
+  )
+  code <- program$bytecode # ordered reverse-Polish instruction sequence
+  constants <- program$const_data # numerical literals paired with constant instructions
+
+  if (length(code) == 0L) {
+    return(quote(x))
+  }
+  verify_bytecode(code, constants)
+
+  # Canonical printed names are deliberately stable even when the parser
+  # accepts several aliases. For example, expit and sigmoid are both shown as
+  # inv_logit, and pnorm is shown as Phi, matching the Stan mathematics.
+  unary_function <- c(
+    `6` = "log",
+    `7` = "exp",
+    `8` = "sqrt",
+    `9` = "inv_logit",
+    `10` = "logit",
+    `13` = "sin",
+    `14` = "cos",
+    `15` = "tan",
+    `16` = "abs",
+    `18` = "sinh",
+    `19` = "cosh",
+    `20` = "tanh",
+    `21` = "asinh",
+    `22` = "acosh",
+    `23` = "atanh",
+    `24` = "log1p_exp",
+    `25` = "cbrt",
+    `26` = "Phi",
+    `27` = "inv_Phi"
+  ) # function name indexed by unary instruction number
+  binary_operator <- c(
+    `2` = "+",
+    `3` = "-",
+    `4` = "*",
+    `5` = "/",
+    `12` = "^"
+  ) # infix operator indexed by binary instruction number
+
+  expression_stack <- list() # partially reconstructed expressions in evaluation order
+  constant_index <- 1L # next numerical literal consumed by a constant instruction
+
+  for (operation in code) {
+    if (operation == 0L) {
+      expression_stack[[length(expression_stack) + 1L]] <- quote(x)
+      next
+    }
+    if (operation == 1L) {
+      expression_stack[[length(expression_stack) + 1L]] <- constants[[constant_index]]
+      constant_index <- constant_index + 1L
+      next
+    }
+
+    stack_size <- length(expression_stack) # number of available expression operands
+    if (operation %in% as.integer(names(binary_operator))) {
+      left_operand <- expression_stack[[stack_size - 1L]] # first operand emitted by the parser
+      right_operand <- expression_stack[[stack_size]] # second operand emitted by the parser
+      expression_stack <- expression_stack[seq_len(stack_size - 2L)]
+      expression_stack[[length(expression_stack) + 1L]] <- as.call(list(
+        as.name(binary_operator[[as.character(operation)]]),
+        left_operand,
+        right_operand
+      ))
+      next
+    }
+
+    operand <- expression_stack[[stack_size]] # sole operand of a unary transformation
+    if (operation == 11L) {
+      reconstructed <- call("/", 1, operand) # reciprocal is printed in familiar mathematical form
+    } else if (operation == 17L) {
+      reconstructed <- call("^", operand, 2) # square instruction is equivalent to an explicit power
+    } else {
+      function_name <- unary_function[[as.character(operation)]]
+      reconstructed <- as.call(list(as.name(function_name), operand))
+    }
+    expression_stack[[stack_size]] <- reconstructed
+  }
+
+  expression_stack[[1L]]
 }
 
 #' Evaluate bytecode for a scalar input

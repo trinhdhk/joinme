@@ -192,9 +192,6 @@ Distributional regression can be specified in two equivalent forms:
 \item An unnamed list with explicit LHS parameter names, e.g. \code{list(sigma ~ 1 + time)}.
 }
 
-The time axis is internally scaled for numerical stability; reported coefficients
-are rescaled within Stan so fixed effects remain interpretable on the original scale.
-
 Marker weights (see \code{joinme_standata()}) are used to form marker-average summaries
 for both current value (CV) and current slope (CS) association components. When
 \code{priors$marker_weights$shared = TRUE}, all weighted marker-based association terms share
@@ -213,8 +210,8 @@ numeric value retains the ordinary prior-scale shorthand. The marker-only
 current-value and slope channels can supply little
 information about a common shift when the average centred marker trajectory
 is close to zero, so this location prior is substantively important. The family
-name \code{"student_t"} learns set-specific degrees of freedom; each excess above
-two has a \code{Gamma(2, 0.1)} shape--rate prior. A
+name \code{"student_t"} learns a single degrees-of-freedom value shared across all
+weight sets; its excess above two has a \code{Gamma(2, 0.1)} shape--rate prior. A
 \code{prior_student_t(df = ...)} declaration always fixes \code{df} instead. The
 family names \code{"constant"} and \code{"none"} instead use the declared offset as
 the complete marker weight and fit neither a common mean nor departures. The
@@ -312,7 +309,7 @@ should fall as the raw association feature increases.
 \item \code{x}: raw association-feature values used either to define training pairs or
 to help derive knot locations.
 \item \code{y}: optional target transformed values at those \code{x} points. Supplying \code{y}
-activates the plug-in fit; omitting it activates Stan estimation.
+activates the plug-in fit; omitting it uses built-in Stan estimation.
 \item \code{lambda}: smoothness control (larger = smoother transform).
 \item \code{direction}: monotone orientation for penalised spline families. Accepted
 values are \code{"increasing"} and \code{"decreasing"}. When \code{y} is supplied, the
@@ -335,7 +332,7 @@ dividing by sqrt of the second moment.
 }
 
 Additional arguments are forwarded to \code{joinme_standata()} (e.g., \code{assoc},
-\code{basehaz}, \code{basehaz_degree}, \code{n_knots}, \code{time_var}, and \code{shrinkage}). Use
+\code{basehaz}, \code{basehaz_degree}, \code{n_knots}, and \code{time_var}). Use
 lme4-style \code{||} in \code{formulaLong} to request diagonal random-effect covariance.
 }
 \examples{

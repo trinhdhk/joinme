@@ -67,7 +67,7 @@ normalize_marker_draws <- function(marker_draws, marker_levels, marker_terms) {
     marker_draws <- matrix(marker_draws, ncol = length(marker_terms))
   }
   if (!is.matrix(marker_draws)) {
-    stop("sim$true_params$re_draws$marker must be a matrix-like object.")
+    stop("sim$truth$re_draws$marker must be a matrix-like object.")
   }
 
   if (nrow(marker_draws) != length(marker_levels) && ncol(marker_draws) == length(marker_levels)) {
@@ -75,14 +75,14 @@ normalize_marker_draws <- function(marker_draws, marker_levels, marker_terms) {
   }
   if (nrow(marker_draws) != length(marker_levels)) {
     stop(
-      "Could not align sim$true_params$re_draws$marker with marker levels: ",
+      "Could not align sim$truth$re_draws$marker with marker levels: ",
       nrow(marker_draws), " rows for ", length(marker_levels), " markers."
     )
   }
 
   if (ncol(marker_draws) != length(marker_terms)) {
     stop(
-      "Could not align sim$true_params$re_draws$marker with marker terms: ",
+      "Could not align sim$truth$re_draws$marker with marker terms: ",
       ncol(marker_draws), " columns for ", length(marker_terms), " terms."
     )
   }
@@ -131,9 +131,9 @@ parse_assoc_marker <- function(x, fallback = NULL) {
 }
 
 build_truth_assoc <- function(sim, marker_levels) {
-  assoc_coefs <- sim$true_params$assoc_coefs
-  marker_weights_by_term <- null_or(sim$true_params$marker_weights_by_term, list())
-  default_weights <- as.numeric(null_or(sim$true_params$marker_weights, rep(1, length(marker_levels))))
+  assoc_coefs <- sim$truth$assoc_coefs
+  marker_weights_by_term <- null_or(sim$truth$marker_weights_by_term, list())
+  default_weights <- as.numeric(null_or(sim$truth$marker_weights, rep(1, length(marker_levels))))
   cv_marker_weights <- as.numeric(null_or(marker_weights_by_term$cv_marker, default_weights))
   if (length(cv_marker_weights) != length(marker_levels)) {
     stop("cv_marker weights do not align with marker levels.")
@@ -151,14 +151,14 @@ build_truth_assoc <- function(sim, marker_levels) {
 }
 
 infer_survival_terms <- function(sim) {
-  beta_event <- sim$true_params$beta_event
+  beta_event <- sim$truth$beta_event
   term_names <- names(beta_event)
   if (!is.null(term_names) && length(term_names) > 0L && all(nzchar(term_names))) {
     return(as.character(term_names))
   }
 
-  formula_event <- sim$true_params$formulaEvent %||% sim$truth$formulaEvent
-  event_cols <- colnames(joinme:::.mm_event(formula_event, sim$dataEvent))
+  formula_event <- sim$truth$formulaEvent
+  event_cols <- colnames(stats::model.matrix(formula_event, sim$dataEvent))
   as.character(event_cols %||% character(0))
 }
 
@@ -167,7 +167,7 @@ build_truth_survival <- function(sim) {
   truth_vals <- rep(0, length(survival_terms))
   names(truth_vals) <- survival_terms
 
-  beta_event <- sim$true_params$beta_event
+  beta_event <- sim$truth$beta_event
   if (!is.null(beta_event) && length(beta_event) > 0L) {
     beta_names <- names(beta_event)
     if (!is.null(beta_names) && any(nzchar(beta_names))) {
@@ -229,23 +229,22 @@ sim <- simulate_joinme(
   n_id = cfg$n_id,
   families = rep("gaussian", cfg$n_markers),
   times_obs = seq(0, 4, length.out = 5),
-  n_obs_per_marker_per_id = 5,
   assoc = c("cv_mean", "cv_marker"),
-  assoc_coefs = c(cv_mean = 1, cv_marker = 0.5),
-  marker_weights = rep(1, cfg$n_markers),
-  fixed_marker_weights = TRUE,
-  shared_marker_weights = TRUE,
-  beta_long = c(-1, 0.5),
-  beta_event = c(-0.5, 0.25),
-  re_params = list(
-    id = list(sd = c(1)),
-    marker = list(sd = c(1, 0.25), corr = matrix(c(1, -0.25, -0.25, 1), ncol=2)),
-    id_marker_cov = list(
-        latent = list(
-            sd = 1
-        ),
-        alpha = c(-0.5),
-        lambda = c(1)
+  truth = jm_truth(
+    longitudinal = c(-1, 0.5),
+    survival = list(slope = c(x1 = -0.5, x2 = 0.25)),
+    assoc_coef = list(slope = c(cv_mean = 1, cv_marker = 0.5)),
+    vcov = list(
+      sd = list(intercept = -0.5, latent = 1),
+      corr = list(intercept = numeric(0), latent = numeric(0))
+    ),
+    marker_weights = list(
+      offset = rep(1, cfg$n_markers),
+      family = "normal"
+    ),
+    re_params = list(
+      id = list(sd = c(1)),
+      marker = list(sd = c(1, 0.25), corr = matrix(c(1, -0.25, -0.25, 1), ncol = 2))
     )
   ),
   use_mirai = TRUE,
@@ -266,9 +265,12 @@ JoiNMe_elapsed <- system.time({
     dataEvent = sim$dataEvent,
     assoc = c("cv_mean", "cv_marker"),
     families = rep("gaussian", cfg$n_markers),
-    marker_weights = rep(1, cfg$n_markers),
-    fixed_marker_weights = TRUE,
-    shared_marker_weights = TRUE,
+    priors = jm_prior(
+      marker_weights = list(
+        offset = rep(1, cfg$n_markers),
+        family = "normal"
+      )
+    ),
     control = list(
       engine = "cmdstanr",
       chains = 2,
@@ -288,11 +290,11 @@ JoiNMe_elapsed <- system.time({
 JoiNMe_coef <- coef(fit_JoiNMe, summary = TRUE)
 marker_terms <- unique(as.character(JoiNMe_coef$formulaLong$marker$term))
 marker_draws <- normalize_marker_draws(
-  marker_draws = sim$true_params$re_draws$marker,
+  marker_draws = sim$truth$re_draws$marker,
   marker_levels = marker_levels,
   marker_terms = marker_terms
 )
-fixed_truth <- as.numeric(sim$true_params$beta_long[marker_terms])
+fixed_truth <- as.numeric(sim$truth$beta_long[marker_terms])
 fixed_truth[is.na(fixed_truth)] <- 0
 truth_long <- do.call(rbind, lapply(marker_levels, function(marker_label) {
   data.frame(

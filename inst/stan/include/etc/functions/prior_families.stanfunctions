@@ -13,7 +13,7 @@
  * and rstanarm. Local and global positive Student-t scales form the ordinary
  * horseshoe. A finite inverse-gamma slab variable regularises the tails. This
  * prevents a very large local scale from producing an effectively unbounded
- * coefficient whilst retaining strong shrinkage close to zero.
+ * coefficient whilst retaining strong regularisation close to zero.
  */
 
 /**
@@ -122,8 +122,8 @@ real joinme_standard_prior_lpdf(
  * `mu[j] + scale[j] * raw[j]`.  For a regularised horseshoe, the same stated
  * scale multiplies a group-global scale and a coefficient-local scale.  A
  * finite slab regularises the upper tail.  Horseshoe groups are component-role
- * groups, not one global group for all model coefficients; hence shrinkage in
- * (say) a covariance regression cannot inadvertently determine shrinkage of a
+ * groups, not one global group for all model coefficients; hence regularisation in
+ * (say) a covariance regression cannot inadvertently determine regularisation of a
  * longitudinal slope.
  *
  * @param raw_parameter Packed zero-centred raw regression parameters.

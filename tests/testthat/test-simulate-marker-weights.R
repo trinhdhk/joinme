@@ -1,17 +1,17 @@
-test_that("standardized shrinkage draws match all three Stan families", {
+test_that("standardised component draws follow jm_prior families", {
   set.seed(7301)
-  got_t <- .sim_draw_standard_shrinkage(8, 0L)
+  got_t <- .sim_draw_standard_component(8, prior_student_t(df = 4))
   set.seed(7301)
-  expect_equal(got_t, stats::rt(8, df = 6))
+  expect_equal(got_t, stats::rt(8, df = 4))
 
   set.seed(7302)
-  got_laplace <- .sim_draw_standard_shrinkage(8, 1L)
+  got_laplace <- .sim_draw_standard_component(8, prior_laplace())
   set.seed(7302)
   expected_laplace <- sample(c(-1, 1), 8, replace = TRUE) * stats::rexp(8, rate = 1)
   expect_equal(got_laplace, expected_laplace)
 
   set.seed(7303)
-  got_normal <- .sim_draw_standard_shrinkage(8, 2L)
+  got_normal <- .sim_draw_standard_component(8, prior_normal())
   set.seed(7303)
   expect_equal(got_normal, stats::rnorm(8))
 })
@@ -22,7 +22,6 @@ test_that("simulate_joinme stores base, mean, departure, and effective marker-we
     families = rep("gaussian", 3),
     times_obs = c(0, 0.5, 1),
     time_cens = 1,
-    shrinkage = 1L,
     truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0)),
       marker_weights = list(
         offset = c(m1 = 0.5, m2 = -0.25, m3 = 1),
@@ -37,8 +36,6 @@ test_that("simulate_joinme stores base, mean, departure, and effective marker-we
 
   truth <- sim$truth
   expect_false("true_params" %in% names(sim))
-  expect_equal(truth$shrinkage, 1L)
-  expect_equal(truth$shrinkage_distribution, "double_exponential(0, 1)")
   expect_equal(truth$marker_weight_prior_family, "laplace")
   expect_identical(truth$marker_weight_prior_family, "laplace")
   expect_equal(
@@ -103,7 +100,6 @@ test_that("simulate_joinme uses zero offsets for estimated weights and constant 
     families = rep("gaussian", 2),
     times_obs = c(0, 0.5),
     time_cens = 0.5,
-    shrinkage = 2L,
     truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0)),
       marker_weights = list(family = "normal")
     ),
@@ -112,7 +108,6 @@ test_that("simulate_joinme uses zero offsets for estimated weights and constant 
     use_mirai = FALSE
   )
   expect_equal(unname(estimated$truth$marker_weights_offset), c(0, 0))
-  expect_equal(estimated$truth$shrinkage_distribution, "normal(0, 1)")
   expect_equal(estimated$truth$marker_weight_prior_family, "normal")
 
   supplied <- c(m1 = 2, m2 = -1)
@@ -124,7 +119,6 @@ test_that("simulate_joinme uses zero offsets for estimated weights and constant 
     truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0)),
       marker_weights = list(offset = supplied, family = "constant")
     ),
-    shrinkage = 0L,
     assoc = "cv_total",
     seed = 7306,
     use_mirai = FALSE
@@ -148,7 +142,6 @@ test_that("term-specific simulated weights use Stan's flattened set layout", {
         shared = FALSE
       )
     ),
-    shrinkage = 0L,
     assoc = c("cv_total", "cv_marker"),
     seed = 7307,
     use_mirai = FALSE
@@ -249,10 +242,6 @@ test_that("simulate_joinme validates marker-weight declarations", {
   expect_error(
     jm_prior(marker_weights = list(offset = c(m1 = 1, 2))),
     "wholly named or wholly unnamed"
-  )
-  expect_error(
-    simulate_joinme(n_id = 2, shrinkage = 3L),
-    "shrinkage"
   )
   expect_error(
     simulate_joinme(n_id = 2, marker_weight_scale = 1, use_mirai = FALSE),

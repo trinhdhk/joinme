@@ -116,7 +116,8 @@ if (use_mixture == 1) {
                 mix_location[group],
                 mix_scale[group],
                 mix_start_subject,
-                shrinkage
+                mix_component_family,
+                mix_component_df
               );
         }
         // The ordinary submodel priors have already added this standard-Normal
@@ -142,11 +143,12 @@ if (use_mixture == 1) {
                 mix_location[group],
                 mix_scale[group],
                 mix_start_covariance,
-                shrinkage
+                mix_component_family,
+                mix_component_df
               );
         }
         // Covariance-regression latent terms also have a standard-Normal
-        // ordinary prior. The shrinkage switch changes only their selected
+        // ordinary prior. The class-family declaration changes only their selected
         // replacement component family.
         target += -re_weight_L[subject]
           * std_normal_lpdf(selected_covariance_effect);
@@ -188,7 +190,8 @@ if (use_mixture == 1) {
               mix_location[group],
               mix_scale[group],
               mix_start_marker,
-              shrinkage
+              mix_component_family,
+              mix_component_df
             );
       }
       // The ordinary marker prior may now be Normal, Student-t, Laplace or a

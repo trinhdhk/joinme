@@ -7,7 +7,7 @@ compute_bfmi <- function(energy_mat) {
   })
 }
 
-fit_one <- function(sim, fixed_marker_weights, label, seed_fit) {
+fit_one <- function(sim, marker_weight_family, label, seed_fit) {
   fit <- joinme(
     formulaLong = y ~ 1 + time + x1 + (1 + time | id) + (0 + x1 + (1 + time | id) | marker),
     dataLong = sim$dataLong,
@@ -15,8 +15,10 @@ fit_one <- function(sim, fixed_marker_weights, label, seed_fit) {
     dataEvent = sim$dataEvent,
     assoc = c("cv_mean", "cv_marker"),
     families = rep("gaussian", 3),
-    fixed_marker_weights = fixed_marker_weights,
-    marker_weights = sim$truth$marker_weights,
+    priors = jm_prior(marker_weights = list(
+      offset = sim$truth$marker_weights,
+      family = marker_weight_family
+    )),
     control = list(
       engine = "cmdstanr",
       chains = 2,
@@ -39,7 +41,7 @@ fit_one <- function(sim, fixed_marker_weights, label, seed_fit) {
 
   out <- data.frame(
     label = label,
-    fixed_marker_weights = fixed_marker_weights,
+    marker_weight_family = marker_weight_family,
     ebfmi_chain1 = d$ebfmi[1],
     ebfmi_chain2 = d$ebfmi[2],
     div_chain1 = d$num_divergent[1],
@@ -58,15 +60,15 @@ sim <- simulate_joinme(
   formulaLong = y ~ 1 + time + x1 + (1 + time | id) + (0 + x1 + (1 + time | id) | marker),
   formulaEvent = survival::Surv(time, event) ~ x2,
   families = rep("gaussian", 3),
-  n_obs_per_marker_per_id = 8,
   times_obs = seq(0, 6, length.out = 10),
-  beta_long = c("(Intercept)" = 0.8, "time" = 0.6, "x1" = 0.5),
-  beta_event = c("x2" = 0.1),
   assoc = c("cv_mean", "cv_marker"),
-  assoc_coefs = c(cv_mean = 0.3, cv_marker = 0.1),
-  marker_weights = c(1, 2, 1),
-  fixed_marker_weights = TRUE,
-  baseline_hazard = list(type = "weibull", shape = 1.1, scale = 10),
+  truth = jm_truth(
+    longitudinal = c("(Intercept)" = 0.8, "time" = 0.6, "x1" = 0.5),
+    survival = list(slope = c(x2 = 0.1)),
+    assoc_coef = list(slope = c(cv_mean = 0.3, cv_marker = 0.1)),
+    marker_weights = list(offset = c(1, 2, 1), family = "constant"),
+    basehaz = list(type = "weibull", shape = 1.1, scale = 10)
+  ),
   seed = 20260303,
   time_cens = 10,
   use_mirai = TRUE,
@@ -75,8 +77,8 @@ sim <- simulate_joinme(
 
 cat("event_rate:", mean(sim$dataEvent$event), "\n")
 
-res_free <- fit_one(sim, fixed_marker_weights = FALSE, label = "free_weights", seed_fit = 20260320)
-res_fixed <- fit_one(sim, fixed_marker_weights = TRUE, label = "fixed_weights", seed_fit = 20260321)
+res_free <- fit_one(sim, marker_weight_family = "normal", label = "fitted_weights", seed_fit = 20260320)
+res_fixed <- fit_one(sim, marker_weight_family = "constant", label = "constant_weights", seed_fit = 20260321)
 
 cat("\n===== WEIGHT IDENTIFICATION COMPARISON =====\n")
 print(rbind(res_free, res_fixed))

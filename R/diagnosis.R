@@ -2335,7 +2335,7 @@ JMbayes2::tvAUC
 	} else {
 		# For cause-specific ROC analysis, administrative censoring and competing
 		# events terminate observation of the requested cause.  Requested-cause
-		# events after the horizon remain failures, rather than censoring events,
+		# events after the horizon would fail, rather than censoring events,
 		# when estimating the censoring distribution.
 		cause_failure <- risk_set$event_status == 1L &
 			risk_set$event_type == cause

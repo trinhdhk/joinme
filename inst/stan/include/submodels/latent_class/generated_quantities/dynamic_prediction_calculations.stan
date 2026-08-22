@@ -39,7 +39,8 @@ if (
             dynamic_mix_location[fitted_draw][group],
             dynamic_mix_scale[fitted_draw][group],
             dynamic_mix_start_subject,
-            dynamic_mix_family
+            dynamic_mix_component_family,
+            dynamic_mix_component_df
           );
       }
     }
@@ -57,7 +58,8 @@ if (
             dynamic_mix_location[fitted_draw][group],
             dynamic_mix_scale[fitted_draw][group],
             dynamic_mix_start_covariance,
-            dynamic_mix_family
+            dynamic_mix_component_family,
+            dynamic_mix_component_df
           );
       }
     }
@@ -92,7 +94,8 @@ if (
             dynamic_mix_location[fitted_draw][group],
             dynamic_mix_scale[fitted_draw][group],
             dynamic_mix_start_marker,
-            dynamic_mix_family
+            dynamic_mix_component_family,
+            dynamic_mix_component_df
           );
       }
 

@@ -25,6 +25,7 @@
 *.html
 *.pdf
 *.png
+*.hpp
 
 
 # Editor/IDE

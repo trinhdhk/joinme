@@ -170,7 +170,7 @@
   int<lower=1, upper=4> prior_marker_family; // family of standardised marker random effects
   real<lower=0> prior_marker_df; // fixed Student-t degrees of freedom for marker effects
   real<lower=0> prior_marker_global_df; // unit-default horseshoe global degrees of freedom for marker effects
-  real<lower=0> prior_marker_global_scale; // configured horseshoe global shrinkage scale for marker effects
+  real<lower=0> prior_marker_global_scale; // configured horseshoe global regularisation scale for marker effects
   real<lower=0> prior_marker_slab_df; // fixed horseshoe slab degrees of freedom for marker effects
   real<lower=0> prior_marker_slab_scale; // configured finite-slab scale for marker effects
 
@@ -181,5 +181,4 @@
    * original time when calculating current slopes. Longitudinal designs and
    * their coefficients already use original time and need no index metadata. */
   real<lower=0> tmax; // maximum event time converting scaled integration differences to original-time derivatives
-
 

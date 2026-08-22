@@ -39,7 +39,8 @@ if (use_dynamic_mixture == 1) {
               dynamic_mix_location[fitted_draw][group],
               dynamic_mix_scale[fitted_draw][group],
               dynamic_mix_start_subject,
-              dynamic_mix_family
+              dynamic_mix_component_family,
+              dynamic_mix_component_df
             );
         }
         target += -std_normal_lpdf(selected_subject_effect);
@@ -58,7 +59,8 @@ if (use_dynamic_mixture == 1) {
               dynamic_mix_location[fitted_draw][group],
               dynamic_mix_scale[fitted_draw][group],
               dynamic_mix_start_covariance,
-              dynamic_mix_family
+              dynamic_mix_component_family,
+              dynamic_mix_component_df
             );
         }
         target += -std_normal_lpdf(selected_covariance_effect);
@@ -92,7 +94,8 @@ if (use_dynamic_mixture == 1) {
               dynamic_mix_location[fitted_draw][group],
               dynamic_mix_scale[fitted_draw][group],
               dynamic_mix_start_marker,
-              dynamic_mix_family
+              dynamic_mix_component_family,
+              dynamic_mix_component_df
             );
         }
 

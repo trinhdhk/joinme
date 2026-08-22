@@ -35,10 +35,11 @@ test_that("JoiNMe supports expit-based penalised spline transforms end to end", 
     formulaEvent = survival::Surv(time, event) ~ 1,
     families = c("gaussian", "gaussian", "gaussian"),
     n_id = 500,
-    n_obs_per_marker_per_id = 10,
     times_obs = seq(0, 10, length.out = 10),
     assoc = "vcov",
-    assoc_coefs = list(vcov = c(2, -1, -1)),
+    truth = jm_truth(assoc_coef = list(slope = c(
+      "vcov[1]" = 2, "vcov[2]" = -1, "vcov[3]" = -1
+    ))),
     # transforms = sim_tf,
     transform = joinme_tf(
       vcov = ~ log(1+exp(x))

@@ -248,7 +248,7 @@ coverage, baseline and covariate-dependent class-probability recovery,
 posterior probability assigned to the true class, entropy, multiclass proper
 scores, outcome prediction, survival discrimination and convergence.
 Simulation factors should include component overlap, rare classes, sample
-size, marker count, response families, shrinkage family, censoring,
+size, marker count, response families, class-component family, censoring,
 association strength and fitted class-count misspecification.
 
 # Base JoiNMe model
@@ -578,13 +578,14 @@ a_{rk}\mid C_r=g,\mu_{gk},s_{gk}
 \qquad k\in\mathcal K.
 \]
 
-The component family is selected through the existing `shrinkage` convention:
+The component family is declared in the same prior hierarchy as the other
+fitted distributions:
 
-| `shrinkage` | component \(D_\nu\) |
-|---:|---|
-| 0 | Student-\(t\), 6 degrees of freedom |
-| 1 | Laplace |
-| 2 | Normal |
+| `jm_prior()` declaration | component \(D_\nu\) |
+|---|---|
+| `class = list(family = prior_student_t(df = nu))` | Student-\(t_\nu\) |
+| `class = list(family = prior_normal())` | Normal |
+| `class = list(family = prior_laplace())` | Laplace |
 
 The finite mixture is
 
@@ -622,8 +623,9 @@ public anchor-scale controls.
 The simplex supplies the intercept. One formula uses class \(G\) as the
 reference category; a list of \(G\) formulae supplies separate, compact
 class-specific predictors and defaults to no ordering.
-`jm_prior(class = list(baseline_prob = ..., slope = ...))` supplies
-\(\boldsymbol\alpha_\pi\) and an independent
+`jm_prior(class = list(baseline_prob = ..., slope = ..., family = ...))`
+supplies \(\boldsymbol\alpha_\pi\), the class-regression prior, and the
+within-class component distribution. The class-regression coefficients have an independent
 Normal, fixed-degrees-of-freedom Student-t, Laplace, or regularised horseshoe
 prior for the regression coefficients. Coefficient-specific locations and
 scales follow subject-domain then marker-domain design order.

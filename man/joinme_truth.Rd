@@ -85,9 +85,11 @@ effects. Its location and ordinary scale must remain zero and one.}
 \item{lkj}{An object created by \code{\link[=prior_lkj]{prior_lkj()}}. Its concentration governs each
 random-effect correlation matrix drawn when \code{re_params} omits \code{corr}.}
 
-\item{class}{A named list containing \code{baseline_prob} and \code{slope}, following
-the class-membership roles accepted by \code{\link[=jm_prior]{jm_prior()}}. The slope may be fixed
-or drawn once for each simulation.}
+\item{class}{A named list containing \code{baseline_prob}, \code{slope}, and \code{family},
+following the class roles accepted by \code{\link[=jm_prior]{jm_prior()}}. The slope may be fixed
+or drawn once for each simulation. The family is a probability declaration
+governing every standardised latent coordinate drawn conditionally on its
+class; it is not itself a population coefficient draw.}
 
 \item{basehaz}{Baseline-hazard truth. Supply a hazard function, a formula in
 \code{time}, a character family name, or a named list such as

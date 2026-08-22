@@ -179,5 +179,5 @@ plot(treatment_over_time, condition_variable = "time")
 
 }
 \seealso{
-\code{\link[=conditional_effects.JoiNMeFit]{conditional_effects.JoiNMeFit()}}, \code{\link[brms:make_conditions]{make_conditions()}}
+\code{\link[=conditional_effects.JoiNMeFit]{conditional_effects.JoiNMeFit()}}, \code{\link[=make_conditions]{make_conditions()}}
 }

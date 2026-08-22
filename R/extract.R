@@ -385,7 +385,7 @@ extract.JoiNMeFit <- function(object,
   # These three selectors own the complete draw-level inputs used by the
   # posterior-summary layer and corresponding high-level coefficient methods. They deliberately return
   # scientific structures rather than Stan storage coordinates. The shorter
-  # `what = "fixef"` selector below remains the longitudinal design-matrix
+  # `what = "fixef"` selector remains the longitudinal design-matrix
   # component and is useful when a rectangular posterior object is required.
   if (what %in% c("fixed_effects", "random_effects", "coefficients")) {
     structured_draws <- switch(

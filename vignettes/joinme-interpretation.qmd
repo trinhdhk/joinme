@@ -172,10 +172,7 @@ For a `JoiNMeMixFit`, a class is a component of the selected random-effect distr
 
 # Conditional effects
 
-`conditional_effects()` describes fitted outcomes while selected predictors
-vary and the remaining predictors are held at declared values. It is useful
-for displaying nonlinear terms, interactions and response-scale trajectories.
-It does not itself compare two groups.
+`conditional_effects()` describes fitted outcomes while selected predictors vary and the remaining predictors are held at declared values. It is useful for displaying nonlinear terms, interactions and response-scale trajectories.
 
 ```r
 profiles <- data.frame(

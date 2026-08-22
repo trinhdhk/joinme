@@ -34,11 +34,7 @@ softplus <- function(x) {
 #' Numerical root finding can return the lower boundary of an event-time
 #' interval when the underlying event occurs closer to zero than the solver's
 #' tolerance.  A counting-process likelihood requires a strictly positive
-#' interval length.  This helper moves an exactly tied stop time by a
-#' scientifically negligible distance that remains representable on the time
-#' scale.  Stops below their starts are deliberately left unchanged so that a
-#' genuinely invalid interval is still rejected by [joinme_standata()].
-#'
+#' interval length.
 #' @param interval_start Numeric vector of event-interval start times.
 #' @param interval_stop Numeric vector of event-interval stop times.
 #' @param absolute_offset Small positive separation used near time zero.
@@ -85,22 +81,27 @@ softplus <- function(x) {
   interval_stop
 }
 
-#' Draw standardised shrinkage latents
+#' Draw standardised latent-class component innovations
 #'
 #' @param n Number of draws.
-#' @param shrinkage Integer family code: 0 Student-t(6), 1 Laplace, 2 Normal.
+#' @param family A checked `joinme_prior_spec` declaring a centred unit-scale
+#'   Student-t, Normal, or Laplace component distribution.
 #' @return Numeric vector of standardised draws.
 #' @keywords internal
 #' @noRd
-.sim_draw_standard_shrinkage <- function(n, shrinkage) {
+.sim_draw_standard_component <- function(n, family) {
   n <- as.integer(n)
   if (n <= 0L) return(numeric(0))
-  if (shrinkage == 1L) {
+  if (!inherits(family, "joinme_prior_spec")) {
+    cli::cli_abort("The latent-class component family must be a JoiNMe prior declaration.")
+  }
+  if (identical(family$family, "laplace")) {
     # Inverse-CDF construction for double_exponential(0, 1).
     return(sample(c(-1, 1), n, replace = TRUE) * stats::rexp(n, rate = 1))
   }
-  if (shrinkage == 2L) return(stats::rnorm(n))
-  stats::rt(n, df = 6)
+  if (identical(family$family, "normal")) return(stats::rnorm(n))
+  if (identical(family$family, "student_t")) return(stats::rt(n, df = family$df))
+  cli::cli_abort("The latent-class component family must use prior_student_t(), prior_normal(), or prior_laplace().")
 }
 
 #' Draw marker-weight departures from a declared prior family
@@ -465,285 +466,6 @@ weibull_h0 <- function(shape = 1.4, scale = 6.0) {
   if (f_upper >= 0) list(lower = lower, upper = upper) else NULL
 }
 
-#' Simulate joint data (Student-t longitudinal; CV_total survival association)
-#'
-#' @param n_id Number of subjects.
-#' @param D Number of markers.
-#' @param n_t Measurements per (id, marker).
-#' @param seed RNG seed.
-#' @param include_marker_only Include marker-only random effects block.
-#' @param Q_idm Dimension of marker-by-id basis.
-#' @param R_id Dimension of id-level basis.
-#' @param R_mk Dimension of marker-only basis.
-#' @param beta Fixed effects (Intercept, time, x1) on original scale.
-#' @param gamma_w Hazard covariates (e.g. x1, x2).
-#' @param alpha_cv_total Association coefficient for CV_total.
-#' @param h0 Baseline hazard function h0(t).
-#' @param time_cens Administrative censoring time.
-#' @param nu Student-t df.
-#' @param sigma_y Student-t scale.
-#' @param sigma_fun Optional function to generate observation-level scales.
-#'   Signature: function(id, times, dataEvent) -> numeric vector.
-#' @param formulaDist Optional distributional regression formulas.
-#' @param beta_sigma Optional coefficients for sigma regression.
-#' @param beta_nu Optional coefficients for nu regression.
-#' @param integration_control list passed to integrate().
-#' @param root_control list controlling bracketing.
-#'
-#' @return list(dataLong, dataEvent, truth, helpers, tmax)
-#' @export
-simulate_joinme_joint_student_t_cvtotal <- function(
-  n_id = 50,
-  D = 10,
-  n_t = 10,
-  seed = .Random.seed[[1]],
-  include_marker_only = TRUE,
-  Q_idm = 2,
-  R_id = 2,
-  R_mk = 1,
-  beta = c("(Intercept)" = 1.0, "time" = 0.5, "x1" = 0.4),
-  gamma_w = c("x1" = 0.3, "x2" = -0.2),
-  alpha_cv_total = 0.6,
-  h0 = weibull_h0(shape = 1.4, scale = 6.0),
-  time_cens = 8.0,
-  nu = 5,
-  sigma_y = 0.4,
-  sigma_fun = NULL,
-  formulaDist = NULL,
-  beta_sigma = NULL,
-  beta_nu = NULL,
-  integration_control = list(rel.tol = 1e-6, subdivisions = 2000L, stop.on.error = TRUE),
-  root_control = list(t_init = 1.0, t_max = 50.0, expand = 1.7, max_expand = 60L)
-) {
-  # Workflow: simulate covariates -> random effects -> longitudinal -> survival
-  # - matches Stan semantics for CV_total association
-  set.seed(seed)
-  # Step: configure optional parallel execution for simulation.
-
-  dist_formulas <- .normalize_formula_dist(formulaDist)
-  .validate_dist_formula_scopes(dist_formulas, "student_t")
-
-  # Event-level data (exogenous)
-  dataEvent <- data.frame(
-    id = seq_len(n_id),
-    x1 = rnorm(n_id),
-    x2 = rnorm(n_id),
-    stringsAsFactors = FALSE
-  )
-  dataEvent$Xcov1 <- 0.0
-
-  # ---- id RE u_id
-  tau_u <- rep(0.6, R_id)
-  if (R_id >= 2) tau_u[2] <- 0.4
-  Corr_u <- diag(R_id)
-  if (R_id == 2) Corr_u <- matrix(c(1, 0.2, 0.2, 1), 2, 2)
-  Lcorr_u <- t(chol(Corr_u))
-  z_u <- matrix(rnorm(n_id * R_id), n_id, R_id)
-  L_u <- diag(tau_u, R_id, R_id) %*% Lcorr_u
-  u_id <- z_u %*% t(L_u)
-
-  # ---- marker-only v_marker
-  if (include_marker_only && R_mk > 0) {
-    tau_v <- rep(0.4, R_mk)
-    Corr_v <- diag(R_mk)
-    Lcorr_v <- t(chol(Corr_v))
-    z_v <- matrix(rnorm(D * R_mk), D, R_mk)
-    L_v <- diag(tau_v, R_mk, R_mk) %*% Lcorr_v
-    v_marker <- z_v %*% t(L_v)
-  } else {
-    tau_v <- numeric(0)
-    Lcorr_v <- matrix(0, 0, 0)
-    z_v <- matrix(0, D, 0)
-    v_marker <- matrix(0, D, 0)
-  }
-
-  # ---- marker-by-id latent z_w (id-specific, iid standard normal)
-  z_w_lat <- array(rnorm(n_id * D * Q_idm), dim = c(n_id, D, Q_idm))
-  z_w <- z_w_lat
-
-  # ---- id-specific covariance L_i (diagonal)
-  alpha_L <- rep(-0.2, Q_idm)
-  lambda_L <- rep(0.3, Q_idm)
-  z_L <- matrix(rnorm(n_id * Q_idm), nrow = n_id, ncol = Q_idm)
-
-  L_i <- array(0.0, dim = c(n_id, Q_idm, Q_idm))
-  for (i in seq_len(n_id)) {
-    for (q in seq_len(Q_idm)) {
-      lp <- alpha_L[q] + lambda_L[q] * z_L[i, q]
-      L_i[i, q, q] <- softplus(lp)
-    }
-  }
-
-  # w_idm[i,d] = L_i[i] %*% z_w[i,d]
-  w_idm <- array(0.0, dim = c(n_id, D, Q_idm))
-  for (i in seq_len(n_id)) {
-    Li <- matrix(L_i[i, , ], Q_idm, Q_idm)
-    for (d in seq_len(D)) w_idm[i, d, ] <- as.numeric(Li %*% z_w[i, d, ])
-  }
-
-  # ---- design rows (original time)
-  fixed_row <- function(i, t) c("(Intercept)" = 1, time = t, x1 = dataEvent$x1[i])
-  id_row <- function(t) if (R_id == 1) c(1) else c(1, t)
-  mk_row <- function(i, t) if (!include_marker_only || R_mk <= 0) numeric(0) else c(dataEvent$x1[i])
-  idm_row <- function(t) if (Q_idm == 1) c(1) else c(1, t)
-  haz_row <- function(i) c(x1 = dataEvent$x1[i], x2 = dataEvent$x2[i])
-
-  # CV components (vectorized over t)
-  cv_mean_i <- function(i, t) {
-    # fixed_part: (1, t, x1) * beta
-    # id_part: (1, t) * u_id[i,]
-    x1_val <- dataEvent$x1[i]
-    fixed_part <- beta[1] + beta[2] * t + beta[3] * x1_val
-    id_part <- if (R_id == 1) u_id[i, 1] else u_id[i, 1] + u_id[i, 2] * t
-    as.numeric(fixed_part + id_part)
-  }
-
-  cv_marker_i <- function(i, t) {
-    # z_idm: (1, t) if Q_idm=2 else (1)
-    # z_mk: (x1) if R_mk=1 else (empty)
-    # Total CV_marker = mean over markers of [ mk_part + idm_part ]
-    x1_val <- dataEvent$x1[i]
-    lt <- length(t)
-    per_marker_sum <- numeric(lt)
-
-    for (d in seq_len(D)) {
-      mk_part <- if (include_marker_only && R_mk > 0) x1_val * v_marker[d, 1] else 0
-      idm_part <- if (Q_idm == 1) w_idm[i, d, 1] else w_idm[i, d, 1] + w_idm[i, d, 2] * t
-      per_marker_sum <- per_marker_sum + mk_part + idm_part
-    }
-    per_marker_sum / D
-  }
-  cv_total_i <- function(i, t) cv_mean_i(i, t) + cv_marker_i(i, t)
-
-  eta_w_i <- function(i) sum(haz_row(i) * gamma_w)
-
-  hazard_i <- function(i, t) {
-    h0(t) * exp(eta_w_i(i) + alpha_cv_total * cv_total_i(i, t))
-  }
-
-  cumhaz_i <- function(i, t) {
-    if (t <= 0) {
-      return(0)
-    }
-    out <- do.call(integrate, c(list(f = function(u) hazard_i(i, u), lower = 0, upper = t), integration_control))
-    as.numeric(out$value)
-  }
-
-  survival_prob_i <- function(i, t) exp(-cumhaz_i(i, t))
-
-  draw_event_time <- function(i) {
-    U <- runif(1)
-    target_H <- -log(U)
-    f <- function(t) cumhaz_i(i, t) - target_H
-    br <- .find_bracket(f,
-      lower = 0, upper = root_control$t_init, upper_max = root_control$t_max,
-      expand = root_control$expand, max_expand = root_control$max_expand
-    )
-    if (is.null(br)) {
-      return(list(time = time_cens, event = 0L, bracketing_failed = TRUE, U = U))
-    }
-    T <- uniroot(f, lower = br$lower, upper = br$upper)$root
-    if (T > time_cens) {
-      list(time = time_cens, event = 0L, bracketing_failed = FALSE, U = U)
-    } else {
-      list(time = T, event = 1L, bracketing_failed = FALSE, U = U)
-    }
-  }
-
-  # Draw event times by inverse transform sampling
-  death <- lapply(seq_len(n_id), draw_event_time)
-  dataEvent$time <- vapply(death, `[[`, numeric(1), "time")
-  dataEvent$event <- vapply(death, `[[`, integer(1), "event")
-
-  # ---- longitudinal long format
-  marker_levels <- paste0("m", seq_len(D))
-  dataLong <- do.call(rbind, lapply(seq_len(n_id), function(i) {
-    do.call(rbind, lapply(seq_len(D), function(d) {
-      t_max_i <- min(dataEvent$time[i], time_cens)
-      t_obs <- sort(runif(n_t, 0, max(1e-8, t_max_i)))
-      df <- data.frame(
-        id = i,
-        marker = factor(marker_levels[d], levels = marker_levels),
-        time = t_obs,
-        x1 = dataEvent$x1[i],
-        x2 = dataEvent$x2[i],
-        stringsAsFactors = FALSE
-      )
-      mu <- numeric(length(t_obs))
-      for (k in seq_along(t_obs)) {
-        tt <- t_obs[k]
-        mu_fixed <- sum(fixed_row(i, tt) * beta)
-        mu_id <- sum(id_row(tt) * u_id[i, ])
-        mu_mk <- 0
-        if (include_marker_only && R_mk > 0) mu_mk <- sum(mk_row(i, tt) * v_marker[d, ])
-        mu_idm <- sum(idm_row(tt) * w_idm[i, d, ])
-        mu[k] <- mu_fixed + mu_id + mu_mk + mu_idm
-      }
-      sig <- if (is.null(sigma_fun)) {
-        rep(sigma_y, length(mu))
-      } else {
-        sigma_fun(i, t_obs, dataEvent)
-      }
-      if (is.null(sigma_fun) && !is.null(dist_formulas$sigma) && !is.null(beta_sigma)) {
-        X_sigma <- .build_dist_matrix(dist_formulas$sigma, df, family_by_row = rep("student_t", nrow(df)))$X
-        sig <- as.numeric(exp(X_sigma %*% beta_sigma))
-      }
-      if (length(sig) != length(mu)) {
-        stop("sigma_fun must return a vector with length equal to times.")
-      }
-      nu_vec <- rep(nu, length(mu))
-      if (!is.null(dist_formulas$nu) && !is.null(beta_nu)) {
-        X_nu <- .build_dist_matrix(dist_formulas$nu, df, family_by_row = rep("student_t", nrow(df)))$X
-        nu_vec <- 2 + exp(as.numeric(X_nu %*% beta_nu))
-      }
-      df$y <- vapply(seq_along(mu), function(k) mu[k] + rt(1, df = nu_vec[k]) * sig[k], numeric(1))
-      df
-    }))
-  }))
-
-  tmax <- max(dataEvent$time)
-
-  # Store latent truth for debugging or benchmark comparisons
-  truth <- list(
-    beta = beta,
-    gamma_w = gamma_w,
-    alpha_cv_total = alpha_cv_total,
-    nu = nu,
-    sigma_y = sigma_y,
-    beta_sigma = beta_sigma,
-    beta_nu = beta_nu,
-    formulaDist = dist_formulas,
-    include_marker_only = include_marker_only,
-    tau_u = tau_u,
-    Lcorr_u = Lcorr_u,
-    z_u = z_u,
-    u_id = u_id,
-    tau_v = tau_v,
-    Lcorr_v = Lcorr_v,
-    z_v = z_v,
-    v_marker = v_marker,
-    z_w_lat = z_w_lat,
-    z_w = z_w,
-    alpha_L = alpha_L,
-    lambda_L = lambda_L,
-    z_L = z_L,
-    L_i = L_i,
-    w_idm = w_idm
-  )
-
-  # Return helper closures for CV and hazard functions
-  helpers <- list(
-    cv_mean = cv_mean_i,
-    cv_marker = cv_marker_i,
-    cv_total = cv_total_i,
-    hazard = hazard_i,
-    cumhaz = cumhaz_i,
-    survival_prob = survival_prob_i
-  )
-
-  list(dataLong = dataLong, dataEvent = dataEvent, truth = truth, helpers = helpers, tmax = tmax)
-}
-
 #' Resolve marker-specific family declarations for simulation
 #'
 #' @description
@@ -833,8 +555,6 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #' Population coefficients are declared through `truth`. A `prior_*()` object
 #' generates one population coefficient vector and a finite numeric vector
 #' fixes that vector exactly. Every realised coefficient is stored in `truth`.
-#' Random effects, marker-weight departures, observations and event times remain
-#' conditional random realisations.
 #'
 #' @param formulaLong Longitudinal formula (same role as in `joinme()`).
 #'   Grouping terms may use `weighted(group, weights = <column>)` to mirror
@@ -934,9 +654,7 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   `"student_t"`, `"normal"`, `"laplace"`, or `"horseshoe"`. The names
 #'   `"constant"` and `"none"` use the offset without a random departure. The
 #'   family name `"student_t"` draws one value shared by all active sets as
-#'   `2 + Gamma(2, 0.1)`, matching fitting. Departure location and ordinary scale remain zero and
-#'   one. All declarations and their realised population coefficients are
-#'   retained in the realised simulation truth.
+#'   `2 + Gamma(2, 0.1)`, matching fitting.
 #'   Set `marker_weights$family` to `"constant"` or `"none"` when the
 #'   declared offset is the complete marker weight. No common location or
 #'   marker-specific departure is then drawn. Under a stochastic family, the
@@ -944,10 +662,6 @@ simulate_joinme_joint_student_t_cvtotal <- function(
 #'   departure is drawn directly from the declared centred unit-scale family.
 #'   No additional marker-weight scale is used: the survival association slope
 #'   already scales the weighted marker feature.
-#' @param shrinkage Integer selecting the random-effect component distribution:
-#'   `0` denotes Student-t with 6 degrees of freedom, `1` Laplace, and `2`
-#'   Normal. Marker-weight departures no longer use this switch; their family
-#'   is declared by `truth = jm_truth(marker_weights = list(family = "normal"))`
 #'   or another supported family name.
 #' @param n_id Number of subjects.
 #' @param families Marker-specific family names or `jm_family()` declarations.
@@ -1134,7 +848,6 @@ simulate_joinme <- function(
     x1 ~ rnorm(n_id),
     x2 ~ rnorm(n_id)
   ),
-  shrinkage = 0L,
   assoc = c("cv_total"),
   vcov_diag_link = "softplus",
   family_params = list(
@@ -1229,13 +942,6 @@ simulate_joinme <- function(
     cli::cli_abort(c(
       x = "Unknown {.arg re_params} component{?s}: {.field {unknown_random_effect_blocks}}.",
       i = "Use {.field id}, {.field marker}, or {.field dist}; covariance-regression coefficients belong to {.arg truth$vcov}."
-    ))
-  }
-  shrinkage <- as.integer(shrinkage)
-  if (length(shrinkage) != 1L || is.na(shrinkage) || !(shrinkage %in% 0:2)) {
-    cli::cli_abort(c(
-      x = "{.arg shrinkage} must be one of 0, 1, or 2.",
-      i = "The mappings are 0 = Student-t(6), 1 = Laplace, and 2 = Normal."
     ))
   }
   obs_time_noise_sd <- as.numeric(obs_time_noise_sd %||% 0)
@@ -1349,9 +1055,7 @@ simulate_joinme <- function(
       # worker's global environment.  This detail is important: a serialised
       # closure searches that environment after its own simulation bindings,
       # whereas values supplied through mirai's local `.args` environment are
-      # not visible through the closure's lexical parent.  The fitted formulae
-      # and simulation state remain inside fun's closure; only package-level
-      # functions need to be added here.
+      # not visible through the closure's lexical parent.
       worker_arguments <- c(
         list(fun = fun, xi = xi, args = args, seed_i = seed_i),
         .sim_mirai_helpers
@@ -2615,7 +2319,6 @@ simulate_joinme <- function(
     ),
     covariance_is_diagonal =
       as.integer(indep_flags$indep_idmarker_cov %||% 0L) == 1L,
-    shrinkage = shrinkage,
     id_variable = id_var,
     marker_variable = marker_var
   ) # checked component layout, probabilities, allocations, locations and scales
@@ -2633,8 +2336,7 @@ simulate_joinme <- function(
     latent_matrix = z_id,
     level = "subject",
     allocation = mixture_configuration$allocation$subject %||% integer(0),
-    mixture = mixture_configuration,
-    shrinkage = shrinkage
+    mixture = mixture_configuration
   ) # selected component-conditional individual coordinates
   re_id <- if (K_id > 0L) {
     z_id %*% chol(re_id_effective_internal$cov)
@@ -2654,8 +2356,7 @@ simulate_joinme <- function(
     latent_matrix = z_marker,
     level = "marker",
     allocation = mixture_configuration$allocation$marker %||% integer(0),
-    mixture = mixture_configuration,
-    shrinkage = shrinkage
+    mixture = mixture_configuration
   ) # selected component-conditional marker coordinates
   re_marker <- if (K_mk > 0L) {
     z_marker %*% chol(re_marker_effective_internal$cov)
@@ -2848,8 +2549,7 @@ simulate_joinme <- function(
       },
       allocation =
         mixture_configuration$allocation$subject %||% integer(0),
-      mixture = mixture_configuration,
-      shrinkage = shrinkage
+      mixture = mixture_configuration
     ) # selected component-conditional covariance-regression latents
 
     # STEP 3b-ii: evaluate the two independent observed-covariate regressions
@@ -3697,7 +3397,6 @@ simulate_joinme <- function(
     time_scale_observed_max = as.numeric(tmax),
     gamma_w = beta_event,
     bs_gamma_c = baseline_hazard_truth$coefficients,
-    shrinkage = shrinkage,
     marker_weights_offset = marker_weights_offset,
     marker_weight_mean = marker_weight_means,
     z_marker_weights = marker_weight_prior_draw$raw,
@@ -3845,12 +3544,6 @@ simulate_joinme <- function(
     marker_weight_horseshoe_local = marker_weight_prior_draw$local_scale,
     marker_weight_horseshoe_global = marker_weight_prior_draw$global_scale,
     marker_weight_horseshoe_slab = marker_weight_prior_draw$slab_multiplier,
-    shrinkage = shrinkage,
-    shrinkage_distribution = c(
-      `0` = "student_t(6, 0, 1)",
-      `1` = "double_exponential(0, 1)",
-      `2` = "normal(0, 1)"
-    )[[as.character(shrinkage)]],
     link_names = link_names,
     quadrature_nodes = as.integer(gk_spec$n_gk),
     gk_nodes = gk_spec$nodes,
@@ -4052,7 +3745,6 @@ simulate_joinme <- function(
       vcov_diag_link = diag_link_cov
     ),
     assoc = assoc,
-    shrinkage = shrinkage,
     eps_fd = eps_cs,
     id_var = id_var,
     marker_var = marker_var,

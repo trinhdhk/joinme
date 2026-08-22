@@ -30,10 +30,11 @@
 #' D\{a_j;\mu_g,\operatorname{diag}(s_g)\}.
 #' }
 #'
-#' `shrinkage = 0`, `1`, and `2` select Student-\eqn{t_6}, Laplace, and Normal
-#' latent-class component densities, respectively. These choices do not set
-#' the ordinary priors for `beta`, `alpha`, `iota`, marker effects or marker
-#' weights; declare those independently with [jm_prior()]. The component locations and scales are
+#' The latent-class component density is declared through
+#' `jm_prior(class = list(family = ...))` using [prior_student_t()],
+#' [prior_normal()], or [prior_laplace()]. This choice does not set the ordinary
+#' priors for longitudinal, association, functional, marker-effect, or
+#' marker-weight coefficients. The component locations and scales are
 #' estimated. By default, Stan orders only the first selected random-intercept
 #' location. Selected slopes and other coordinates remain unrestricted.
 #' Alternatively, baseline class probabilities may be ordered, or ordering may
@@ -92,8 +93,7 @@
 #'   no order. The default is `"intercept"` for a shared class formula and
 #'   `"none"` for a list of `n_classes` class-specific formulae.
 #' @param ... Additional arguments passed to [joinme_standata()], including
-#'   `assoc`, `id_var`, `marker_var`, `time_var`, and
-#'   `shrinkage`.
+#'   `assoc`, `id_var`, `marker_var`, and `time_var`.
 #'
 #' @return If `fit = TRUE`, a `JoiNMeMixFit` object inheriting from
 #'   `JoiNMeFit`.  If `fit = FALSE`, a prepared `JoiNMeMixStanData` object.
@@ -109,7 +109,10 @@
 #'   n_classes = 3,
 #'   class_type = c("subject", "vcov"),
 #'   formulaClass = ~ treatment + age,
-#'   priors = jm_prior(class = list(baseline_prob = rep(2, 3))),
+#'   priors = jm_prior(class = list(
+#'     baseline_prob = rep(2, 3),
+#'     family = prior_student_t(df = 6)
+#'   )),
 #'   assoc = c("cv_total")
 #' )
 #'
@@ -170,7 +173,7 @@ joinme_mix <- function(
   # A longitudinal-only fit still needs the common matrix-building
   # machinery to know the study time scale.  The scaffold copies one observed
   # row per subject so every longitudinal covariate used in a design
-  # template remains available.  Its survival contribution is removed later by
+  # template are available.  Its survival contribution is removed later by
   # setting both integration limits to zero.
   if (!has_survival_process) {
     if (length(association_terms) > 0L) {
@@ -1020,6 +1023,8 @@ joinme_mix <- function(
       prior_class_regression_global_scale = 1,
       prior_class_regression_slab_df = 4,
       prior_class_regression_slab_scale = 2,
+      mix_component_family = 2L,
+      mix_component_df = 6,
       mixture = NULL
     ))
   }
@@ -1164,7 +1169,7 @@ joinme_mix <- function(
     0L
   } # sole packed random-intercept coordinate receiving a strict location order
 
-  class_prior <- mixture$class_prior %||% list() # baseline-probability and formulaClass slope prior declarations
+  class_prior <- mixture$class_prior %||% list() # baseline probability, formulaClass slope prior and component distribution declaration
   probability_prior <- as.numeric(
     class_prior$baseline_prob %||% 1
   ) # Dirichlet concentration supplied through jm_prior(class = ...)
@@ -1239,6 +1244,16 @@ joinme_mix <- function(
       class_regression = ncol(X_class_subject) + ncol(X_class_marker)
     )
   ) # Stan fields ordered as all subject-domain then all marker-domain coefficients
+  class_component_declaration <- .normalise_joinme_prior_component(
+    class_prior$family,
+    name = "class$family",
+    default = prior_student_t(df = 6),
+    fixed_unit_scale = TRUE
+  ) # centred unit-scale component law whose location and scale vary by latent class
+  if (identical(class_component_declaration$family, "horseshoe")) {
+    cli::cli_abort("{.arg priors$class$family} must use {.fn prior_student_t}, {.fn prior_normal}, or {.fn prior_laplace}.")
+  }
+  encoded_class_component <- .encode_joinme_prior(class_component_declaration) # common prior-family code and Student-t degrees of freedom consumed by fitting and prediction
 
   include_survival <- isTRUE(mixture$include_survival)
 
@@ -1289,6 +1304,8 @@ joinme_mix <- function(
     prior_class_regression_global_scale = class_regression_prior_data$prior_class_regression_global_scale,
     prior_class_regression_slab_df = class_regression_prior_data$prior_class_regression_slab_df,
     prior_class_regression_slab_scale = class_regression_prior_data$prior_class_regression_slab_scale,
+    mix_component_family = as.integer(encoded_class_component$family),
+    mix_component_df = as.numeric(encoded_class_component$df),
     mixture = list(
       n_classes = n_classes,
       class_type = selected_types,
@@ -1299,14 +1316,13 @@ joinme_mix <- function(
       ordered_location_coordinate = ordered_location_coordinate,
       class = list(
         baseline_prob = probability_prior,
-        slope = class_regression_declaration
+        slope = class_regression_declaration,
+        family = class_component_declaration
       ),
       class_design = class_design,
-      distribution = c(
-        "student_t_6",
-        "laplace",
-        "normal"
-      )[as.integer(stan_data$shrinkage %||% 0L) + 1L],
+      distribution = class_component_declaration$family,
+      distribution_df = as.numeric(class_component_declaration$df),
+      component_prior = class_component_declaration,
       include_survival = include_survival,
       allocation_domains = list(
         subject = intersect(selected_types, c("subject", "corr", "vcov")),

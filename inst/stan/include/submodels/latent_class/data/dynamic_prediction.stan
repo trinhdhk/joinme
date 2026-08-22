@@ -25,7 +25,8 @@
 int<lower=0, upper=1> use_dynamic_mixture; // whether the parent fit used latent progress classes
 int<lower=1> dynamic_n_classes; // common number of fitted latent classes
 int<lower=1> dynamic_mix_dimension; // selected-coordinate width, with one inert column when inactive
-int<lower=0, upper=2> dynamic_mix_family; // component family: Student-t(6), Laplace, or Normal
+int<lower=1, upper=3> dynamic_mix_component_family; // jm_prior component code: 1 Student-t, 2 Normal, 3 Laplace
+real<lower=0> dynamic_mix_component_df; // fixed Student-t degrees of freedom; unused for Normal and Laplace components
 matrix<lower=0>[n_draws, dynamic_n_classes]
   dynamic_mix_probability_subject; // formula-adjusted class probabilities for the new subject
 array[n_draws] matrix<lower=0>[

@@ -71,8 +71,7 @@ sim <- simulate_joinme(
     longitudinal = c("(Intercept)" = 1.0, "time" = 0.5, "x1" = 0.4),
     assoc_coef = list(slope = c(cv_total = 0.5)),
     marker_weights = list(family = "student_t")
-  ),
-  shrinkage = 0L
+  )
 )
 
 dataLong <- sim$dataLong
@@ -397,8 +396,6 @@ contrast_draws <- conditional_contrast(
 time_contrast_draws <- contrast_draws$longitudinal
 ```
 
-Each result is a tidy data frame with one row per retained posterior draw and conditional estimand. `.draw` identifies the retained draw, `.value` contains the posterior quantity, and `estimand__` identifies the condition or evaluation point. All scientific descriptors used by the summarised table remain as ordinary columns, so the data can be grouped and plotted with tidy posterior tools without joining a separate description table. Marker marginalisation and A-versus-B subtraction are performed within each draw before the data frame is returned.
-
 `concordance(fit)` is a follow-up-wide survival-curve concordance rather than a ROC analysis at one selected horizon. By default, residual follow-up for subject $i$ starts at their final longitudinal measurement strictly before the observed event or censoring time, $T_{0i}$. For an event at residual time $r_i=T_i-T_{0i}$, the event subject is compared with every subject known to survive longer. The pair is concordant when $\widehat S_i(r_i)<\widehat S_j(r_i)$: both conditional survival curves are evaluated at the same earlier event time. This is the survival-curve concordance proposed by Antolini and colleagues and does not use the outcome time to construct a fixed subject score.
 
 Premature censoring is handled through observability. A subject censored before $r_i$ is not comparable with that event; censoring at $r_i$ establishes survival through that time and remains comparable. `type_weights = "n/G2"` requests Uno's inverse-censoring weighting through `survival::concordance()`. Fitted monotone splines and ordered piecewise-linear associations enter every curve through their posterior ordinates.
@@ -530,8 +527,4 @@ profile_contrast <- conditional_contrast(
 plot(profile_contrast, condition_variable = "time", ask = FALSE)
 ```
 
-Longitudinal contrasts are differences, A minus B, on the selected scale. Event
-contrasts are hazard ratios, A divided by B, unless the log-hazard-ratio scale
-is requested. Group assignments override matching columns in `conditions`;
-all remaining predictors use the condition value or their reference value from
-the fitting data.
+Longitudinal contrasts are differences, A minus B, on the selected scale. Event contrasts are hazard ratios, A divided by B, unless the log-hazard-ratio scale is requested. Group assignments override matching columns in `conditions`; all remaining predictors use the condition value or their reference value from the fitting data.

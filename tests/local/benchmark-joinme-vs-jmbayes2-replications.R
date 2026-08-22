@@ -131,20 +131,20 @@ normalize_marker_draws <- function(marker_draws, marker_levels, marker_terms) {
     marker_draws <- matrix(marker_draws, ncol = length(marker_terms))
   }
   if (!is.matrix(marker_draws)) {
-    stop("sim$true_params$re_draws$marker must be a matrix-like object.")
+    stop("sim$truth$re_draws$marker must be a matrix-like object.")
   }
   if (nrow(marker_draws) != length(marker_levels) && ncol(marker_draws) == length(marker_levels)) {
     marker_draws <- t(marker_draws)
   }
   if (nrow(marker_draws) != length(marker_levels)) {
     stop(
-      "Could not align sim$true_params$re_draws$marker with marker levels: ",
+      "Could not align sim$truth$re_draws$marker with marker levels: ",
       nrow(marker_draws), " rows for ", length(marker_levels), " markers."
     )
   }
   if (ncol(marker_draws) != length(marker_terms)) {
     stop(
-      "Could not align sim$true_params$re_draws$marker with marker terms: ",
+      "Could not align sim$truth$re_draws$marker with marker terms: ",
       ncol(marker_draws), " columns for ", length(marker_terms), " terms."
     )
   }
@@ -154,7 +154,7 @@ normalize_marker_draws <- function(marker_draws, marker_levels, marker_terms) {
 }
 
 infer_marker_terms <- function(sim, marker_levels) {
-  marker_draws <- sim$true_params$re_draws$marker
+  marker_draws <- sim$truth$re_draws$marker
   if (is.data.frame(marker_draws)) {
     marker_draws <- as.matrix(marker_draws)
   }
@@ -173,7 +173,7 @@ infer_marker_terms <- function(sim, marker_levels) {
   }
 
   if (is.null(term_names) || any(!nzchar(term_names))) {
-    beta_names <- names(sim$true_params$beta_long)
+    beta_names <- names(sim$truth$beta_long)
     if (length(beta_names) < term_count) {
       stop("Could not infer marker-level longitudinal terms from simulation truth.")
     }
@@ -184,8 +184,8 @@ infer_marker_terms <- function(sim, marker_levels) {
 
 build_truth_long <- function(sim, marker_levels) {
   marker_terms <- infer_marker_terms(sim, marker_levels)
-  marker_draws <- normalize_marker_draws(sim$true_params$re_draws$marker, marker_levels, marker_terms)
-  fixed_truth <- as.numeric(sim$true_params$beta_long[marker_terms])
+  marker_draws <- normalize_marker_draws(sim$truth$re_draws$marker, marker_levels, marker_terms)
+  fixed_truth <- as.numeric(sim$truth$beta_long[marker_terms])
   fixed_truth[is.na(fixed_truth)] <- 0
   do.call(rbind, lapply(marker_levels, function(marker_label) {
     data.frame(
@@ -198,14 +198,14 @@ build_truth_long <- function(sim, marker_levels) {
 }
 
 infer_survival_terms <- function(sim) {
-  beta_event <- sim$true_params$beta_event
+  beta_event <- sim$truth$beta_event
   term_names <- names(beta_event)
   if (!is.null(term_names) && length(term_names) > 0L && all(nzchar(term_names))) {
     return(as.character(term_names))
   }
 
-  formula_event <- sim$true_params$formulaEvent %||% sim$truth$formulaEvent
-  event_cols <- colnames(joinme:::.mm_event(formula_event, sim$dataEvent))
+  formula_event <- sim$truth$formulaEvent
+  event_cols <- colnames(stats::model.matrix(formula_event, sim$dataEvent))
   as.character(event_cols %||% character(0))
 }
 
@@ -214,7 +214,7 @@ build_truth_survival <- function(sim) {
   truth_vals <- rep(0, length(survival_terms))
   names(truth_vals) <- survival_terms
 
-  beta_event <- sim$true_params$beta_event
+  beta_event <- sim$truth$beta_event
   if (!is.null(beta_event) && length(beta_event) > 0L) {
     beta_names <- names(beta_event)
     if (!is.null(beta_names) && any(nzchar(beta_names))) {
@@ -238,9 +238,9 @@ build_truth_survival <- function(sim) {
 }
 
 build_truth_assoc <- function(sim, marker_levels) {
-  assoc_coefs <- sim$true_params$assoc_coefs
-  marker_weights_by_term <- null_or(sim$true_params$marker_weights_by_term, list())
-  default_weights <- as.numeric(null_or(sim$true_params$marker_weights, rep(1, length(marker_levels))))
+  assoc_coefs <- sim$truth$assoc_coefs
+  marker_weights_by_term <- null_or(sim$truth$marker_weights_by_term, list())
+  default_weights <- as.numeric(null_or(sim$truth$marker_weights, rep(1, length(marker_levels))))
   cv_marker_weights <- as.numeric(null_or(marker_weights_by_term$cv_marker, default_weights))
   if (length(cv_marker_weights) != length(marker_levels)) {
     stop("cv_marker weights do not align with marker levels.")
@@ -274,7 +274,15 @@ summarise_draw_array_with_rhat <- function(draw_array, id_col, labels) {
   if (is.null(draw_array) || length(dim(draw_array)) != 3L || dim(draw_array)[3] == 0L) {
     return(data.frame())
   }
-  summary_tbl <- joinme:::.assoc_summary_from_draw_array(draw_array, term_labels = labels, digits = 8)
+  dimnames(draw_array)[[3L]] <- labels
+  summary_tbl <- posterior::summarise_draws(
+    posterior::as_draws_array(draw_array),
+    Estimate = mean,
+    Est.Error = stats::sd,
+    Q2.5 = ~stats::quantile(.x, 0.025, names = FALSE),
+    Q97.5 = ~stats::quantile(.x, 0.975, names = FALSE),
+    Rhat = posterior::rhat
+  )
   out <- data.frame(
     id = labels,
     estimate = summary_tbl$Estimate,
@@ -303,29 +311,30 @@ draw_array_slice <- function(draw_array, index = 1L) {
 }
 
 build_joinme_assoc_coef_draws <- function(fit_joinme, marker_levels, draws = NULL, seed = 1) {
-  fit <- fit_joinme$fit
-  all_vars <- tryCatch(posterior::variables(joinme:::.get_draws_obj(fit)), error = function(e) character(0))
+  raw_draws <- joinme::extract(fit_joinme, what = "raw", draws = draws, seed = seed, keep_chains = TRUE)$posterior_draws
+  all_vars <- posterior::variables(posterior::as_draws_array(raw_draws))
   cv_mean_var <- if ("alpha_cv_mean" %in% all_vars) "alpha_cv_mean" else NULL
   cv_marker_var <- if ("alpha_cv_marker" %in% all_vars) "alpha_cv_marker" else NULL
 
   cv_mean_arr <- if (!is.null(cv_mean_var)) {
-    joinme:::.get_draws_array(fit, variables = cv_mean_var, draws = draws, seed = seed)
+    joinme::extract(fit_joinme, what = "raw", variable = cv_mean_var, draws = draws, seed = seed, keep_chains = TRUE)$posterior_draws
   } else {
     NULL
   }
   cv_marker_arr <- if (!is.null(cv_marker_var)) {
-    joinme:::.get_draws_array(fit, variables = cv_marker_var, draws = draws, seed = seed)
+    joinme::extract(fit_joinme, what = "raw", variable = cv_marker_var, draws = draws, seed = seed, keep_chains = TRUE)$posterior_draws
   } else {
     NULL
   }
   weight_arr <- if (!is.null(cv_marker_var)) {
-    joinme:::.association_marker_weight_array(
+    joinme::extract(
       fit_joinme,
-      term_key = "cv_marker",
+      what = "marker_weights",
+      term = "cv_marker",
       draws = draws,
       seed = seed,
-      all_vars = all_vars
-    )
+      keep_chains = TRUE
+    )$posterior_draws
   } else {
     NULL
   }
@@ -363,33 +372,35 @@ build_joinme_assoc_coef_draws <- function(fit_joinme, marker_levels, draws = NUL
     }
   }
 
-  joinme:::.assoc_matrix_from_draw_array(out_arr, marker_levels)
+  dimnames(out_arr)[[3L]] <- marker_levels
+  as.matrix(posterior::as_draws_matrix(posterior::as_draws_array(out_arr)))
 }
 
 build_joinme_assoc_coef_array <- function(fit_joinme, marker_levels, draws = NULL, seed = 1) {
-  fit <- fit_joinme$fit
-  all_vars <- tryCatch(posterior::variables(joinme:::.get_draws_obj(fit)), error = function(e) character(0))
+  raw_draws <- joinme::extract(fit_joinme, what = "raw", draws = draws, seed = seed, keep_chains = TRUE)$posterior_draws
+  all_vars <- posterior::variables(posterior::as_draws_array(raw_draws))
   cv_mean_var <- if ("alpha_cv_mean" %in% all_vars) "alpha_cv_mean" else NULL
   cv_marker_var <- if ("alpha_cv_marker" %in% all_vars) "alpha_cv_marker" else NULL
 
   cv_mean_arr <- if (!is.null(cv_mean_var)) {
-    joinme:::.get_draws_array(fit, variables = cv_mean_var, draws = draws, seed = seed)
+    joinme::extract(fit_joinme, what = "raw", variable = cv_mean_var, draws = draws, seed = seed, keep_chains = TRUE)$posterior_draws
   } else {
     NULL
   }
   cv_marker_arr <- if (!is.null(cv_marker_var)) {
-    joinme:::.get_draws_array(fit, variables = cv_marker_var, draws = draws, seed = seed)
+    joinme::extract(fit_joinme, what = "raw", variable = cv_marker_var, draws = draws, seed = seed, keep_chains = TRUE)$posterior_draws
   } else {
     NULL
   }
   weight_arr <- if (!is.null(cv_marker_var)) {
-    joinme:::.association_marker_weight_array(
+    joinme::extract(
       fit_joinme,
-      term_key = "cv_marker",
+      what = "marker_weights",
+      term = "cv_marker",
       draws = draws,
       seed = seed,
-      all_vars = all_vars
-    )
+      keep_chains = TRUE
+    )$posterior_draws
   } else {
     NULL
   }
@@ -636,22 +647,23 @@ simulate_replication <- function(seed) {
     n_id = cfg$n_id,
     families = rep("gaussian", cfg$n_markers),
     times_obs = seq(0, 5, length.out = 5),
-    n_obs_per_marker_per_id = 5,
     assoc = c("cv_mean", "cv_marker"),
-    assoc_coefs = c(cv_mean = 1, cv_marker = 1),
-    marker_weights = rep(1, cfg$n_markers),
-    fixed_marker_weights = TRUE,
-    shared_marker_weights = TRUE,
-    beta_long = benchmark_beta_long,
-    beta_event = c(-0.5, 0.25),
-    baseline_hazard = list(type = "weibull", shape = 0.8, scale = 12),
-    re_params = list(
-      id = list(sd = c(1)),
-      marker = benchmark_marker_re_params,
-      id_marker_cov = list(
-        latent = list(sd = 1),
-        alpha = c(-0.5),
-        lambda = c(1)
+    truth = jm_truth(
+      longitudinal = benchmark_beta_long,
+      survival = list(slope = c(x1 = -0.5, x2 = 0.25)),
+      assoc_coef = list(slope = c(cv_mean = 1, cv_marker = 1)),
+      vcov = list(
+        sd = list(intercept = -0.5, latent = 1),
+        corr = list(intercept = numeric(0), latent = numeric(0))
+      ),
+      marker_weights = list(
+        offset = rep(1, cfg$n_markers),
+        family = "normal"
+      ),
+      basehaz = list(type = "weibull", shape = 0.8, scale = 12),
+      re_params = list(
+        id = list(sd = c(1)),
+        marker = benchmark_marker_re_params
       )
     ),
     use_mirai = cfg$use_mirai,
@@ -757,9 +769,12 @@ for (replication in seq_len(cfg$n_rep)) {
       dataEvent = sim$dataEvent,
       assoc = c("cv_mean", "cv_marker"),
       families = rep("gaussian", cfg$n_markers),
-      marker_weights = rep(1, cfg$n_markers),
-      fixed_marker_weights = TRUE,
-      shared_marker_weights = TRUE,
+      priors = jm_prior(
+        marker_weights = list(
+          offset = rep(1, cfg$n_markers),
+          family = "normal"
+        )
+      ),
       control = list(
         engine = "cmdstanr",
         chains = 2,

@@ -40,40 +40,6 @@ jm_priors(
   class = NULL,
   .validate = TRUE
 )
-
-jm_prior(
-  ...,
-  intercept = NULL,
-  slope = NULL,
-  longitudinal = NULL,
-  survival = NULL,
-  baseline = NULL,
-  vcov = NULL,
-  marker_weights = NULL,
-  assoc = NULL,
-  functional = NULL,
-  marker = NULL,
-  lkj = NULL,
-  class = NULL,
-  .validate = TRUE
-)
-
-joinme_prior(
-  ...,
-  intercept = NULL,
-  slope = NULL,
-  longitudinal = NULL,
-  survival = NULL,
-  baseline = NULL,
-  vcov = NULL,
-  marker_weights = NULL,
-  assoc = NULL,
-  functional = NULL,
-  marker = NULL,
-  lkj = NULL,
-  class = NULL,
-  .validate = TRUE
-)
 }
 \arguments{
 \item{...}{Named distributional-parameter prior components, such as
@@ -121,8 +87,8 @@ departure law for marker-specific deviations.
 Accepted stochastic values are \code{"student_t"}, \code{"normal"}, \code{"laplace"}, and
 \code{"horseshoe"}. Values \code{"constant"} and \code{"none"} are synonymous: the
 offset is then used exactly, with no fitted location or departure. The
-family name \code{"student_t"} fits one degrees-of-freedom
-value above two per active weight set under a shifted \code{Gamma(2, 0.1)}
+family name \code{"student_t"} fits a single degrees-of-freedom
+value above two shared by every active weight set under a shifted \code{Gamma(2, 0.1)}
 prior. \verb{prior_*()} objects are not accepted for \code{family} because
 marker-weight departures retain location zero and ordinary scale one.
 \code{marker_weights} itself must be a named list; bare
@@ -141,8 +107,12 @@ random effects. Location zero and scale one are enforced.}
 \item{lkj}{An object from \code{\link[=prior_lkj]{prior_lkj()}} or a positive numeric concentration.}
 
 \item{class}{A named list with \code{baseline_prob}, the positive Dirichlet
-concentration for baseline class probabilities, and \code{slope}, the prior
-declaration for coefficients from \code{formulaClass}. A scalar
+concentration for baseline class probabilities; \code{slope}, the prior
+declaration for coefficients from \code{formulaClass}; and \code{family}, the
+centred unit-scale distribution of latent coordinates within each class.
+\code{family} must be created with \code{\link[=prior_student_t]{prior_student_t()}}, \code{\link[=prior_normal]{prior_normal()}}, or
+\code{\link[=prior_laplace]{prior_laplace()}}; its location and scale must be zero and one because
+class-specific locations and scales are fitted separately. A scalar
 \code{baseline_prob} is repeated over classes; a vector may provide one
 concentration per class. The slope remains one prior block because
 class-specific formula lists share a reference-class parameterisation.
@@ -194,7 +164,8 @@ pri <- jm_prior(
   lkj = prior_lkj(2),
   class = list(
     baseline_prob = c(2, 2, 2),
-    slope = prior_normal(scale = 1)
+    slope = prior_normal(scale = 1),
+    family = prior_student_t(df = 6)
   )
 )
 print(pri)

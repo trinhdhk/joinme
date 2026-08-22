@@ -10,7 +10,6 @@ test_that("fit recovers signed marker weights and alpha without passing marker_w
     n_id = 120,
     families = rep("gaussian", 3),
     times_obs = seq(0, 8, length.out = 12),
-    shrinkage = 0L,
     assoc = c("cv_total"),
     truth = jm_truth(assoc_coef = list(slope = c(cv_total = 0.6))),
     transforms = list(cv_total = list(type = "identity")),
@@ -27,7 +26,6 @@ test_that("fit recovers signed marker weights and alpha without passing marker_w
     assoc = c("cv_total"),
     families = rep("gaussian", 3),
     transforms = list(cv_total = list(type = "identity")),
-    shrinkage = 0L,
     control = list(
       engine = "cmdstanr",
       chains = 2,
