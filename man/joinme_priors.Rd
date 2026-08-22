@@ -125,7 +125,7 @@ declarations immediately.}
 An object of class \code{joinme_priors}.
 }
 \description{
-\code{jm_prior()} names priors by the part of the statistical model they govern,
+\code{jm_priors()} names priors by the part of the statistical model they govern,
 rather than by internal coefficient letters. \code{intercept} and \code{slope} are
 global fallbacks. A component-specific declaration replaces only the named
 role, leaving the other role to inherit its global fallback.
@@ -148,7 +148,7 @@ share the block, use its family selector because the fitted coefficient is
 shared and cannot receive different marker-specific priors.
 }
 \examples{
-pri <- jm_prior(
+pri <- jm_priors(
   intercept = prior_student_t(df = 6, scale = 2),
   slope = prior_normal(scale = 1),
   longitudinal = list(slope = prior_normal(scale = 0.5)),

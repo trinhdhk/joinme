@@ -417,7 +417,7 @@ test_that("concordance.JoiNMeFit supports split marker-weight fits", {
     config = list(transforms = list(), transforms_spec = list()),
     call = quote(joinme::joinme(
       formulaLong = y ~ 1 + time,
-      priors = jm_prior(marker_weights = list(shared = FALSE))
+      priors = jm_priors(((marker_weights = list(shared = FALSE))
     )),
     tmax = 2,
     dataLong = data.frame(id = c(1, 1, 2, 2), time = c(0, 1, 0, 1), marker = c("m1", "m2", "m1", "m2"), y = c(1, 2, 1.5, 2.5)),

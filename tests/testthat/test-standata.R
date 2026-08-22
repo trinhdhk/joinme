@@ -23,7 +23,7 @@ test_that("standata builds marker weights", {
     formulaEvent = formulaEvent,
     dataEvent = sim$dataEvent,
     assoc = c("cv_total", "cs_marker"),
-    prior_specification = jm_prior(marker_weights = list(offset = marker_weights))
+    prior_specification = jm_priors(marker_weights = list(offset = marker_weights))
   )
 
   expected_weights <- marker_weights[sd$marker_levels]
@@ -129,7 +129,7 @@ test_that("standata builds one marker-weight structure per active weighted assoc
     formulaEvent = formulaEvent,
     dataEvent = sim$dataEvent,
     assoc = c("cv_total", "cs_total", "cv_marker"),
-    prior_specification = jm_prior(marker_weights = list(
+    prior_specification = jm_priors(marker_weights = list(
       offset = weights_by_term,
       shared = FALSE
     ))
@@ -168,7 +168,7 @@ test_that("constant marker-weight families use aligned offsets without fitted co
     formulaEvent = survival::Surv(time, event) ~ 1 + x1 + x2,
     dataEvent = sim$dataEvent,
     assoc = "cv_total",
-    prior_specification = jm_prior(marker_weights = list(
+    prior_specification = jm_priors(marker_weights = list(
       offset = declared,
       family = "none"
     ))

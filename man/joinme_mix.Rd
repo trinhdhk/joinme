@@ -96,7 +96,7 @@ D\{a_j;\mu_g,\operatorname{diag}(s_g)\}.
 }
 
 The latent-class component density is declared through
-\code{jm_prior(class = list(family = ...))} using \code{\link[=prior_student_t]{prior_student_t()}},
+\code{jm_priors(class = list(family = ...))} using \code{\link[=prior_student_t]{prior_student_t()}},
 \code{\link[=prior_normal]{prior_normal()}}, or \code{\link[=prior_laplace]{prior_laplace()}}. This choice does not set the ordinary
 priors for longitudinal, association, functional, marker-effect, or
 marker-weight coefficients. The component locations and scales are
@@ -146,7 +146,7 @@ mixed_fit <- joinme_mix(
   n_classes = 3,
   class_type = c("subject", "vcov"),
   formulaClass = ~ treatment + age,
-  priors = jm_prior(class = list(
+  priors = jm_priors(class = list(
     baseline_prob = rep(2, 3),
     family = prior_student_t(df = 6)
   )),

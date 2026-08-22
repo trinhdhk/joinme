@@ -125,7 +125,7 @@ test_that("singular prior aliases share the validated entry point", {
 })
 
 test_that("global roles are inherited independently and formulaDist alpha is unambiguous", {
-  pri <- jm_prior(
+  pri <- jm_priors(
     intercept = prior_normal(mu = 1, scale = 2),
     slope = prior_student_t(df = 5, mu = 0, scale = 0.8),
     longitudinal = list(slope = prior_laplace(scale = 0.4)),
@@ -137,11 +137,11 @@ test_that("global roles are inherited independently and formulaDist alpha is una
   expect_identical(pri$vcov$sd$slope, pri$global$slope)
   expect_identical(pri$distributional$alpha$intercept$family, "normal")
   expect_identical(pri$distributional$alpha$slope, pri$global$slope)
-  expect_error(jm_prior(beta = prior_normal()), "Unknown distributional prior component")
+  expect_error(jm_priors(beta = prior_normal()), "Unknown distributional prior component")
 })
 
 test_that("distributional prior selectors normalise quoted family aliases and markers", {
-  pri <- jm_prior(
+  pri <- jm_priors(
     `sigma[family='student']` = list(
       intercept = prior_laplace(scale = 0.7),
       slope = prior_normal(scale = 0.2)
@@ -167,7 +167,7 @@ test_that("distributional prior selectors normalise quoted family aliases and ma
 })
 
 test_that("coefficient prior constructors retain separate families and vectors", {
-  pri <- jm_prior(
+  pri <- jm_priors(
     longitudinal = list(
       intercept = prior_normal(mu = c(0, 1, 2), scale = c(1, 1, 0.5)),
       slope = prior_normal(scale = 0.5)
@@ -242,34 +242,34 @@ test_that("coefficient prior degrees of freedom are fixed scalars", {
 
 test_that("standardised marker priors reject user-supplied location and scale", {
   expect_error(
-    jm_prior(marker = prior_normal(scale = 2)),
+    jm_priors(marker = prior_normal(scale = 2)),
     "standardised latent block"
   )
   expect_error(
-    jm_prior(marker_weights = list(family = prior_laplace(mu = 0.5))),
+    jm_priors(marker_weights = list(family = prior_laplace(mu = 0.5))),
     "family name rather than a prior"
   )
   expect_error(
-    jm_prior(marker_weights = list(family = "gaussian")),
+    jm_priors(marker_weights = list(family = "gaussian")),
     "should be one of"
   )
-  marker_horseshoe <- jm_prior(marker = prior_horseshoe(global_scale = 0.2))
+  marker_horseshoe <- jm_priors(marker = prior_horseshoe(global_scale = 0.2))
   expect_equal(marker_horseshoe$marker$family$global_scale, 0.2)
   expect_error(
-    jm_prior(marker_weights = list(family = prior_student_t(df = 8))),
+    jm_priors(marker_weights = list(family = prior_student_t(df = 8))),
     "family name rather than a prior"
   )
   expect_error(
-    jm_prior(marker_weights = prior_student_t(df = 7)),
+    jm_priors(marker_weights = prior_student_t(df = 7)),
     "named list"
   )
-  marker_weight_intercept <- jm_prior(
+  marker_weight_intercept <- jm_priors(
     marker_weights = list(intercept = prior_normal(mu = 0.25, scale = 0.6))
   )
   expect_identical(marker_weight_intercept$marker_weights$intercept$family, "normal")
   expect_equal(marker_weight_intercept$marker_weights$intercept$mu, 0.25)
   expect_equal(marker_weight_intercept$marker_weights$intercept$scale, 0.6)
-  inherited_marker_weight_intercept <- jm_prior(
+  inherited_marker_weight_intercept <- jm_priors(
     intercept = prior_laplace(mu = -0.1, scale = 0.8),
     marker_weights = list(family = "normal")
   )
@@ -277,25 +277,25 @@ test_that("standardised marker priors reject user-supplied location and scale", 
   expect_equal(inherited_marker_weight_intercept$marker_weights$intercept$mu, -0.1)
   expect_equal(inherited_marker_weight_intercept$marker_weights$intercept$scale, 0.8)
   expect_error(
-    jm_prior(marker_weights = list(mean = prior_normal())),
+    jm_priors(marker_weights = list(mean = prior_normal())),
     "offset.*intercept.*family.*shared"
   )
-  named_automatic_marker_weight_student <- jm_prior(
+  named_automatic_marker_weight_student <- jm_priors(
     marker_weights = list(family = "student_t")
   )
   expect_true(named_automatic_marker_weight_student$marker_weights$family$estimate_df)
   expect_output(print(named_automatic_marker_weight_student), "fitted df")
-  expect_true(jm_prior()$marker_weights$family$estimate_df)
+  expect_true(jm_priors()$marker_weights$family$estimate_df)
   expect_error(
-    jm_prior(marker_weights = list(family = prior_student_t(mu = 1))),
+    jm_priors(marker_weights = list(family = prior_student_t(mu = 1))),
     "family name rather than a prior"
   )
   expect_error(
-    jm_prior(marker_weights = list(family = prior_student_t(scale = 2))),
+    jm_priors(marker_weights = list(family = prior_student_t(scale = 2))),
     "family name rather than a prior"
   )
   expect_error(
-    jm_prior(marker_weights = list(family = prior_student_t(df = 2))),
+    jm_priors(marker_weights = list(family = prior_student_t(df = 2))),
     "family name rather than a prior"
   )
 })
@@ -317,7 +317,7 @@ test_that("family-only marker blocks do not send ordinary locations or scales to
     formulaEvent = survival::Surv(time, event) ~ x1 + x2,
     dataEvent = simulated$dataEvent,
     assoc = "cv_total",
-    prior_specification = jm_prior(
+    prior_specification = jm_priors(
       marker = list(family = prior_laplace()),
       marker_weights = list(family = "normal")
     )
@@ -350,7 +350,7 @@ test_that("Student-t marker weights fit their degrees of freedom", {
     formulaEvent = survival::Surv(time, event) ~ x1 + x2,
     dataEvent = simulated$dataEvent,
     assoc = "cv_total",
-    prior_specification = jm_prior(
+    prior_specification = jm_priors(
       marker_weights = list(
         intercept = prior_laplace(mu = 0.6, scale = 0.3),
         family = "student_t"
@@ -374,7 +374,7 @@ test_that("Student-t marker weights fit their degrees of freedom", {
     formulaEvent = survival::Surv(time, event) ~ x1 + x2,
     dataEvent = simulated$dataEvent,
     assoc = "cv_total",
-    prior_specification = jm_prior(
+    prior_specification = jm_priors(
       marker_weights = list(family = "student_t")
     )
   )
@@ -383,39 +383,39 @@ test_that("Student-t marker weights fit their degrees of freedom", {
 })
 
 test_that("marker-weight offset and constant family have one prior interface", {
-  named <- jm_prior(marker_weights = list(
+  named <- jm_priors(marker_weights = list(
     offset = c(m2 = -1, m1 = 2),
     family = "constant"
   ))
   expect_identical(named$marker_weights$family$family, "constant")
   expect_equal(named$marker_weights$offset, c(m2 = -1, m1 = 2))
 
-  synonym <- jm_prior(marker_weights = list(offset = c(2, -1), family = "none"))
+  synonym <- jm_priors(marker_weights = list(offset = c(2, -1), family = "none"))
   expect_identical(synonym$marker_weights$family$family, "constant")
 
-  expect_true(jm_prior()$marker_weights$shared)
-  expect_false(jm_prior(marker_weights = list(shared = FALSE))$marker_weights$shared)
+  expect_true(jm_priors()$marker_weights$shared)
+  expect_false(jm_priors(marker_weights = list(shared = FALSE))$marker_weights$shared)
   expect_error(
-    jm_prior(marker_weights = list(shared = 0)),
+    jm_priors(marker_weights = list(shared = 0)),
     "marker_weights\\$shared"
   )
 
   expect_error(
-    jm_prior(marker_weights = list(offset = c(m1 = 1, 2))),
+    jm_priors(marker_weights = list(offset = c(m1 = 1, 2))),
     "wholly named or wholly unnamed"
   )
   expect_error(
-    jm_prior(marker_weights = list(offset = c(m1 = 1, m1 = 2))),
+    jm_priors(marker_weights = list(offset = c(m1 = 1, m1 = 2))),
     "duplicated"
   )
   expect_error(
-    jm_prior(marker_weights = list(offset = list(unrecognised = c(1, 2)))),
+    jm_priors(marker_weights = list(offset = list(unrecognised = c(1, 2)))),
     "unknown weighted association"
   )
 })
 
 test_that("prior assembly is scalar-or-exact rather than partially recycled", {
-  pri <- jm_prior(
+  pri <- jm_priors(
     longitudinal = list(intercept = prior_normal(mu = c(0, 1), scale = c(1, 2))),
     assoc = prior_student_t(df = 5),
     functional = list(slope = prior_laplace())
@@ -444,7 +444,7 @@ test_that("prior assembly is scalar-or-exact rather than partially recycled", {
 })
 
 test_that("horseshoe global scales are shared only within a component-role", {
-  pri <- jm_prior(
+  pri <- jm_priors(
     longitudinal = list(slope = prior_horseshoe(global_scale = 0.2)),
     vcov = list(sd = list(slope = prior_horseshoe(global_scale = 0.5)))
   )

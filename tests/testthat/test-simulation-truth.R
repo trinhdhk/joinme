@@ -1,18 +1,18 @@
 test_that("jm_prior accepts distributions and rejects fixed coefficients", {
-  fitting_prior <- jm_prior(
+  fitting_prior <- jm_priors(
     intercept = prior_normal(0, 2),
     slope = prior_student_t(5, 0, 1),
     assoc = list(slope = prior_laplace(0, 1))
   )
 
   expect_s3_class(fitting_prior, "joinme_priors")
-  expect_error(jm_prior(longitudinal = c(0, 1)), "fixed numerical value")
+  expect_error(jm_priors(longitudinal = c(0, 1)), "fixed numerical value")
   expect_error(
-    jm_prior(marker_weights = list(intercept = 1, family = "normal")),
+    jm_priors(marker_weights = list(intercept = 1, family = "normal")),
     "fixed numerical value"
   )
   expect_error(
-    jm_prior(sigma = list(intercept = log(0.5))),
+    jm_priors(sigma = list(intercept = log(0.5))),
     "fixed numerical value"
   )
   expect_error(

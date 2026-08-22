@@ -32,9 +32,9 @@
 #' marker-specific departures are estimated around the offset declared in
 #' `priors$marker_weights$offset`. Each offset vector must be wholly named or
 #' wholly unnamed. The common mean uses
-#' `jm_prior(marker_weights = list(intercept = ...))`; standardised departures
+#' `jm_priors(marker_weights = list(intercept = ...))`; standardised departures
 #' use the centred unit-scale family named by `marker_weights$family`, for
-#' example `jm_prior(marker_weights = list(family = "laplace"))`. The family
+#' example `jm_priors(marker_weights = list(family = "laplace"))`. The family
 #' intercept is a fitting prior and does not set a simulation truth. A bare
 #' numeric value retains the ordinary prior-scale shorthand. The marker-only
 #' current-value and slope channels can supply little
@@ -269,7 +269,7 @@
 #'   `joinme_tf(cv_total = ~ expit(x, intercept = TRUE, slope = TRUE))`, which
 #'   is fitted as `expit(iota_1 + iota_2 * x)`. See details.
 #'
-#' @param priors Prior declaration from [jm_prior()]. Global `intercept` and
+#' @param priors Prior declaration from [jm_priors()]. Global `intercept` and
 #'   `slope` declarations may be replaced independently within `longitudinal`,
 #'   `survival`, `vcov`, `assoc`, `functional`, `marker_weights`, and named
 #'   distributional regressions. Distributional names may use family or marker

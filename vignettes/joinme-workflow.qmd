@@ -95,7 +95,7 @@ head(dataLong)
 head(dataEvent)
 ```
 
-`jm_truth()` describes the data-generating population; `jm_prior()` describes
+`jm_truth()` describes the data-generating population; `jm_priors()` describes
 the probability distributions used in fitting. They share scientific
 component names but are not interchangeable. A numerical value in `jm_truth()`
 is fixed for the whole data set; a `prior_*()` declaration is sampled once and
@@ -158,12 +158,12 @@ formulaLong_marker_only <- y ~ time + x1 +
   (0 + x1 || marker)
 ```
 
-Prior families are declared by model block through `jm_prior()`. Thus changing
+Prior families are declared by model block through `jm_priors()`. Thus changing
 the prior for an association coefficient does not silently change the fixed
 effects, affine transformation shifts, marker effects, or marker weights.
 ```{r priors}
 # Define explicit, block-specific priors for transparency.
-priors <- jm_prior(
+priors <- jm_priors(
   intercept = prior_student_t(df = 6, mu = 0, scale = 2),
   slope = prior_normal(mu = 0, scale = 1),
   longitudinal = list(
@@ -194,7 +194,7 @@ When `formulaDist` contains family-scoped regressions, the matching prior may
 use the same scope. Because it is an argument name, quote it with backticks:
 
 ```{r scoped-distributional-prior}
-scoped_priors <- jm_prior(
+scoped_priors <- jm_priors(
   `sigma[family='student']` = list(
     intercept = prior_student_t(df = 4, scale = 1),
     slope = prior_normal(scale = 0.25)

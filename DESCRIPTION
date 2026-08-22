@@ -1,7 +1,7 @@
 Package: joinme
 Type: Package
 Title: Joint Nested Mixed-effects (JoiNMe) Model for Multivariate Longitudinal and Survival Data
-Version: 0.0.1.2609.2
+Version: 0.0.1.2609.3
 Author: Trinh Dong <trinh.dong@ncl.ac.uk>
 Maintainer: Trinh Dong <trinh.dong@ncl.ac.uk>
 Description: Bayesian joint models linking multivariate longitudinal markers with

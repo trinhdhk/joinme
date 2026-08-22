@@ -53,7 +53,7 @@
   /*
    * These quantities are the association coefficients used by the hazard.
    * They are not multiplied by an additional unidentified random scale: the
-   * location and scale supplied in `jm_prior(assoc = list(slope = ...))` therefore describe
+   * location and scale supplied in `jm_priors(assoc = list(slope = ...))` therefore describe
    * the coefficient itself. The suffix "scaled" is retained because the
    * downstream likelihood has historically used these names.
    */

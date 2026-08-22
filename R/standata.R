@@ -103,7 +103,7 @@
 #'   `"decreasing"`). Their knot ordinates are estimated from simplex
 #'   increments; the earlier `x` field is accepted as an alias for `knots`, while
 #'   the earlier `y` field no longer fixes the fitted curve.
-#' @param prior_specification A component-based [jm_prior()] declaration.
+#' @param prior_specification A component-based [jm_priors()] declaration.
 #'   Global `intercept` and `slope` declarations are inherited unless a
 #'   scientific component supplies the corresponding role explicitly.
 #'   Marker-weighted associations are governed entirely by its

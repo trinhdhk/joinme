@@ -78,7 +78,7 @@ test_that("joinme_standata assigns family- and marker-scoped distributional prio
   )
 
   family_data <- do.call(joinme_standata, c(common_arguments, list(
-    prior_specification = jm_prior(
+    prior_specification = jm_priors(
       `sigma[family='student']` = list(
         intercept = prior_laplace(scale = 0.7),
         slope = prior_normal(scale = 0.2)
@@ -97,7 +97,7 @@ test_that("joinme_standata assigns family- and marker-scoped distributional prio
   )
 
   marker_data <- do.call(joinme_standata, c(common_arguments, list(
-    prior_specification = jm_prior(
+    prior_specification = jm_priors(
       `nu[marker='m2']` = list(intercept = prior_laplace(scale = 0.3))
     )
   )))
@@ -126,7 +126,7 @@ test_that("marker-scoped priors reject coefficients shared by several markers", 
       dataEvent = sim$dataEvent,
       families = c("student_t", "student_t"),
       formulaDist = list(sigma[family = student_t] ~ 1),
-      prior_specification = jm_prior(
+      prior_specification = jm_priors(
         `sigma[marker='m1']` = list(intercept = prior_normal())
       ),
       assoc = "cv_total"
@@ -136,7 +136,7 @@ test_that("marker-scoped priors reject coefficients shared by several markers", 
 })
 
 test_that("family-scoped horseshoes retain separate global regularisation groups", {
-  pri <- jm_prior(
+  pri <- jm_priors(
     `sigma[family='gaussian']` = list(
       slope = prior_horseshoe(global_scale = 0.1)
     ),

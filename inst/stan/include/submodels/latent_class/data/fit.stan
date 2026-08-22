@@ -19,7 +19,7 @@
 int<lower=0, upper=1> use_mixture; // whether latent-progress classes are fitted
 int<lower=1> n_classes; // number of shared latent classes
 int<lower=0> K_mix; // total selected latent-coordinate count
-int<lower=1, upper=3> mix_component_family; // component family declared by jm_prior(): 1 Student-t, 2 Normal, 3 Laplace
+int<lower=1, upper=3> mix_component_family; // component family declared by jm_priors(): 1 Student-t, 2 Normal, 3 Laplace
 real<lower=0> mix_component_df; // fixed Student-t degrees of freedom from class$family; unused by Normal and Laplace components
 int<lower=0, upper=1> mix_subject; // whether subject effects receive a latent-class distribution
 int<lower=0, upper=1> mix_marker; // whether marker effects receive a latent-class distribution
@@ -44,7 +44,7 @@ int<lower=0, upper=K_mix> mix_start_covariance; // first packed covariance coord
 
 int<lower=0, upper=2> mix_ordering; // label rule: none, random intercept, or baseline probability
 int<lower=0, upper=K_mix> mix_ordered_location_coordinate; // sole packed intercept coordinate ordered across classes
-vector<lower=0>[n_classes] mix_probability_prior; // Dirichlet concentration from jm_prior()
+vector<lower=0>[n_classes] mix_probability_prior; // Dirichlet concentration from jm_priors()
 int<lower=0> P_class_subject; // concatenated subject class predictors
 matrix[n_id, P_class_subject] X_class_subject; // subject class-regression design
 array[n_classes] int<lower=1, upper=max(1, P_class_subject)> class_term_start_subject; // first subject coefficient used by each class

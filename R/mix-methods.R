@@ -2558,7 +2558,7 @@ tvAUC.JoiNMeMixFit <- function(object, ...) {
     )
   }
   set.seed(.mixture_safe_seed(seed, 319))
-  component_family <- as.character(mixture$distribution %||% "student_t") # family retained from jm_prior(class$family)
+  component_family <- as.character(mixture$distribution %||% "student_t") # family retained from jm_priors(class$family)
   component_df <- as.numeric(mixture$distribution_df %||% 6) # fixed Student-t degrees of freedom, ignored by other component families
   noise <- switch(
     component_family,

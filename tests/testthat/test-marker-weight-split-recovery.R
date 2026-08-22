@@ -41,7 +41,7 @@ test_that("fit supports end-to-end split marker-weight structures", {
     dataEvent = sim$dataEvent,
     assoc = c("cv_total", "cv_marker"),
     families = rep("gaussian", 2),
-    priors = jm_prior(marker_weights = list(
+    priors = jm_priors(marker_weights = list(
       offset = term_weights,
       family = "constant",
       shared = FALSE

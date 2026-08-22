@@ -885,7 +885,7 @@ simulate_joinme_mix <- function(
     standard_draw <- .sim_draw_standard_component(
       nrow(latent_matrix),
       family = mixture$component_family
-    ) # centred unit-scale draw from the class family declared through jm_truth() and jm_prior()
+    ) # centred unit-scale draw from the class family declared through jm_truth() and jm_priors()
     latent_matrix[, source_coordinate] <-
       mixture$location[allocation, packed_coordinate] +
       mixture$scale[allocation, packed_coordinate] * standard_draw

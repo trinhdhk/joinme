@@ -148,7 +148,7 @@ shift through \code{intercept = TRUE} and/or \code{slope = TRUE}, for example
 \code{joinme_tf(cv_total = ~ expit(x, intercept = TRUE, slope = TRUE))}, which
 is fitted as \code{expit(iota_1 + iota_2 * x)}. See details.}
 
-\item{priors}{Prior declaration from \code{\link[=jm_prior]{jm_prior()}}. Global \code{intercept} and
+\item{priors}{Prior declaration from \code{\link[=jm_priors]{jm_priors()}}. Global \code{intercept} and
 \code{slope} declarations may be replaced independently within \code{longitudinal},
 \code{survival}, \code{vcov}, \code{assoc}, \code{functional}, \code{marker_weights}, and named
 distributional regressions. Distributional names may use family or marker
@@ -202,9 +202,9 @@ the family is stochastic, one common mean per weight set and signed
 marker-specific departures are estimated around the offset declared in
 \code{priors$marker_weights$offset}. Each offset vector must be wholly named or
 wholly unnamed. The common mean uses
-\code{jm_prior(marker_weights = list(intercept = ...))}; standardised departures
+\code{jm_priors(marker_weights = list(intercept = ...))}; standardised departures
 use the centred unit-scale family named by \code{marker_weights$family}, for
-example \code{jm_prior(marker_weights = list(family = "laplace"))}. The family
+example \code{jm_priors(marker_weights = list(family = "laplace"))}. The family
 intercept is a fitting prior and does not set a simulation truth. A bare
 numeric value retains the ordinary prior-scale shorthand. The marker-only
 current-value and slope channels can supply little

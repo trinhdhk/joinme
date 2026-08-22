@@ -77,7 +77,7 @@ test_that("formulaVCov rejects partial or unknown component lists", {
 })
 
 test_that("covariance prior blocks are assembled in their documented order", {
-  priors <- jm_prior(vcov = list(
+  priors <- jm_priors(vcov = list(
     sd = list(intercept = prior_laplace(
       mu = c(1, 2, 3, 4), scale = c(0.5, 0.6, 0.7, 0.8)
     )),

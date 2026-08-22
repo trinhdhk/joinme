@@ -139,7 +139,7 @@ Ordered piecewise-linear fits use
 increments; the earlier \code{x} field is accepted as an alias for \code{knots}, while
 the earlier \code{y} field no longer fixes the fitted curve.}
 
-\item{prior_specification}{A component-based \code{\link[=jm_prior]{jm_prior()}} declaration.
+\item{prior_specification}{A component-based \code{\link[=jm_priors]{jm_priors()}} declaration.
 Global \code{intercept} and \code{slope} declarations are inherited unless a
 scientific component supplies the corresponding role explicitly.
 Marker-weighted associations are governed entirely by its

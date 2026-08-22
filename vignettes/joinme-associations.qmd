@@ -68,7 +68,7 @@ $$
 and analogously for `cs_marker`. This is intentionally not equal to $f_{cs}(\frac{1}{D}\sum_d \omega_d CS_{id}(t))$ unless $f_{cs}$ is linear.
 
 In practice, place the entire declaration in
-`jm_prior(marker_weights = ...)`. Use `family = "constant"` or `"none"` for fixed weights, or a stochastic family to fit a hierarchical marker-weight decomposition. For marker (d) in weight set (s),
+`jm_priors(marker_weights = ...)`. Use `family = "constant"` or `"none"` for fixed weights, or a stochastic family to fit a hierarchical marker-weight decomposition. For marker (d) in weight set (s),
 
 $$
 \omega_{sd}=\omega^{(0)}_{sd}+\mu_{\omega,s}+z_{sd}.
@@ -76,7 +76,7 @@ $$
 
 Here $\omega^{(0)}_{sd}$ is the offset in `marker_weights$offset`, $\mu_{\omega,s}$ is a fitted common location, and $z_{sd}$ is a marker departure drawn directly from the selected centred unit-scale family.
 
-Every marker attached to set (s) contributes likelihood information about $\mu_{\omega,s}$, so the common location is the marker-weight analogue of a population intercept. The common location uses `jm_prior(marker_weights = list(intercept = ...))`. The departures use `marker_weights$family`; their location and scale are fixed at zero and one.
+Every marker attached to set (s) contributes likelihood information about $\mu_{\omega,s}$, so the common location is the marker-weight analogue of a population intercept. The common location uses `jm_priors(marker_weights = list(intercept = ...))`. The departures use `marker_weights$family`; their location and scale are fixed at zero and one.
 
 A shared weight structure has one
 (\mu_{\omega}) and one departure vector. With `marker_weights$shared = FALSE`, every active weighted association term has its own mean and departures.
@@ -138,7 +138,7 @@ plot(ce, ask = FALSE)
 
 # Association coefficients and naming
 
-Association coefficients are denoted by $\alpha$. This follows joint-model conventions and avoids confusion with the linear predictor $\eta$. Total, mean, marker, correlation, and covariance associations use the slope prior declared by `jm_prior(assoc = list(slope = ...))`. Its location and scale describe the effective coefficient entering the log hazard; there is no additional random association-scale multiplier. Marker-weight sign conventions are applied after this prior transformation where required for identification.
+Association coefficients are denoted by $\alpha$. This follows joint-model conventions and avoids confusion with the linear predictor $\eta$. Total, mean, marker, correlation, and covariance associations use the slope prior declared by `jm_priors(assoc = list(slope = ...))`. Its location and scale describe the effective coefficient entering the log hazard; there is no additional random association-scale multiplier. Marker-weight sign conventions are applied after this prior transformation where required for identification.
 
 Summaries report the selected association components so that interpretation remains focused on the fitted association structure.
 

@@ -354,7 +354,7 @@ test_that("class_ordering targets only an intercept, baseline probabilities, or 
 })
 
 test_that("latent-class priors are declared through jm_prior", {
-  priors <- jm_prior(
+  priors <- jm_priors(
     class = list(
       baseline_prob = c(2, 3, 4),
       slope = prior_student_t(
@@ -374,19 +374,19 @@ test_that("latent-class priors are declared through jm_prior", {
   expect_true("class" %in% names(formals(jm_prior)))
   expect_false("class_probability" %in% names(formals(jm_prior)))
   expect_false("class_regression" %in% names(formals(jm_prior)))
-  expect_error(jm_prior(class = list(probability = 1)), "baseline_prob")
-  expect_error(jm_prior(class = list(baseline_prob = 0)), "positive")
-  expect_error(jm_prior(class = list(family = "normal")), "prior_normal")
+  expect_error(jm_priors(class = list(probability = 1)), "baseline_prob")
+  expect_error(jm_priors(class = list(baseline_prob = 0)), "positive")
+  expect_error(jm_priors(class = list(family = "normal")), "prior_normal")
   expect_error(
-    jm_prior(class = list(family = prior_normal(mu = 0.25))),
+    jm_priors(class = list(family = prior_normal(mu = 0.25))),
     "standardised latent block"
   )
   expect_error(
-    jm_prior(class = list(family = prior_laplace(scale = 1.5))),
+    jm_priors(class = list(family = prior_laplace(scale = 1.5))),
     "standardised latent block"
   )
-  expect_error(jm_prior(class = list(family = prior_horseshoe())), "does not accept")
-  inherited <- jm_prior(slope = prior_laplace(scale = 0.75))
+  expect_error(jm_priors(class = list(family = prior_horseshoe())), "does not accept")
+  inherited <- jm_priors(slope = prior_laplace(scale = 0.75))
   expect_identical(inherited$class$slope$family, "laplace")
   expect_equal(inherited$class$slope$scale, 0.75)
   expect_false("class_probability_prior" %in% names(formals(joinme_mix)))

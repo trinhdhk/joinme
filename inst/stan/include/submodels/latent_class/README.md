@@ -12,7 +12,7 @@ marker-weight, and functional submodels remain responsible for their own
 scientific likelihood contributions.
 
 The R declaration
-`jm_prior(class = list(baseline_prob = ..., slope = ..., family = ...))`
+`jm_priors(class = list(baseline_prob = ..., slope = ..., family = ...))`
 supplies all three prior parts. `baseline_prob` is the Dirichlet concentration,
 `slope` is the coefficient prior for `formulaClass`, and `family` is the
 centred, unit-scale distribution used within every class. The family is

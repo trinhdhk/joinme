@@ -31,7 +31,7 @@
 #' }
 #'
 #' The latent-class component density is declared through
-#' `jm_prior(class = list(family = ...))` using [prior_student_t()],
+#' `jm_priors(class = list(family = ...))` using [prior_student_t()],
 #' [prior_normal()], or [prior_laplace()]. This choice does not set the ordinary
 #' priors for longitudinal, association, functional, marker-effect, or
 #' marker-weight coefficients. The component locations and scales are
@@ -109,7 +109,7 @@
 #'   n_classes = 3,
 #'   class_type = c("subject", "vcov"),
 #'   formulaClass = ~ treatment + age,
-#'   priors = jm_prior(class = list(
+#'   priors = jm_priors(class = list(
 #'     baseline_prob = rep(2, 3),
 #'     family = prior_student_t(df = 6)
 #'   )),
@@ -1172,7 +1172,7 @@ joinme_mix <- function(
   class_prior <- mixture$class_prior %||% list() # baseline probability, formulaClass slope prior and component distribution declaration
   probability_prior <- as.numeric(
     class_prior$baseline_prob %||% 1
-  ) # Dirichlet concentration supplied through jm_prior(class = ...)
+  ) # Dirichlet concentration supplied through jm_priors(class = ...)
   if (length(probability_prior) == 1L) {
     probability_prior <- rep(probability_prior, n_classes)
   }

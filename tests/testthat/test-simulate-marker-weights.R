@@ -273,7 +273,7 @@ test_that("regularised-horseshoe marker-weight simulation retains its realised h
 
 test_that("Student-t marker-weight simulation draws fitted degrees of freedom", {
   set.seed(7312)
-  moving_prior <- jm_prior(marker_weights = list(family = "student_t"))$marker_weights$family
+  moving_prior <- jm_priors(marker_weights = list(family = "student_t"))$marker_weights$family
   automatic_draw <- .sim_draw_marker_weight_prior(
     12L,
     moving_prior,
@@ -323,7 +323,7 @@ test_that("mixture truth retains term-specific marker-weight means", {
 
 test_that("simulate_joinme validates marker-weight declarations", {
   expect_error(
-    jm_prior(marker_weights = list(offset = c(m1 = 1, 2))),
+    jm_priors(marker_weights = list(offset = c(m1 = 1, 2))),
     "wholly named or wholly unnamed"
   )
   expect_error(
@@ -398,7 +398,7 @@ test_that("regularised-horseshoe marker-weight simulation retains its realised h
 
 test_that("Student-t marker-weight simulation draws fitted degrees of freedom", {
   set.seed(7312)
-  moving_prior <- jm_prior(marker_weights = list(family = "student_t"))$marker_weights$family
+  moving_prior <- jm_priors(marker_weights = list(family = "student_t"))$marker_weights$family
   automatic_draw <- .sim_draw_marker_weight_prior(
     12L,
     moving_prior,

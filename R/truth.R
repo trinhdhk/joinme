@@ -4,7 +4,7 @@
 #' Fitting priors and simulation truths share a scientific component hierarchy,
 #' but only the latter may contain fixed numerical coefficients. This validator
 #' prevents a numerical truth from being mistaken for a probability
-#' distribution in `jm_prior()`.
+#' distribution in `jm_priors()`.
 #'
 #' @param prior_request Named fitting-prior declarations before normalisation.
 #'

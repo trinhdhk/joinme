@@ -11,7 +11,7 @@ prior_lkj(eta = 1)
 matrices; values above one favour correlations nearer zero.}
 }
 \value{
-A \code{joinme_lkj_prior} object for use inside \code{\link[=jm_prior]{jm_prior()}}.
+A \code{joinme_lkj_prior} object for use inside \code{\link[=jm_priors]{jm_priors()}}.
 }
 \description{
 Declare an LKJ correlation prior

@@ -14,7 +14,7 @@ Numeric lists, such as \code{list(1, 1, 2)}, are accepted and flattened in
 their supplied order. The same convention applies to \code{mu}.}
 }
 \value{
-A \code{joinme_prior_spec} object for use inside \code{\link[=jm_prior]{jm_prior()}}.
+A \code{joinme_prior_spec} object for use inside \code{\link[=jm_priors]{jm_priors()}}.
 }
 \description{
 Creates a JoiNMe prior declaration without evaluating a density in R. The

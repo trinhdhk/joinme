@@ -86,7 +86,7 @@ effects. Its location and ordinary scale must remain zero and one.}
 random-effect correlation matrix drawn when \code{re_params} omits \code{corr}.}
 
 \item{class}{A named list containing \code{baseline_prob}, \code{slope}, and \code{family},
-following the class roles accepted by \code{\link[=jm_prior]{jm_prior()}}. The slope may be fixed
+following the class roles accepted by \code{\link[=jm_priors]{jm_priors()}}. The slope may be fixed
 or drawn once for each simulation. The family is a probability declaration
 governing every standardised latent coordinate drawn conditionally on its
 class; it is not itself a population coefficient draw.}
@@ -108,7 +108,7 @@ An object of class \code{joinme_truth} for the \code{truth} argument of
 }
 \description{
 \code{jm_truth()} describes the population quantities used once to generate a
-complete data set. Its coefficient hierarchy follows \code{\link[=jm_prior]{jm_prior()}}: global
+complete data set. Its coefficient hierarchy follows \code{\link[=jm_priors]{jm_priors()}}: global
 \code{intercept} and \code{slope} declarations provide fallbacks, whilst named model
 components may replace either role.
 

@@ -25,7 +25,7 @@ prior sparsity.}
 \item{slab_scale}{Positive scale of the regularising slab.}
 }
 \value{
-A \code{joinme_prior_spec} object for use inside \code{\link[=jm_prior]{jm_prior()}}.
+A \code{joinme_prior_spec} object for use inside \code{\link[=jm_priors]{jm_priors()}}.
 }
 \description{
 Declares the regularised horseshoe hierarchy used by brms and rstanarm. The

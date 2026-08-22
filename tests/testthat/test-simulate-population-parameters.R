@@ -74,7 +74,7 @@ test_that("omitted population parameters are drawn once and stored in truth", {
 
 test_that("numeric marker-weight locations belong to truth rather than fitting priors", {
   expect_error(
-    jm_prior(marker_weights = list(intercept = 1, family = "normal")),
+    jm_priors(marker_weights = list(intercept = 1, family = "normal")),
     "fixed numerical value"
   )
 

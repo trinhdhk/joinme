@@ -105,7 +105,7 @@ print.joinme_tf <- function(x, ...) {
 #'   Numeric lists, such as `list(1, 1, 2)`, are accepted and flattened in
 #'   their supplied order. The same convention applies to `mu`.
 #'
-#' @return A `joinme_prior_spec` object for use inside [jm_prior()].
+#' @return A `joinme_prior_spec` object for use inside [jm_priors()].
 #' @export
 prior_normal <- function(mu = 0, scale = 1) {
   make_prior_dist("normal", mu = mu, scale = scale)
@@ -118,7 +118,7 @@ prior_normal <- function(mu = 0, scale = 1) {
 #'   complete parameter block. Marker-weight departures instead use the bare
 #'   family name `"student_t"`, whose degrees of freedom are fitted.
 #'
-#' @return A `joinme_prior_spec` object for use inside [jm_prior()].
+#' @return A `joinme_prior_spec` object for use inside [jm_priors()].
 #' @export
 prior_student_t <- function(df = 6, mu = 0, scale = 1) {
   make_prior_dist(
@@ -138,7 +138,7 @@ prior_student_t <- function(df = 6, mu = 0, scale = 1) {
 #'
 #' @inheritParams prior_normal
 #'
-#' @return A `joinme_prior_spec` object for use inside [jm_prior()].
+#' @return A `joinme_prior_spec` object for use inside [jm_priors()].
 #' @export
 prior_laplace <- function(mu = 0, scale = 1) {
   make_prior_dist("laplace", mu = mu, scale = scale)
@@ -159,7 +159,7 @@ prior_laplace <- function(mu = 0, scale = 1) {
 #' @param slab_df Positive fixed degrees of freedom for the regularising slab.
 #' @param slab_scale Positive scale of the regularising slab.
 #'
-#' @return A `joinme_prior_spec` object for use inside [jm_prior()].
+#' @return A `joinme_prior_spec` object for use inside [jm_priors()].
 #' @export
 prior_horseshoe <- function(
   df = 1,
@@ -185,7 +185,7 @@ prior_horseshoe <- function(
 #' @param eta Positive LKJ concentration. `eta = 1` is uniform over correlation
 #'   matrices; values above one favour correlations nearer zero.
 #'
-#' @return A `joinme_lkj_prior` object for use inside [jm_prior()].
+#' @return A `joinme_lkj_prior` object for use inside [jm_priors()].
 #' @export
 prior_lkj <- function(eta = 1) {
   if (!is.numeric(eta) || length(eta) != 1L || !is.finite(eta) || eta <= 0) {
@@ -272,7 +272,7 @@ make_prior_dist <- function(
 #' Declare priors by scientific model component
 #'
 #' @description
-#' `jm_prior()` names priors by the part of the statistical model they govern,
+#' `jm_priors()` names priors by the part of the statistical model they govern,
 #' rather than by internal coefficient letters. `intercept` and `slope` are
 #' global fallbacks. A component-specific declaration replaces only the named
 #' role, leaving the other role to inherit its global fallback.
@@ -366,7 +366,7 @@ make_prior_dist <- function(
 #' @export
 #'
 #' @examples
-#' pri <- jm_prior(
+#' pri <- jm_priors(
 #'   intercept = prior_student_t(df = 6, scale = 2),
 #'   slope = prior_normal(scale = 1),
 #'   longitudinal = list(slope = prior_normal(scale = 0.5)),
@@ -444,7 +444,7 @@ jm_priors <- joinme_priors
 #'
 #' @description
 #' `jm_truth()` describes the population quantities used once to generate a
-#' complete data set. Its coefficient hierarchy follows [jm_prior()]: global
+#' complete data set. Its coefficient hierarchy follows [jm_priors()]: global
 #' `intercept` and `slope` declarations provide fallbacks, whilst named model
 #' components may replace either role.
 #'
@@ -491,7 +491,7 @@ jm_priors <- joinme_priors
 #' @param lkj An object created by [prior_lkj()]. Its concentration governs each
 #'   random-effect correlation matrix drawn when `re_params` omits `corr`.
 #' @param class A named list containing `baseline_prob`, `slope`, and `family`,
-#'   following the class roles accepted by [jm_prior()]. The slope may be fixed
+#'   following the class roles accepted by [jm_priors()]. The slope may be fixed
 #'   or drawn once for each simulation. The family is a probability declaration
 #'   governing every standardised latent coordinate drawn conditionally on its
 #'   class; it is not itself a population coefficient draw.
@@ -1188,7 +1188,7 @@ make_conditions <- function(x, ...) {
   if (!is.list(priors)) {
     cli::cli_abort(c(
       x = "{.arg priors} must be a named list or a {.fn joinme_priors} object.",
-      i = "Example: jm_prior(intercept = prior_normal(scale = 2.5), slope = prior_student_t(df = 6), lkj = prior_lkj(2))."
+      i = "Example: jm_priors(intercept = prior_normal(scale = 2.5), slope = prior_student_t(df = 6), lkj = prior_lkj(2))."
     ))
   }
   if (length(priors) > 0 && (is.null(names(priors)) || any(names(priors) %in% c("", NA_character_)))) {

@@ -10,7 +10,7 @@ $$
 \qquad z_{sd}\sim F_s(0,1).
 $$
 
-The offset is declared as `jm_prior(marker_weights = list(offset = ...))` in R.
+The offset is declared as `jm_priors(marker_weights = list(offset = ...))` in R.
 It may be a wholly named or wholly unnamed vector, with a named collection of
 vectors available for unshared association terms. The fitted common location
 borrows information across markers and receives the ordinary coefficient prior

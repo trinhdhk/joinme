@@ -113,7 +113,7 @@ fit_interval <- joinme(
     treatment + age,
   dataEvent = dataEvent_interval,
   assoc = c("cv_mean", "cv_marker"),
-  priors = jm_prior(
+  priors = jm_priors(
     longitudinal = list(slope = prior_normal(0, 1)),
     survival = list(slope = prior_normal(0, 1)),
     assoc = list(slope = prior_normal(0, 1))
