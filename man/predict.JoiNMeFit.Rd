@@ -173,7 +173,7 @@ predictive draws (includes observation noise).
 \code{predict.JoiNMeFit()} does not accept a \code{condition} argument. It estimates
 subject-specific future trajectories and survival conditional on the
 longitudinal histories supplied in \code{newdataLong}. Use
-\code{\link[=conditional_effects.JoiNMeFit]{conditional_effects.JoiNMeFit()}} with \code{\link[brms:make_conditions]{make_conditions()}} when the target is
+\code{\link[=conditional_effects.JoiNMeFit]{conditional_effects.JoiNMeFit()}} with \code{\link[=make_conditions]{make_conditions()}} when the target is
 a population-level comparison across named covariate profiles.
 
 The function uses a Bayesian approach in two draw layers:
