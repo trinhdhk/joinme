@@ -89,8 +89,3 @@ contain the complete ordered include story:
 | `joinme_fitpred_threading.stan` | fitted-effect prediction | no |
 | `joinme_mix_fitpred_threading.stan` | fitted-effect prediction | yes |
 
-Start with the master entry point when tracing a complete programme. Start
-with a submodel directory when studying one scientific part. Reusable
-mathematical routines, shared coefficient-prior machinery and the bytecode
-evaluator remain under `../etc/`; they support or combine the scientific
-stories.

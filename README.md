@@ -117,7 +117,7 @@ Posterior draws are available through a dedicated renamed-draw interface:
 - `as.array(fit)` and `as.array(pred)` return the same renamed posterior arrays
 - `mcmc_plot()` forwards those draws to `bayesplot`, imitating the behaviour of `brms`
 - `longitudinal_plot()`, `survival_plot()`, `cumhaz_plot()`,
-  `association_plot()`, and `diagnostic_plot()` provide methods for plotting individual processes.
+  `association_plot()`, and `diagnostic_plot()` provide methods for plotting individual processes.f
 
 <!--
 Summary-scale consistency:

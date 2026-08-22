@@ -13,7 +13,7 @@ multiplies the marker average after transformation and weighting. Estimated
 weights use a unit-scale departure law, so between-marker contrast informs the
 slope magnitude. The slope is oriented non-negatively to remove the equivalent
 simultaneous sign reversal of the slope and weights. The fitted common weight
-location remains inside every effective weight, and the marker-weight submodel
+location stay inside every effective weight, and the marker-weight submodel
 introduces no additional departure-scale multiplier.
 
 ## Read the blocks in order

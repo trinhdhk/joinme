@@ -11,6 +11,14 @@ random-effect coordinates. The ordinary longitudinal, survival, association,
 marker-weight, and functional submodels remain responsible for their own
 scientific likelihood contributions.
 
+The R declaration
+`jm_prior(class = list(baseline_prob = ..., slope = ..., family = ...))`
+supplies all three prior parts. `baseline_prob` is the Dirichlet concentration,
+`slope` is the coefficient prior for `formulaClass`, and `family` is the
+centred, unit-scale distribution used within every class. The family is
+Student-t, Normal, or Laplace; class-specific locations and scales remain
+separate fitted quantities.
+
 ## Read the blocks in order
 
 1. [functions](functions/README.md) — component densities and class

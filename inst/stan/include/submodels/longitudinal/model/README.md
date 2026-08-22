@@ -6,8 +6,6 @@
 
 Checks marker-family support and contributes priors for longitudinal distributional quantities, nested random effects and covariance regression.
 
-The observation likelihood remains in the joint threaded likelihood because the same latent effects enter the event association.
-
 ## Files in this block
 
 - [`dynamic_prediction.stan`](dynamic_prediction.stan) — ordinary dynamic-prediction contribution.

@@ -14,7 +14,9 @@ definition.
 
 - [`component_density.stanfunctions`](component_density.stanfunctions) —
   Student-t, Laplace and Normal component densities used in fitting and mixture
-  dynamic prediction.
+  dynamic prediction. Its family code and fixed Student-t degrees of freedom
+  come from `jm_prior(class = list(family = ...))`; the fitted class location
+  and scale are applied inside this single density function.
 - [`class_probability.stanfunctions`](class_probability.stanfunctions) — the
   multinomial-logit class-probability calculation used only in mixture fitting.
 

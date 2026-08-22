@@ -6,8 +6,11 @@
 
 Declares the number of classes, selected random-effect coordinates, allocation
 domains, class-membership design matrices, label-ordering convention, and the
-prior information required for baseline probabilities and allocation slopes.
-Dynamic prediction instead receives fitted draws of these quantities.
+prior information required for baseline probabilities, allocation slopes, and
+the within-class component family. The family and any fixed Student-t degrees
+of freedom are encoded from `jm_prior(class = list(family = ...))` using the
+same family map as the common prior interpreter. Dynamic prediction instead
+receives fitted draws and the retained component-family declaration.
 
 ## Files in this block
 

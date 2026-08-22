@@ -44,7 +44,7 @@ valid unused family code for the common prior routine.
 2. [transformed data](transformed_data/README.md) — prepared sharing
    structure.
 3. [parameters](parameters/README.md) — common locations, unit-scale marker coordinates,
-   optional Student-t tail parameters, and any shrinkage auxiliaries.
+   optional Student-t tail parameters, and any regularisation auxiliaries.
 4. [transformed parameters](transformed_parameters/README.md) — effective
    marker weights.
 5. [model](model/README.md) — departure and common-location priors.
