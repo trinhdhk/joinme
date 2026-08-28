@@ -14,11 +14,14 @@
 #' @param ... Unused.
 #'
 #' @return A `summary_JoiNMeFit` object. Its `tables` element includes
-#'   posterior association coefficients, a compact marker-weight table with
-#'   common locations and within-set spreads, transform parameters, and, when an
-#'   ordered piecewise-linear association is active, `piecewise_ordinates`
+#'   posterior association coefficients, fitted affine shifts inside active
+#'   functional association transformations, a compact marker-weight table with
+#'   common locations and within-set spreads, transform parameters, and, when
+#'   an ordered piecewise-linear association is active, `piecewise_ordinates`
 #'   containing the relative log-hazard and hazard-ratio contribution at every
-#'   knot. Declared marker-weight offsets are retained in
+#'   knot. The optional `affine_shift` table begins with `assoc` and `term`,
+#'   where `term` is `"intercept"` or `"slope"`; it contains only roles fitted
+#'   for active association channels. Declared marker-weight offsets are retained in
 #'   `metadata$marker_weight_offsets` and printed above the posterior tables.
 #' @export
 summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], digits = 3,
@@ -408,88 +411,23 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
     ord_tmp <- order(tmp$channel, tmp$term)
     transform_param_tables[[channel]] <- tmp[ord_tmp, , drop = FALSE]
   }
-  iota_param_specs <- list(
-    cv_total = list(intercept = "iota_intercept_cv_eff", slope = "iota_slope_cv_eff", n_intercept = sd$estimate_iota_intercept_cv %||% 0L, n_slope = sd$estimate_iota_slope_cv %||% 0L),
-    cs_total = list(intercept = "iota_intercept_cs_eff", slope = "iota_slope_cs_eff", n_intercept = sd$estimate_iota_intercept_cs %||% 0L, n_slope = sd$estimate_iota_slope_cs %||% 0L),
-    corr = list(intercept = "iota_intercept_corr_eff", slope = "iota_slope_corr_eff", n_intercept = sd$estimate_iota_intercept_corr %||% 0L, n_slope = sd$estimate_iota_slope_corr %||% 0L),
-    vcov = list(intercept = "iota_intercept_vcov_eff", slope = "iota_slope_vcov_eff", n_intercept = sd$estimate_iota_intercept_vcov %||% 0L, n_slope = sd$estimate_iota_slope_vcov %||% 0L),
-    cv_mean = list(intercept = "iota_intercept_cv_mean_eff", slope = "iota_slope_cv_mean_eff", n_intercept = sd$estimate_iota_intercept_cv_mean %||% 0L, n_slope = sd$estimate_iota_slope_cv_mean %||% 0L),
-    cv_marker = list(intercept = "iota_intercept_cv_marker_eff", slope = "iota_slope_cv_marker_eff", n_intercept = sd$estimate_iota_intercept_cv_marker %||% 0L, n_slope = sd$estimate_iota_slope_cv_marker %||% 0L),
-    cs_mean = list(intercept = "iota_intercept_cs_mean_eff", slope = "iota_slope_cs_mean_eff", n_intercept = sd$estimate_iota_intercept_cs_mean %||% 0L, n_slope = sd$estimate_iota_slope_cs_mean %||% 0L),
-    cs_marker = list(intercept = "iota_intercept_cs_marker_eff", slope = "iota_slope_cs_marker_eff", n_intercept = sd$estimate_iota_intercept_cs_marker %||% 0L, n_slope = sd$estimate_iota_slope_cs_marker %||% 0L)
-  )
-  for (channel in names(iota_param_specs)) {
-    spec <- iota_param_specs[[channel]]
-    if (channel %in% c("corr", "vcov")) {
-      n_components <- .assoc_transform_component_count(
-        channel,
-        sd$Q_idm,
-        diagonal_only = identical(channel, "vcov") && isTRUE(as.integer(sd$indep_idmarker_cov %||% 0L) == 1L)
-      )
-      if (n_components < 1L) {
-        next
-      }
-      component_labels <- .assoc_transform_component_labels(channel, n_components)
-      n_intercept <- as.integer(spec$n_intercept %||% 0L)
-      n_slope <- as.integer(spec$n_slope %||% 0L)
-      var_map <- list(
-        intercept = if (n_intercept > 0L) paste0(spec$intercept, "[", seq_len(n_components * n_intercept), "]") else character(0),
-        slope = if (n_slope > 0L) paste0(spec$slope, "[", seq_len(n_components * n_slope), "]") else character(0)
-      )
-      var_names <- unlist(var_map, use.names = FALSE)
-      var_names <- var_names[var_names %in% all_vars]
-      if (!length(var_names)) {
-        if (n_intercept <= 1L) {
-          var_names <- c(var_names, paste0(spec$intercept, "[", seq_len(n_components), "]"))
-        }
-        if (n_slope <= 1L) {
-          var_names <- c(var_names, paste0(spec$slope, "[", seq_len(n_components), "]"))
-        }
-        var_names <- var_names[var_names %in% all_vars]
-      }
-      if (!length(var_names)) {
-        next
-      }
-      tmp <- as.data.frame(.summarise_draws_diag(fit, var_names, draws = draws, seed = seed))
-      raw_idx <- as.integer(sub("^.*\\[(\\d+)\\]$", "\\1", tmp$variable))
-      is_intercept <- grepl(paste0("^", spec$intercept, "\\["), tmp$variable)
-      count_use <- ifelse(is_intercept, max(1L, n_intercept), max(1L, n_slope))
-      tmp$channel <- component_labels[((raw_idx - 1L) %/% count_use) + 1L]
-      tmp$term <- paste0(ifelse(is_intercept, "iota_1", "iota_2"), "[", ((raw_idx - 1L) %% count_use) + 1L, "]")
-    } else {
-      var_map <- c(
-        if (as.integer(spec$n_intercept %||% 0L) > 0L) paste0(spec$intercept, "[", seq_len(as.integer(spec$n_intercept)), "]") else character(0),
-        if (as.integer(spec$n_slope %||% 0L) > 0L) paste0(spec$slope, "[", seq_len(as.integer(spec$n_slope)), "]") else character(0)
-      )
-      if (!length(var_map)) {
-        var_map <- c(spec$intercept, spec$slope)
-      }
-      var_names <- unname(var_map)[unname(var_map) %in% all_vars]
-      if (!length(var_names)) {
-        next
-      }
-      tmp <- as.data.frame(.summarise_draws_diag(fit, var_names, draws = draws, seed = seed))
-      tmp$channel <- channel
-      tmp$term <- ifelse(
-        grepl(paste0("^", spec$intercept, "(\\[|$)"), tmp$variable),
-        paste0("iota_1[", ifelse(grepl("\\[", tmp$variable), sub(paste0("^", spec$intercept, "\\[(\\d+)\\]$"), "\\1", tmp$variable), "1"), "]"),
-        paste0("iota_2[", ifelse(grepl("\\[", tmp$variable), sub(paste0("^", spec$slope, "\\[(\\d+)\\]$"), "\\1", tmp$variable), "1"), "]")
-      )
-    }
-    tmp <- tmp[, c("channel", "term", "Estimate", "Est.Error", "Q2.5", "Q97.5", "Rhat", "ess_bulk", "ess_tail"), drop = FALSE]
-    tmp$Estimate <- round(tmp$Estimate, digits)
-    tmp$Est.Error <- round(tmp$Est.Error, digits)
-    tmp$Q2.5 <- round(tmp$Q2.5, digits)
-    tmp$Q97.5 <- round(tmp$Q97.5, digits)
-    tmp$Rhat <- round(tmp$Rhat, 3)
-    ord_tmp <- order(tmp$channel, tmp$term)
-    transform_param_tables[[paste0(channel, "_iota")]] <- tmp[ord_tmp, , drop = FALSE]
-  }
   transform_params <- if (length(transform_param_tables) > 0) {
     do.call(rbind, unname(transform_param_tables))
   } else {
     NULL
   }
+
+  # Report fitted affine shifts separately from spline or piecewise-linear
+  # transform coefficients. This preserves the scientific distinction between
+  # an intercept or slope inside a nonlinear transformation and the basis
+  # coefficients that define a nonparametric transformation.
+  affine_shift <- .association_affine_shift_summary(
+    object = object,
+    available_variables = all_vars,
+    draws = draws,
+    seed = seed,
+    digits = digits
+  ) # active association channels and explicitly fitted affine roles only
 
 #   browser()
   transform_specs <- cfg$transform_spec %||% object$call$transforms
@@ -521,6 +459,7 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
     s_basehaz <- NULL
     s_surv <- NULL
     s_a <- NULL
+    affine_shift <- NULL
     s_marker_weights <- NULL
     transform_params <- NULL
     piecewise_ordinates <- NULL
@@ -531,6 +470,7 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
     s_basehaz,
     s_surv,
     s_a,
+    affine_shift,
     s_marker_weights,
     transform_params,
     s_d,
@@ -550,6 +490,7 @@ summary.JoiNMeFit <- function(object, draws = NULL, seed = .Random.seed[[1]], di
       baseline_hazard = s_basehaz,
       survival_process = s_surv,
       assoc = s_a,
+      affine_shift = affine_shift,
       marker_weights = s_marker_weights,
       transform_parameters = transform_params,
       piecewise_ordinates = piecewise_ordinates,

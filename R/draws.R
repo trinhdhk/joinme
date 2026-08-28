@@ -41,7 +41,10 @@
 #' @param draws Optional number of posterior draws to retain.
 #' @param seed Integer seed used when subsetting draws.
 #' @param what For `JoiNMeFit` objects, either `"all"` (default renamed
-#'   posterior variables), `"basehaz"`, or `"baseline_hazard"`.
+#'   posterior variables), `"affine_shift"`, `"basehaz"`, or
+#'   `"baseline_hazard"`. The affine-shift selection contains only fitted
+#'   intercepts and slopes from active association transformations, named as
+#'   `"affine_shift[association, term]"`.
 #' @param format Output format. Supported values are `"draws_array"`,
 #'   `"draws_matrix"`, and `"draws_df"`.
 #' @param x A fitted `JoiNMeFit` or dynamic-prediction `JoiNMeDynPred` object
@@ -62,7 +65,7 @@ posterior_draws <- function(object, ...) {
 #' @noRd
 .fit_term_map <- function(object, all_vars) {
   mapped <- lapply(
-    c("fixef", "gamma_w", "assoc", "distributional", "distributional_regression", "likelihood_scale"),
+    c("fixef", "gamma_w", "assoc", "affine_shift", "distributional", "distributional_regression", "likelihood_scale"),
     function(what) .fit_component_term_map(object, what = what, all_vars = all_vars)
   )
   mapped <- Filter(function(x) is.data.frame(x) && nrow(x) > 0L, mapped)
@@ -154,7 +157,7 @@ posterior_draws <- function(object, ...) {
   # Version the cache because fitted objects are mutable R6 objects and can
   # survive a package reload. An earlier cached array may therefore contain
   # raw Stan names even after the renaming rules have been corrected.
-  cache_key <- "renamed_draws_array_v2"
+  cache_key <- "renamed_draws_array_v3"
   cached <- object$cache_get(cache_key)
   if (!is.null(cached)) {
     return(cached)
@@ -315,7 +318,7 @@ posterior_draws <- function(object, ...) {
 #' @rdname posterior_draws
 #' @export
 posterior_draws.JoiNMeFit <- function(object, variables = NULL, regex = FALSE, draws = NULL, seed = 1,
-                            what = c("all", "basehaz", "baseline_hazard"),
+                            what = c("all", "affine_shift", "basehaz", "baseline_hazard"),
                             format = c("draws_array", "draws_matrix", "draws_df"), ...) {
   
   what <- match.arg(what)
@@ -323,6 +326,7 @@ posterior_draws.JoiNMeFit <- function(object, variables = NULL, regex = FALSE, d
   if (!identical(what, "all")) {
     ext_what <- switch(
       what,
+      affine_shift = "affine_shift",
       basehaz = "basehaz",
       baseline_hazard = "baseline_hazard"
     )

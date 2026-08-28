@@ -152,9 +152,10 @@ extract <- function(object, ...) {
 .fit_component_term_map <- function(
   object,
   what = c(
-    "fixef", 
+    "fixef",
     "gamma_w",
     "assoc",
+    "affine_shift",
     "distributional",
     "distributional_regression",
     "likelihood_scale",
@@ -239,6 +240,21 @@ extract <- function(object, ...) {
 
     map <- data.frame(term = as.character(assoc_terms), variable = as.character(assoc_vars), stringsAsFactors = FALSE)
 
+  } else if (what == "affine_shift") {
+    affine_layout <- .association_affine_shift_layout(
+      stan_data = sd,
+      available_variables = all_vars
+    ) # active fitted affine coefficients, in the common reporting order
+    if (!is.null(affine_layout) && nrow(affine_layout) > 0L) {
+      map <- data.frame(
+        term = .association_affine_shift_draw_label(
+          affine_layout$assoc,
+          affine_layout$term
+        ), # unique public draw name containing both scientific coordinates
+        variable = affine_layout$variable,
+        stringsAsFactors = FALSE
+      )
+    }
   } else if (what == "distributional") {
     dist_map <- .distributional_term_map(sd, cfg, all_vars)
     if (length(dist_map) > 0) {
@@ -343,11 +359,13 @@ extract <- function(object, ...) {
 #'   `"fixed_effects"`, `"random_effects"`, `"coefficients"`,
 #'   `"marker_weights"`, `"fixef"`,
 #'   `"gamma_w"`, `"basehaz"`,
-#'   `"baseline_hazard"`, `"assoc"`, `"association_plot"`,
+#'   `"baseline_hazard"`, `"assoc"`, `"affine_shift"`, `"association_plot"`,
 #'   `"distributional"`, `"distributional_regression"`, `"likelihood_scale"`,
 #'   or `"raw"`.
 #' @param term Optional character vector of friendly term names (summary-style)
-#'   to subset extracted columns.
+#'   to subset extracted columns. For `what = "affine_shift"`, use
+#'   `"intercept"`, `"slope"`, or a complete label such as
+#'   `"affine_shift[cv_mean, intercept]"`.
 #' @param variable Optional character vector of raw Stan variable names. This is
 #'   used directly when `what = "raw"` and can also further filter mapped outputs.
 #' @param draws Optional number of posterior draws to keep per chain.
@@ -361,7 +379,8 @@ extract <- function(object, ...) {
 #'     otherwise a numeric matrix (rows = draws, cols = requested terms). For
 #'     `what = "association_plot"`, this is a named list of compact draw
 #'     matrices keyed by association term.
-#'   - `term_map`: data.frame mapping `term` to Stan `variable`
+#'   - `term_map`: data.frame mapping `term` to Stan `variable`. For
+#'     `what = "affine_shift"`, it contains `assoc`, `term`, and `variable`.
 #'   - `support`: for `what = "association_plot"`, cached model-implied raw
 #'     support ranges used by association plotting.
 #'   - `transform_coeff_draws`: for `what = "association_plot"`,
@@ -370,7 +389,7 @@ extract <- function(object, ...) {
 #' @seealso [posterior_draws()] for a higher-level interface that returns a single `posterior`
 #' @export
 extract.JoiNMeFit <- function(object,
-                              what = c("fixed_effects", "random_effects", "coefficients", "marker_weights", "fixef", "gamma_w", "basehaz", "baseline_hazard", "assoc", "association_plot", "distributional", "distributional_regression", "likelihood_scale", "raw"),
+                              what = c("fixed_effects", "random_effects", "coefficients", "marker_weights", "fixef", "gamma_w", "basehaz", "baseline_hazard", "assoc", "affine_shift", "association_plot", "distributional", "distributional_regression", "likelihood_scale", "raw"),
                               term = NULL,
                               variable = NULL,
                               draws = NULL,
@@ -382,65 +401,92 @@ extract.JoiNMeFit <- function(object,
   sd <- object$stan_data
   cfg <- object$config
 
-  # These three selectors own the complete draw-level inputs used by the
-  # posterior-summary layer and corresponding high-level coefficient methods. They deliberately return
-  # scientific structures rather than Stan storage coordinates. The shorter
-  # `what = "fixef"` selector below remains the longitudinal design-matrix
-  # component and is useful when a rectangular posterior object is required.
-  if (what %in% c("fixed_effects", "random_effects", "coefficients")) {
-    structured_draws <- switch(
-      what,
-      fixed_effects = .extract_fixed_effect_draws(object, draws = draws, seed = seed),
-      random_effects = .extract_random_effect_draws(object, draws = draws, seed = seed),
-      coefficients = .extract_combined_coefficient_draws(object, draws = draws, seed = seed)
-    )
-    return(list(
-      posterior_draws = structured_draws,
-      term_map = NULL,
-      metadata = list(
-        what = what,
-        scale = "scientific",
-        keep_chains = FALSE
-      )
-    ))
-  }
-
-  # Marker weights are a derived posterior quantity rather than one rectangular
-  # Stan variable. This selector makes their chain-preserving reconstruction
-  # available without requiring callers to reach into package internals.
-  if (identical(what, "marker_weights")) {
-    active_terms <- .reported_marker_weight_terms(sd) # one representative term per fitted shared or term-specific set
-    if (!is.null(term)) active_terms <- intersect(active_terms, as.character(term))
-    if (!length(active_terms)) {
-      cli::cli_abort("No matching marker-weight set is available for extraction.")
-    }
+  # Affine shifts need both an association coordinate and an intercept or
+  # slope role. This dedicated branch preserves both scientific coordinates in
+  # `term_map`, whilst posterior columns use a unique composite label. The
+  # common layout excludes inactive channels and fixed affine defaults.
+  if (identical(what, "affine_shift")) {
     all_variables <- tryCatch(
       posterior::variables(.get_draws_obj(fit)),
       error = function(error) character(0)
-    ) # posterior vocabulary used to select fitted rather than constant weights
-    weight_arrays <- lapply(active_terms, function(term_key) {
-      .association_marker_weight_array(
-        object,
-        term_key = term_key,
-        draws = draws,
-        seed = seed,
-        all_vars = all_variables
-      )
-    })
-    names(weight_arrays) <- active_terms
-    if (!isTRUE(keep_chains)) {
-      weight_arrays <- lapply(weight_arrays, function(weight_array) {
-        posterior::as_draws_matrix(posterior::as_draws_array(weight_array))
-      })
+    ) # complete fitted posterior vocabulary used to verify saved coefficients
+    affine_layout <- .association_affine_shift_layout(
+      stan_data = sd,
+      available_variables = all_variables
+    ) # one row per active and explicitly fitted affine coefficient
+
+    if (!is.null(variable) && !is.null(affine_layout)) {
+      affine_layout <- affine_layout[
+        affine_layout$variable %in% as.character(variable),
+        ,
+        drop = FALSE
+      ]
     }
+    if (!is.null(term) && !is.null(affine_layout)) {
+      requested_terms <- as.character(term) # coefficient roles or complete public labels
+      public_labels <- .association_affine_shift_draw_label(
+        affine_layout$assoc,
+        affine_layout$term
+      )
+      affine_layout <- affine_layout[
+        affine_layout$term %in% requested_terms |
+          public_labels %in% requested_terms,
+        ,
+        drop = FALSE
+      ]
+    }
+    if (is.null(affine_layout) || nrow(affine_layout) == 0L) {
+      cli::cli_abort(c(
+        x = "No matching fitted affine-shift coefficients were found.",
+        i = "Check that the association is active and its affine intercept or slope is fitted."
+      ))
+    }
+
+    public_labels <- .association_affine_shift_draw_label(
+      affine_layout$assoc,
+      affine_layout$term
+    ) # names shared by both lower posterior interfaces
+    if (isTRUE(keep_chains)) {
+      affine_draws <- .get_draws_array(
+        fit,
+        variables = affine_layout$variable,
+        draws = draws,
+        seed = seed
+      ) # iteration by chain by affine coefficient
+      variable_position <- match(
+        affine_layout$variable,
+        dimnames(affine_draws)[[3L]]
+      ) # saved draw positions placed into the scientific reporting order
+      if (anyNA(variable_position)) {
+        cli::cli_abort("A fitted affine-shift coefficient is absent from the posterior draw array.")
+      }
+      affine_draws <- affine_draws[, , variable_position, drop = FALSE]
+      dimnames(affine_draws)[[3L]] <- make.unique(public_labels)
+    } else {
+      affine_draws <- .get_draws_matrix(
+        fit,
+        variables = affine_layout$variable,
+        draws = draws,
+        seed = seed
+      ) # flattened draws by affine coefficient
+      variable_position <- match(
+        affine_layout$variable,
+        colnames(affine_draws)
+      ) # saved draw positions placed into the scientific reporting order
+      if (anyNA(variable_position)) {
+        cli::cli_abort("A fitted affine-shift coefficient is absent from the posterior draw matrix.")
+      }
+      affine_draws <- affine_draws[, variable_position, drop = FALSE]
+      colnames(affine_draws) <- make.unique(public_labels)
+    }
+
     return(list(
-      posterior_draws = if (length(weight_arrays) == 1L) weight_arrays[[1L]] else weight_arrays,
-      term_map = data.frame(
-        term = active_terms,
-        variable = "effective_marker_weight",
-        stringsAsFactors = FALSE
-      ),
-      metadata = list(what = what, keep_chains = isTRUE(keep_chains))
+      posterior_draws = affine_draws,
+      term_map = affine_layout[, c("assoc", "term", "variable"), drop = FALSE],
+      metadata = list(
+        what = what,
+        keep_chains = isTRUE(keep_chains)
+      )
     ))
   }
 

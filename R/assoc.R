@@ -11,7 +11,12 @@
 #'
 #' For scalar channels (`cv_mean`, `cs_mean`) the returned effect is simply the
 #' posterior coefficient. For covariance-style channels (`corr`, `vcov`) the
-#' returned effects are grouped by their labelled covariance component.
+#' returned effects are grouped by their labelled covariance component. When
+#' `summary = TRUE` and an active functional transformation contains a fitted
+#' affine shift, the result also contains `affine_shift`. This table begins
+#' with `assoc` and `term`; `term` is `"intercept"` or `"slope"`. A row is
+#' included only when that role was fitted for the corresponding active
+#' association channel.
 #'
 #' @param object A `JoiNMeFit` object.
 #' @param draws Optional number of posterior draws to retain.
@@ -22,9 +27,10 @@
 #' If `FALSE`, return raw MCMC sample matrices.
 #' @param ... Unused.
 #'
-#' @return A named list with class `PosteriorAssoc`. Each list element contains
-#'   either a posterior summary table or a draws-by-term matrix for one
-#'   association channel.
+#' @return A named list with class `PosteriorAssoc`. Each association element
+#'   contains either a posterior summary table or a draws-by-term matrix. In
+#'   summary form, the optional `affine_shift` element contains the fitted
+#'   transformation intercepts and slopes in the same posterior-summary schema.
 #' @export
 assoc <- function(object, ...) {
   UseMethod("assoc")
@@ -34,6 +40,268 @@ assoc <- function(object, ...) {
 #' @export
 posterior_assoc <- function(object, ...) {
   assoc(object, ...)
+}
+
+#' Describe the fitted affine shifts within association transformations
+#'
+#' @description
+#' Functional association transformations may contain a fitted affine map,
+#' \eqn{\iota_0 + \iota_1 x}, inside one or more nonlinear functions. This
+#' helper identifies only the coefficients that were requested for association
+#' channels present in the fitted survival model. It also translates the saved
+#' Stan positions into the association and coefficient labels used in public
+#' posterior tables.
+#'
+#' A covariance or correlation transformation is evaluated separately for
+#' every applicable lower-triangular component. When a functional expression
+#' contains more than one fitted nonlinear node, the node number is appended to
+#' the association label so that repeated intercepts or slopes remain
+#' distinguishable without introducing an internal parameter-name column.
+#'
+#' @param stan_data The Stan data retained in a fitted `JoiNMeFit` object.
+#' @param available_variables Character vector of posterior variable names.
+#'
+#' @return A data frame with the posterior variable name, association label,
+#'   and scientific term (`"intercept"` or `"slope"`), or `NULL` when no
+#'   applicable affine shift was fitted.
+#' @keywords internal
+#' @noRd
+.association_affine_shift_layout <- function(
+  stan_data,
+  available_variables
+) {
+  association_names <- c(
+    "cv_total",
+    "cv_mean",
+    "cv_marker",
+    "cs_total",
+    "cs_mean",
+    "cs_marker",
+    "corr",
+    "vcov"
+  ) # public association order used throughout fitting and reporting
+  available_variables <- as.character(
+    available_variables %||% character(0)
+  ) # saved posterior quantities that can genuinely be reported
+  rows <- list() # one compact description for every fitted affine coefficient
+
+  # Consider each public association channel independently. An affine flag on
+  # an inactive channel is not an estimand of the fitted survival model and is
+  # therefore deliberately excluded even if a similarly named quantity is
+  # present in a synthetic or partially reconstructed object.
+  for (association_name in association_names) {
+    association_is_active <- isTRUE(
+      as.integer(stan_data[[paste0("assoc_", association_name)]] %||% 0L) == 1L
+    ) # whether this transformed feature contributes to the fitted log hazard
+    if (!association_is_active) {
+      next
+    }
+
+    association_map <- .assoc_channel_map(
+      association_name
+    ) # fitted affine names and counts for this association channel
+    if (is.null(association_map)) {
+      next
+    }
+
+    number_components <- if (association_name %in% c("corr", "vcov")) {
+      .assoc_transform_component_count(
+        association_name,
+        stan_data$Q_idm,
+        diagonal_only = identical(association_name, "vcov") &&
+          isTRUE(as.integer(stan_data$indep_idmarker_cov %||% 0L) == 1L)
+      )
+    } else {
+      1L
+    } # number of separately transformed covariance features, or one scalar feature
+    if (number_components < 1L) {
+      next
+    }
+
+    component_labels <- if (association_name %in% c("corr", "vcov")) {
+      .assoc_component_display_labels(
+        association_name,
+        stan_data,
+        n_components = number_components
+      )
+    } else {
+      association_name
+    } # scientific association labels, including covariance-basis terms
+
+    # Form one role at a time because an expression may estimate only its
+    # intercept, only its slope, or different numbers of each. A positive count
+    # is the authoritative declaration that a coefficient was fitted.
+    append_role <- function(role, variable_prefix, number_nodes) {
+      number_nodes <- as.integer(
+        number_nodes %||% 0L
+      ) # fitted nonlinear nodes carrying this coefficient role
+      if (number_nodes < 1L || is.null(variable_prefix)) {
+        return(NULL)
+      }
+
+      number_coefficients <- number_components * number_nodes
+      expected_variables <- paste0(
+        variable_prefix,
+        "[",
+        seq_len(number_coefficients),
+        "]"
+      ) # flattened component-major order used by the Stan transformation
+      if (
+        number_coefficients == 1L &&
+          !(expected_variables[[1L]] %in% available_variables) &&
+          variable_prefix %in% available_variables
+      ) {
+        expected_variables <- variable_prefix
+      } # scalar naming admitted for lightweight fitted-object representations
+
+      retained_positions <- which(
+        expected_variables %in% available_variables
+      ) # fitted and saved coefficients only
+      if (length(retained_positions) == 0L) {
+        return(NULL)
+      }
+
+      component_index <- ((retained_positions - 1L) %/% number_nodes) + 1L
+      node_index <- ((retained_positions - 1L) %% number_nodes) + 1L
+      association_label <- component_labels[component_index]
+      if (number_nodes > 1L) {
+        association_label <- paste0(
+          association_label,
+          " (node ",
+          node_index,
+          ")"
+        )
+      }
+
+      data.frame(
+        variable = expected_variables[retained_positions],
+        assoc = association_label,
+        term = rep(role, length(retained_positions)),
+        stringsAsFactors = FALSE
+      )
+    }
+
+    intercept_rows <- append_role(
+      role = "intercept",
+      variable_prefix = association_map$iota_intercept,
+      number_nodes = stan_data[[association_map$n_iota_intercept]] %||% 0L
+    ) # fitted additive shifts for this active association
+    slope_rows <- append_role(
+      role = "slope",
+      variable_prefix = association_map$iota_slope,
+      number_nodes = stan_data[[association_map$n_iota_slope]] %||% 0L
+    ) # fitted multipliers within the nonlinear transformation
+    channel_rows <- Filter(
+      Negate(is.null),
+      list(intercept_rows, slope_rows)
+    )
+    if (length(channel_rows) > 0L) {
+      rows[[length(rows) + 1L]] <- do.call(rbind, channel_rows)
+    }
+  }
+
+  if (length(rows) == 0L) {
+    return(NULL)
+  }
+  output <- do.call(rbind, rows)
+  rownames(output) <- NULL
+  output
+}
+
+#' Label fitted affine-shift draws for posterior interfaces
+#'
+#' @description
+#' Forms a unique, readable name from the association channel and affine
+#' coefficient role. The same label is used by `extract()` and
+#' `posterior_draws()`, including the complete renamed draw collection, so a
+#' draw has one public name irrespective of the route used to obtain it.
+#'
+#' @param association Character vector of association labels.
+#' @param term Character vector containing `"intercept"` or `"slope"`.
+#'
+#' @return A character vector of labels of the form
+#'   `"affine_shift[association, term]"`.
+#' @keywords internal
+#' @noRd
+.association_affine_shift_draw_label <- function(association, term) {
+  paste0(
+    "affine_shift[",
+    as.character(association),
+    ", ",
+    as.character(term),
+    "]"
+  )
+}
+
+#' Summarise fitted affine shifts within association transformations
+#'
+#' @description
+#' Builds the common posterior table used by `summary()`,
+#' `posterior_summary()`, `assoc()`, and `posterior_assoc()`. The calculation is
+#' centralised so all four interfaces apply the same association filtering,
+#' labels, interval definition, rounding, and sampling diagnostics.
+#'
+#' @param object A fitted `JoiNMeFit` object.
+#' @param available_variables Character vector of saved posterior variable
+#'   names.
+#' @param draws Optional number of posterior draws used in the summary.
+#' @param seed Random seed used when posterior draws are reduced.
+#' @param digits Number of decimal places for posterior location and interval
+#'   summaries.
+#'
+#' @return A data frame beginning with `assoc` and `term`, followed by
+#'   `Estimate`, `Est.Error`, `Q2.5`, `Q97.5`, `Rhat`, `ess_bulk`, and
+#'   `ess_tail`; or `NULL` when no applicable affine coefficient was fitted.
+#' @keywords internal
+#' @noRd
+.association_affine_shift_summary <- function(
+  object,
+  available_variables,
+  draws = NULL,
+  seed = 1,
+  digits = 3
+) {
+  coefficient_layout <- .association_affine_shift_layout(
+    stan_data = object$stan_data,
+    available_variables = available_variables
+  ) # exact posterior variables and their scientific association labels
+  if (is.null(coefficient_layout) || nrow(coefficient_layout) == 0L) {
+    return(NULL)
+  }
+
+  posterior_table <- as.data.frame(.summarise_draws_diag(
+    object$fit,
+    variables = coefficient_layout$variable,
+    draws = draws,
+    seed = seed
+  )) # posterior location, uncertainty, interval, and chain diagnostics
+  layout_position <- match(
+    posterior_table$variable,
+    coefficient_layout$variable
+  ) # preserve the actual posterior ordering without joining repeated labels
+  posterior_table$assoc <- coefficient_layout$assoc[layout_position]
+  posterior_table$term <- coefficient_layout$term[layout_position]
+  posterior_table <- posterior_table[, c(
+    "assoc",
+    "term",
+    "Estimate",
+    "Est.Error",
+    "Q2.5",
+    "Q97.5",
+    "Rhat",
+    "ess_bulk",
+    "ess_tail"
+  ), drop = FALSE]
+
+  # Use the same numerical presentation as the other model and association
+  # tables whilst leaving effective sample sizes on their natural scale.
+  posterior_table$Estimate <- round(posterior_table$Estimate, digits)
+  posterior_table$Est.Error <- round(posterior_table$Est.Error, digits)
+  posterior_table$Q2.5 <- round(posterior_table$Q2.5, digits)
+  posterior_table$Q97.5 <- round(posterior_table$Q97.5, digits)
+  posterior_table$Rhat <- round(posterior_table$Rhat, 3L)
+  rownames(posterior_table) <- NULL
+  posterior_table
 }
 
 #' @rdname assoc
@@ -184,6 +452,23 @@ assoc.JoiNMeFit <- function(object, draws = NULL, seed = 1, digits = 3, summary 
     ))
   }
 
+  # Add the fitted affine transformation coefficients after establishing that
+  # the model contains at least one association effect. Raw association output
+  # remains a collection of effect matrices; complete unsummarised affine
+  # draws remain available through posterior_draws().
+  if (isTRUE(summary)) {
+    affine_shift <- .association_affine_shift_summary(
+      object = object,
+      available_variables = all_vars,
+      draws = draws,
+      seed = seed,
+      digits = digits
+    ) # only active channels and explicitly fitted intercept or slope roles
+    if (!is.null(affine_shift)) {
+      out$affine_shift <- affine_shift
+    }
+  }
+
   out <- structure(
     out,
     class = "PosteriorAssoc",
@@ -226,7 +511,11 @@ print.PosteriorAssoc <- function(x, ...) {
     return(invisible(x))
   }
 
-  for (term_name in names(x)) {
+  association_names <- setdiff(
+    names(x),
+    "affine_shift"
+  ) # survival association effects, excluding the separate affine-shift table
+  for (term_name in association_names) {
     .cli_summary_heading(paste0("Association term: ", term_name), level = 2L)
     if (isTRUE(meta$summary)) {
       term_tbl <- x[[term_name]]
@@ -249,6 +538,14 @@ print.PosteriorAssoc <- function(x, ...) {
       )
       .cli_print_table(desc)
     }
+  }
+
+  if (isTRUE(meta$summary) && !is.null(x$affine_shift)) {
+    .cli_print_table_section(
+      "Association transformation affine shifts (iota)",
+      .posterior_assoc_display_table(x$affine_shift),
+      level = 2L
+    )
   }
 
   class_association <- attr(x, "class_association") %||%

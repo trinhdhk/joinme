@@ -1057,6 +1057,7 @@ print.summary_JoiNMeFit <- function(x, ...) {
   .cli_print_table_section("Baseline hazard coefficients", x$tables$baseline_hazard, level = 2L)
   .cli_print_table_section("Survival process (non-association covariates)", x$tables$survival_process, level = 2L)
   .cli_print_table_section("Association parameters", x$tables$assoc, level = 2L)
+  .cli_print_table_section("Association transformation affine shifts (iota)", x$tables$affine_shift, level = 2L)
   .cli_print_table_section("Marker-weight distribution", x$tables$marker_weights, level = 2L)
   .cli_print_table_section("Transform parameters", x$tables$transform_parameters, level = 2L)
   .cli_print_table_section("Piecewise-linear relative log-hazard ordinates", x$tables$piecewise_ordinates, level = 2L)

@@ -705,6 +705,7 @@ summary.JoiNMeMixFit <- function(
     output$tables$baseline_hazard <- NULL
     output$tables$survival_process <- NULL
     output$tables$assoc <- NULL
+    output$tables$affine_shift <- NULL
     output$tables$transform_parameters <- NULL
     output$tables$piecewise_ordinates <- NULL
     output$metadata$event_process <- "not fitted"
@@ -3988,7 +3989,7 @@ assoc.JoiNMeMixFit <- function(
   dot_arguments$term <- NULL
 
   association_terms <- unlist(lapply(
-    names(association_output),
+    setdiff(names(association_output), "affine_shift"),
     function(term_name) {
       if (term_name %in% c("corr", "vcov")) {
         term_table <- association_output[[term_name]] # component-labelled covariance association table
