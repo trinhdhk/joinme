@@ -259,8 +259,8 @@ fit <- joinme(
 #> 
 #> SAMPLING FOR MODEL 'joinme_fit_threading' NOW (CHAIN 1).
 #> Chain 1: 
-#> Chain 1: Gradient evaluation took 0.005867 seconds
-#> Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 58.67 seconds.
+#> Chain 1: Gradient evaluation took 0.005792 seconds
+#> Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 57.92 seconds.
 #> Chain 1: Adjust your expectations accordingly!
 #> Chain 1: 
 #> Chain 1: 
@@ -277,9 +277,9 @@ fit <- joinme(
 #> Chain 1: Iteration: 101 / 200 [ 50%]  (Sampling)
 #> Chain 1: Iteration: 200 / 200 [100%]  (Sampling)
 #> Chain 1: 
-#> Chain 1:  Elapsed Time: 26.033 seconds (Warm-up)
-#> Chain 1:                980.357 seconds (Sampling)
-#> Chain 1:                1006.39 seconds (Total)
+#> Chain 1:  Elapsed Time: 31.052 seconds (Warm-up)
+#> Chain 1:                1065.54 seconds (Sampling)
+#> Chain 1:                1096.59 seconds (Total)
 #> Chain 1:
 
 # Counting-process fit with left truncation/time-split covariates:
@@ -294,8 +294,8 @@ fit_split <- joinme(
 #> 
 #> SAMPLING FOR MODEL 'joinme_fit_threading' NOW (CHAIN 1).
 #> Chain 1: 
-#> Chain 1: Gradient evaluation took 0.010632 seconds
-#> Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 106.32 seconds.
+#> Chain 1: Gradient evaluation took 0.009107 seconds
+#> Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 91.07 seconds.
 #> Chain 1: Adjust your expectations accordingly!
 #> Chain 1: 
 #> Chain 1: 
@@ -312,9 +312,9 @@ fit_split <- joinme(
 #> Chain 1: Iteration: 101 / 200 [ 50%]  (Sampling)
 #> Chain 1: Iteration: 200 / 200 [100%]  (Sampling)
 #> Chain 1: 
-#> Chain 1:  Elapsed Time: 63.009 seconds (Warm-up)
-#> Chain 1:                159.806 seconds (Sampling)
-#> Chain 1:                222.815 seconds (Total)
+#> Chain 1:  Elapsed Time: 65.784 seconds (Warm-up)
+#> Chain 1:                162.882 seconds (Sampling)
+#> Chain 1:                228.666 seconds (Total)
 #> Chain 1:
 ```
 
@@ -347,10 +347,10 @@ posterior::summarise_draws(
   default_convergence_measures()
 )
 #> # A tibble: 2 × 10
-#>   variable  mean median    sd   mad     q5   q95  rhat ess_bulk ess_tail
-#>   <chr>    <dbl>  <dbl> <dbl> <dbl>  <dbl> <dbl> <dbl>    <dbl>    <dbl>
-#> 1 time     0.320  0.326 0.143 0.149 0.0840 0.530 1.01      115.     78.3
-#> 2 cv_total 0.770  0.658 0.439 0.292 0.319  1.49  0.991     139.    102.
+#>   variable  mean median    sd   mad    q5   q95  rhat ess_bulk ess_tail
+#>   <chr>    <dbl>  <dbl> <dbl> <dbl> <dbl> <dbl> <dbl>    <dbl>    <dbl>
+#> 1 time     0.311  0.323 0.130 0.132 0.114 0.492 0.994     142.     90.9
+#> 2 cv_total 0.873  0.766 0.457 0.352 0.322 1.73  1.02      138.     52.5
 ```
 
 ### 4.2 Traceplots
@@ -433,11 +433,11 @@ preds <- tryCatch(
 head(preds$predictions$survival)
 #>     id     time  Survival    Median  Est.Error       L95       U95
 #> 2.1  2 4.000000 1.0000000 1.0000000 0.00000000 1.0000000 1.0000000
-#> 2.2  2 4.137931 0.9716349 0.9803110 0.02763955 0.9065650 0.9978418
-#> 2.3  2 4.275862 0.9423368 0.9598085 0.05587747 0.8123380 0.9957610
-#> 2.4  2 4.413793 0.9122360 0.9393903 0.08442012 0.7184409 0.9937528
-#> 2.5  2 4.551724 0.8814960 0.9187693 0.11293141 0.6261259 0.9918227
-#> 2.6  2 4.689655 0.8503127 0.8979580 0.14104076 0.5367392 0.9899672
+#> 2.2  2 4.137931 0.9729243 0.9804552 0.02519878 0.9130063 0.9950132
+#> 2.3  2 4.275862 0.9449152 0.9605605 0.05087853 0.8245017 0.9900687
+#> 2.4  2 4.413793 0.9160932 0.9403197 0.07668446 0.7353907 0.9851661
+#> 2.5  2 4.551724 0.8866054 0.9197376 0.10222408 0.6471287 0.9803049
+#> 2.6  2 4.689655 0.8566237 0.8988181 0.12708817 0.5611852 0.9754844
 ```
 
 When the identifier occurred during fitting, the posterior random
@@ -588,13 +588,13 @@ Code
 renamed_draws <- posterior_draws(fit, variables = c("time", "cv_total"), format = "draws_df")
 head(renamed_draws)
 #> # A draws_df: 6 iterations, 1 chains, and 2 variables
-#>      time cv_total
-#> 1  0.5131     0.62
-#> 2 -0.0038     0.85
-#> 3  0.6096     1.26
-#> 4  0.1803     0.47
-#> 5  0.4196     3.34
-#> 6  0.2498     0.47
+#>   time cv_total
+#> 1 0.14     0.48
+#> 2 0.32     0.86
+#> 3 0.33     0.84
+#> 4 0.32     0.81
+#> 5 0.17     0.93
+#> 6 0.03     0.94
 #> # ... hidden reserved variables {'.chain', '.iteration', '.draw'}
 
 mcmc_plot(fit, variable = c("time", "cv_total"), type = "intervals")

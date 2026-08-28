@@ -49,11 +49,11 @@ transformation, expressed in `x`.
 ``` r
 invert_transform_expr(~ log(x))
 #> ~exp(x)
-#> <environment: 0x5576fda243d8>
+#> <environment: 0x555e74a95970>
 invert_transform_expr(~ log(2 * x + 1))
 #> ~(exp(x) - 1)/2
-#> <environment: 0x5576fda243d8>
+#> <environment: 0x555e74a95970>
 invert_transform_expr(~ x^3)
 #> ~cbrt(x)
-#> <environment: 0x5576fda243d8>
+#> <environment: 0x555e74a95970>
 ```
