@@ -188,20 +188,8 @@ predictors are estimated in separate coefficient blocks and together
 determine
 \Sigma_i=\operatorname{diag}(\boldsymbol\sigma_i)K_iK_i^\top\operatorname{diag}(\boldsymbol\sigma_i).
 
-The resulting unit-row-norm property is the identification device that
-separates the two covariance regressions. If one instead fixed every
-K\_{i,rr}=1 and regressed free off-diagonals, then under
-L_i=\operatorname{diag}(\boldsymbol\sigma_i)K_i,
-\operatorname{Var}(w\_{idr}\mid\cdot)=\sigma\_{ir}^2\sum\_{c\le
-r}K\_{i,rc}^2 would vary with off-diagonal terms. Marginal variance
-would then be explained jointly by SD and correlation coefficients. The
-implemented partial- correlation recursion enforces \sum\_{c\le
-r}K\_{i,rc}^2=1, so \operatorname{Var}(w\_{idr}\mid\cdot)=\sigma\_{ir}^2
-and the scientific roles of `formulaVCov$sd` and `formulaVCov$corr`
-remain distinct.
-
-The packed lower-triangle coordinate m retains one non-negative scalar
-loading \lambda_m. Thus
+The lower-triangle coordinate m retains one non-negative scalar loading
+\lambda_m. Thus
 \boldsymbol\lambda_L=(\lambda_1,\ldots,\lambda\_{M\_{\mathrm{cov}}})^\top
 is a vector and its action is
 \operatorname{diag}(\boldsymbol\lambda_L)\boldsymbol z\_{L,i}, not a

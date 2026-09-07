@@ -259,8 +259,8 @@ fit <- joinme(
 #> 
 #> SAMPLING FOR MODEL 'joinme_fit_threading' NOW (CHAIN 1).
 #> Chain 1: 
-#> Chain 1: Gradient evaluation took 0.005792 seconds
-#> Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 57.92 seconds.
+#> Chain 1: Gradient evaluation took 0.005764 seconds
+#> Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 57.64 seconds.
 #> Chain 1: Adjust your expectations accordingly!
 #> Chain 1: 
 #> Chain 1: 
@@ -277,9 +277,9 @@ fit <- joinme(
 #> Chain 1: Iteration: 101 / 200 [ 50%]  (Sampling)
 #> Chain 1: Iteration: 200 / 200 [100%]  (Sampling)
 #> Chain 1: 
-#> Chain 1:  Elapsed Time: 31.052 seconds (Warm-up)
-#> Chain 1:                1065.54 seconds (Sampling)
-#> Chain 1:                1096.59 seconds (Total)
+#> Chain 1:  Elapsed Time: 32.765 seconds (Warm-up)
+#> Chain 1:                1120.52 seconds (Sampling)
+#> Chain 1:                1153.29 seconds (Total)
 #> Chain 1:
 
 # Counting-process fit with left truncation/time-split covariates:
@@ -294,8 +294,8 @@ fit_split <- joinme(
 #> 
 #> SAMPLING FOR MODEL 'joinme_fit_threading' NOW (CHAIN 1).
 #> Chain 1: 
-#> Chain 1: Gradient evaluation took 0.009107 seconds
-#> Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 91.07 seconds.
+#> Chain 1: Gradient evaluation took 0.010166 seconds
+#> Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 101.66 seconds.
 #> Chain 1: Adjust your expectations accordingly!
 #> Chain 1: 
 #> Chain 1: 
@@ -312,9 +312,9 @@ fit_split <- joinme(
 #> Chain 1: Iteration: 101 / 200 [ 50%]  (Sampling)
 #> Chain 1: Iteration: 200 / 200 [100%]  (Sampling)
 #> Chain 1: 
-#> Chain 1:  Elapsed Time: 65.784 seconds (Warm-up)
-#> Chain 1:                162.882 seconds (Sampling)
-#> Chain 1:                228.666 seconds (Total)
+#> Chain 1:  Elapsed Time: 70.95 seconds (Warm-up)
+#> Chain 1:                174.965 seconds (Sampling)
+#> Chain 1:                245.915 seconds (Total)
 #> Chain 1:
 ```
 
